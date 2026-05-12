@@ -1,0 +1,42 @@
+name: LumenDesk
+options:
+  deploymentTarget:
+    macOS: "13.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_STYLE: Automatic
+targets:
+  LumenDesk:
+    type: application
+    platform: macOS
+    sources:
+      - path: LumenDesk
+    info:
+      path: LumenDesk/Info.plist
+      properties:
+        CFBundleDisplayName: LumenDesk
+        CFBundleShortVersionString: "1.0"
+        CFBundleVersion: "1"
+        LSMinimumSystemVersion: "13.0"
+        NSLocalNetworkUsageDescription: LumenDesk discovers and controls LIFX and Govee smart bulbs on your local network.
+        NSBonjourServices:
+          - _lifx._udp
+          - _hap._tcp
+    entitlements:
+      path: LumenDesk/LumenDesk.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.network.client: true
+        com.apple.security.network.server: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.lumendesk.LumenDesk
+        ENABLE_HARDENED_RUNTIME: YES
+        ENABLE_PREVIEWS: YES
+        GENERATE_INFOPLIST_FILE: NO
+        DEVELOPMENT_ASSET_PATHS: '"LumenDesk/Preview Content"'
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor

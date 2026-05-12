@@ -21,6 +21,20 @@
 		B10000000000000000000C /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000C /* Preview Assets.xcassets */; };
 		B100000000000000000010 /* Room.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000010 /* Room.swift */; };
 		B100000000000000000011 /* RoomSectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000011 /* RoomSectionView.swift */; };
+		B200000000000000000001 /* LumenDeskApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000001 /* LumenDeskApp.swift */; };
+		B200000000000000000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000002 /* ContentView.swift */; };
+		B200000000000000000003 /* LightDevice.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000003 /* LightDevice.swift */; };
+		B200000000000000000004 /* LightManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000004 /* LightManager.swift */; };
+		B200000000000000000005 /* UDPSocket.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000005 /* UDPSocket.swift */; };
+		B200000000000000000006 /* LIFXProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000006 /* LIFXProtocol.swift */; };
+		B200000000000000000007 /* LIFXClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000007 /* LIFXClient.swift */; };
+		B200000000000000000008 /* GoveeProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000008 /* GoveeProtocol.swift */; };
+		B200000000000000000009 /* GoveeClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000009 /* GoveeClient.swift */; };
+		B20000000000000000000A /* LightRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000A /* LightRowView.swift */; };
+		B20000000000000000000B /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000B /* Assets.xcassets */; };
+		B20000000000000000000C /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000C /* Preview Assets.xcassets */; };
+		B200000000000000000010 /* Room.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000010 /* Room.swift */; };
+		B200000000000000000011 /* RoomSectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000011 /* RoomSectionView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -41,10 +55,19 @@
 		A100000000000000000010 /* Room.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Room.swift; sourceTree = "<group>"; };
 		A100000000000000000011 /* RoomSectionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomSectionView.swift; sourceTree = "<group>"; };
 		A100000000000000000099 /* LumenDesk.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LumenDesk.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A10000000000000000000F /* Info-iOS.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "Info-iOS.plist"; sourceTree = "<group>"; };
+		A1000000000000000000FF /* LumenDeskiOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LumenDeskiOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		D100000000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D200000000000000000001 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -73,6 +96,7 @@
 				A10000000000000000000B /* Assets.xcassets */,
 				C100000000000000000008 /* Preview Content */,
 				A10000000000000000000D /* Info.plist */,
+				A10000000000000000000F /* Info-iOS.plist */,
 				A10000000000000000000E /* LumenDesk.entitlements */,
 			);
 			path = LumenDesk;
@@ -137,6 +161,7 @@
 			isa = PBXGroup;
 			children = (
 				A100000000000000000099 /* LumenDesk.app */,
+				A1000000000000000000FF /* LumenDeskiOS.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -161,6 +186,23 @@
 			productReference = A100000000000000000099 /* LumenDesk.app */;
 			productType = "com.apple.product-type.application";
 		};
+		E200000000000000000001 /* LumenDeskiOS */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F200000000000000000003 /* Build configuration list for PBXNativeTarget "LumenDeskiOS" */;
+			buildPhases = (
+				D200000000000000000002 /* Sources */,
+				D200000000000000000003 /* Resources */,
+				D200000000000000000001 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = LumenDeskiOS;
+			productName = LumenDeskiOS;
+			productReference = A1000000000000000000FF /* LumenDeskiOS.app */;
+			productType = "com.apple.product-type.application";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -172,6 +214,9 @@
 				LastUpgradeCheck = 1500;
 				TargetAttributes = {
 					E100000000000000000001 = {
+						CreatedOnToolsVersion = 15.0;
+					};
+					E200000000000000000001 = {
 						CreatedOnToolsVersion = 15.0;
 					};
 				};
@@ -190,6 +235,7 @@
 			projectRoot = "";
 			targets = (
 				E100000000000000000001 /* LumenDesk */,
+				E200000000000000000001 /* LumenDeskiOS */,
 			);
 		};
 /* End PBXProject section */
@@ -201,6 +247,15 @@
 			files = (
 				B10000000000000000000B /* Assets.xcassets in Resources */,
 				B10000000000000000000C /* Preview Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D200000000000000000003 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B20000000000000000000B /* Assets.xcassets in Resources */,
+				B20000000000000000000C /* Preview Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -223,6 +278,25 @@
 				B10000000000000000000A /* LightRowView.swift in Sources */,
 				B100000000000000000010 /* Room.swift in Sources */,
 				B100000000000000000011 /* RoomSectionView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D200000000000000000002 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B200000000000000000001 /* LumenDeskApp.swift in Sources */,
+				B200000000000000000002 /* ContentView.swift in Sources */,
+				B200000000000000000003 /* LightDevice.swift in Sources */,
+				B200000000000000000004 /* LightManager.swift in Sources */,
+				B200000000000000000005 /* UDPSocket.swift in Sources */,
+				B200000000000000000006 /* LIFXProtocol.swift in Sources */,
+				B200000000000000000007 /* LIFXClient.swift in Sources */,
+				B200000000000000000008 /* GoveeProtocol.swift in Sources */,
+				B200000000000000000009 /* GoveeClient.swift in Sources */,
+				B20000000000000000000A /* LightRowView.swift in Sources */,
+				B200000000000000000010 /* Room.swift in Sources */,
+				B200000000000000000011 /* RoomSectionView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -399,6 +473,58 @@
 			};
 			name = Release;
 		};
+		G200000000000000000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_ASSET_PATHS = "\"LumenDesk/Preview Content\"";
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "LumenDesk/Info-iOS.plist";
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.lumendesk.LumenDesk;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		G200000000000000000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_ASSET_PATHS = "\"LumenDesk/Preview Content\"";
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "LumenDesk/Info-iOS.plist";
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.lumendesk.LumenDesk;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -416,6 +542,15 @@
 			buildConfigurations = (
 				G100000000000000000003 /* Debug */,
 				G100000000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F200000000000000000003 /* Build configuration list for PBXNativeTarget "LumenDeskiOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				G200000000000000000003 /* Debug */,
+				G200000000000000000004 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

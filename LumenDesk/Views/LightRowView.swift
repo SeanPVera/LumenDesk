@@ -68,5 +68,47 @@ struct LightRowView: View {
             RoundedRectangle(cornerRadius: 10)
                 .stroke(.separator, lineWidth: 0.5)
         )
+        .contextMenu { roomMenuContents }
+    }
+
+    @ViewBuilder
+    private var roomMenuContents: some View {
+        let currentRoom = manager.room(forLightID: device.id)
+
+        Menu("Move to Room") {
+            Button {
+                manager.assign(lightID: device.id, toRoom: nil)
+            } label: {
+                if currentRoom == nil {
+                    Label("Unassigned", systemImage: "checkmark")
+                } else {
+                    Text("Unassigned")
+                }
+            }
+            if !manager.rooms.isEmpty {
+                Divider()
+                ForEach(manager.rooms) { room in
+                    Button {
+                        manager.assign(lightID: device.id, toRoom: room.id)
+                    } label: {
+                        if currentRoom?.id == room.id {
+                            Label(room.name, systemImage: "checkmark")
+                        } else {
+                            Text(room.name)
+                        }
+                    }
+                }
+            }
+        }
+
+        if let room = currentRoom {
+            Divider()
+            Button("Move Up in \(room.name)") {
+                manager.moveLight(device.id, in: room.id, by: -1)
+            }
+            Button("Move Down in \(room.name)") {
+                manager.moveLight(device.id, in: room.id, by: 1)
+            }
+        }
     }
 }

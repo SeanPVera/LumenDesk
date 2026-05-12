@@ -8,12 +8,19 @@ import AppKit
 @MainActor
 final class LightManager: ObservableObject {
     @Published private(set) var devices: [LightDevice] = []
+    @Published private(set) var rooms: [Room] = []
     @Published private(set) var isScanning: Bool = false
     @Published var statusMessage: String = ""
 
     private var lifx: LIFXClient?
     private var govee: GoveeClient?
     private var refreshTimer: Timer?
+
+    private let roomsDefaultsKey = "LumenDesk.rooms.v1"
+
+    init() {
+        rooms = loadRooms()
+    }
 
     func start() {
         do {
@@ -190,6 +197,90 @@ extension LightManager: GoveeClientDelegate {
                                  blue: Double(b) / 255.0)
             device.lastSeen = Date()
         }
+    }
+}
+
+// MARK: - Rooms
+
+extension LightManager {
+    /// Lights not currently assigned to any room, sorted by name.
+    var unassignedDevices: [LightDevice] {
+        let assigned = Set(rooms.flatMap { $0.lightIDs })
+        return devices
+            .filter { !assigned.contains($0.id) }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    /// Resolves the lights for a room in the order the user has arranged them.
+    /// Skips IDs that no longer correspond to a discovered light.
+    func devices(in room: Room) -> [LightDevice] {
+        let index = Dictionary(uniqueKeysWithValues: devices.map { ($0.id, $0) })
+        return room.lightIDs.compactMap { index[$0] }
+    }
+
+    func createRoom(name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        rooms.append(Room(name: trimmed))
+        persistRooms()
+    }
+
+    func renameRoom(_ roomID: UUID, to name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let idx = rooms.firstIndex(where: { $0.id == roomID }) else { return }
+        rooms[idx].name = trimmed
+        persistRooms()
+    }
+
+    func deleteRoom(_ roomID: UUID) {
+        rooms.removeAll { $0.id == roomID }
+        persistRooms()
+    }
+
+    func moveRoom(_ roomID: UUID, by offset: Int) {
+        guard let idx = rooms.firstIndex(where: { $0.id == roomID }) else { return }
+        let target = idx + offset
+        guard rooms.indices.contains(target) else { return }
+        rooms.swapAt(idx, target)
+        persistRooms()
+    }
+
+    /// Move a light to the given room, or to the unassigned bucket if `roomID` is nil.
+    /// The light is removed from any other room first to keep memberships unique.
+    func assign(lightID: String, toRoom roomID: UUID?) {
+        for i in rooms.indices {
+            rooms[i].lightIDs.removeAll { $0 == lightID }
+        }
+        if let roomID, let idx = rooms.firstIndex(where: { $0.id == roomID }) {
+            rooms[idx].lightIDs.append(lightID)
+        }
+        persistRooms()
+    }
+
+    /// Shift a light up or down within its current room.
+    func moveLight(_ lightID: String, in roomID: UUID, by offset: Int) {
+        guard let r = rooms.firstIndex(where: { $0.id == roomID }),
+              let l = rooms[r].lightIDs.firstIndex(of: lightID) else { return }
+        let target = l + offset
+        guard rooms[r].lightIDs.indices.contains(target) else { return }
+        rooms[r].lightIDs.swapAt(l, target)
+        persistRooms()
+    }
+
+    /// Returns the room that owns the given light, if any.
+    func room(forLightID lightID: String) -> Room? {
+        rooms.first { $0.lightIDs.contains(lightID) }
+    }
+
+    private func persistRooms() {
+        guard let data = try? JSONEncoder().encode(rooms) else { return }
+        UserDefaults.standard.set(data, forKey: roomsDefaultsKey)
+    }
+
+    private func loadRooms() -> [Room] {
+        guard let data = UserDefaults.standard.data(forKey: roomsDefaultsKey),
+              let decoded = try? JSONDecoder().decode([Room].self, from: data) else { return [] }
+        return decoded
     }
 }
 

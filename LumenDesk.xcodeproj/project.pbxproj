@@ -19,6 +19,8 @@
 		B10000000000000000000A /* LightRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000A /* LightRowView.swift */; };
 		B10000000000000000000B /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000B /* Assets.xcassets */; };
 		B10000000000000000000C /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000C /* Preview Assets.xcassets */; };
+		B100000000000000000010 /* Room.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000010 /* Room.swift */; };
+		B100000000000000000011 /* RoomSectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000011 /* RoomSectionView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -36,6 +38,8 @@
 		A10000000000000000000C /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
 		A10000000000000000000D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A10000000000000000000E /* LumenDesk.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LumenDesk.entitlements; sourceTree = "<group>"; };
+		A100000000000000000010 /* Room.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Room.swift; sourceTree = "<group>"; };
+		A100000000000000000011 /* RoomSectionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomSectionView.swift; sourceTree = "<group>"; };
 		A100000000000000000099 /* LumenDesk.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LumenDesk.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -78,6 +82,7 @@
 			isa = PBXGroup;
 			children = (
 				A100000000000000000003 /* LightDevice.swift */,
+				A100000000000000000010 /* Room.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -115,6 +120,7 @@
 			isa = PBXGroup;
 			children = (
 				A10000000000000000000A /* LightRowView.swift */,
+				A100000000000000000011 /* RoomSectionView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -215,6 +221,8 @@
 				B100000000000000000008 /* GoveeProtocol.swift in Sources */,
 				B100000000000000000009 /* GoveeClient.swift in Sources */,
 				B10000000000000000000A /* LightRowView.swift in Sources */,
+				B100000000000000000010 /* Room.swift in Sources */,
+				B100000000000000000011 /* RoomSectionView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

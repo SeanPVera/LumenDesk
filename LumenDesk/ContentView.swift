@@ -2,6 +2,8 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject var manager: LightManager
+    @State private var showingNewRoom: Bool = false
+    @State private var newRoomName: String = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -11,16 +13,19 @@ struct ContentView: View {
                 emptyState
             } else {
                 ScrollView {
-                    LazyVStack(spacing: 10) {
-                        ForEach(manager.devices) { device in
-                            LightRowView(device: device)
+                    LazyVStack(alignment: .leading, spacing: 18) {
+                        ForEach(manager.rooms) { room in
+                            RoomSectionView(room: room)
                         }
+
+                        unassignedSection
                     }
                     .padding(16)
                 }
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))
+        .sheet(isPresented: $showingNewRoom) { newRoomSheet }
     }
 
     private var header: some View {
@@ -40,6 +45,12 @@ struct ContentView: View {
                 ProgressView().controlSize(.small)
             }
             Button {
+                newRoomName = ""
+                showingNewRoom = true
+            } label: {
+                Label("New Room", systemImage: "rectangle.stack.badge.plus")
+            }
+            Button {
                 manager.scan()
             } label: {
                 Label("Scan", systemImage: "arrow.clockwise")
@@ -50,6 +61,60 @@ struct ContentView: View {
         .padding(.vertical, 12)
         .background(.regularMaterial)
         .overlay(Divider(), alignment: .bottom)
+    }
+
+    @ViewBuilder
+    private var unassignedSection: some View {
+        let unassigned = manager.unassignedDevices
+        if !unassigned.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Text(manager.rooms.isEmpty ? "All Lights" : "Unassigned")
+                        .font(.headline)
+                    Text("\(unassigned.count)")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6).padding(.vertical, 1)
+                        .background(Capsule().fill(Color.secondary.opacity(0.15)))
+                    Spacer()
+                }
+                VStack(spacing: 10) {
+                    ForEach(unassigned) { device in
+                        LightRowView(device: device)
+                    }
+                }
+            }
+        }
+    }
+
+    private var newRoomSheet: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("New Room").font(.title3.weight(.semibold))
+            Text("Group lights from any brand into a single custom room.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            TextField("Room name (e.g. “Living Room”)", text: $newRoomName)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit(createRoom)
+            HStack {
+                Spacer()
+                Button("Cancel") { showingNewRoom = false }
+                    .keyboardShortcut(.cancelAction)
+                Button("Create", action: createRoom)
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(newRoomName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(20)
+        .frame(width: 360)
+    }
+
+    private func createRoom() {
+        let trimmed = newRoomName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        manager.createRoom(name: trimmed)
+        showingNewRoom = false
     }
 
     private var emptyState: some View {

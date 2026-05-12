@@ -72,7 +72,9 @@ struct RoomSectionView: View {
                 Image(systemName: "ellipsis.circle")
                     .foregroundStyle(.secondary)
             }
+            #if os(macOS)
             .menuStyle(.borderlessButton)
+            #endif
             .fixedSize()
         }
         .contentShape(Rectangle())

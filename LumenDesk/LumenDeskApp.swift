@@ -8,9 +8,12 @@ struct LumenDeskApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(manager)
+                #if os(macOS)
                 .frame(minWidth: 520, minHeight: 380)
+                #endif
                 .onAppear { manager.start() }
         }
+        #if os(macOS)
         .windowResizability(.contentSize)
         .commands {
             CommandGroup(after: .newItem) {
@@ -18,5 +21,6 @@ struct LumenDeskApp: App {
                     .keyboardShortcut("r", modifiers: .command)
             }
         }
+        #endif
     }
 }

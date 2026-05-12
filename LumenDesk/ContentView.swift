@@ -24,7 +24,7 @@ struct ContentView: View {
                 }
             }
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(Color.windowBackground)
         .sheet(isPresented: $showingNewRoom) { newRoomSheet }
     }
 
@@ -124,7 +124,7 @@ struct ContentView: View {
                 .font(.system(size: 44))
                 .foregroundStyle(.secondary)
             Text("No lights found yet").font(.headline)
-            Text("Make sure your Mac is on the same Wi-Fi network as your bulbs. For Govee, enable “LAN Control” for each bulb in the Govee Home app.")
+            Text(“Make sure this device is on the same Wi-Fi network as your bulbs. For Govee, enable “LAN Control” for each bulb in the Govee Home app.”)
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

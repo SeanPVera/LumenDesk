@@ -62,7 +62,7 @@ struct LightRowView: View {
         .padding(12)
         .background(
             RoundedRectangle(cornerRadius: 10)
-                .fill(Color(nsColor: .controlBackgroundColor))
+                .fill(Color.cardBackground)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 10)

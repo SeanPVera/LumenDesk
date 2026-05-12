@@ -1,6 +1,10 @@
 import Foundation
 import SwiftUI
+#if os(macOS)
 import AppKit
+#else
+import UIKit
+#endif
 
 /// Owns the LIFX + Govee clients, holds the discovered devices, and serializes
 /// UI updates onto the main actor. Control calls from the UI fan out to the
@@ -287,17 +291,41 @@ extension LightManager {
 // MARK: - Color helpers
 
 extension Color {
+    static var windowBackground: Color {
+        #if os(macOS)
+        Color(nsColor: .windowBackgroundColor)
+        #else
+        Color(uiColor: .systemGroupedBackground)
+        #endif
+    }
+
+    static var cardBackground: Color {
+        #if os(macOS)
+        Color(nsColor: .controlBackgroundColor)
+        #else
+        Color(uiColor: .secondarySystemGroupedBackground)
+        #endif
+    }
+
     var hsbComponents: (h: Double, s: Double, b: Double) {
-        guard let ns = NSColor(self).usingColorSpace(.sRGB) else { return (0, 0, 1) }
         var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        #if os(macOS)
+        guard let ns = NSColor(self).usingColorSpace(.sRGB) else { return (0, 0, 1) }
         ns.getHue(&h, saturation: &s, brightness: &b, alpha: &a)
+        #else
+        UIColor(self).getHue(&h, saturation: &s, brightness: &b, alpha: &a)
+        #endif
         return (Double(h), Double(s), Double(b))
     }
 
     var rgbComponents: (r: Double, g: Double, b: Double) {
-        guard let ns = NSColor(self).usingColorSpace(.sRGB) else { return (1, 1, 1) }
         var r: CGFloat = 0, g: CGFloat = 0, bb: CGFloat = 0, a: CGFloat = 0
+        #if os(macOS)
+        guard let ns = NSColor(self).usingColorSpace(.sRGB) else { return (1, 1, 1) }
         ns.getRed(&r, green: &g, blue: &bb, alpha: &a)
+        #else
+        UIColor(self).getRed(&r, green: &g, blue: &bb, alpha: &a)
+        #endif
         return (Double(r), Double(g), Double(bb))
     }
 }

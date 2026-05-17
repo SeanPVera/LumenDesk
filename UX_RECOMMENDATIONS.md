@@ -211,19 +211,27 @@ Recommendations are grouped into four phases ordered by impact-to-effort ratio. 
 
 ---
 
-### Phase 2 — Core Interaction Improvements (3–4 weeks)
+### Phase 2 — Core Interaction Improvements (3–4 weeks) — ✅ IMPLEMENTED
 *Medium effort. Introduces new UI patterns (swatches, drag-drop, toasts) that pair well together.*
 
-| Priority | Rec | Files Affected |
-|----------|-----|----------------|
-| P1 | **#1** Room-level master controls | `RoomSectionView.swift`, `LightManager.swift` |
-| P2 | **#2** Global "All Lights" controls in header | `ContentView.swift`, `LightManager.swift` |
-| P3 | **#9** Command-failure feedback (toast/banner) | `LightManager.swift`, `ContentView.swift` |
-| P4 | **#6** Color swatches for common colors | `LightRowView.swift` |
-| P5 | **#7** Drag-and-drop reordering | `ContentView.swift`, `RoomSectionView.swift`, `LightManager.swift` |
-| P6 | **#8** Keyboard shortcuts | `LumenDeskApp.swift`, `ContentView.swift` |
+| Priority | Rec | Files Affected | Status |
+|----------|-----|----------------|--------|
+| P1 | **#1** Room-level master controls | `RoomSectionView.swift`, `LightManager.swift` | ✅ Done |
+| P2 | **#2** Global "All Lights" controls in header | `ContentView.swift`, `LightManager.swift` | ✅ Done |
+| P3 | **#9** Command-failure feedback (toast/banner) | `LightManager.swift`, `ContentView.swift` | ✅ Done |
+| P4 | **#6** Color swatches for common colors | `LightRowView.swift` | ✅ Done |
+| P5 | **#7** Drag-and-drop room reordering | `ContentView.swift`, `LightManager.swift` | ✅ Done |
+| P6 | **#8** Keyboard shortcuts | `LumenDeskApp.swift`, `ContentView.swift` | ✅ Done |
 
 **Deliverable:** The app becomes significantly faster for daily use. Room master controls alone justify a minor version bump.
+
+**Implementation notes:**
+- **#1** — Master toggle in room header (shows when room has lights); master brightness "All" slider appears below the header when the room has 2+ lights and is expanded. Both fanout to `setPower(in:on:)` / `setBrightness(in:value:)` on LightManager.
+- **#2** — Second row in the app header (visible whenever devices are present): global toggle + brightness slider labeled "All Lights". Wired to `setAllPower(on:)` / `setAllBrightness(_:)`. `Cmd+N` shortcut added to the New Room button.
+- **#9** — `@Published var commandError: String?` on LightManager, auto-cleared after 4 s via a `@MainActor Task`. Single-device `setPower` warns on stale devices; room and global bulk commands count stale lights and report the number. A `CommandToastView` slides up from the bottom of the window with an amber border and manual ×-dismiss.
+- **#6** — Horizontal strip of 8 color swatches (Warm White through Purple) added above the brightness slider row in each light card. `ColorPicker` moved to the trailing end of that strip. Swatches are disabled when the light is off.
+- **#7** — Replaced `ScrollView + LazyVStack` with a `List` using `.listStyle(.plain).scrollContentBackground(.hidden)` for visual parity. Added `ForEach.onMove` for rooms, backed by `moveRooms(from:to:)` in LightManager. macOS List shows a grip handle on row hover automatically.
+- **#8** — `⇧⌘P` toggles all lights (registered in the app menu commands). `⌘N` opens the New Room sheet (on the header button). Both are surfaced in tooltips.
 
 ---
 

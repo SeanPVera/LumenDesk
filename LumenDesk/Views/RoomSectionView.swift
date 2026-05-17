@@ -24,6 +24,9 @@ struct RoomSectionView: View {
                         .padding(.horizontal, 4)
                         .padding(.bottom, 4)
                 } else {
+                    if lights.count > 1 {
+                        masterBrightnessRow
+                    }
                     VStack(spacing: 10) {
                         ForEach(lights) { device in
                             LightRowView(device: device)
@@ -77,6 +80,14 @@ struct RoomSectionView: View {
 
             Spacer()
 
+            if !lights.isEmpty {
+                Toggle("", isOn: masterPowerBinding)
+                    .toggleStyle(.switch)
+                    .labelsHidden()
+                    .controlSize(.small)
+                    .help("Toggle all lights in \(room.name)")
+            }
+
             Menu {
                 Button("Rename…") { beginRename() }
                 Button("Move Up") { manager.moveRoom(room.id, by: -1) }
@@ -92,6 +103,41 @@ struct RoomSectionView: View {
         }
         .contentShape(Rectangle())
     }
+
+    private var masterBrightnessRow: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "sun.min").foregroundStyle(.tertiary).font(.caption)
+            Slider(value: masterBrightnessBinding, in: 0...1)
+                .disabled(lights.allSatisfy { !$0.isOn })
+            Image(systemName: "sun.max").foregroundStyle(.tertiary).font(.caption)
+            Text("All")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 4)
+    }
+
+    // MARK: - Bindings
+
+    private var masterPowerBinding: Binding<Bool> {
+        Binding(
+            get: { !lights.isEmpty && lights.allSatisfy { $0.isOn } },
+            set: { manager.setPower(in: room, on: $0) }
+        )
+    }
+
+    private var masterBrightnessBinding: Binding<Double> {
+        Binding(
+            get: {
+                let on = lights.filter { $0.isOn }
+                guard !on.isEmpty else { return 1.0 }
+                return on.reduce(0) { $0 + $1.brightness } / Double(on.count)
+            },
+            set: { manager.setBrightness(in: room, value: $0) }
+        )
+    }
+
+    // MARK: - Rename helpers
 
     private func beginRename() {
         draftName = room.name

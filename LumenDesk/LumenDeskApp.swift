@@ -18,6 +18,10 @@ struct LumenDeskApp: App {
             CommandGroup(after: .newItem) {
                 Button("Scan for Lights") { manager.scan() }
                     .keyboardShortcut("r", modifiers: .command)
+                Button("Toggle All Lights") {
+                    manager.setAllPower(on: !manager.devices.contains(where: { $0.isOn }))
+                }
+                .keyboardShortcut("p", modifiers: [.command, .shift])
             }
             CommandGroup(after: .importExport) {
                 Button("Export Configuration…") { exportConfiguration() }

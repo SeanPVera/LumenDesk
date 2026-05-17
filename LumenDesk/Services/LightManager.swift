@@ -11,6 +11,8 @@ final class LightManager: ObservableObject {
     @Published private(set) var rooms: [Room] = []
     @Published private(set) var isScanning: Bool = false
     @Published var statusMessage: String = ""
+    @Published var commandError: String?
+    private var errorClearTask: Task<Void, Never>?
 
     private var lifx: LIFXClient?
     private var govee: GoveeClient?
@@ -81,7 +83,19 @@ final class LightManager: ObservableObject {
 
     // MARK: - Control
 
+    func publishError(_ message: String) {
+        commandError = message
+        errorClearTask?.cancel()
+        errorClearTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            if !Task.isCancelled { self.commandError = nil }
+        }
+    }
+
     func setPower(_ device: LightDevice, on: Bool) {
+        if device.isStale {
+            publishError(""\(device.name)" may be offline — command sent anyway.")
+        }
         device.isOn = on
         switch device.brand {
         case .lifx: lifx?.setPower(macHex: device.backendID, on: on)
@@ -123,6 +137,45 @@ final class LightManager: ObservableObject {
             govee?.setColor(deviceID: device.backendID,
                             r: Int(rgb.r * 255), g: Int(rgb.g * 255), b: Int(rgb.b * 255))
         }
+    }
+
+    // MARK: - Room & global bulk controls
+
+    func setPower(in room: Room, on: Bool) {
+        let lights = devices(in: room)
+        let staleCount = lights.filter { $0.isStale }.count
+        if staleCount > 0 {
+            publishError("\(staleCount) light\(staleCount == 1 ? "" : "s") in "\(room.name)" may be offline.")
+        }
+        for d in lights {
+            d.isOn = on
+            switch d.brand {
+            case .lifx: lifx?.setPower(macHex: d.backendID, on: on)
+            case .govee: govee?.setPower(deviceID: d.backendID, on: on)
+            }
+        }
+    }
+
+    func setBrightness(in room: Room, value: Double) {
+        for d in devices(in: room) { setBrightness(d, value: value) }
+    }
+
+    func setAllPower(on: Bool) {
+        let staleCount = devices.filter { $0.isStale }.count
+        if staleCount > 0 {
+            publishError("\(staleCount) light\(staleCount == 1 ? "" : "s") may be offline.")
+        }
+        for d in devices {
+            d.isOn = on
+            switch d.brand {
+            case .lifx: lifx?.setPower(macHex: d.backendID, on: on)
+            case .govee: govee?.setPower(deviceID: d.backendID, on: on)
+            }
+        }
+    }
+
+    func setAllBrightness(_ value: Double) {
+        for d in devices { setBrightness(d, value: value) }
     }
 
     // MARK: - Internal helpers
@@ -245,6 +298,11 @@ extension LightManager {
 
     func deleteRoom(_ roomID: UUID) {
         rooms.removeAll { $0.id == roomID }
+        persistRooms()
+    }
+
+    func moveRooms(from offsets: IndexSet, to destination: Int) {
+        rooms.move(fromOffsets: offsets, toOffset: destination)
         persistRooms()
     }
 

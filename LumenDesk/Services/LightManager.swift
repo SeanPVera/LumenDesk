@@ -11,6 +11,8 @@ final class LightManager: ObservableObject {
     @Published private(set) var rooms: [Room] = []
     @Published private(set) var isScanning: Bool = false
     @Published var statusMessage: String = ""
+    @Published var commandError: String?
+    private var errorClearTask: Task<Void, Never>?
 
     private var lifx: LIFXClient?
     private var govee: GoveeClient?
@@ -60,7 +62,12 @@ final class LightManager: ObservableObject {
     }
 
     private func refreshAll() {
+        let now = Date()
         for d in devices {
+            // Two missed 30s cycles (>75s) without a response → mark unreachable.
+            if now.timeIntervalSince(d.lastSeen) > 75 {
+                d.isStale = true
+            }
             switch d.brand {
             case .lifx: lifx?.refresh(macHex: d.backendID)
             case .govee: govee?.refresh(deviceID: d.backendID)
@@ -68,9 +75,27 @@ final class LightManager: ObservableObject {
         }
     }
 
+    /// Records a successful contact with a device, clearing any stale flag.
+    private func markSeen(_ device: LightDevice) {
+        device.lastSeen = Date()
+        device.isStale = false
+    }
+
     // MARK: - Control
 
+    func publishError(_ message: String) {
+        commandError = message
+        errorClearTask?.cancel()
+        errorClearTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            if !Task.isCancelled { self.commandError = nil }
+        }
+    }
+
     func setPower(_ device: LightDevice, on: Bool) {
+        if device.isStale {
+            publishError(""\(device.name)" may be offline — command sent anyway.")
+        }
         device.isOn = on
         switch device.brand {
         case .lifx: lifx?.setPower(macHex: device.backendID, on: on)
@@ -114,6 +139,45 @@ final class LightManager: ObservableObject {
         }
     }
 
+    // MARK: - Room & global bulk controls
+
+    func setPower(in room: Room, on: Bool) {
+        let lights = devices(in: room)
+        let staleCount = lights.filter { $0.isStale }.count
+        if staleCount > 0 {
+            publishError("\(staleCount) light\(staleCount == 1 ? "" : "s") in "\(room.name)" may be offline.")
+        }
+        for d in lights {
+            d.isOn = on
+            switch d.brand {
+            case .lifx: lifx?.setPower(macHex: d.backendID, on: on)
+            case .govee: govee?.setPower(deviceID: d.backendID, on: on)
+            }
+        }
+    }
+
+    func setBrightness(in room: Room, value: Double) {
+        for d in devices(in: room) { setBrightness(d, value: value) }
+    }
+
+    func setAllPower(on: Bool) {
+        let staleCount = devices.filter { $0.isStale }.count
+        if staleCount > 0 {
+            publishError("\(staleCount) light\(staleCount == 1 ? "" : "s") may be offline.")
+        }
+        for d in devices {
+            d.isOn = on
+            switch d.brand {
+            case .lifx: lifx?.setPower(macHex: d.backendID, on: on)
+            case .govee: govee?.setPower(deviceID: d.backendID, on: on)
+            }
+        }
+    }
+
+    func setAllBrightness(_ value: Double) {
+        for d in devices { setBrightness(d, value: value) }
+    }
+
     // MARK: - Internal helpers
 
     fileprivate func upsert(_ device: LightDevice) {
@@ -121,7 +185,7 @@ final class LightManager: ObservableObject {
             let existing = devices[idx]
             existing.name = device.name
             existing.address = device.address
-            existing.lastSeen = Date()
+            markSeen(existing)
         } else {
             devices.append(device)
             devices.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
@@ -141,7 +205,7 @@ extension LightManager: LIFXClientDelegate {
             let id = "lifx:\(macHex)"
             if let existing = self.device(withID: id) {
                 existing.address = address
-                existing.lastSeen = Date()
+                self.markSeen(existing)
             } else {
                 let device = LightDevice(id: id, brand: .lifx, backendID: macHex,
                                          name: "LIFX \(macHex.suffix(6))", address: address)
@@ -161,7 +225,7 @@ extension LightManager: LIFXClientDelegate {
             let s = Double(color.saturation) / 65535.0
             // Display in the UI at full brightness — brightness is shown separately.
             device.color = Color(hue: h, saturation: s, brightness: 1.0)
-            device.lastSeen = Date()
+            self.markSeen(device)
         }
     }
 }
@@ -174,7 +238,7 @@ extension LightManager: GoveeClientDelegate {
             let id = "govee:\(deviceID)"
             if let existing = self.device(withID: id) {
                 existing.address = address
-                existing.lastSeen = Date()
+                self.markSeen(existing)
             } else {
                 let suffix = deviceID.split(separator: ":").suffix(2).joined(separator: "")
                 let display = sku.map { "\($0) \(suffix)" } ?? "Govee \(suffix)"
@@ -195,7 +259,7 @@ extension LightManager: GoveeClientDelegate {
             device.color = Color(red: Double(r) / 255.0,
                                  green: Double(g) / 255.0,
                                  blue: Double(b) / 255.0)
-            device.lastSeen = Date()
+            self.markSeen(device)
         }
     }
 }
@@ -237,6 +301,11 @@ extension LightManager {
         persistRooms()
     }
 
+    func moveRooms(from offsets: IndexSet, to destination: Int) {
+        rooms.move(fromOffsets: offsets, toOffset: destination)
+        persistRooms()
+    }
+
     func moveRoom(_ roomID: UUID, by offset: Int) {
         guard let idx = rooms.firstIndex(where: { $0.id == roomID }) else { return }
         let target = idx + offset
@@ -270,6 +339,28 @@ extension LightManager {
     /// Returns the room that owns the given light, if any.
     func room(forLightID lightID: String) -> Room? {
         rooms.first { $0.lightIDs.contains(lightID) }
+    }
+
+    /// Serializes the current room layout for export to a file.
+    func exportRoomsData() -> Data? {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return try? encoder.encode(rooms)
+    }
+
+    /// Replaces the current room layout with a previously exported file.
+    /// Returns true on success; sets `statusMessage` and returns false on a
+    /// malformed file so the user gets feedback instead of silent data loss.
+    @discardableResult
+    func importRoomsData(_ data: Data) -> Bool {
+        guard let decoded = try? JSONDecoder().decode([Room].self, from: data) else {
+            statusMessage = "Import failed — that file isn't a valid LumenDesk configuration."
+            return false
+        }
+        rooms = decoded
+        persistRooms()
+        statusMessage = "Imported \(decoded.count) room\(decoded.count == 1 ? "" : "s")."
+        return true
     }
 
     private func persistRooms() {

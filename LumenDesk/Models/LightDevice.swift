@@ -16,6 +16,9 @@ final class LightDevice: ObservableObject, Identifiable {
     @Published var brightness: Double  // 0…1
     @Published var color: Color
     @Published var lastSeen: Date
+    /// True when the bulb has missed several refresh cycles and is likely
+    /// offline or off the network. Cleared on the next successful response.
+    @Published var isStale: Bool = false
 
     init(id: String, brand: Brand, backendID: String, name: String, address: String,
          isOn: Bool = false, brightness: Double = 1.0, color: Color = .white) {

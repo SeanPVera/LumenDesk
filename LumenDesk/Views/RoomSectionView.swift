@@ -9,6 +9,7 @@ struct RoomSectionView: View {
     @State private var isExpanded: Bool = true
     @State private var renaming: Bool = false
     @State private var draftName: String = ""
+    @FocusState private var nameFieldFocused: Bool
 
     private var lights: [LightDevice] { manager.devices(in: room) }
 
@@ -23,6 +24,9 @@ struct RoomSectionView: View {
                         .padding(.horizontal, 4)
                         .padding(.bottom, 4)
                 } else {
+                    if lights.count > 1 {
+                        masterBrightnessRow
+                    }
                     VStack(spacing: 10) {
                         ForEach(lights) { device in
                             LightRowView(device: device)
@@ -46,12 +50,26 @@ struct RoomSectionView: View {
             .buttonStyle(.plain)
 
             if renaming {
-                TextField("Room name", text: $draftName, onCommit: commitRename)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 220)
+                HStack(spacing: 4) {
+                    TextField("Room name", text: $draftName)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 220)
+                        .focused($nameFieldFocused)
+                        .onSubmit(commitRename)
+                        .onExitCommand(perform: cancelRename)
+                    Button(action: cancelRename) {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Cancel (Esc)")
+                }
             } else {
                 Text(room.name)
                     .font(.headline)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .help(room.name)
             }
 
             Text("\(lights.count)")
@@ -61,6 +79,14 @@ struct RoomSectionView: View {
                 .background(Capsule().fill(Color.secondary.opacity(0.15)))
 
             Spacer()
+
+            if !lights.isEmpty {
+                Toggle("", isOn: masterPowerBinding)
+                    .toggleStyle(.switch)
+                    .labelsHidden()
+                    .controlSize(.small)
+                    .help("Toggle all lights in \(room.name)")
+            }
 
             Menu {
                 Button("Rename…") { beginRename() }
@@ -78,13 +104,58 @@ struct RoomSectionView: View {
         .contentShape(Rectangle())
     }
 
+    private var masterBrightnessRow: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "sun.min").foregroundStyle(.tertiary).font(.caption)
+            Slider(value: masterBrightnessBinding, in: 0...1)
+                .disabled(lights.allSatisfy { !$0.isOn })
+            Image(systemName: "sun.max").foregroundStyle(.tertiary).font(.caption)
+            Text("All")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 4)
+    }
+
+    // MARK: - Bindings
+
+    private var masterPowerBinding: Binding<Bool> {
+        Binding(
+            get: { !lights.isEmpty && lights.allSatisfy { $0.isOn } },
+            set: { manager.setPower(in: room, on: $0) }
+        )
+    }
+
+    private var masterBrightnessBinding: Binding<Double> {
+        Binding(
+            get: {
+                let on = lights.filter { $0.isOn }
+                guard !on.isEmpty else { return 1.0 }
+                return on.reduce(0) { $0 + $1.brightness } / Double(on.count)
+            },
+            set: { manager.setBrightness(in: room, value: $0) }
+        )
+    }
+
+    // MARK: - Rename helpers
+
     private func beginRename() {
         draftName = room.name
         renaming = true
+        // Defer so the field exists before we move focus into it.
+        DispatchQueue.main.async { nameFieldFocused = true }
     }
 
     private func commitRename() {
-        manager.renameRoom(room.id, to: draftName)
+        let trimmed = draftName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty {
+            manager.renameRoom(room.id, to: trimmed)
+        }
+        renaming = false
+    }
+
+    private func cancelRename() {
+        draftName = room.name
         renaming = false
     }
 }

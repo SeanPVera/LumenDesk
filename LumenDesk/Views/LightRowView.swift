@@ -26,9 +26,25 @@ struct LightRowView: View {
                     .fill(device.isOn ? device.color : Color.gray.opacity(0.35))
                     .frame(width: 28, height: 28)
                     .overlay(Circle().stroke(.secondary.opacity(0.4), lineWidth: 1))
+                    .overlay(alignment: .bottomTrailing) {
+                        if device.isStale {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.orange)
+                                .background(
+                                    Circle()
+                                        .fill(Color(nsColor: .controlBackgroundColor))
+                                        .frame(width: 13, height: 13)
+                                )
+                        }
+                    }
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(device.name).font(.headline)
+                    Text(device.name)
+                        .font(.headline)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .help(device.name)
                     HStack(spacing: 6) {
                         Text(device.brand.displayName)
                             .font(.caption2.weight(.semibold))
@@ -66,8 +82,13 @@ struct LightRowView: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 10)
-                .stroke(.separator, lineWidth: 0.5)
+                .stroke(device.isStale ? Color.orange.opacity(0.5) : Color(nsColor: .separatorColor),
+                        lineWidth: device.isStale ? 1 : 0.5)
         )
+        .opacity(device.isStale ? 0.6 : 1)
+        .help(device.isStale
+              ? "Not responding — last seen \(device.lastSeen.formatted(.relative(presentation: .named))). Check the bulb's power and network."
+              : "")
         .contextMenu { roomMenuContents }
     }
 

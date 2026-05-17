@@ -4,6 +4,7 @@ struct ContentView: View {
     @EnvironmentObject var manager: LightManager
     @State private var showingNewRoom: Bool = false
     @State private var newRoomName: String = ""
+    @State private var setupChecks: Set<Int> = []
 
     var body: some View {
         VStack(spacing: 0) {
@@ -118,23 +119,61 @@ struct ContentView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 16) {
             Spacer()
             Image(systemName: "lightbulb.slash")
                 .font(.system(size: 44))
                 .foregroundStyle(.secondary)
             Text("No lights found yet").font(.headline)
-            Text("Make sure your Mac is on the same Wi-Fi network as your bulbs. For Govee, enable “LAN Control” for each bulb in the Govee Home app.")
+            Text("Run through this checklist, then scan again.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 380)
-            Button("Scan again") { manager.scan() }
+
+            VStack(alignment: .leading, spacing: 12) {
+                setupStep(0,
+                          "Mac and bulbs on the same Wi-Fi",
+                          "Both must be on the same network and subnet — check your router if unsure.")
+                setupStep(1,
+                          "Govee: “LAN Control” enabled",
+                          "Govee Home app → Devices → [bulb] → Settings → LAN Control.")
+                setupStep(2,
+                          "LIFX: bulbs powered and paired",
+                          "Confirm each bulb is on and set up in the LIFX app.")
+            }
+            .frame(maxWidth: 440)
+            .padding(16)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color(nsColor: .controlBackgroundColor))
+            )
+
+            Button("Scan Now") { manager.scan() }
                 .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()
+    }
+
+    private func setupStep(_ index: Int, _ title: String, _ detail: String) -> some View {
+        let checked = setupChecks.contains(index)
+        return Button {
+            if checked { setupChecks.remove(index) } else { setupChecks.insert(index) }
+        } label: {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: checked ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(checked ? Color.accentColor : Color.secondary)
+                    .font(.title3)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.callout.weight(.medium))
+                    Text(detail).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
 

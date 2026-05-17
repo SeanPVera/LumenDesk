@@ -9,6 +9,7 @@ struct RoomSectionView: View {
     @State private var isExpanded: Bool = true
     @State private var renaming: Bool = false
     @State private var draftName: String = ""
+    @FocusState private var nameFieldFocused: Bool
 
     private var lights: [LightDevice] { manager.devices(in: room) }
 
@@ -46,12 +47,26 @@ struct RoomSectionView: View {
             .buttonStyle(.plain)
 
             if renaming {
-                TextField("Room name", text: $draftName, onCommit: commitRename)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 220)
+                HStack(spacing: 4) {
+                    TextField("Room name", text: $draftName)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 220)
+                        .focused($nameFieldFocused)
+                        .onSubmit(commitRename)
+                        .onExitCommand(perform: cancelRename)
+                    Button(action: cancelRename) {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Cancel (Esc)")
+                }
             } else {
                 Text(room.name)
                     .font(.headline)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .help(room.name)
             }
 
             Text("\(lights.count)")
@@ -81,10 +96,20 @@ struct RoomSectionView: View {
     private func beginRename() {
         draftName = room.name
         renaming = true
+        // Defer so the field exists before we move focus into it.
+        DispatchQueue.main.async { nameFieldFocused = true }
     }
 
     private func commitRename() {
-        manager.renameRoom(room.id, to: draftName)
+        let trimmed = draftName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty {
+            manager.renameRoom(room.id, to: trimmed)
+        }
+        renaming = false
+    }
+
+    private func cancelRename() {
+        draftName = room.name
         renaming = false
     }
 }

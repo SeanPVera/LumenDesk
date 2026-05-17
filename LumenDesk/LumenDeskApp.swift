@@ -1,4 +1,6 @@
 import SwiftUI
+import AppKit
+import UniformTypeIdentifiers
 
 @main
 struct LumenDeskApp: App {
@@ -17,6 +19,32 @@ struct LumenDeskApp: App {
                 Button("Scan for Lights") { manager.scan() }
                     .keyboardShortcut("r", modifiers: .command)
             }
+            CommandGroup(after: .importExport) {
+                Button("Export Configuration…") { exportConfiguration() }
+                Button("Import Configuration…") { importConfiguration() }
+            }
         }
+    }
+
+    private func exportConfiguration() {
+        guard let data = manager.exportRoomsData() else { return }
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.json]
+        panel.nameFieldStringValue = "LumenDesk-Rooms.json"
+        panel.title = "Export Room Configuration"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        try? data.write(to: url)
+    }
+
+    private func importConfiguration() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.json]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.title = "Import Room Configuration"
+        guard panel.runModal() == .OK,
+              let url = panel.url,
+              let data = try? Data(contentsOf: url) else { return }
+        manager.importRoomsData(data)
     }
 }

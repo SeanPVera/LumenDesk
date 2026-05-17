@@ -187,18 +187,27 @@ Recommendations are grouped into four phases ordered by impact-to-effort ratio. 
 
 ---
 
-### Phase 1 — Quick Wins (1–2 weeks)
+### Phase 1 — Quick Wins (1–2 weeks) — ✅ IMPLEMENTED
 *Low effort, high payoff. All changes are isolated to existing files with no new architectural dependencies.*
 
-| Priority | Rec | Files Affected |
-|----------|-----|----------------|
-| P1 | **#4** Text truncation for long names | `LightRowView.swift`, `RoomSectionView.swift` |
-| P2 | **#3** Fix inline-rename UX | `RoomSectionView.swift` |
-| P3 | **#13** Better empty state & first-run onboarding | `ContentView.swift` |
-| P4 | **#19** Export / import room configuration | `ContentView.swift`, `LightManager.swift` |
-| P5 | **#5** Per-light reachability indicator | `LightDevice.swift`, `LightManager.swift`, `LightRowView.swift` |
+| Priority | Rec | Files Affected | Status |
+|----------|-----|----------------|--------|
+| P1 | **#4** Text truncation for long names | `LightRowView.swift`, `RoomSectionView.swift` | ✅ Done |
+| P2 | **#3** Fix inline-rename UX | `RoomSectionView.swift` | ✅ Done |
+| P3 | **#13** Better empty state & first-run onboarding | `ContentView.swift` | ✅ Done |
+| P4 | **#19** Export / import room configuration | `LumenDeskApp.swift`, `LightManager.swift`, `LumenDesk.entitlements` | ✅ Done |
+| P5 | **#5** Per-light reachability indicator | `LightDevice.swift`, `LightManager.swift`, `LightRowView.swift` | ✅ Done |
 
 **Deliverable:** Polished existing surfaces. No new concepts introduced. Shippable as a patch release.
+
+**Implementation notes:**
+- **#4** — `.lineLimit(1).truncationMode(.tail)` on bulb and room names, with `.help()` tooltips exposing the full text on hover.
+- **#3** — `@FocusState` auto-focuses the rename field; a visible `×` button and `Esc` (`onExitCommand`) cancel and restore the prior name; empty names are rejected on commit.
+- **#13** — Replaced the static empty state with an interactive 3-step setup checklist (tap to tick) plus a prominent "Scan Now" default-action button.
+- **#19** — `Export/Import Configuration…` in the File menu via `NSSavePanel`/`NSOpenPanel`; pretty-printed JSON; malformed imports surface a status message instead of silently wiping rooms. Added `files.user-selected.read-write` sandbox entitlement.
+- **#5** — Added `isStale` to `LightDevice`; the 30 s refresh timer flags devices unseen for >75 s. Stale rows dim to 60%, gain an amber border + ⚠ badge on the color dot, and a tooltip showing "last seen". A central `markSeen()` helper clears the flag on any successful response.
+
+> ⚠️ This is a macOS-only SwiftUI app; no Swift/Xcode toolchain exists in the cloud Linux environment, so changes were hand-reviewed rather than compiled. Build & smoke-test on a Mac before release.
 
 ---
 

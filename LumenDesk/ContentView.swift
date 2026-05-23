@@ -2,9 +2,21 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject var manager: LightManager
+
     @State private var showingNewRoom: Bool = false
     @State private var newRoomName: String = ""
     @State private var setupChecks: Set<Int> = []
+    @State private var showingScenes: Bool = false
+
+    @State private var searchText: String = ""
+    @FocusState private var searchFocused: Bool
+
+    @State private var selectionMode: Bool = false
+    @State private var selectedIDs: Set<String> = []
+
+    // Width threshold above which we switch from the single-column List
+    // (drag-reorderable) to a two-column LazyVGrid (denser, no reorder).
+    private let gridThreshold: CGFloat = 780
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -14,23 +26,31 @@ struct ContentView: View {
                 if manager.devices.isEmpty {
                     emptyState
                 } else {
-                    List {
-                        ForEach(manager.rooms) { room in
-                            RoomSectionView(room: room)
-                                .listRowInsets(EdgeInsets(top: 9, leading: 16, bottom: 9, trailing: 16))
-                                .listRowSeparator(.hidden)
-                                .listRowBackground(Color.clear)
-                        }
-                        .onMove { manager.moveRooms(from: $0, to: $1) }
-
-                        unassignedSection
+                    if !manager.favoriteDevices.isEmpty {
+                        FavoritesStripView()
+                            .padding(.horizontal, 16)
+                            .padding(.top, 12)
                     }
-                    .listStyle(.plain)
-                    .scrollContentBackground(.hidden)
+
+                    GeometryReader { proxy in
+                        if proxy.size.width >= gridThreshold {
+                            gridLayout
+                        } else {
+                            listLayout
+                        }
+                    }
                 }
             }
             .background(Color(nsColor: .windowBackgroundColor))
+            .background(findShortcutButton)
             .sheet(isPresented: $showingNewRoom) { newRoomSheet }
+            .sheet(isPresented: $showingScenes) { ScenesView() }
+
+            if selectionMode && !selectedIDs.isEmpty {
+                BulkActionBar(selectedIDs: $selectedIDs, selectionMode: $selectionMode)
+                    .padding(.bottom, manager.commandError == nil ? 16 : 72)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
 
             if let error = manager.commandError {
                 CommandToastView(message: error) { manager.commandError = nil }
@@ -39,6 +59,17 @@ struct ContentView: View {
             }
         }
         .animation(.spring(duration: 0.25), value: manager.commandError)
+        .animation(.spring(duration: 0.25), value: selectionMode)
+    }
+
+    /// Invisible button that owns ⌘F. Lives in a `.background()` so it doesn't
+    /// take space but stays in the view tree for the shortcut to register.
+    private var findShortcutButton: some View {
+        Button { searchFocused = true } label: { EmptyView() }
+            .keyboardShortcut("f", modifiers: .command)
+            .opacity(0)
+            .frame(width: 0, height: 0)
+            .disabled(manager.devices.isEmpty)
     }
 
     // MARK: - Header
@@ -51,15 +82,30 @@ struct ContentView: View {
                     .foregroundStyle(.yellow)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("LumenDesk").font(.title3.weight(.semibold))
-                    Text(manager.statusMessage.isEmpty
-                         ? "\(manager.devices.count) light\(manager.devices.count == 1 ? "" : "s") on this network"
-                         : manager.statusMessage)
+                    Text(headerSubtitle)
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
                 if manager.isScanning {
                     ProgressView().controlSize(.small)
                 }
+                if !manager.devices.isEmpty {
+                    Button {
+                        selectionMode.toggle()
+                        if !selectionMode { selectedIDs.removeAll() }
+                    } label: {
+                        Label(selectionMode ? "Done" : "Select",
+                              systemImage: selectionMode ? "checkmark.circle.fill" : "checkmark.circle")
+                    }
+                    .help(selectionMode ? "Exit selection mode" : "Select multiple lights for bulk actions")
+                }
+                Button {
+                    showingScenes = true
+                } label: {
+                    Label("Scenes", systemImage: "wand.and.stars")
+                }
+                .keyboardShortcut("s", modifiers: [.command, .shift])
+                .help("Save and recall lighting scenes (⇧⌘S)")
                 Button {
                     newRoomName = ""
                     showingNewRoom = true
@@ -95,11 +141,175 @@ struct ContentView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
+
+                Divider()
+                searchField
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
             }
         }
         .background(.regularMaterial)
         .overlay(Divider(), alignment: .bottom)
     }
+
+    private var headerSubtitle: String {
+        if !manager.statusMessage.isEmpty { return manager.statusMessage }
+        if selectionMode {
+            return selectedIDs.isEmpty
+                ? "Select lights to act on them in bulk"
+                : "\(selectedIDs.count) of \(manager.devices.count) selected"
+        }
+        return "\(manager.devices.count) light\(manager.devices.count == 1 ? "" : "s") on this network"
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+                .font(.caption)
+            TextField("Search lights or rooms", text: $searchText)
+                .textFieldStyle(.plain)
+                .focused($searchFocused)
+            if !searchText.isEmpty {
+                Button { searchText = "" } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                        .font(.caption)
+                }
+                .buttonStyle(.plain)
+                .help("Clear search")
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color(nsColor: .textBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(searchFocused ? Color.accentColor : Color(nsColor: .separatorColor),
+                        lineWidth: searchFocused ? 1.5 : 0.5)
+        )
+    }
+
+    // MARK: - List & grid layouts
+
+    private var visibleRooms: [Room] {
+        manager.rooms.filter { manager.room($0, matchesQuery: searchText) }
+    }
+
+    private var visibleUnassigned: [LightDevice] {
+        manager.unassignedDevices.filter { manager.device($0, matchesQuery: searchText) }
+    }
+
+    private var listLayout: some View {
+        List {
+            ForEach(visibleRooms) { room in
+                RoomSectionView(
+                    room: room,
+                    searchQuery: searchText,
+                    selectionMode: selectionMode,
+                    selectedIDs: selectedIDs,
+                    onToggleSelection: toggleSelection
+                )
+                .listRowInsets(EdgeInsets(top: 9, leading: 16, bottom: 9, trailing: 16))
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
+            }
+            .onMove { offsets, destination in
+                // Reordering is disabled while a search is active to avoid
+                // moving the wrong rooms based on filtered indices.
+                guard searchText.isEmpty else { return }
+                manager.moveRooms(from: offsets, to: destination)
+            }
+
+            unassignedSection
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+    }
+
+    private var gridLayout: some View {
+        ScrollView {
+            LazyVGrid(
+                columns: [
+                    GridItem(.flexible(), spacing: 16),
+                    GridItem(.flexible(), spacing: 16)
+                ],
+                alignment: .leading,
+                spacing: 18
+            ) {
+                ForEach(visibleRooms) { room in
+                    RoomSectionView(
+                        room: room,
+                        searchQuery: searchText,
+                        selectionMode: selectionMode,
+                        selectedIDs: selectedIDs,
+                        onToggleSelection: toggleSelection
+                    )
+                }
+                if !visibleUnassigned.isEmpty {
+                    unassignedGridSection
+                }
+            }
+            .padding(16)
+        }
+    }
+
+    private func toggleSelection(_ id: String) {
+        if selectedIDs.contains(id) {
+            selectedIDs.remove(id)
+        } else {
+            selectedIDs.insert(id)
+        }
+    }
+
+    // MARK: - Unassigned section
+
+    @ViewBuilder
+    private var unassignedSection: some View {
+        if !visibleUnassigned.isEmpty {
+            unassignedContent
+                .listRowInsets(EdgeInsets(top: 9, leading: 16, bottom: 9, trailing: 16))
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
+        }
+    }
+
+    @ViewBuilder
+    private var unassignedGridSection: some View {
+        if !visibleUnassigned.isEmpty {
+            unassignedContent
+        }
+    }
+
+    private var unassignedContent: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text(manager.rooms.isEmpty ? "All Lights" : "Unassigned")
+                    .font(.headline)
+                Text("\(visibleUnassigned.count)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6).padding(.vertical, 1)
+                    .background(Capsule().fill(Color.secondary.opacity(0.15)))
+                Spacer()
+            }
+            VStack(spacing: 10) {
+                ForEach(visibleUnassigned) { device in
+                    LightRowView(
+                        device: device,
+                        selectionMode: selectionMode,
+                        selected: selectedIDs.contains(device.id),
+                        onToggleSelection: { toggleSelection(device.id) }
+                    )
+                }
+            }
+        }
+    }
+
+    // MARK: - Header bindings
 
     private var globalPowerBinding: Binding<Bool> {
         Binding(
@@ -117,35 +327,6 @@ struct ContentView: View {
             },
             set: { manager.setAllBrightness($0) }
         )
-    }
-
-    // MARK: - Unassigned section
-
-    @ViewBuilder
-    private var unassignedSection: some View {
-        let unassigned = manager.unassignedDevices
-        if !unassigned.isEmpty {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 8) {
-                    Text(manager.rooms.isEmpty ? "All Lights" : "Unassigned")
-                        .font(.headline)
-                    Text("\(unassigned.count)")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 6).padding(.vertical, 1)
-                        .background(Capsule().fill(Color.secondary.opacity(0.15)))
-                    Spacer()
-                }
-                VStack(spacing: 10) {
-                    ForEach(unassigned) { device in
-                        LightRowView(device: device)
-                    }
-                }
-            }
-            .listRowInsets(EdgeInsets(top: 9, leading: 16, bottom: 9, trailing: 16))
-            .listRowSeparator(.hidden)
-            .listRowBackground(Color.clear)
-        }
     }
 
     // MARK: - New room sheet
@@ -271,6 +452,75 @@ struct CommandToastView: View {
         )
         .shadow(color: .black.opacity(0.15), radius: 8, y: 4)
         .frame(maxWidth: 380)
+    }
+}
+
+// MARK: - Bulk action bar
+
+struct BulkActionBar: View {
+    @EnvironmentObject var manager: LightManager
+    @Binding var selectedIDs: Set<String>
+    @Binding var selectionMode: Bool
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text("\(selectedIDs.count) selected")
+                .font(.callout.weight(.medium))
+
+            Divider().frame(height: 16)
+
+            Button("Turn On") {
+                manager.setPower(deviceIDs: selectedIDs, on: true)
+            }
+            Button("Turn Off") {
+                manager.setPower(deviceIDs: selectedIDs, on: false)
+            }
+
+            Menu("Move to…") {
+                Button("Unassigned") {
+                    manager.assign(lightIDs: selectedIDs, toRoom: nil)
+                    exit()
+                }
+                if !manager.rooms.isEmpty {
+                    Divider()
+                    ForEach(manager.rooms) { room in
+                        Button(room.name) {
+                            manager.assign(lightIDs: selectedIDs, toRoom: room.id)
+                            exit()
+                        }
+                    }
+                }
+            }
+            .fixedSize()
+
+            Menu("Brightness") {
+                Button("100%") { manager.setBrightness(deviceIDs: selectedIDs, value: 1.0) }
+                Button("75%")  { manager.setBrightness(deviceIDs: selectedIDs, value: 0.75) }
+                Button("50%")  { manager.setBrightness(deviceIDs: selectedIDs, value: 0.5) }
+                Button("25%")  { manager.setBrightness(deviceIDs: selectedIDs, value: 0.25) }
+                Button("10%")  { manager.setBrightness(deviceIDs: selectedIDs, value: 0.1) }
+            }
+            .fixedSize()
+
+            Spacer(minLength: 8)
+
+            Button("Done") { exit() }
+                .buttonStyle(.borderedProminent)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
+        )
+        .shadow(color: .black.opacity(0.15), radius: 8, y: 4)
+        .frame(maxWidth: 640)
+    }
+
+    private func exit() {
+        selectedIDs.removeAll()
+        selectionMode = false
     }
 }
 

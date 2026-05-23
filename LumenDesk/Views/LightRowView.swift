@@ -4,6 +4,12 @@ struct LightRowView: View {
     @EnvironmentObject var manager: LightManager
     @ObservedObject var device: LightDevice
 
+    /// When true the row becomes a selection target: its internal controls and
+    /// context menu are inert and a checkbox is shown on the leading edge.
+    var selectionMode: Bool = false
+    var selected: Bool = false
+    var onToggleSelection: (() -> Void)? = nil
+
     private var brightnessBinding: Binding<Double> {
         Binding(get: { device.brightness },
                 set: { manager.setBrightness(device, value: $0) })
@@ -19,9 +25,17 @@ struct LightRowView: View {
                 set: { manager.setPower(device, on: $0) })
     }
 
+    private var controlsDisabled: Bool { selectionMode || !device.isOn }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 12) {
+                if selectionMode {
+                    Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                        .font(.title3)
+                        .foregroundStyle(selected ? Color.accentColor : Color.secondary)
+                }
+
                 Circle()
                     .fill(device.isOn ? device.color : Color.gray.opacity(0.35))
                     .frame(width: 28, height: 28)
@@ -40,11 +54,18 @@ struct LightRowView: View {
                     }
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(device.name)
-                        .font(.headline)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .help(device.name)
+                    HStack(spacing: 4) {
+                        if manager.isFavorite(device.id) {
+                            Image(systemName: "star.fill")
+                                .font(.caption2)
+                                .foregroundStyle(.yellow)
+                        }
+                        Text(device.name)
+                            .font(.headline)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .help(device.name)
+                    }
                     HStack(spacing: 6) {
                         Text(device.brand.displayName)
                             .font(.caption2.weight(.semibold))
@@ -62,6 +83,7 @@ struct LightRowView: View {
                 Toggle("", isOn: powerBinding)
                     .toggleStyle(.switch)
                     .labelsHidden()
+                    .disabled(selectionMode)
             }
 
             VStack(spacing: 6) {
@@ -72,13 +94,13 @@ struct LightRowView: View {
                     Spacer(minLength: 0)
                     ColorPicker("", selection: colorBinding, supportsOpacity: false)
                         .labelsHidden()
-                        .disabled(!device.isOn)
+                        .disabled(controlsDisabled)
                 }
 
                 HStack(spacing: 10) {
                     Image(systemName: "sun.min").foregroundStyle(.secondary)
                     Slider(value: brightnessBinding, in: 0...1)
-                        .disabled(!device.isOn)
+                        .disabled(controlsDisabled)
                     Image(systemName: "sun.max").foregroundStyle(.secondary)
                 }
             }
@@ -90,14 +112,37 @@ struct LightRowView: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 10)
-                .stroke(device.isStale ? Color.orange.opacity(0.5) : Color(nsColor: .separatorColor),
-                        lineWidth: device.isStale ? 1 : 0.5)
+                .stroke(borderColor, lineWidth: borderWidth)
         )
         .opacity(device.isStale ? 0.6 : 1)
         .help(device.isStale
               ? "Not responding — last seen \(device.lastSeen.formatted(.relative(presentation: .named))). Check the bulb's power and network."
               : "")
-        .contextMenu { roomMenuContents }
+        // In selection mode an invisible overlay captures clicks before the
+        // disabled inner controls can swallow them, turning the whole card
+        // into a single selection target.
+        .overlay {
+            if selectionMode {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture { onToggleSelection?() }
+            }
+        }
+        .contextMenu {
+            if !selectionMode { roomMenuContents }
+        }
+    }
+
+    private var borderColor: Color {
+        if selected { return Color.accentColor }
+        if device.isStale { return Color.orange.opacity(0.5) }
+        return Color(nsColor: .separatorColor)
+    }
+
+    private var borderWidth: CGFloat {
+        if selected { return 2 }
+        if device.isStale { return 1 }
+        return 0.5
     }
 
     // MARK: - Color swatches
@@ -123,13 +168,25 @@ struct LightRowView: View {
                 .overlay(Circle().stroke(Color.primary.opacity(0.25), lineWidth: 0.5))
         }
         .buttonStyle(.plain)
-        .disabled(!device.isOn)
+        .disabled(controlsDisabled)
         .help(swatch.label)
     }
 
     @ViewBuilder
     private var roomMenuContents: some View {
         let currentRoom = manager.room(forLightID: device.id)
+
+        Button {
+            manager.toggleFavorite(device.id)
+        } label: {
+            if manager.isFavorite(device.id) {
+                Label("Remove from Favorites", systemImage: "star.slash")
+            } else {
+                Label("Add to Favorites", systemImage: "star")
+            }
+        }
+
+        Divider()
 
         Menu("Move to Room") {
             Button {

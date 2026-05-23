@@ -9,9 +9,13 @@ import AppKit
 final class LightManager: ObservableObject {
     @Published private(set) var devices: [LightDevice] = []
     @Published private(set) var rooms: [Room] = []
+    @Published private(set) var favoriteIDs: Set<String> = []
+    @Published private(set) var scenes: [LightingScene] = []
     @Published private(set) var isScanning: Bool = false
     @Published var statusMessage: String = ""
     @Published var commandError: String?
+    @Published private(set) var canUndo: Bool = false
+    @Published private(set) var canRedo: Bool = false
     private var errorClearTask: Task<Void, Never>?
 
     private var lifx: LIFXClient?
@@ -19,9 +23,26 @@ final class LightManager: ObservableObject {
     private var refreshTimer: Timer?
 
     private let roomsDefaultsKey = "LumenDesk.rooms.v1"
+    private let favoritesDefaultsKey = "LumenDesk.favorites.v1"
+    private let scenesDefaultsKey = "LumenDesk.scenes.v1"
+
+    // Undo/redo state — coalesces rapid changes (e.g. slider drags) per device.
+    private struct DeviceState {
+        let deviceID: String
+        let isOn: Bool
+        let brightness: Double
+        let color: Color
+    }
+    private var undoStack: [[DeviceState]] = []
+    private var redoStack: [[DeviceState]] = []
+    private var lastChangeTime: [String: Date] = [:]
+    private let undoLimit = 20
+    private let coalesceWindow: TimeInterval = 1.0
 
     init() {
         rooms = loadRooms()
+        favoriteIDs = loadFavorites()
+        scenes = loadScenes()
     }
 
     func start() {
@@ -96,15 +117,77 @@ final class LightManager: ObservableObject {
         if device.isStale {
             publishError(""\(device.name)" may be offline — command sent anyway.")
         }
+        recordChange([device])
         device.isOn = on
+        sendPower(device, on: on)
+    }
+
+    func setBrightness(_ device: LightDevice, value: Double) {
+        recordChange([device])
+        device.brightness = value
+        sendBrightness(device, value: value)
+    }
+
+    func setColor(_ device: LightDevice, color: Color) {
+        recordChange([device])
+        device.color = color
+        sendColor(device, color: color)
+    }
+
+    // MARK: - Room & global bulk controls
+
+    func setPower(in room: Room, on: Bool) {
+        let lights = devices(in: room)
+        let staleCount = lights.filter { $0.isStale }.count
+        if staleCount > 0 {
+            publishError("\(staleCount) light\(staleCount == 1 ? "" : "s") in "\(room.name)" may be offline.")
+        }
+        recordChange(lights)
+        for d in lights { d.isOn = on; sendPower(d, on: on) }
+    }
+
+    func setBrightness(in room: Room, value: Double) {
+        let lights = devices(in: room)
+        recordChange(lights)
+        for d in lights { d.brightness = value; sendBrightness(d, value: value) }
+    }
+
+    func setAllPower(on: Bool) {
+        let staleCount = devices.filter { $0.isStale }.count
+        if staleCount > 0 {
+            publishError("\(staleCount) light\(staleCount == 1 ? "" : "s") may be offline.")
+        }
+        recordChange(devices)
+        for d in devices { d.isOn = on; sendPower(d, on: on) }
+    }
+
+    func setAllBrightness(_ value: Double) {
+        recordChange(devices)
+        for d in devices { d.brightness = value; sendBrightness(d, value: value) }
+    }
+
+    func setPower(deviceIDs: Set<String>, on: Bool) {
+        let lights = devices.filter { deviceIDs.contains($0.id) }
+        recordChange(lights)
+        for d in lights { d.isOn = on; sendPower(d, on: on) }
+    }
+
+    func setBrightness(deviceIDs: Set<String>, value: Double) {
+        let lights = devices.filter { deviceIDs.contains($0.id) }
+        recordChange(lights)
+        for d in lights { d.brightness = value; sendBrightness(d, value: value) }
+    }
+
+    // MARK: - Vendor send helpers (no model mutation, no undo recording)
+
+    private func sendPower(_ device: LightDevice, on: Bool) {
         switch device.brand {
         case .lifx: lifx?.setPower(macHex: device.backendID, on: on)
         case .govee: govee?.setPower(deviceID: device.backendID, on: on)
         }
     }
 
-    func setBrightness(_ device: LightDevice, value: Double) {
-        device.brightness = value
+    private func sendBrightness(_ device: LightDevice, value: Double) {
         switch device.brand {
         case .lifx:
             let hsb = device.color.hsbComponents
@@ -120,8 +203,7 @@ final class LightManager: ObservableObject {
         }
     }
 
-    func setColor(_ device: LightDevice, color: Color) {
-        device.color = color
+    private func sendColor(_ device: LightDevice, color: Color) {
         switch device.brand {
         case .lifx:
             let hsb = color.hsbComponents
@@ -139,43 +221,68 @@ final class LightManager: ObservableObject {
         }
     }
 
-    // MARK: - Room & global bulk controls
+    // MARK: - Undo / redo
 
-    func setPower(in room: Room, on: Bool) {
-        let lights = devices(in: room)
-        let staleCount = lights.filter { $0.isStale }.count
-        if staleCount > 0 {
-            publishError("\(staleCount) light\(staleCount == 1 ? "" : "s") in "\(room.name)" may be offline.")
-        }
-        for d in lights {
-            d.isOn = on
-            switch d.brand {
-            case .lifx: lifx?.setPower(macHex: d.backendID, on: on)
-            case .govee: govee?.setPower(deviceID: d.backendID, on: on)
-            }
-        }
+    private func snapshot(_ device: LightDevice) -> DeviceState {
+        DeviceState(deviceID: device.id, isOn: device.isOn,
+                    brightness: device.brightness, color: device.color)
     }
 
-    func setBrightness(in room: Room, value: Double) {
-        for d in devices(in: room) { setBrightness(d, value: value) }
+    /// Records the current state of the given devices on the undo stack before
+    /// they are mutated. Rapid repeated changes to the same device (or the
+    /// same set of devices, for bulk ops) within a 1 s window coalesce into
+    /// the first snapshot, so a slider drag produces one undoable step.
+    private func recordChange(_ devices: [LightDevice]) {
+        guard !devices.isEmpty else { return }
+        let now = Date()
+        if let last = undoStack.last,
+           last.count == devices.count,
+           Set(last.map { $0.deviceID }) == Set(devices.map { $0.id }),
+           devices.allSatisfy({ now.timeIntervalSince(lastChangeTime[$0.id] ?? .distantPast) < coalesceWindow }) {
+            for d in devices { lastChangeTime[d.id] = now }
+            return
+        }
+        undoStack.append(devices.map { snapshot($0) })
+        if undoStack.count > undoLimit { undoStack.removeFirst() }
+        redoStack.removeAll()
+        canUndo = !undoStack.isEmpty
+        canRedo = false
+        for d in devices { lastChangeTime[d.id] = now }
     }
 
-    func setAllPower(on: Bool) {
-        let staleCount = devices.filter { $0.isStale }.count
-        if staleCount > 0 {
-            publishError("\(staleCount) light\(staleCount == 1 ? "" : "s") may be offline.")
+    func undo() {
+        guard let entry = undoStack.popLast() else { return }
+        let current = entry.compactMap { snap -> DeviceState? in
+            guard let d = devices.first(where: { $0.id == snap.deviceID }) else { return nil }
+            return snapshot(d)
         }
-        for d in devices {
-            d.isOn = on
-            switch d.brand {
-            case .lifx: lifx?.setPower(macHex: d.backendID, on: on)
-            case .govee: govee?.setPower(deviceID: d.backendID, on: on)
-            }
-        }
+        redoStack.append(current)
+        apply(entry)
+        canUndo = !undoStack.isEmpty
+        canRedo = !redoStack.isEmpty
     }
 
-    func setAllBrightness(_ value: Double) {
-        for d in devices { setBrightness(d, value: value) }
+    func redo() {
+        guard let entry = redoStack.popLast() else { return }
+        let current = entry.compactMap { snap -> DeviceState? in
+            guard let d = devices.first(where: { $0.id == snap.deviceID }) else { return nil }
+            return snapshot(d)
+        }
+        undoStack.append(current)
+        apply(entry)
+        canUndo = !undoStack.isEmpty
+        canRedo = !redoStack.isEmpty
+    }
+
+    private func apply(_ entry: [DeviceState]) {
+        for snap in entry {
+            guard let d = devices.first(where: { $0.id == snap.deviceID }) else { continue }
+            d.isOn = snap.isOn
+            d.brightness = snap.brightness
+            d.color = snap.color
+            sendColor(d, color: snap.color)
+            sendPower(d, on: snap.isOn)
+        }
     }
 
     // MARK: - Internal helpers
@@ -326,6 +433,20 @@ extension LightManager {
         persistRooms()
     }
 
+    /// Bulk-assigns a set of lights to the same room (or to unassigned). Used
+    /// by the multi-select action bar.
+    func assign(lightIDs: Set<String>, toRoom roomID: UUID?) {
+        for i in rooms.indices {
+            rooms[i].lightIDs.removeAll { lightIDs.contains($0) }
+        }
+        if let roomID, let idx = rooms.firstIndex(where: { $0.id == roomID }) {
+            // Preserve the order in which the manager currently knows about the lights.
+            let ordered = devices.map { $0.id }.filter { lightIDs.contains($0) }
+            rooms[idx].lightIDs.append(contentsOf: ordered)
+        }
+        persistRooms()
+    }
+
     /// Shift a light up or down within its current room.
     func moveLight(_ lightID: String, in roomID: UUID, by offset: Int) {
         guard let r = rooms.firstIndex(where: { $0.id == roomID }),
@@ -372,6 +493,130 @@ extension LightManager {
         guard let data = UserDefaults.standard.data(forKey: roomsDefaultsKey),
               let decoded = try? JSONDecoder().decode([Room].self, from: data) else { return [] }
         return decoded
+    }
+}
+
+// MARK: - Favorites
+
+extension LightManager {
+    func isFavorite(_ deviceID: String) -> Bool { favoriteIDs.contains(deviceID) }
+
+    func toggleFavorite(_ deviceID: String) {
+        if favoriteIDs.contains(deviceID) {
+            favoriteIDs.remove(deviceID)
+        } else {
+            favoriteIDs.insert(deviceID)
+        }
+        persistFavorites()
+    }
+
+    var favoriteDevices: [LightDevice] {
+        devices
+            .filter { favoriteIDs.contains($0.id) }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    fileprivate func persistFavorites() {
+        if let data = try? JSONEncoder().encode(Array(favoriteIDs)) {
+            UserDefaults.standard.set(data, forKey: favoritesDefaultsKey)
+        }
+    }
+
+    fileprivate func loadFavorites() -> Set<String> {
+        guard let data = UserDefaults.standard.data(forKey: favoritesDefaultsKey),
+              let arr = try? JSONDecoder().decode([String].self, from: data) else { return [] }
+        return Set(arr)
+    }
+}
+
+// MARK: - Scenes
+
+extension LightManager {
+    func captureScene(name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        var snapshots: [String: DeviceSnapshot] = [:]
+        for d in devices {
+            let hsb = d.color.hsbComponents
+            snapshots[d.id] = DeviceSnapshot(
+                isOn: d.isOn,
+                brightness: d.brightness,
+                hue: hsb.h,
+                saturation: hsb.s
+            )
+        }
+        scenes.append(LightingScene(name: trimmed, snapshots: snapshots))
+        persistScenes()
+    }
+
+    func applyScene(_ scene: LightingScene) {
+        let affected = devices.filter { scene.snapshots[$0.id] != nil }
+        guard !affected.isEmpty else {
+            publishError(""\(scene.name)" has no lights in common with what's on the network.")
+            return
+        }
+        recordChange(affected)
+        var staleCount = 0
+        for d in affected {
+            guard let snap = scene.snapshots[d.id] else { continue }
+            if d.isStale { staleCount += 1 }
+            let color = Color(hue: snap.hue, saturation: snap.saturation, brightness: 1.0)
+            d.color = color
+            d.brightness = snap.brightness
+            d.isOn = snap.isOn
+            sendColor(d, color: color)
+            sendPower(d, on: snap.isOn)
+        }
+        if staleCount > 0 {
+            publishError("Applied "\(scene.name)" — \(staleCount) light\(staleCount == 1 ? "" : "s") may be offline.")
+        }
+    }
+
+    func deleteScene(_ sceneID: UUID) {
+        scenes.removeAll { $0.id == sceneID }
+        persistScenes()
+    }
+
+    func renameScene(_ sceneID: UUID, to name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let idx = scenes.firstIndex(where: { $0.id == sceneID }) else { return }
+        scenes[idx].name = trimmed
+        persistScenes()
+    }
+
+    fileprivate func persistScenes() {
+        if let data = try? JSONEncoder().encode(scenes) {
+            UserDefaults.standard.set(data, forKey: scenesDefaultsKey)
+        }
+    }
+
+    fileprivate func loadScenes() -> [LightingScene] {
+        guard let data = UserDefaults.standard.data(forKey: scenesDefaultsKey),
+              let decoded = try? JSONDecoder().decode([LightingScene].self, from: data) else { return [] }
+        return decoded
+    }
+}
+
+// MARK: - Search
+
+extension LightManager {
+    /// Returns true if a device matches the case-insensitive query against its
+    /// name, brand display name, or address. Empty queries match everything.
+    func device(_ device: LightDevice, matchesQuery query: String) -> Bool {
+        let trimmed = query.trimmingCharacters(in: .whitespaces).lowercased()
+        if trimmed.isEmpty { return true }
+        return device.name.lowercased().contains(trimmed)
+            || device.brand.displayName.lowercased().contains(trimmed)
+            || device.address.lowercased().contains(trimmed)
+    }
+
+    /// Returns true if any light in the room matches the query, OR the room's
+    /// own name matches. Used to decide whether to render a room at all.
+    func room(_ room: Room, matchesQuery query: String) -> Bool {
+        let trimmed = query.trimmingCharacters(in: .whitespaces).lowercased()
+        if trimmed.isEmpty { return true }
+        if room.name.lowercased().contains(trimmed) { return true }
+        return devices(in: room).contains { device($0, matchesQuery: query) }
     }
 }
 

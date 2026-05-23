@@ -235,19 +235,29 @@ Recommendations are grouped into four phases ordered by impact-to-effort ratio. 
 
 ---
 
-### Phase 3 — Power-User Features (4–6 weeks)
+### Phase 3 — Power-User Features (4–6 weeks) — ✅ IMPLEMENTED
 *Medium-to-high effort. Introduces new data models (scenes, favorites, search state) and new views.*
 
-| Priority | Rec | Files Affected |
-|----------|-----|----------------|
-| P1 | **#12** Search / filter | `ContentView.swift`, new `SearchBar` component |
-| P2 | **#10** Multi-select + bulk operations | `ContentView.swift`, `LightRowView.swift`, `LightManager.swift`, new `BulkActionBar` |
-| P3 | **#11** Scenes — save & recall presets | New `Scene.swift` model, new `ScenesView.swift`, `LightManager.swift` |
-| P4 | **#15** Adaptive two-column layout | `ContentView.swift`, new `RoomGridView.swift` |
-| P5 | **#18** Favorites strip | New `FavoritesStripView.swift`, `LightDevice.swift`, `LightManager.swift` |
-| P6 | **#14** Undo / redo | `LightManager.swift`, `LumenDeskApp.swift` |
+| Priority | Rec | Files Affected | Status |
+|----------|-----|----------------|--------|
+| P1 | **#12** Search / filter | `ContentView.swift`, `RoomSectionView.swift`, `LightManager.swift` | ✅ Done |
+| P2 | **#10** Multi-select + bulk operations | `ContentView.swift`, `LightRowView.swift`, `RoomSectionView.swift`, `LightManager.swift` | ✅ Done |
+| P3 | **#11** Scenes — save & recall presets | New `LightingScene.swift`, new `ScenesView.swift`, `LightManager.swift` | ✅ Done |
+| P4 | **#15** Adaptive two-column layout | `ContentView.swift` | ✅ Done |
+| P5 | **#18** Favorites strip | New `FavoritesStripView.swift`, `LightRowView.swift`, `LightManager.swift` | ✅ Done |
+| P6 | **#14** Undo / redo | `LightManager.swift`, `LumenDeskApp.swift` | ✅ Done |
 
 **Deliverable:** LumenDesk becomes a professional-grade tool for users with large smart-home setups.
+
+**Implementation notes:**
+- **#12** — Manual search field in the header (TextField with magnifying-glass icon, focus ring, ×-clear button). `⌘F` focuses via a zero-size `Button` in `.background()`. New `LightManager.device(_:matchesQuery:)` and `room(_:matchesQuery:)` helpers; case-insensitive substring against name, brand, and address. Drag-reorder is gated off while filtering to avoid moving the wrong rooms.
+- **#10** — `Select` button in the header toggles selection mode. In that mode `LightRowView` shows a leading checkmark, gets an accent-color border when selected, and an invisible overlay turns the whole card into a single tap target (so taps don't get swallowed by the disabled inner controls). A floating `BulkActionBar` slides up from the bottom: count, Turn On / Off, Move to Room…, Brightness presets (10–100 %), Done. New `setPower(deviceIDs:on:)`, `setBrightness(deviceIDs:value:)`, `assign(lightIDs:toRoom:)`.
+- **#11** — New `LightingScene` model captures power + brightness + hue/saturation per device. `ScenesView` sheet (toolbar button + `⇧⌘S`): capture row at top, scrollable list of scene rows with Apply / Rename / Delete. Scenes persist to `UserDefaults` under `LumenDesk.scenes.v1`. Applying a scene that includes a stale device surfaces a toast warning.
+- **#15** — `GeometryReader` swaps the content area between the single-column `List` (with drag-reorder) below 780 px and a two-column `LazyVGrid` above. Header, search, favorites stay full-width.
+- **#18** — `favoriteIDs: Set<String>` on the manager, persisted to `UserDefaults`. Star/unstar from the light's context menu; a small yellow star renders next to the name. `FavoritesStripView` shows compact horizontally-scrollable tiles above the rooms; each tile has the bulb's color dot, name, and a `.mini` power toggle. Hidden when the favorites set is empty.
+- **#14** — `recordChange([LightDevice])` snapshots state before every mutation. A 1 s coalesce window collapses slider drags and bulk-op drags into a single undo step. `Cmd+Z` / `⇧⌘Z` wired via `CommandGroup(replacing: .undoRedo)`. Stack capped at 20 entries to bound memory. Scene application records an undo entry too — applying a scene is one reversible step.
+
+> ⚠️ Three new Swift files were added (`LightingScene.swift`, `ScenesView.swift`, `FavoritesStripView.swift`). They are registered in both `project.yml` (for XcodeGen) and `LumenDesk.xcodeproj/project.pbxproj` (so a non-regenerated checkout still builds). The new `files.user-selected.read-write` entitlement from Phase 1 is mirrored into `project.yml` so a regen doesn't drop it.
 
 ---
 

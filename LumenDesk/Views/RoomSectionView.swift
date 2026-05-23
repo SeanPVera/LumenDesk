@@ -6,30 +6,51 @@ import SwiftUI
 struct RoomSectionView: View {
     @EnvironmentObject var manager: LightManager
     let room: Room
+    var searchQuery: String = ""
+    var selectionMode: Bool = false
+    var selectedIDs: Set<String> = []
+    var onToggleSelection: ((String) -> Void)? = nil
+
     @State private var isExpanded: Bool = true
     @State private var renaming: Bool = false
     @State private var draftName: String = ""
     @FocusState private var nameFieldFocused: Bool
 
-    private var lights: [LightDevice] { manager.devices(in: room) }
+    private var allLights: [LightDevice] { manager.devices(in: room) }
+
+    /// Lights to actually render, filtered by the current search query. A room
+    /// whose own name matches the query shows all of its lights.
+    private var visibleLights: [LightDevice] {
+        let trimmed = searchQuery.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty { return allLights }
+        if room.name.lowercased().contains(trimmed.lowercased()) { return allLights }
+        return allLights.filter { manager.device($0, matchesQuery: trimmed) }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             header
             if isExpanded {
-                if lights.isEmpty {
-                    Text("No lights in this room yet. Use a light's menu to move it here.")
+                if visibleLights.isEmpty {
+                    Text(searchQuery.isEmpty
+                         ? "No lights in this room yet. Use a light's menu to move it here."
+                         : "No lights match "\(searchQuery)".")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 4)
                         .padding(.bottom, 4)
                 } else {
-                    if lights.count > 1 {
+                    if visibleLights.count > 1 {
                         masterBrightnessRow
                     }
                     VStack(spacing: 10) {
-                        ForEach(lights) { device in
-                            LightRowView(device: device)
+                        ForEach(visibleLights) { device in
+                            LightRowView(
+                                device: device,
+                                selectionMode: selectionMode,
+                                selected: selectedIDs.contains(device.id),
+                                onToggleSelection: { onToggleSelection?(device.id) }
+                            )
                         }
                     }
                 }
@@ -72,7 +93,7 @@ struct RoomSectionView: View {
                     .help(room.name)
             }
 
-            Text("\(lights.count)")
+            Text("\(allLights.count)")
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 6).padding(.vertical, 1)
@@ -80,7 +101,7 @@ struct RoomSectionView: View {
 
             Spacer()
 
-            if !lights.isEmpty {
+            if !allLights.isEmpty && !selectionMode {
                 Toggle("", isOn: masterPowerBinding)
                     .toggleStyle(.switch)
                     .labelsHidden()
@@ -108,7 +129,7 @@ struct RoomSectionView: View {
         HStack(spacing: 8) {
             Image(systemName: "sun.min").foregroundStyle(.tertiary).font(.caption)
             Slider(value: masterBrightnessBinding, in: 0...1)
-                .disabled(lights.allSatisfy { !$0.isOn })
+                .disabled(selectionMode || allLights.allSatisfy { !$0.isOn })
             Image(systemName: "sun.max").foregroundStyle(.tertiary).font(.caption)
             Text("All")
                 .font(.caption2)
@@ -121,7 +142,7 @@ struct RoomSectionView: View {
 
     private var masterPowerBinding: Binding<Bool> {
         Binding(
-            get: { !lights.isEmpty && lights.allSatisfy { $0.isOn } },
+            get: { !allLights.isEmpty && allLights.allSatisfy { $0.isOn } },
             set: { manager.setPower(in: room, on: $0) }
         )
     }
@@ -129,7 +150,7 @@ struct RoomSectionView: View {
     private var masterBrightnessBinding: Binding<Double> {
         Binding(
             get: {
-                let on = lights.filter { $0.isOn }
+                let on = allLights.filter { $0.isOn }
                 guard !on.isEmpty else { return 1.0 }
                 return on.reduce(0) { $0 + $1.brightness } / Double(on.count)
             },

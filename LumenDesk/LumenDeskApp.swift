@@ -27,6 +27,12 @@ struct LumenDeskApp: App {
                 Button("Export Configuration…") { exportConfiguration() }
                 Button("Import Configuration…") { importConfiguration() }
             }
+            CommandGroup(replacing: .undoRedo) {
+                Button("Undo Light Change") { manager.undo() }
+                    .keyboardShortcut("z", modifiers: .command)
+                Button("Redo Light Change") { manager.redo() }
+                    .keyboardShortcut("z", modifiers: [.command, .shift])
+            }
         }
     }
 

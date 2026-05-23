@@ -21,6 +21,7 @@ final class LightManager: ObservableObject {
     private var lifx: LIFXClient?
     private var govee: GoveeClient?
     private var refreshTimer: Timer?
+    private var scheduleTimer: Timer?
 
     private let roomsDefaultsKey = "LumenDesk.rooms.v1"
     private let favoritesDefaultsKey = "LumenDesk.favorites.v1"
@@ -63,6 +64,7 @@ final class LightManager: ObservableObject {
 
         scan()
         scheduleRefresh()
+        startScheduleTimer()
     }
 
     func scan() {
@@ -79,6 +81,36 @@ final class LightManager: ObservableObject {
         refreshTimer?.invalidate()
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refreshAll() }
+        }
+    }
+
+    private func startScheduleTimer() {
+        scheduleTimer?.invalidate()
+        scheduleTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.checkSchedules() }
+        }
+    }
+
+    private func checkSchedules() {
+        let cal = Calendar.current
+        let now = Date()
+        let nowHour = cal.component(.hour, from: now)
+        let nowMinute = cal.component(.minute, from: now)
+        for room in rooms {
+            for entry in room.schedules where entry.isEnabled {
+                guard entry.hour == nowHour, entry.minute == nowMinute else { continue }
+                let lights = devices(in: room)
+                switch entry.action {
+                case .turnOn:
+                    for d in lights { d.isOn = true; sendPower(d, on: true) }
+                case .turnOff:
+                    for d in lights { d.isOn = false; sendPower(d, on: false) }
+                default:
+                    if let brightness = entry.action.brightnessValue {
+                        for d in lights { d.brightness = brightness; sendBrightness(d, value: brightness) }
+                    }
+                }
+            }
         }
     }
 
@@ -594,6 +626,41 @@ extension LightManager {
         guard let data = UserDefaults.standard.data(forKey: scenesDefaultsKey),
               let decoded = try? JSONDecoder().decode([LightingScene].self, from: data) else { return [] }
         return decoded
+    }
+}
+
+// MARK: - Schedules
+
+extension LightManager {
+    func schedules(for roomID: UUID) -> [ScheduleEntry] {
+        rooms.first(where: { $0.id == roomID })?.schedules ?? []
+    }
+
+    func addSchedule(_ entry: ScheduleEntry, to roomID: UUID) {
+        guard let idx = rooms.firstIndex(where: { $0.id == roomID }),
+              rooms[idx].schedules.count < 4 else { return }
+        rooms[idx].schedules.append(entry)
+        rooms[idx].schedules.sort { $0.hour != $1.hour ? $0.hour < $1.hour : $0.minute < $1.minute }
+        persistRooms()
+    }
+
+    func deleteSchedule(_ entryID: UUID, from roomID: UUID) {
+        guard let idx = rooms.firstIndex(where: { $0.id == roomID }) else { return }
+        rooms[idx].schedules.removeAll { $0.id == entryID }
+        persistRooms()
+    }
+
+    func setScheduleEnabled(_ entryID: UUID, in roomID: UUID, enabled: Bool) {
+        guard let rIdx = rooms.firstIndex(where: { $0.id == roomID }),
+              let eIdx = rooms[rIdx].schedules.firstIndex(where: { $0.id == entryID }) else { return }
+        rooms[rIdx].schedules[eIdx].isEnabled = enabled
+        persistRooms()
+    }
+
+    var hasActiveSchedules: Bool {
+        rooms.contains { room in
+            room.schedules.contains { $0.isEnabled }
+        }
     }
 }
 

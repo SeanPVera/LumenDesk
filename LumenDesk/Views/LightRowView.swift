@@ -34,6 +34,7 @@ struct LightRowView: View {
                     Image(systemName: selected ? "checkmark.circle.fill" : "circle")
                         .font(.title3)
                         .foregroundStyle(selected ? Color.accentColor : Color.secondary)
+                        .accessibilityHidden(true)
                 }
 
                 Circle()
@@ -50,8 +51,10 @@ struct LightRowView: View {
                                         .fill(Color(nsColor: .controlBackgroundColor))
                                         .frame(width: 13, height: 13)
                                 )
+                                .accessibilityLabel("Device may be offline")
                         }
                     }
+                    .accessibilityHidden(true)
 
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 4) {
@@ -59,6 +62,7 @@ struct LightRowView: View {
                             Image(systemName: "star.fill")
                                 .font(.caption2)
                                 .foregroundStyle(.yellow)
+                                .accessibilityLabel("Favorite")
                         }
                         Text(device.name)
                             .font(.headline)
@@ -73,10 +77,19 @@ struct LightRowView: View {
                             .background(device.brand.tint.opacity(0.18))
                             .foregroundStyle(device.brand.tint)
                             .clipShape(Capsule())
+                            .accessibilityHidden(true)
                         Text(device.address)
                             .font(.caption).foregroundStyle(.secondary)
+                            .accessibilityHidden(true)
                     }
                 }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(
+                    [device.name,
+                     manager.isFavorite(device.id) ? "Favorite" : nil,
+                     device.isStale ? "may be offline" : nil]
+                        .compactMap { $0 }.joined(separator: ", ")
+                )
 
                 Spacer()
 
@@ -84,6 +97,7 @@ struct LightRowView: View {
                     .toggleStyle(.switch)
                     .labelsHidden()
                     .disabled(selectionMode)
+                    .accessibilityLabel(device.isOn ? "Turn off \(device.name)" : "Turn on \(device.name)")
             }
 
             VStack(spacing: 6) {
@@ -95,16 +109,28 @@ struct LightRowView: View {
                     ColorPicker("", selection: colorBinding, supportsOpacity: false)
                         .labelsHidden()
                         .disabled(controlsDisabled)
+                        .accessibilityLabel("\(device.name) color")
                 }
 
                 HStack(spacing: 10) {
                     Image(systemName: "sun.min").foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
                     Slider(value: brightnessBinding, in: 0...1)
                         .disabled(controlsDisabled)
+                        .accessibilityLabel("\(device.name) brightness")
+                        .accessibilityValue("\(Int(device.brightness * 100)) percent")
                     Image(systemName: "sun.max").foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
                 }
             }
         }
+        .accessibilityElement(children: selectionMode ? .ignore : .contain)
+        .accessibilityLabel(selectionMode
+            ? "\(device.name)\(selected ? ", selected" : "")"
+            : "")
+        .accessibilityAddTraits(selectionMode ? .isButton : [])
+        .accessibilityHint(selectionMode ? "Double-tap to toggle selection" : "")
+        .accessibilityAction(.default) { if selectionMode { onToggleSelection?() } }
         .padding(12)
         .background(
             RoundedRectangle(cornerRadius: 10)
@@ -166,10 +192,12 @@ struct LightRowView: View {
                 .fill(swatch.color)
                 .frame(width: 18, height: 18)
                 .overlay(Circle().stroke(Color.primary.opacity(0.25), lineWidth: 0.5))
+                .accessibilityHidden(true)
         }
         .buttonStyle(.plain)
         .disabled(controlsDisabled)
         .help(swatch.label)
+        .accessibilityLabel(swatch.label)
     }
 
     @ViewBuilder

@@ -131,13 +131,20 @@ struct ContentView: View {
                         .labelsHidden()
                         .controlSize(.small)
                         .help("Toggle all lights on or off (⇧⌘P)")
+                        .accessibilityLabel("All lights power")
+                        .accessibilityHint("Toggles every discovered light")
                     Image(systemName: "sun.min").foregroundStyle(.secondary).font(.caption)
+                        .accessibilityHidden(true)
                     Slider(value: globalBrightnessBinding, in: 0...1)
                         .disabled(manager.devices.allSatisfy { !$0.isOn })
+                        .accessibilityLabel("Global brightness")
+                        .accessibilityValue("\(Int(globalBrightnessBinding.wrappedValue * 100)) percent")
                     Image(systemName: "sun.max").foregroundStyle(.secondary).font(.caption)
+                        .accessibilityHidden(true)
                     Text("All Lights")
                         .font(.caption.weight(.medium))
                         .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
@@ -178,6 +185,7 @@ struct ContentView: View {
                 }
                 .buttonStyle(.plain)
                 .help("Clear search")
+                .accessibilityLabel("Clear search")
             }
         }
         .padding(.horizontal, 8)
@@ -442,6 +450,7 @@ struct CommandToastView: View {
                     .font(.caption)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Dismiss error")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -466,15 +475,19 @@ struct BulkActionBar: View {
         HStack(spacing: 10) {
             Text("\(selectedIDs.count) selected")
                 .font(.callout.weight(.medium))
+                .accessibilityLabel("\(selectedIDs.count) light\(selectedIDs.count == 1 ? "" : "s") selected")
 
             Divider().frame(height: 16)
+                .accessibilityHidden(true)
 
             Button("Turn On") {
                 manager.setPower(deviceIDs: selectedIDs, on: true)
             }
+            .accessibilityHint("Turns on \(selectedIDs.count) selected light\(selectedIDs.count == 1 ? "" : "s")")
             Button("Turn Off") {
                 manager.setPower(deviceIDs: selectedIDs, on: false)
             }
+            .accessibilityHint("Turns off \(selectedIDs.count) selected light\(selectedIDs.count == 1 ? "" : "s")")
 
             Menu("Move to…") {
                 Button("Unassigned") {

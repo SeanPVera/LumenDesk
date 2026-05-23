@@ -8,10 +8,26 @@ struct Room: Identifiable, Codable, Equatable {
     var name: String
     /// Ordered list of `LightDevice.id` values assigned to this room.
     var lightIDs: [String]
+    /// Daily automation entries for this room. Up to 4 per room.
+    var schedules: [ScheduleEntry]
 
-    init(id: UUID = UUID(), name: String, lightIDs: [String] = []) {
+    init(id: UUID = UUID(), name: String, lightIDs: [String] = [], schedules: [ScheduleEntry] = []) {
         self.id = id
         self.name = name
         self.lightIDs = lightIDs
+        self.schedules = schedules
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, lightIDs, schedules
+    }
+
+    // Custom decoder so existing saved data (without the schedules key) loads cleanly.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        lightIDs = try container.decode([String].self, forKey: .lightIDs)
+        schedules = (try? container.decode([ScheduleEntry].self, forKey: .schedules)) ?? []
     }
 }

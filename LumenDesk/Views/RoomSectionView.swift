@@ -14,6 +14,7 @@ struct RoomSectionView: View {
     @State private var isExpanded: Bool = true
     @State private var renaming: Bool = false
     @State private var draftName: String = ""
+    @State private var showingSchedules: Bool = false
     @FocusState private var nameFieldFocused: Bool
 
     private var allLights: [LightDevice] { manager.devices(in: room) }
@@ -39,6 +40,9 @@ struct RoomSectionView: View {
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 4)
                         .padding(.bottom, 4)
+                        .accessibilityLabel(searchQuery.isEmpty
+                                            ? "No lights in \(room.name) yet"
+                                            : "No lights match \(searchQuery) in \(room.name)")
                 } else {
                     if visibleLights.count > 1 {
                         masterBrightnessRow
@@ -56,6 +60,10 @@ struct RoomSectionView: View {
                 }
             }
         }
+        .sheet(isPresented: $showingSchedules) {
+            ScheduleEditorView(room: room)
+                .environmentObject(manager)
+        }
     }
 
     private var header: some View {
@@ -69,6 +77,7 @@ struct RoomSectionView: View {
                     .frame(width: 14)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(isExpanded ? "Collapse \(room.name)" : "Expand \(room.name)")
 
             if renaming {
                 HStack(spacing: 4) {
@@ -98,6 +107,15 @@ struct RoomSectionView: View {
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 6).padding(.vertical, 1)
                 .background(Capsule().fill(Color.secondary.opacity(0.15)))
+                .accessibilityLabel("\(allLights.count) light\(allLights.count == 1 ? "" : "s")")
+
+            if manager.schedules(for: room.id).contains(where: { $0.isEnabled }) {
+                Image(systemName: "clock.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.blue.opacity(0.8))
+                    .help("This room has active schedules")
+                    .accessibilityLabel("Has active schedules")
+            }
 
             Spacer()
 
@@ -107,10 +125,12 @@ struct RoomSectionView: View {
                     .labelsHidden()
                     .controlSize(.small)
                     .help("Toggle all lights in \(room.name)")
+                    .accessibilityLabel("All lights in \(room.name)")
             }
 
             Menu {
                 Button("Rename…") { beginRename() }
+                Button("Edit Schedules…") { showingSchedules = true }
                 Button("Move Up") { manager.moveRoom(room.id, by: -1) }
                 Button("Move Down") { manager.moveRoom(room.id, by: 1) }
                 Divider()
@@ -128,12 +148,17 @@ struct RoomSectionView: View {
     private var masterBrightnessRow: some View {
         HStack(spacing: 8) {
             Image(systemName: "sun.min").foregroundStyle(.tertiary).font(.caption)
+                .accessibilityHidden(true)
             Slider(value: masterBrightnessBinding, in: 0...1)
                 .disabled(selectionMode || allLights.allSatisfy { !$0.isOn })
+                .accessibilityLabel("\(room.name) brightness")
+                .accessibilityValue("\(Int(masterBrightnessBinding.wrappedValue * 100)) percent")
             Image(systemName: "sun.max").foregroundStyle(.tertiary).font(.caption)
+                .accessibilityHidden(true)
             Text("All")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
+                .accessibilityHidden(true)
         }
         .padding(.horizontal, 4)
     }

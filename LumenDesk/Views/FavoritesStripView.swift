@@ -14,6 +14,7 @@ struct FavoritesStripView: View {
                     Image(systemName: "star.fill")
                         .foregroundStyle(.yellow)
                         .font(.caption)
+                        .accessibilityHidden(true)
                     Text("Favorites")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
@@ -48,6 +49,7 @@ private struct FavoriteTileView: View {
                     .fill(device.isOn ? device.color : Color.gray.opacity(0.35))
                     .frame(width: 18, height: 18)
                     .overlay(Circle().stroke(.secondary.opacity(0.4), lineWidth: 0.5))
+                    .accessibilityHidden(true)
                 Text(device.name)
                     .font(.caption.weight(.medium))
                     .lineLimit(1)
@@ -58,6 +60,7 @@ private struct FavoriteTileView: View {
                     .toggleStyle(.switch)
                     .labelsHidden()
                     .controlSize(.mini)
+                    .accessibilityLabel(device.isOn ? "Turn off \(device.name)" : "Turn on \(device.name)")
             }
         }
         .padding(.horizontal, 10)
@@ -71,6 +74,8 @@ private struct FavoriteTileView: View {
                 .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
         )
         .opacity(device.isStale ? 0.6 : 1)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(device.name)\(device.isStale ? ", may be offline" : "")")
         .contextMenu {
             Button("Remove from Favorites") { manager.toggleFavorite(device.id) }
         }

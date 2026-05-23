@@ -261,16 +261,23 @@ Recommendations are grouped into four phases ordered by impact-to-effort ratio. 
 
 ---
 
-### Phase 4 — Platform Integration & Accessibility (6–8 weeks)
+### Phase 4 — Platform Integration & Accessibility (6–8 weeks) — ✅ IMPLEMENTED
 *Highest effort. Requires platform-level work (NSStatusItem, UndoManager, VoiceOver audit) and careful testing.*
 
-| Priority | Rec | Files Affected |
-|----------|-----|----------------|
-| P1 | **#17** Full VoiceOver / accessibility audit | All `Views/`, Xcode Accessibility Inspector review |
-| P2 | **#16** Menu-bar item for quick access | New `MenuBarManager.swift`, new `MenuBarPopoverView.swift`, `LumenDeskApp.swift` |
-| P3 | **#20** Auto-dimming schedule per room | New `Schedule.swift` model, new `ScheduleEditorView.swift`, `LightManager.swift`, `Room.swift` |
+| Priority | Rec | Files Affected | Status |
+|----------|-----|----------------|--------|
+| P1 | **#17** Full VoiceOver / accessibility audit | All `Views/`, `LightRowView`, `RoomSectionView`, `FavoritesStripView`, `ScenesView`, `ContentView` | ✅ Done |
+| P2 | **#16** Menu-bar item for quick access | New `MenuBarPopoverView.swift`, `LumenDeskApp.swift` | ✅ Done |
+| P3 | **#20** Auto-dimming schedule per room | New `ScheduleEntry.swift`, new `ScheduleEditorView.swift`, `LightManager.swift`, `Room.swift`, `RoomSectionView.swift` | ✅ Done |
 
 **Deliverable:** App is suitable for enterprise/accessibility-audited environments and deep macOS integration.
+
+**Implementation notes:**
+- **#17** — Added `.accessibilityLabel` to every unlabeled interactive control: all `Toggle("", ...)` (power switches), `Slider` (brightness — includes `.accessibilityValue` with percent), `ColorPicker`, color swatches, and icon-only buttons. Decorative elements (color circles, sun icons, brand badges, star icons) marked `.accessibilityHidden(true)`. In selection mode, `LightRowView` switches to `.accessibilityElement(children: .ignore)` and exposes the whole card as a single button with selected/deselected state and a default action. Room headers gain labels on expand/collapse chevron and master toggle. `BulkActionBar` buttons annotated with count-aware hints. `ScenesView` Apply/ellipsis buttons labeled with scene names.
+- **#16** — Added a `MenuBarExtra` scene directly to `LumenDeskApp.body` (no `NSStatusItem` management needed — SwiftUI on macOS 13+ handles it). The extra uses `.menuBarExtraStyle(.window)` for a popover-style attachment. `MenuBarPopoverView` (280 px wide, max 340 px tall) shows a header with light count + scan button, an "All Lights" master toggle, per-room toggles with on-count subtitles, and an Unassigned row if applicable. It inherits the shared `LightManager` `@EnvironmentObject`.
+- **#20** — New `ScheduleEntry` model: `id`, `isEnabled`, `hour` (0–23), `minute` (0/15/30/45), `ScheduleAction` (turnOn/turnOff/dim10/dim25/dim50/dim75). `Room` extended with `schedules: [ScheduleEntry]` using a backward-compatible custom `init(from decoder:)` (missing key decodes as `[]`). `LightManager` gains a 60 s `scheduleTimer` that calls `checkSchedules()` on each tick — compares current hour/minute against each enabled entry and fans out the appropriate send helper. Schedules auto-sorted by time on insert, capped at 4 per room. `ScheduleEditorView` sheet opened from "Edit Schedules…" in the room's ellipsis menu; shows a list of entries with enable/disable toggle and delete, plus an add row with hour/minute pickers and action picker. A clock badge (🕐) appears on room section headers when the room has at least one enabled schedule. All schedule data persists via the existing `persistRooms()` call.
+
+> ⚠️ Three new Swift files added (`ScheduleEntry.swift`, `MenuBarPopoverView.swift`, `ScheduleEditorView.swift`), registered in both `project.yml` (auto-discovered) and `project.pbxproj`. No Xcode/Swift toolchain on Linux — hand-reviewed only; build and smoke-test on a Mac before merging.
 
 ---
 

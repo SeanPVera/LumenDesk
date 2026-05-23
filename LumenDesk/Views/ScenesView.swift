@@ -55,10 +55,15 @@ struct ScenesView: View {
             TextField("New scene name (e.g. "Evening")", text: $newSceneName)
                 .textFieldStyle(.roundedBorder)
                 .onSubmit(capture)
+                .accessibilityLabel("Scene name")
             Button("Capture Current State", action: capture)
                 .buttonStyle(.borderedProminent)
                 .disabled(newSceneName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                           || manager.devices.isEmpty)
+                .accessibilityLabel("Capture current lighting state")
+                .accessibilityHint(manager.devices.isEmpty
+                                   ? "No lights discovered yet"
+                                   : "Saves all \(manager.devices.count) lights as a scene named \(newSceneName)")
         }
     }
 
@@ -119,6 +124,8 @@ struct ScenesView: View {
 
             Button("Apply") { manager.applyScene(scene) }
                 .buttonStyle(.bordered)
+                .accessibilityLabel("Apply \(scene.name)")
+                .accessibilityHint("Restores \(scene.snapshots.count) light\(scene.snapshots.count == 1 ? "" : "s") to the saved state")
 
             Menu {
                 Button("Rename…") { beginRename(scene) }
@@ -129,6 +136,7 @@ struct ScenesView: View {
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
+            .accessibilityLabel("More options for \(scene.name)")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)

@@ -24,6 +24,9 @@
 		B100000000000000000012 /* LightingScene.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000012 /* LightingScene.swift */; };
 		B100000000000000000013 /* ScenesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000013 /* ScenesView.swift */; };
 		B100000000000000000014 /* FavoritesStripView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000014 /* FavoritesStripView.swift */; };
+		B100000000000000000015 /* ScheduleEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000015 /* ScheduleEntry.swift */; };
+		B100000000000000000016 /* MenuBarPopoverView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000016 /* MenuBarPopoverView.swift */; };
+		B100000000000000000017 /* ScheduleEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000017 /* ScheduleEditorView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -46,6 +49,9 @@
 		A100000000000000000012 /* LightingScene.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LightingScene.swift; sourceTree = "<group>"; };
 		A100000000000000000013 /* ScenesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScenesView.swift; sourceTree = "<group>"; };
 		A100000000000000000014 /* FavoritesStripView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FavoritesStripView.swift; sourceTree = "<group>"; };
+		A100000000000000000015 /* ScheduleEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleEntry.swift; sourceTree = "<group>"; };
+		A100000000000000000016 /* MenuBarPopoverView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarPopoverView.swift; sourceTree = "<group>"; };
+		A100000000000000000017 /* ScheduleEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleEditorView.swift; sourceTree = "<group>"; };
 		A100000000000000000099 /* LumenDesk.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LumenDesk.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -90,6 +96,7 @@
 				A100000000000000000003 /* LightDevice.swift */,
 				A100000000000000000010 /* Room.swift */,
 				A100000000000000000012 /* LightingScene.swift */,
+				A100000000000000000015 /* ScheduleEntry.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -130,6 +137,8 @@
 				A100000000000000000011 /* RoomSectionView.swift */,
 				A100000000000000000013 /* ScenesView.swift */,
 				A100000000000000000014 /* FavoritesStripView.swift */,
+				A100000000000000000016 /* MenuBarPopoverView.swift */,
+				A100000000000000000017 /* ScheduleEditorView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -235,6 +244,9 @@
 				B100000000000000000012 /* LightingScene.swift in Sources */,
 				B100000000000000000013 /* ScenesView.swift in Sources */,
 				B100000000000000000014 /* FavoritesStripView.swift in Sources */,
+				B100000000000000000015 /* ScheduleEntry.swift in Sources */,
+				B100000000000000000016 /* MenuBarPopoverView.swift in Sources */,
+				B100000000000000000017 /* ScheduleEditorView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

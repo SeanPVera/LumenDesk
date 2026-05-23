@@ -34,6 +34,14 @@ struct LumenDeskApp: App {
                     .keyboardShortcut("z", modifiers: [.command, .shift])
             }
         }
+
+        MenuBarExtra {
+            MenuBarPopoverView()
+                .environmentObject(manager)
+        } label: {
+            Label("LumenDesk", systemImage: "lightbulb.fill")
+        }
+        .menuBarExtraStyle(.window)
     }
 
     private func exportConfiguration() {

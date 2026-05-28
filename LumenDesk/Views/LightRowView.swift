@@ -4,15 +4,22 @@ struct LightRowView: View {
     @EnvironmentObject var manager: LightManager
     @ObservedObject var device: LightDevice
 
-    /// When true the row becomes a selection target: its internal controls and
-    /// context menu are inert and a checkbox is shown on the leading edge.
     var selectionMode: Bool = false
     var selected: Bool = false
     var onToggleSelection: (() -> Void)? = nil
 
+    @State private var renamingName: Bool = false
+    @State private var nameDraft: String = ""
+    @FocusState private var nameFocused: Bool
+
     private var brightnessBinding: Binding<Double> {
         Binding(get: { device.brightness },
                 set: { manager.setBrightness(device, value: $0) })
+    }
+
+    private var kelvinBinding: Binding<Double> {
+        Binding(get: { Double(device.kelvin) },
+                set: { manager.setKelvin(device, kelvin: Int($0)) })
     }
 
     private var colorBinding: Binding<Color> {
@@ -64,11 +71,25 @@ struct LightRowView: View {
                                 .foregroundStyle(.yellow)
                                 .accessibilityLabel("Favorite")
                         }
-                        Text(device.name)
-                            .font(.headline)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                            .help(device.name)
+                        if renamingName {
+                            TextField("Name", text: $nameDraft)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.headline)
+                                .focused($nameFocused)
+                                .onSubmit(commitRename)
+                                .onExitCommand(cancelRename)
+                                .frame(maxWidth: 200)
+                        } else {
+                            Text(device.label)
+                                .font(.headline)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                                .help(device.label)
+                                .onTapGesture(count: 2) {
+                                    guard !selectionMode else { return }
+                                    beginRename()
+                                }
+                        }
                     }
                     HStack(spacing: 6) {
                         Text(device.brand.displayName)
@@ -85,7 +106,7 @@ struct LightRowView: View {
                 }
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel(
-                    [device.name,
+                    [device.label,
                      manager.isFavorite(device.id) ? "Favorite" : nil,
                      device.isStale ? "may be offline" : nil]
                         .compactMap { $0 }.joined(separator: ", ")
@@ -97,7 +118,7 @@ struct LightRowView: View {
                     .toggleStyle(.switch)
                     .labelsHidden()
                     .disabled(selectionMode)
-                    .accessibilityLabel(device.isOn ? "Turn off \(device.name)" : "Turn on \(device.name)")
+                    .accessibilityLabel(device.isOn ? "Turn off \(device.label)" : "Turn on \(device.label)")
             }
 
             VStack(spacing: 6) {
@@ -109,7 +130,7 @@ struct LightRowView: View {
                     ColorPicker("", selection: colorBinding, supportsOpacity: false)
                         .labelsHidden()
                         .disabled(controlsDisabled)
-                        .accessibilityLabel("\(device.name) color")
+                        .accessibilityLabel("\(device.label) color")
                 }
 
                 HStack(spacing: 10) {
@@ -117,16 +138,37 @@ struct LightRowView: View {
                         .accessibilityHidden(true)
                     Slider(value: brightnessBinding, in: 0...1)
                         .disabled(controlsDisabled)
-                        .accessibilityLabel("\(device.name) brightness")
+                        .accessibilityLabel("\(device.label) brightness")
                         .accessibilityValue("\(Int(device.brightness * 100)) percent")
                     Image(systemName: "sun.max").foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                }
+
+                // Colour-temperature slider — relevant when using white-light mode.
+                HStack(spacing: 10) {
+                    Image(systemName: "thermometer.low")
+                        .foregroundStyle(.orange.opacity(0.7))
+                        .font(.caption)
+                        .accessibilityHidden(true)
+                    Slider(value: kelvinBinding, in: 2500...9000, step: 100)
+                        .disabled(controlsDisabled)
+                        .accessibilityLabel("\(device.label) colour temperature")
+                        .accessibilityValue("\(device.kelvin) Kelvin")
+                    Image(systemName: "thermometer.high")
+                        .foregroundStyle(.blue.opacity(0.7))
+                        .font(.caption)
+                        .accessibilityHidden(true)
+                    Text("\(device.kelvin)K")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .frame(width: 40, alignment: .trailing)
                         .accessibilityHidden(true)
                 }
             }
         }
         .accessibilityElement(children: selectionMode ? .ignore : .contain)
         .accessibilityLabel(selectionMode
-            ? "\(device.name)\(selected ? ", selected" : "")"
+            ? "\(device.label)\(selected ? ", selected" : "")"
             : "")
         .accessibilityAddTraits(selectionMode ? .isButton : [])
         .accessibilityHint(selectionMode ? "Double-tap to toggle selection" : "")
@@ -142,11 +184,8 @@ struct LightRowView: View {
         )
         .opacity(device.isStale ? 0.6 : 1)
         .help(device.isStale
-              ? "Not responding — last seen \(device.lastSeen.formatted(.relative(presentation: .named))). Check the bulb's power and network."
+              ? "Not responding \u{2014} last seen \(device.lastSeen.formatted(.relative(presentation: .named))). Check the bulb\u{2019}s power and network."
               : "")
-        // In selection mode an invisible overlay captures clicks before the
-        // disabled inner controls can swallow them, turning the whole card
-        // into a single selection target.
         .overlay {
             if selectionMode {
                 Color.clear
@@ -169,6 +208,24 @@ struct LightRowView: View {
         if selected { return 2 }
         if device.isStale { return 1 }
         return 0.5
+    }
+
+    // MARK: - Inline rename
+
+    private func beginRename() {
+        nameDraft = device.label
+        renamingName = true
+        DispatchQueue.main.async { nameFocused = true }
+    }
+
+    private func commitRename() {
+        let trimmed = nameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        manager.setCustomName(device.id, name: trimmed)
+        renamingName = false
+    }
+
+    private func cancelRename() {
+        renamingName = false
     }
 
     // MARK: - Color swatches
@@ -200,6 +257,8 @@ struct LightRowView: View {
         .accessibilityLabel(swatch.label)
     }
 
+    // MARK: - Context menu
+
     @ViewBuilder
     private var roomMenuContents: some View {
         let currentRoom = manager.room(forLightID: device.id)
@@ -213,6 +272,8 @@ struct LightRowView: View {
                 Label("Add to Favorites", systemImage: "star")
             }
         }
+
+        Button("Rename\u{2026}") { beginRename() }
 
         Divider()
 
@@ -244,12 +305,8 @@ struct LightRowView: View {
 
         if let room = currentRoom {
             Divider()
-            Button("Move Up in \(room.name)") {
-                manager.moveLight(device.id, in: room.id, by: -1)
-            }
-            Button("Move Down in \(room.name)") {
-                manager.moveLight(device.id, in: room.id, by: 1)
-            }
+            Button("Move Up in \(room.name)") { manager.moveLight(device.id, in: room.id, by: -1) }
+            Button("Move Down in \(room.name)") { manager.moveLight(device.id, in: room.id, by: 1) }
         }
     }
 }

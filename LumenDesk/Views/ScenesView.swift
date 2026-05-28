@@ -1,7 +1,5 @@
 import SwiftUI
 
-/// A sheet listing the saved lighting scenes. Lets the user apply, rename,
-/// delete existing scenes and capture the current state as a new one.
 struct ScenesView: View {
     @EnvironmentObject var manager: LightManager
     @Environment(\.dismiss) private var dismiss
@@ -52,7 +50,7 @@ struct ScenesView: View {
 
     private var captureRow: some View {
         HStack(spacing: 8) {
-            TextField("New scene name (e.g. "Evening")", text: $newSceneName)
+            TextField("New scene name (e.g. \u{201C}Evening\u{201D})", text: $newSceneName)
                 .textFieldStyle(.roundedBorder)
                 .onSubmit(capture)
                 .accessibilityLabel("Scene name")
@@ -97,7 +95,7 @@ struct ScenesView: View {
                 .foregroundStyle(.purple)
                 .font(.title3)
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 4) {
                 if renamingID == scene.id {
                     HStack(spacing: 4) {
                         TextField("Scene name", text: $renameDraft)
@@ -115,7 +113,28 @@ struct ScenesView: View {
                     Text(scene.name)
                         .font(.callout.weight(.medium))
                 }
-                Text("\(scene.snapshots.count) light\(scene.snapshots.count == 1 ? "" : "s") · captured \(scene.createdAt.formatted(.relative(presentation: .named)))")
+
+                // Preview swatches — one dot per snapshot, sorted by brightness descending.
+                let swatches = sceneSwatches(scene)
+                if !swatches.isEmpty {
+                    HStack(spacing: 3) {
+                        ForEach(swatches.indices, id: \.self) { i in
+                            Circle()
+                                .fill(swatches[i].color)
+                                .opacity(swatches[i].isOn ? 1.0 : 0.25)
+                                .frame(width: 10, height: 10)
+                                .overlay(Circle().stroke(Color.primary.opacity(0.15), lineWidth: 0.5))
+                                .accessibilityHidden(true)
+                        }
+                        if scene.snapshots.count > swatches.count {
+                            Text("+\(scene.snapshots.count - swatches.count)")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                Text("\(scene.snapshots.count) light\(scene.snapshots.count == 1 ? "" : "s") \u{00B7} captured \(scene.createdAt.formatted(.relative(presentation: .named)))")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -128,7 +147,7 @@ struct ScenesView: View {
                 .accessibilityHint("Restores \(scene.snapshots.count) light\(scene.snapshots.count == 1 ? "" : "s") to the saved state")
 
             Menu {
-                Button("Rename…") { beginRename(scene) }
+                Button("Rename\u{2026}") { beginRename(scene) }
                 Button("Delete Scene", role: .destructive) { manager.deleteScene(scene.id) }
             } label: {
                 Image(systemName: "ellipsis.circle")
@@ -148,6 +167,20 @@ struct ScenesView: View {
             RoundedRectangle(cornerRadius: 8)
                 .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
         )
+    }
+
+    /// Returns up to 8 preview swatches for a scene, sorted by on-state then brightness.
+    private func sceneSwatches(_ scene: LightingScene) -> [(color: Color, isOn: Bool)] {
+        let snaps = scene.snapshots.values
+            .sorted { lhs, rhs in
+                if lhs.isOn != rhs.isOn { return lhs.isOn }
+                return lhs.brightness > rhs.brightness
+            }
+            .prefix(8)
+        return snaps.map { snap in
+            let color = Color(hue: snap.hue, saturation: snap.saturation, brightness: max(0.5, snap.brightness))
+            return (color: color, isOn: snap.isOn)
+        }
     }
 
     private func beginRename(_ scene: LightingScene) {

@@ -120,6 +120,15 @@ struct MenuBarPopoverView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
+            Toggle("", isOn: Binding(
+                get: { !lights.isEmpty && lights.allSatisfy { $0.isOn } },
+                set: { on in lights.forEach { manager.setPower($0, on: on) } }
+            ))
+            .toggleStyle(.switch)
+            .labelsHidden()
+            .controlSize(.small)
+            .disabled(lights.isEmpty)
+            .accessibilityLabel("Unassigned lights power")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)

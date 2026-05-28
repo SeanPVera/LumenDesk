@@ -24,14 +24,16 @@ struct LumenDeskApp: App {
                 .keyboardShortcut("p", modifiers: [.command, .shift])
             }
             CommandGroup(after: .importExport) {
-                Button("Export Configuration…") { exportConfiguration() }
-                Button("Import Configuration…") { importConfiguration() }
+                Button("Export Configuration\u{2026}") { exportConfiguration() }
+                Button("Import Configuration\u{2026}") { importConfiguration() }
             }
             CommandGroup(replacing: .undoRedo) {
                 Button("Undo Light Change") { manager.undo() }
                     .keyboardShortcut("z", modifiers: .command)
+                    .disabled(!manager.canUndo)
                 Button("Redo Light Change") { manager.redo() }
                     .keyboardShortcut("z", modifiers: [.command, .shift])
+                    .disabled(!manager.canRedo)
             }
         }
 
@@ -39,10 +41,25 @@ struct LumenDeskApp: App {
             MenuBarPopoverView()
                 .environmentObject(manager)
         } label: {
-            Label("LumenDesk", systemImage: "lightbulb.fill")
+            Image(systemName: "lightbulb.fill")
+                .foregroundStyle(moodColor)
         }
         .menuBarExtraStyle(.window)
     }
+
+    // MARK: - Mood ring colour for the menu-bar icon
+
+    private var moodColor: Color {
+        let on = manager.devices.filter { $0.isOn }
+        guard !on.isEmpty else { return .yellow }
+        let hsbs = on.map { $0.color.hsbComponents }
+        let avgH = hsbs.reduce(0.0) { $0 + $1.h } / Double(on.count)
+        let avgS = hsbs.reduce(0.0) { $0 + $1.s } / Double(on.count)
+        let avgB = on.reduce(0.0) { $0 + $1.brightness } / Double(on.count)
+        return Color(hue: avgH, saturation: avgS, brightness: max(0.6, avgB))
+    }
+
+    // MARK: - Export / Import
 
     private func exportConfiguration() {
         guard let data = manager.exportRoomsData() else { return }

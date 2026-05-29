@@ -50,17 +50,17 @@ private struct FavoriteTileView: View {
                     .frame(width: 18, height: 18)
                     .overlay(Circle().stroke(.secondary.opacity(0.4), lineWidth: 0.5))
                     .accessibilityHidden(true)
-                Text(device.name)
+                Text(device.label)
                     .font(.caption.weight(.medium))
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .frame(maxWidth: 110, alignment: .leading)
-                    .help(device.name)
+                    .help(device.label)
                 Toggle("", isOn: powerBinding)
                     .toggleStyle(.switch)
                     .labelsHidden()
                     .controlSize(.mini)
-                    .accessibilityLabel(device.isOn ? "Turn off \(device.name)" : "Turn on \(device.name)")
+                    .accessibilityLabel(device.isOn ? "Turn off \(device.label)" : "Turn on \(device.label)")
             }
         }
         .padding(.horizontal, 10)
@@ -75,7 +75,7 @@ private struct FavoriteTileView: View {
         )
         .opacity(device.isStale ? 0.6 : 1)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(device.name)\(device.isStale ? ", may be offline" : "")")
+        .accessibilityLabel("\(device.label)\(device.isStale ? ", may be offline" : "")")
         .contextMenu {
             Button("Remove from Favorites") { manager.toggleFavorite(device.id) }
         }

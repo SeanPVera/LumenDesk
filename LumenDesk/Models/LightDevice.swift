@@ -1,27 +1,29 @@
 import Foundation
 import SwiftUI
 
-/// A single bulb shown in the UI. The model is backend-agnostic; the manager
-/// fans control calls out to the correct vendor client based on `brand`.
 final class LightDevice: ObservableObject, Identifiable {
     enum Brand: String { case lifx, govee }
 
-    let id: String              // brand-prefixed unique id, e.g. "lifx:d073d5..." or "govee:AB:CD:..."
+    let id: String
     let brand: Brand
-    let backendID: String       // raw vendor ID (MAC hex for LIFX, device string for Govee)
+    let backendID: String
 
     @Published var name: String
+    /// User-set override displayed in place of the vendor label. Persisted by LightManager.
+    @Published var customName: String?
     @Published var address: String
     @Published var isOn: Bool
-    @Published var brightness: Double  // 0…1
+    @Published var brightness: Double   // 0…1
     @Published var color: Color
+    @Published var kelvin: Int          // 2500…9000 K; used in white-light mode
     @Published var lastSeen: Date
-    /// True when the bulb has missed several refresh cycles and is likely
-    /// offline or off the network. Cleared on the next successful response.
     @Published var isStale: Bool = false
 
+    /// The label shown in the UI: custom name when set, otherwise the vendor label.
+    var label: String { customName ?? name }
+
     init(id: String, brand: Brand, backendID: String, name: String, address: String,
-         isOn: Bool = false, brightness: Double = 1.0, color: Color = .white) {
+         isOn: Bool = false, brightness: Double = 1.0, color: Color = .white, kelvin: Int = 3500) {
         self.id = id
         self.brand = brand
         self.backendID = backendID
@@ -30,6 +32,7 @@ final class LightDevice: ObservableObject, Identifiable {
         self.isOn = isOn
         self.brightness = brightness
         self.color = color
+        self.kelvin = kelvin
         self.lastSeen = Date()
     }
 }

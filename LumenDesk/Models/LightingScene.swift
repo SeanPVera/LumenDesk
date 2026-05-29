@@ -1,9 +1,5 @@
 import Foundation
 
-/// A saved snapshot of every discovered light's state — power, brightness, and
-/// hue/saturation — that can be recalled with one tap to recreate a lighting
-/// mood. Only lights present in `snapshots` are affected when applied; lights
-/// added after the scene was captured are left alone.
 struct LightingScene: Identifiable, Codable, Equatable {
     let id: UUID
     var name: String
@@ -21,9 +17,33 @@ struct LightingScene: Identifiable, Codable, Equatable {
     }
 }
 
-struct DeviceSnapshot: Codable, Equatable {
+struct DeviceSnapshot: Equatable {
     var isOn: Bool
     var brightness: Double
     var hue: Double
     var saturation: Double
+    var kelvin: Int
+
+    init(isOn: Bool, brightness: Double, hue: Double, saturation: Double, kelvin: Int = 3500) {
+        self.isOn = isOn
+        self.brightness = brightness
+        self.hue = hue
+        self.saturation = saturation
+        self.kelvin = kelvin
+    }
+}
+
+extension DeviceSnapshot: Codable {
+    enum CodingKeys: String, CodingKey {
+        case isOn, brightness, hue, saturation, kelvin
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        isOn = try c.decode(Bool.self, forKey: .isOn)
+        brightness = try c.decode(Double.self, forKey: .brightness)
+        hue = try c.decode(Double.self, forKey: .hue)
+        saturation = try c.decode(Double.self, forKey: .saturation)
+        kelvin = (try? c.decode(Int.self, forKey: .kelvin)) ?? 3500
+    }
 }

@@ -1,7 +1,5 @@
 import SwiftUI
 
-/// Sheet for managing daily automation schedules for a single room. Up to 4
-/// entries per room; each entry fires at the same clock time every day.
 struct ScheduleEditorView: View {
     @EnvironmentObject var manager: LightManager
     @Environment(\.dismiss) private var dismiss
@@ -10,13 +8,16 @@ struct ScheduleEditorView: View {
 
     @State private var draftHour: Int = 20
     @State private var draftMinute: Int = 0
+    @State private var draftOffset: Int = 0   // signed offset in minutes for sun-relative
     @State private var draftAction: ScheduleAction = .turnOff
+
+    @State private var showingSolarSettings: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Schedules — \(room.name)")
+                    Text("Schedules \u{2014} \(room.name)")
                         .font(.title3.weight(.semibold))
                     Text("Automatically control these lights at a set time every day.")
                         .font(.caption)
@@ -50,8 +51,28 @@ struct ScheduleEditorView: View {
             addRow
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
+
+            // Solar settings hint
+            if draftAction.isRelativeToSun {
+                HStack(spacing: 6) {
+                    Image(systemName: "sun.horizon.fill")
+                        .foregroundStyle(.orange)
+                        .font(.caption)
+                    Text("Sunrise: \(String(format: "%02d:%02d", manager.sunriseHour, manager.sunriseMinute))  \u{00B7}  Sunset: \(String(format: "%02d:%02d", manager.sunsetHour, manager.sunsetMinute))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Configure\u{2026}") { showingSolarSettings = true }
+                        .font(.caption)
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 10)
+            }
         }
-        .frame(width: 400, height: 380)
+        .frame(width: 420, height: 400)
+        .sheet(isPresented: $showingSolarSettings) {
+            SolarSettingsView().environmentObject(manager)
+        }
     }
 
     private var emptyState: some View {
@@ -82,12 +103,22 @@ struct ScheduleEditorView: View {
             .toggleStyle(.switch)
             .labelsHidden()
             .controlSize(.small)
-            .accessibilityLabel("\(entry.timeString) — \(entry.action.displayName)")
+            .accessibilityLabel("\(entry.timeString) \u{2014} \(entry.action.displayName)")
             .accessibilityHint(entry.isEnabled ? "Tap to disable" : "Tap to enable")
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(entry.timeString)
-                    .font(.callout.weight(.semibold).monospacedDigit())
+                HStack(spacing: 4) {
+                    Text(entry.timeString)
+                        .font(.callout.weight(.semibold).monospacedDigit())
+                    if entry.action.isRelativeToSun {
+                        let base = entry.action == .atSunrise
+                            ? String(format: "%02d:%02d", manager.sunriseHour, manager.sunriseMinute)
+                            : String(format: "%02d:%02d", manager.sunsetHour, manager.sunsetMinute)
+                        Text("(\u{2248} \(base))")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
                 Text(entry.action.displayName)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -120,7 +151,49 @@ struct ScheduleEditorView: View {
 
     @ViewBuilder private var addRow: some View {
         let atLimit = manager.schedules(for: room.id).count >= 4
-        HStack(spacing: 8) {
+        VStack(spacing: 8) {
+            HStack(spacing: 8) {
+                // Show clock pickers for absolute actions; offset picker for solar.
+                if draftAction.isRelativeToSun {
+                    offsetPicker
+                } else {
+                    clockPickers
+                }
+
+                Picker("Action", selection: $draftAction) {
+                    ForEach(ScheduleAction.allCases, id: \.self) { action in
+                        Text(action.displayName).tag(action)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .frame(minWidth: 120)
+                .accessibilityLabel("Action")
+
+                Spacer()
+
+                Button("Add") {
+                    let entry: ScheduleEntry
+                    if draftAction.isRelativeToSun {
+                        entry = ScheduleEntry(hour: 0, minute: 0,
+                                             offsetMinutes: draftOffset, action: draftAction)
+                    } else {
+                        entry = ScheduleEntry(hour: draftHour, minute: draftMinute,
+                                             offsetMinutes: 0, action: draftAction)
+                    }
+                    manager.addSchedule(entry, to: room.id)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(atLimit)
+                .help(atLimit ? "Maximum of 4 schedules per room" : "Add schedule")
+                .accessibilityLabel("Add schedule")
+                .accessibilityHint(atLimit ? "Maximum of 4 schedules reached" : "")
+            }
+        }
+    }
+
+    private var clockPickers: some View {
+        HStack(spacing: 4) {
             Picker("Hour", selection: $draftHour) {
                 ForEach(0..<24, id: \.self) { h in
                     Text(String(format: "%02d", h)).tag(h)
@@ -142,32 +215,96 @@ struct ScheduleEditorView: View {
             .labelsHidden()
             .frame(width: 60)
             .accessibilityLabel("Minute")
+        }
+    }
 
-            Picker("Action", selection: $draftAction) {
-                ForEach(ScheduleAction.allCases, id: \.self) { action in
-                    Text(action.displayName).tag(action)
+    private var offsetPicker: some View {
+        HStack(spacing: 4) {
+            Picker("Offset", selection: $draftOffset) {
+                ForEach([-120, -90, -60, -45, -30, -15, 0, 15, 30, 45, 60, 90, 120], id: \.self) { min in
+                    let label: String = {
+                        if min == 0 { return "exactly" }
+                        let sign = min > 0 ? "+" : ""
+                        return "\(sign)\(min)m"
+                    }()
+                    Text(label).tag(min)
                 }
             }
             .labelsHidden()
-            .pickerStyle(.menu)
-            .frame(minWidth: 110)
-            .accessibilityLabel("Action")
+            .frame(width: 80)
+            .accessibilityLabel("Offset from \(draftAction == .atSunrise ? "sunrise" : "sunset")")
+        }
+    }
+}
 
-            Spacer()
+// MARK: - Solar settings sheet
 
-            Button("Add") {
-                manager.addSchedule(
-                    ScheduleEntry(hour: draftHour, minute: draftMinute, action: draftAction),
-                    to: room.id
-                )
+struct SolarSettingsView: View {
+    @EnvironmentObject var manager: LightManager
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var sunriseHour: Int = 0
+    @State private var sunriseMinute: Int = 0
+    @State private var sunsetHour: Int = 0
+    @State private var sunsetMinute: Int = 0
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Sunrise & Sunset Times")
+                .font(.title3.weight(.semibold))
+            Text("Set your local sunrise and sunset times. LumenDesk uses these for solar-relative schedules.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+
+            Divider()
+
+            HStack(spacing: 12) {
+                Image(systemName: "sunrise.fill").foregroundStyle(.orange)
+                Text("Sunrise").frame(width: 70, alignment: .leading)
+                timePicker(hour: $sunriseHour, minute: $sunriseMinute)
             }
-            .buttonStyle(.borderedProminent)
-            .disabled(atLimit)
-            .help(atLimit
-                  ? "Maximum of 4 schedules per room"
-                  : "Add a \(draftAction.displayName) schedule at \(String(format: "%02d:%02d", draftHour, draftMinute))")
-            .accessibilityLabel("Add schedule")
-            .accessibilityHint(atLimit ? "Maximum of 4 schedules reached" : "")
+            HStack(spacing: 12) {
+                Image(systemName: "sunset.fill").foregroundStyle(.purple)
+                Text("Sunset").frame(width: 70, alignment: .leading)
+                timePicker(hour: $sunsetHour, minute: $sunsetMinute)
+            }
+
+            Divider()
+
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button("Save") {
+                    manager.setSunriseTime(hour: sunriseHour, minute: sunriseMinute)
+                    manager.setSunsetTime(hour: sunsetHour, minute: sunsetMinute)
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(width: 320)
+        .onAppear {
+            sunriseHour   = manager.sunriseHour
+            sunriseMinute = manager.sunriseMinute
+            sunsetHour    = manager.sunsetHour
+            sunsetMinute  = manager.sunsetMinute
+        }
+    }
+
+    private func timePicker(hour: Binding<Int>, minute: Binding<Int>) -> some View {
+        HStack(spacing: 4) {
+            Picker("Hour", selection: hour) {
+                ForEach(0..<24, id: \.self) { h in Text(String(format: "%02d", h)).tag(h) }
+            }
+            .labelsHidden().frame(width: 60)
+            Text(":").foregroundStyle(.secondary)
+            Picker("Minute", selection: minute) {
+                ForEach([0, 15, 30, 45], id: \.self) { m in Text(String(format: "%02d", m)).tag(m) }
+            }
+            .labelsHidden().frame(width: 60)
         }
     }
 }

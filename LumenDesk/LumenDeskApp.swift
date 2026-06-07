@@ -62,11 +62,11 @@ struct LumenDeskApp: App {
     // MARK: - Export / Import
 
     private func exportConfiguration() {
-        guard let data = manager.exportRoomsData() else { return }
+        guard let data = manager.exportConfigurationData() else { return }
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.json]
-        panel.nameFieldStringValue = "LumenDesk-Rooms.json"
-        panel.title = "Export Room Configuration"
+        panel.nameFieldStringValue = "LumenDesk-Configuration.json"
+        panel.title = "Export LumenDesk Configuration"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         try? data.write(to: url)
     }
@@ -76,7 +76,7 @@ struct LumenDeskApp: App {
         panel.allowedContentTypes = [.json]
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
-        panel.title = "Import Room Configuration"
+        panel.title = "Import LumenDesk Configuration"
         guard panel.runModal() == .OK,
               let url = panel.url,
               let data = try? Data(contentsOf: url) else { return }

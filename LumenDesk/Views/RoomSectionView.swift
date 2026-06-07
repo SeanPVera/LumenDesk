@@ -100,6 +100,15 @@ struct RoomSectionView: View {
             .buttonStyle(.plain)
             .accessibilityLabel(isExpanded ? "Collapse \(room.name)" : "Expand \(room.name)")
 
+            Button {
+                manager.toggleFavoriteRoom(room.id)
+            } label: {
+                Image(systemName: manager.isFavoriteRoom(room.id) ? "star.fill" : "star")
+                    .foregroundStyle(manager.isFavoriteRoom(room.id) ? .yellow : .secondary)
+            }
+            .buttonStyle(.plain)
+            .help(manager.isFavoriteRoom(room.id) ? "Unpin room from favorites" : "Pin room to favorites")
+
             if renaming {
                 HStack(spacing: 4) {
                     TextField("Room name", text: $draftName)
@@ -149,6 +158,15 @@ struct RoomSectionView: View {
                     .accessibilityHidden(true)
             }
 
+            if !allLights.isEmpty {
+                Text(roomSummary)
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.tertiary)
+                    .padding(.horizontal, 5).padding(.vertical, 1)
+                    .background(Capsule().fill(dominantRoomColor.opacity(0.12)))
+                    .help("Average brightness and dominant room color")
+            }
+
             if manager.schedules(for: room.id).contains(where: { $0.isEnabled }) {
                 Image(systemName: "clock.fill")
                     .font(.caption2)
@@ -178,6 +196,33 @@ struct RoomSectionView: View {
             .fixedSize()
         }
         .contentShape(Rectangle())
+    }
+
+    private var roomSummary: String {
+        let on = allLights.filter { $0.isOn }
+        guard !on.isEmpty else { return "off" }
+        let avg = on.reduce(0) { $0 + $1.brightness } / Double(on.count)
+        return "\(Int(avg * 100))% · \(dominantColorName)"
+    }
+
+    private var dominantRoomColor: Color {
+        let on = allLights.filter { $0.isOn }
+        guard !on.isEmpty else { return .secondary }
+        let hsb = on.map { $0.color.hsbComponents }
+        let h = hsb.reduce(0) { $0 + $1.h } / Double(on.count)
+        let s = hsb.reduce(0) { $0 + $1.s } / Double(on.count)
+        return Color(hue: h, saturation: s, brightness: 0.9)
+    }
+
+    private var dominantColorName: String {
+        let h = dominantRoomColor.hsbComponents.h
+        switch h {
+        case 0..<0.08, 0.92...1: return "red"
+        case 0.08..<0.17: return "warm"
+        case 0.17..<0.42: return "green"
+        case 0.42..<0.72: return "blue"
+        default: return "purple"
+        }
     }
 
     // MARK: - Tri-state power toggle

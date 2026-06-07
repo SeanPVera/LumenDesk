@@ -122,7 +122,7 @@ struct MenuBarPopoverView: View {
             Spacer()
             Toggle("", isOn: Binding(
                 get: { !lights.isEmpty && lights.allSatisfy { $0.isOn } },
-                set: { on in lights.forEach { manager.setPower($0, on: on) } }
+                set: { on in manager.setPower(deviceIDs: Set(lights.map { $0.id }), on: on) }
             ))
             .toggleStyle(.switch)
             .labelsHidden()

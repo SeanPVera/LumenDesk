@@ -3,6 +3,7 @@ import Foundation
 protocol GoveeClientDelegate: AnyObject {
     func goveeDiscovered(deviceID: String, address: String, sku: String?)
     func goveeDidUpdate(deviceID: String, isOn: Bool, brightness: Int, r: Int, g: Int, b: Int, kelvin: Int)
+    func goveeCommandFailed(_ error: Error)
 }
 
 /// Drives Govee LAN discovery and control. The bulbs respond to scan and
@@ -33,23 +34,30 @@ final class GoveeClient {
 
     func refresh(deviceID: String) {
         guard let host = addressByDevice[deviceID] else { return }
-        try? socket.send(GoveeProtocol.statusRequest(), to: host, port: GoveeProtocol.controlPort)
+        sendCommand(GoveeProtocol.statusRequest(), to: host)
     }
 
     func setPower(deviceID: String, on: Bool) {
         guard let host = addressByDevice[deviceID] else { return }
-        try? socket.send(GoveeProtocol.turnRequest(on: on), to: host, port: GoveeProtocol.controlPort)
+        sendCommand(GoveeProtocol.turnRequest(on: on), to: host)
     }
 
     func setBrightness(deviceID: String, percent: Int) {
         guard let host = addressByDevice[deviceID] else { return }
-        try? socket.send(GoveeProtocol.brightnessRequest(percent), to: host, port: GoveeProtocol.controlPort)
+        sendCommand(GoveeProtocol.brightnessRequest(percent), to: host)
     }
 
     func setColor(deviceID: String, r: Int, g: Int, b: Int, kelvin: Int = 0) {
         guard let host = addressByDevice[deviceID] else { return }
-        try? socket.send(GoveeProtocol.colorRequest(r: r, g: g, b: b, kelvin: kelvin),
-                         to: host, port: GoveeProtocol.controlPort)
+        sendCommand(GoveeProtocol.colorRequest(r: r, g: g, b: b, kelvin: kelvin), to: host)
+    }
+
+    private func sendCommand(_ data: Data, to host: String) {
+        do {
+            try socket.send(data, to: host, port: GoveeProtocol.controlPort)
+        } catch {
+            delegate?.goveeCommandFailed(error)
+        }
     }
 
     // MARK: - Receive
@@ -64,8 +72,7 @@ final class GoveeClient {
                 delegate?.goveeDiscovered(deviceID: id, address: scan.msg.data.ip, sku: scan.msg.data.sku)
             }
             // Pull status right after discovery.
-            try? socket.send(GoveeProtocol.statusRequest(),
-                             to: scan.msg.data.ip, port: GoveeProtocol.controlPort)
+            sendCommand(GoveeProtocol.statusRequest(), to: scan.msg.data.ip)
             return
         }
 

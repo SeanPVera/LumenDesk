@@ -32,6 +32,22 @@ struct ScheduleEditorView: View {
             Divider()
 
             let schedules = manager.schedules(for: room.id)
+            let warnings = manager.conflictWarnings(for: room.id)
+
+            if !warnings.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("Schedule conflict warning", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.orange)
+                    ForEach(warnings, id: \.self) { warning in
+                        Text(warning).font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+                .padding(10)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.orange.opacity(0.12)))
+                .padding(.horizontal, 16)
+                .padding(.top, 10)
+            }
 
             if schedules.isEmpty {
                 emptyState
@@ -62,6 +78,8 @@ struct ScheduleEditorView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer()
+                    Button("Estimate") { manager.applyEstimatedSolarTimes() }
+                        .font(.caption)
                     Button("Configure\u{2026}") { showingSolarSettings = true }
                         .font(.caption)
                 }
@@ -122,6 +140,9 @@ struct ScheduleEditorView: View {
                 Text(entry.action.displayName)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                Text(manager.nextRunDescription(for: entry))
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
             }
 
             Spacer()

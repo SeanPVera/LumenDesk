@@ -7,6 +7,8 @@ struct ContentView: View {
     @State private var newRoomName: String = ""
     @State private var setupChecks: Set<Int> = []
     @State private var showingScenes: Bool = false
+    @State private var showingShortcuts: Bool = false
+    @State private var auroraFireflies: Bool = true
 
     @State private var searchText: String = ""
     @FocusState private var searchFocused: Bool
@@ -25,11 +27,9 @@ struct ContentView: View {
                 if manager.devices.isEmpty {
                     emptyState
                 } else {
-                    if !manager.favoriteDevices.isEmpty {
-                        FavoritesStripView()
-                            .padding(.horizontal, 16)
-                            .padding(.top, 12)
-                    }
+                    FavoritesStripView()
+                        .padding(.horizontal, 16)
+                        .padding(.top, 12)
 
                     GeometryReader { proxy in
                         if proxy.size.width >= gridThreshold {
@@ -46,11 +46,20 @@ struct ContentView: View {
             .sheet(isPresented: $showingScenes) {
                 ScenesView().environmentObject(manager)
             }
+            .sheet(isPresented: $showingShortcuts) {
+                KeyboardShortcutsView()
+            }
 
             if selectionMode && !selectedIDs.isEmpty {
                 BulkActionBar(selectedIDs: $selectedIDs, selectionMode: $selectionMode)
                     .padding(.bottom, manager.commandError == nil ? 16 : 72)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
+            if auroraFireflies && !manager.devices.isEmpty {
+                AuroraFireflyOverlay(colors: manager.devices.filter { $0.isOn }.map { $0.color })
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
             }
 
             if let error = manager.commandError {
@@ -115,7 +124,14 @@ struct ContentView: View {
                 Spacer()
                 if manager.isScanning {
                     ProgressView().controlSize(.small)
+                        .help(manager.scanPhase)
                 }
+                Toggle(isOn: $auroraFireflies) {
+                    Image(systemName: "sparkles")
+                }
+                .toggleStyle(.button)
+                .controlSize(.small)
+                .help("Aurora Firefly Mode — whimsical ambient glow")
                 if !manager.devices.isEmpty {
                     Button {
                         selectionMode.toggle()
@@ -125,7 +141,17 @@ struct ContentView: View {
                               systemImage: selectionMode ? "checkmark.circle.fill" : "checkmark.circle")
                     }
                     .help(selectionMode ? "Exit selection mode" : "Select multiple lights for bulk actions")
+                    if selectionMode {
+                        Button("Select Visible") { selectedIDs = visibleDeviceIDs }
+                            .disabled(visibleDeviceIDs.isEmpty)
+                        Button("Clear") { selectedIDs.removeAll() }
+                            .disabled(selectedIDs.isEmpty)
+                    }
                 }
+                Button { showingShortcuts = true } label: {
+                    Label("Shortcuts", systemImage: "keyboard")
+                }
+                .help("Show keyboard shortcuts")
                 Button { showingScenes = true } label: {
                     Label("Scenes", systemImage: "wand.and.stars")
                 }
@@ -184,6 +210,7 @@ struct ContentView: View {
 
     private var headerSubtitle: String {
         if !manager.statusMessage.isEmpty { return manager.statusMessage }
+        if manager.isScanning { return manager.scanPhase }
         if selectionMode {
             return selectedIDs.isEmpty
                 ? "Select lights to act on them in bulk"
@@ -263,6 +290,16 @@ struct ContentView: View {
             if showOnlyOn { return device.isOn }
             return true
         }
+    }
+
+    private var visibleDeviceIDs: Set<String> {
+        var ids = Set(visibleUnassigned.map { $0.id })
+        for room in visibleRooms {
+            ids.formUnion(manager.devices(in: room).filter { device in
+                manager.device(device, matchesQuery: searchText) && (!showOnlyOn || device.isOn)
+            }.map { $0.id })
+        }
+        return ids
     }
 
     private var listLayout: some View {
@@ -435,6 +472,17 @@ struct ContentView: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
 
+            DiscoveryDiagnosticsCard()
+                .environmentObject(manager)
+
+            HStack(spacing: 12) {
+                setupBrandCard("LIFX", icon: "dot.radiowaves.left.and.right", tint: .purple,
+                               detail: "Uses UDP broadcast on 56700. Keep the Mac and bulbs on the same subnet.")
+                setupBrandCard("Govee", icon: "network", tint: .orange,
+                               detail: "Requires LAN Control in the Govee Home app and UDP ports 4001–4003.")
+            }
+            .frame(maxWidth: 520)
+
             VStack(alignment: .leading, spacing: 12) {
                 setupStep(0,
                           "Mac and bulbs on the same Wi-Fi",
@@ -460,6 +508,21 @@ struct ContentView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()
+    }
+
+    private func setupBrandCard(_ title: String, icon: String, tint: Color, detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label(title, systemImage: icon)
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(tint)
+            Text(detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
     }
 
     private func setupStep(_ index: Int, _ title: String, _ detail: String) -> some View {
@@ -567,6 +630,14 @@ struct BulkActionBar: View {
                 Button("50%")  { manager.setBrightness(deviceIDs: selectedIDs, value: 0.5) }
                 Button("25%")  { manager.setBrightness(deviceIDs: selectedIDs, value: 0.25) }
                 Button("10%")  { manager.setBrightness(deviceIDs: selectedIDs, value: 0.1) }
+                if !manager.customBrightnessPresets.isEmpty {
+                    Divider()
+                    ForEach(manager.customBrightnessPresets, id: \.self) { value in
+                        Button("Preset \(Int(value * 100))%") { manager.setBrightness(deviceIDs: selectedIDs, value: value) }
+                    }
+                }
+                Divider()
+                Button("Save Current Average as Preset") { manager.addBrightnessPreset(currentAverageBrightness) }
             }
             .fixedSize()
 
@@ -586,9 +657,105 @@ struct BulkActionBar: View {
         .frame(maxWidth: 640)
     }
 
+    private var currentAverageBrightness: Double {
+        let selected = manager.devices.filter { selectedIDs.contains($0.id) }
+        guard !selected.isEmpty else { return 0.5 }
+        return selected.reduce(0) { $0 + $1.brightness } / Double(selected.count)
+    }
+
     private func exitSelection() {
         selectedIDs.removeAll()
         selectionMode = false
+    }
+}
+
+struct DiscoveryDiagnosticsCard: View {
+    @EnvironmentObject var manager: LightManager
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("Discovery diagnostics", systemImage: "wave.3.right.circle")
+                .font(.callout.weight(.semibold))
+            HStack {
+                Text(manager.scanPhase)
+                Spacer()
+                Text("Responses: \(manager.scanResponseCount)")
+                    .monospacedDigit()
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            if let date = manager.lastScanDate {
+                Text("Last scan: \(date.formatted(.relative(presentation: .named)))")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: 440, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
+    }
+}
+
+struct KeyboardShortcutsView: View {
+    @Environment(\.dismiss) private var dismiss
+    private let shortcuts = [
+        ("Scan for Lights", "⌘R"),
+        ("New Room", "⌘N"),
+        ("Find", "⌘F"),
+        ("Scenes", "⇧⌘S"),
+        ("Toggle All Lights", "⇧⌘P"),
+        ("Undo / Redo", "⌘Z / ⇧⌘Z")
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Keyboard Shortcuts").font(.title3.weight(.semibold))
+            ForEach(shortcuts, id: \.0) { item in
+                HStack {
+                    Text(item.0)
+                    Spacer()
+                    Text(item.1).font(.body.monospaced()).foregroundStyle(.secondary)
+                }
+            }
+            HStack { Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.defaultAction) }
+        }
+        .padding(20)
+        .frame(width: 360)
+    }
+}
+
+struct AuroraFireflyOverlay: View {
+    let colors: [Color]
+    @State private var drift = false
+    private let points: [(CGFloat, CGFloat)] = [(0.12,0.25),(0.28,0.72),(0.46,0.18),(0.63,0.64),(0.81,0.32),(0.92,0.78)]
+
+    var body: some View {
+        GeometryReader { proxy in
+            Canvas { context, size in
+                let palette = colors.isEmpty ? [Color.yellow, Color.orange, Color.purple] : colors
+                for (idx, point) in points.enumerated() {
+                    let color = palette[idx % palette.count]
+                    let x = size.width * point.0 + (drift ? 18 : -18) * sin(Double(idx + 1))
+                    let y = size.height * point.1 + (drift ? -14 : 14) * cos(Double(idx + 2))
+                    context.fill(Path(ellipseIn: CGRect(x: x, y: y, width: 7, height: 7)), with: .color(color.opacity(0.55)))
+                    context.addFilter(.blur(radius: 8))
+                    context.fill(Path(ellipseIn: CGRect(x: x - 10, y: y - 10, width: 27, height: 27)), with: .color(color.opacity(0.16)))
+                    context.drawLayer { layer in
+                        if idx > 0 {
+                            let previous = points[idx - 1]
+                            var path = Path()
+                            path.move(to: CGPoint(x: size.width * previous.0, y: size.height * previous.1))
+                            path.addLine(to: CGPoint(x: x + 3, y: y + 3))
+                            layer.stroke(path, with: .color(color.opacity(0.08)), lineWidth: 1)
+                        }
+                    }
+                }
+            }
+            .ignoresSafeArea()
+            .onAppear {
+                withAnimation(.easeInOut(duration: 5).repeatForever(autoreverses: true)) { drift.toggle() }
+            }
+        }
     }
 }
 

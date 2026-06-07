@@ -9,6 +9,10 @@ final class LightManager: ObservableObject {
     @Published private(set) var favoriteIDs: Set<String> = []
     @Published private(set) var scenes: [LightingScene] = []
     @Published private(set) var isScanning: Bool = false
+    @Published private(set) var scanPhase: String = "Idle"
+    @Published private(set) var lastScanDate: Date?
+    @Published private(set) var scanResponseCount: Int = 0
+    @Published private(set) var commandPendingIDs: Set<String> = []
     @Published var statusMessage: String = ""
     @Published var commandError: String?
     @Published var commandErrorUndo: (() -> Void)?  // optional undo action on the error toast
@@ -17,6 +21,7 @@ final class LightManager: ObservableObject {
     @Published private(set) var collapsedRooms: Set<UUID> = []
     // Holds the last deleted room and its position for undo.
     @Published private(set) var lastDeletedRoom: (room: Room, index: Int)? = nil
+    @Published private(set) var lastDeletedScene: (scene: LightingScene, index: Int)? = nil
 
     private var errorClearTask: Task<Void, Never>?
     private var lifx: LIFXClient?
@@ -24,9 +29,15 @@ final class LightManager: ObservableObject {
     private var refreshTimer: Timer?
     private var scheduleTimer: Timer?
     private var scanGeneration: Int = 0     // incremented each scan; clears isScanning safely
+    private var hasStarted = false
+    private var lastScheduleCheck: Date?
 
     // Custom display names keyed by device id, persisted across sessions.
     private var customNames: [String: String] = [:]
+
+    @Published private(set) var favoriteRoomIDs: Set<UUID> = []
+    @Published private(set) var favoriteSceneIDs: Set<UUID> = []
+    @Published private(set) var customBrightnessPresets: [Double] = []
 
     // Configurable sunrise/sunset times (hour and minute).
     @Published var sunriseHour: Int   = 6
@@ -44,6 +55,9 @@ final class LightManager: ObservableObject {
     private let customNamesDefaultsKey  = "LumenDesk.customNames.v1"
     private let collapsedRoomsKey       = "LumenDesk.collapsedRooms.v1"
     private let solarKey                = "LumenDesk.solar.v1"
+    fileprivate let roomFavoritesDefaultsKey = "LumenDesk.favoriteRooms.v1"
+    fileprivate let sceneFavoritesDefaultsKey = "LumenDesk.favoriteScenes.v1"
+    fileprivate let brightnessPresetsKey    = "LumenDesk.brightnessPresets.v1"
 
     // MARK: - Undo / redo state
 
@@ -68,10 +82,18 @@ final class LightManager: ObservableObject {
         scenes = loadScenes()
         customNames = loadCustomNames()
         collapsedRooms = loadCollapsedRooms()
+        favoriteRoomIDs = loadUUIDSet(forKey: roomFavoritesDefaultsKey)
+        favoriteSceneIDs = loadUUIDSet(forKey: sceneFavoritesDefaultsKey)
+        customBrightnessPresets = loadBrightnessPresets()
         loadSolarPrefs()
     }
 
     func start() {
+        guard !hasStarted else {
+            scan()
+            return
+        }
+        hasStarted = true
         do {
             let lx = try LIFXClient()
             lx.delegate = self
@@ -93,13 +115,25 @@ final class LightManager: ObservableObject {
 
     func scan() {
         isScanning = true
+        scanPhase = "Sending discovery broadcasts"
+        lastScanDate = Date()
+        scanResponseCount = 0
         lifx?.discover()
         govee?.discover()
         scanGeneration += 1
         let gen = scanGeneration
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+            Task { @MainActor in
+                guard let self, self.scanGeneration == gen else { return }
+                self.scanPhase = "Querying bulb state"
+            }
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-            guard let self, self.scanGeneration == gen else { return }
-            self.isScanning = false
+            Task { @MainActor in
+                guard let self, self.scanGeneration == gen else { return }
+                self.isScanning = false
+                self.scanPhase = self.scanResponseCount == 0 ? "No responses found" : "Scan complete: \(self.scanResponseCount) response\(self.scanResponseCount == 1 ? "" : "s")"
+            }
         }
     }
 
@@ -112,56 +146,67 @@ final class LightManager: ObservableObject {
 
     private func startScheduleTimer() {
         scheduleTimer?.invalidate()
-        scheduleTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.checkSchedules() }
+        let seconds = Calendar.current.component(.second, from: Date())
+        let delay = TimeInterval(max(1, 60 - seconds))
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                self.checkSchedules()
+                self.scheduleTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+                    Task { @MainActor in self?.checkSchedules() }
+                }
+            }
         }
     }
 
     private func checkSchedules() {
-        let cal = Calendar.current
         let now = Date()
+        let previous = lastScheduleCheck ?? now.addingTimeInterval(-75)
+        lastScheduleCheck = now
+        let cal = Calendar.current
         let nowHour   = cal.component(.hour, from: now)
         let nowMinute = cal.component(.minute, from: now)
         let nowKey    = String(format: "%02d:%02d", nowHour, nowMinute)
 
         for room in rooms {
             for entry in room.schedules where entry.isEnabled {
-                // Prevent double-fire when timer drift causes two ticks in the same minute.
                 if scheduleFiredThisMinute[entry.id] == nowKey { continue }
-
-                let (targetH, targetM): (Int, Int) = {
-                    switch entry.action {
-                    case .atSunrise:
-                        let base = sunriseHour * 60 + sunriseMinute + entry.offsetMinutes
-                        let clamped = max(0, min(1439, base))
-                        return (clamped / 60, clamped % 60)
-                    case .atSunset:
-                        let base = sunsetHour * 60 + sunsetMinute + entry.offsetMinutes
-                        let clamped = max(0, min(1439, base))
-                        return (clamped / 60, clamped % 60)
-                    default:
-                        return (entry.hour, entry.minute)
-                    }
-                }()
-
-                guard targetH == nowHour, targetM == nowMinute else { continue }
+                guard schedule(entry, shouldFireBetween: previous, and: now) else { continue }
 
                 scheduleFiredThisMinute[entry.id] = nowKey
                 let lights = devices(in: room)
                 switch entry.action {
                 case .turnOn, .atSunrise:
-                    for d in lights { d.isOn = true; sendPower(d, on: true) }
+                    for d in lights { d.isOn = true; markPending(d.id); sendPower(d, on: true) }
                 case .turnOff, .atSunset:
-                    for d in lights { d.isOn = false; sendPower(d, on: false) }
+                    for d in lights { d.isOn = false; markPending(d.id); sendPower(d, on: false) }
                 default:
                     if let brightness = entry.action.brightnessValue {
-                        for d in lights { d.brightness = brightness; sendBrightness(d, value: brightness) }
+                        for d in lights { d.brightness = brightness; markPending(d.id); sendBrightness(d, value: brightness) }
                     }
                 }
             }
         }
-        // Purge stale entries from a previous minute.
         scheduleFiredThisMinute = scheduleFiredThisMinute.filter { $0.value == nowKey }
+    }
+
+    private func schedule(_ entry: ScheduleEntry, shouldFireBetween previous: Date, and now: Date) -> Bool {
+        guard let target = scheduledOccurrenceToday(for: entry, relativeTo: now) else { return false }
+        return target > previous && target <= now
+    }
+
+    fileprivate func scheduledOccurrenceToday(for entry: ScheduleEntry, relativeTo date: Date) -> Date? {
+        let cal = Calendar.current
+        let totalMinutes: Int
+        switch entry.action {
+        case .atSunrise:
+            totalMinutes = max(0, min(1439, sunriseHour * 60 + sunriseMinute + entry.offsetMinutes))
+        case .atSunset:
+            totalMinutes = max(0, min(1439, sunsetHour * 60 + sunsetMinute + entry.offsetMinutes))
+        default:
+            totalMinutes = max(0, min(1439, entry.hour * 60 + entry.minute))
+        }
+        return cal.date(byAdding: .minute, value: totalMinutes, to: cal.startOfDay(for: date))
     }
 
     private func refreshAll() {
@@ -178,6 +223,7 @@ final class LightManager: ObservableObject {
     private func markSeen(_ device: LightDevice) {
         device.lastSeen = Date()
         device.isStale = false
+        commandPendingIDs.remove(device.id)
     }
 
     // MARK: - Custom display names
@@ -195,7 +241,7 @@ final class LightManager: ObservableObject {
         persistCustomNames()
     }
 
-    private func persistCustomNames() {
+    fileprivate func persistCustomNames() {
         if let data = try? JSONEncoder().encode(customNames) {
             UserDefaults.standard.set(data, forKey: customNamesDefaultsKey)
         }
@@ -216,7 +262,7 @@ final class LightManager: ObservableObject {
         sunsetHour = hour; sunsetMinute = minute; persistSolarPrefs()
     }
 
-    private func persistSolarPrefs() {
+    fileprivate func persistSolarPrefs() {
         let d: [String: Int] = [
             "sunriseHour": sunriseHour, "sunriseMinute": sunriseMinute,
             "sunsetHour": sunsetHour,   "sunsetMinute": sunsetMinute
@@ -245,7 +291,7 @@ final class LightManager: ObservableObject {
 
     func isRoomExpanded(_ roomID: UUID) -> Bool { !collapsedRooms.contains(roomID) }
 
-    private func persistCollapsedRooms() {
+    fileprivate func persistCollapsedRooms() {
         if let data = try? JSONEncoder().encode(Array(collapsedRooms)) {
             UserDefaults.standard.set(data, forKey: collapsedRoomsKey)
         }
@@ -272,6 +318,15 @@ final class LightManager: ObservableObject {
         }
     }
 
+    // MARK: - Command pending state
+
+    fileprivate func markPending(_ deviceID: String) {
+        commandPendingIDs.insert(deviceID)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+            Task { @MainActor in self?.commandPendingIDs.remove(deviceID) }
+        }
+    }
+
     // MARK: - Control
 
     func setPower(_ device: LightDevice, on: Bool) {
@@ -280,12 +335,14 @@ final class LightManager: ObservableObject {
         }
         recordChange([device])
         device.isOn = on
+        markPending(device.id)
         sendPower(device, on: on)
     }
 
     func setBrightness(_ device: LightDevice, value: Double) {
         recordChange([device])
         device.brightness = value
+        markPending(device.id)
         sendBrightness(device, value: value)
     }
 
@@ -295,13 +352,15 @@ final class LightManager: ObservableObject {
         }
         recordChange([device])
         device.color = color
+        markPending(device.id)
         sendColor(device, color: color)
     }
 
     func setKelvin(_ device: LightDevice, kelvin: Int) {
         recordChange([device])
         device.kelvin = kelvin
-        sendBrightness(device, value: device.brightness)  // re-sends with new kelvin
+        markPending(device.id)
+        sendColorTemperature(device, kelvin: kelvin)
     }
 
     // MARK: - Room & global bulk controls
@@ -313,13 +372,13 @@ final class LightManager: ObservableObject {
             publishError("\(staleCount) light\(staleCount == 1 ? "" : "s") in \u{201C}\(room.name)\u{201D} may be offline.")
         }
         recordChange(lights)
-        for d in lights { d.isOn = on; sendPower(d, on: on) }
+        for d in lights { d.isOn = on; markPending(d.id); sendPower(d, on: on) }
     }
 
     func setBrightness(in room: Room, value: Double) {
         let lights = devices(in: room)
         recordChange(lights)
-        for d in lights { d.brightness = value; sendBrightness(d, value: value) }
+        for d in lights { d.brightness = value; markPending(d.id); sendBrightness(d, value: value) }
     }
 
     func setAllPower(on: Bool) {
@@ -328,24 +387,24 @@ final class LightManager: ObservableObject {
             publishError("\(staleCount) light\(staleCount == 1 ? "" : "s") may be offline.")
         }
         recordChange(devices)
-        for d in devices { d.isOn = on; sendPower(d, on: on) }
+        for d in devices { d.isOn = on; markPending(d.id); sendPower(d, on: on) }
     }
 
     func setAllBrightness(_ value: Double) {
         recordChange(devices)
-        for d in devices { d.brightness = value; sendBrightness(d, value: value) }
+        for d in devices { d.brightness = value; markPending(d.id); sendBrightness(d, value: value) }
     }
 
     func setPower(deviceIDs: Set<String>, on: Bool) {
         let lights = devices.filter { deviceIDs.contains($0.id) }
         recordChange(lights)
-        for d in lights { d.isOn = on; sendPower(d, on: on) }
+        for d in lights { d.isOn = on; markPending(d.id); sendPower(d, on: on) }
     }
 
     func setBrightness(deviceIDs: Set<String>, value: Double) {
         let lights = devices.filter { deviceIDs.contains($0.id) }
         recordChange(lights)
-        for d in lights { d.brightness = value; sendBrightness(d, value: value) }
+        for d in lights { d.brightness = value; markPending(d.id); sendBrightness(d, value: value) }
     }
 
     // MARK: - Vendor send helpers
@@ -388,7 +447,16 @@ final class LightManager: ObservableObject {
             let rgb = color.rgbComponents
             govee?.setColor(deviceID: device.backendID,
                             r: Int(rgb.r * 255), g: Int(rgb.g * 255), b: Int(rgb.b * 255),
-                            kelvin: device.kelvin)
+                            kelvin: 0)
+        }
+    }
+
+    private func sendColorTemperature(_ device: LightDevice, kelvin: Int) {
+        switch device.brand {
+        case .lifx:
+            sendBrightness(device, value: device.brightness)
+        case .govee:
+            govee?.setColor(deviceID: device.backendID, r: 255, g: 255, b: 255, kelvin: kelvin)
         }
     }
 
@@ -460,6 +528,7 @@ final class LightManager: ObservableObject {
     // MARK: - Internal helpers
 
     fileprivate func upsert(_ device: LightDevice) {
+        scanResponseCount += 1
         // Apply any persisted custom name.
         device.customName = customNames[device.id]
 
@@ -491,6 +560,7 @@ extension LightManager: LIFXClientDelegate {
         Task { @MainActor in
             let id = "lifx:\(macHex)"
             if let existing = self.device(withID: id) {
+                self.scanResponseCount += 1
                 existing.address = address
                 self.markSeen(existing)
             } else {
@@ -518,6 +588,10 @@ extension LightManager: LIFXClientDelegate {
             self.markSeen(device)
         }
     }
+
+    nonisolated func lifxCommandFailed(_ error: Error) {
+        Task { @MainActor in self.publishError("LIFX command failed: \(error)") }
+    }
 }
 
 // MARK: - Govee delegate
@@ -527,6 +601,7 @@ extension LightManager: GoveeClientDelegate {
         Task { @MainActor in
             let id = "govee:\(deviceID)"
             if let existing = self.device(withID: id) {
+                self.scanResponseCount += 1
                 existing.address = address
                 self.markSeen(existing)
             } else {
@@ -552,6 +627,10 @@ extension LightManager: GoveeClientDelegate {
                                  blue: Double(b) / 255.0)
             self.markSeen(device)
         }
+    }
+
+    nonisolated func goveeCommandFailed(_ error: Error) {
+        Task { @MainActor in self.publishError("Govee command failed: \(error)") }
     }
 }
 
@@ -648,22 +727,93 @@ extension LightManager {
         rooms.first { $0.lightIDs.contains(lightID) }
     }
 
-    func exportRoomsData() -> Data? {
+    struct ExportedConfiguration: Codable {
+        var rooms: [Room]
+        var favoriteIDs: [String]
+        var favoriteRoomIDs: [UUID]
+        var favoriteSceneIDs: [UUID]
+        var scenes: [LightingScene]
+        var customNames: [String: String]
+        var collapsedRooms: [UUID]
+        var sunriseHour: Int
+        var sunriseMinute: Int
+        var sunsetHour: Int
+        var sunsetMinute: Int
+        var brightnessPresets: [Double]
+    }
+
+    func exportRoomsData() -> Data? { exportConfigurationData() }
+
+    func exportConfigurationData() -> Data? {
+        let config = ExportedConfiguration(
+            rooms: rooms,
+            favoriteIDs: Array(favoriteIDs),
+            favoriteRoomIDs: Array(favoriteRoomIDs),
+            favoriteSceneIDs: Array(favoriteSceneIDs),
+            scenes: scenes,
+            customNames: customNames,
+            collapsedRooms: Array(collapsedRooms),
+            sunriseHour: sunriseHour,
+            sunriseMinute: sunriseMinute,
+            sunsetHour: sunsetHour,
+            sunsetMinute: sunsetMinute,
+            brightnessPresets: customBrightnessPresets
+        )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        return try? encoder.encode(rooms)
+        return try? encoder.encode(config)
     }
 
     @discardableResult
     func importRoomsData(_ data: Data) -> Bool {
+        if let config = try? JSONDecoder().decode(ExportedConfiguration.self, from: data) {
+            rooms = config.rooms
+            favoriteIDs = Set(config.favoriteIDs)
+            favoriteRoomIDs = Set(config.favoriteRoomIDs)
+            favoriteSceneIDs = Set(config.favoriteSceneIDs)
+            scenes = config.scenes
+            customNames = config.customNames
+            collapsedRooms = Set(config.collapsedRooms)
+            sunriseHour = config.sunriseHour
+            sunriseMinute = config.sunriseMinute
+            sunsetHour = config.sunsetHour
+            sunsetMinute = config.sunsetMinute
+            customBrightnessPresets = sanitizedPresets(config.brightnessPresets)
+            persistAllConfiguration()
+            reportImportMatchStatus(roomCount: rooms.count)
+            return true
+        }
         guard let decoded = try? JSONDecoder().decode([Room].self, from: data) else {
-            statusMessage = "Import failed — that file isn\u{2019}t a valid LumenDesk configuration."
+            statusMessage = "Import failed — that file isn’t a valid LumenDesk configuration."
             return false
         }
         rooms = decoded
         persistRooms()
-        statusMessage = "Imported \(decoded.count) room\(decoded.count == 1 ? "" : "s")."
+        reportImportMatchStatus(roomCount: decoded.count)
         return true
+    }
+
+    private func reportImportMatchStatus(roomCount: Int) {
+        let importedIDs = Set(rooms.flatMap { $0.lightIDs })
+        let knownIDs = Set(devices.map { $0.id })
+        let missing = importedIDs.subtracting(knownIDs).count
+        if missing > 0 {
+            statusMessage = "Imported \(roomCount) room\(roomCount == 1 ? "" : "s"); \(missing) saved light\(missing == 1 ? "" : "s") not currently discovered."
+        } else {
+            statusMessage = "Imported \(roomCount) room\(roomCount == 1 ? "" : "s") and matched all saved lights."
+        }
+    }
+
+    private func persistAllConfiguration() {
+        persistRooms()
+        persistFavorites()
+        persistScenes()
+        persistCustomNames()
+        persistCollapsedRooms()
+        persistSolarPrefs()
+        persistUUIDSet(favoriteRoomIDs, forKey: roomFavoritesDefaultsKey)
+        persistUUIDSet(favoriteSceneIDs, forKey: sceneFavoritesDefaultsKey)
+        persistBrightnessPresets()
     }
 
     fileprivate func persistRooms() {
@@ -709,6 +859,66 @@ extension LightManager {
               let arr = try? JSONDecoder().decode([String].self, from: data) else { return [] }
         return Set(arr)
     }
+
+
+    func isFavoriteRoom(_ roomID: UUID) -> Bool { favoriteRoomIDs.contains(roomID) }
+
+    func toggleFavoriteRoom(_ roomID: UUID) {
+        if favoriteRoomIDs.contains(roomID) { favoriteRoomIDs.remove(roomID) } else { favoriteRoomIDs.insert(roomID) }
+        persistUUIDSet(favoriteRoomIDs, forKey: roomFavoritesDefaultsKey)
+    }
+
+    func isFavoriteScene(_ sceneID: UUID) -> Bool { favoriteSceneIDs.contains(sceneID) }
+
+    func toggleFavoriteScene(_ sceneID: UUID) {
+        if favoriteSceneIDs.contains(sceneID) { favoriteSceneIDs.remove(sceneID) } else { favoriteSceneIDs.insert(sceneID) }
+        persistUUIDSet(favoriteSceneIDs, forKey: sceneFavoritesDefaultsKey)
+    }
+
+    var favoriteRooms: [Room] { rooms.filter { favoriteRoomIDs.contains($0.id) } }
+    var favoriteScenes: [LightingScene] { scenes.filter { favoriteSceneIDs.contains($0.id) } }
+
+    fileprivate func persistUUIDSet(_ values: Set<UUID>, forKey key: String) {
+        if let data = try? JSONEncoder().encode(Array(values)) { UserDefaults.standard.set(data, forKey: key) }
+    }
+
+    fileprivate func loadUUIDSet(forKey key: String) -> Set<UUID> {
+        guard let data = UserDefaults.standard.data(forKey: key),
+              let arr = try? JSONDecoder().decode([UUID].self, from: data) else { return [] }
+        return Set(arr)
+    }
+
+    func addBrightnessPreset(_ value: Double) {
+        customBrightnessPresets = sanitizedPresets(customBrightnessPresets + [value])
+        persistBrightnessPresets()
+    }
+
+    func deleteBrightnessPreset(_ value: Double) {
+        customBrightnessPresets.removeAll { abs($0 - value) < 0.005 }
+        persistBrightnessPresets()
+    }
+
+    fileprivate func sanitizedPresets(_ values: [Double]) -> [Double] {
+        var seen: Set<Int> = []
+        return values.map { max(0.01, min(1.0, $0)) }
+            .sorted()
+            .filter { value in
+                let key = Int((value * 100).rounded())
+                if seen.contains(key) { return false }
+                seen.insert(key)
+                return true
+            }
+    }
+
+    fileprivate func persistBrightnessPresets() {
+        if let data = try? JSONEncoder().encode(customBrightnessPresets) { UserDefaults.standard.set(data, forKey: brightnessPresetsKey) }
+    }
+
+    fileprivate func loadBrightnessPresets() -> [Double] {
+        guard let data = UserDefaults.standard.data(forKey: brightnessPresetsKey),
+              let decoded = try? JSONDecoder().decode([Double].self, from: data) else { return [] }
+        return sanitizedPresets(decoded)
+    }
 }
 
 // MARK: - Scenes
@@ -748,6 +958,7 @@ extension LightManager {
             d.brightness = snap.brightness
             d.kelvin = snap.kelvin
             d.isOn = snap.isOn
+            markPending(d.id)
             sendColor(d, color: color)
             if d.brand == .govee {
                 govee?.setBrightness(deviceID: d.backendID, percent: Int(snap.brightness * 100))
@@ -755,13 +966,30 @@ extension LightManager {
             sendPower(d, on: snap.isOn)
         }
         if staleCount > 0 {
-            publishError("Applied \u{201C}\(scene.name)\u{201D} — \(staleCount) light\(staleCount == 1 ? "" : "s") may be offline.")
+            publishError("Applied \u{201C}\(scene.name)\u{201D} — \(staleCount) light\(staleCount == 1 ? "" : "s") may be offline.") { self.undo() }
+        } else {
+            publishError("Applied \u{201C}\(scene.name)\u{201D}.") { self.undo() }
         }
     }
 
     func deleteScene(_ sceneID: UUID) {
-        scenes.removeAll { $0.id == sceneID }
+        guard let idx = scenes.firstIndex(where: { $0.id == sceneID }) else { return }
+        let deleted = scenes[idx]
+        lastDeletedScene = (scene: deleted, index: idx)
+        scenes.remove(at: idx)
+        favoriteSceneIDs.remove(sceneID)
         persistScenes()
+        persistUUIDSet(favoriteSceneIDs, forKey: sceneFavoritesDefaultsKey)
+        publishError("Scene “\(deleted.name)” deleted.") { self.undoDeleteScene() }
+    }
+
+    func undoDeleteScene() {
+        guard let (scene, index) = lastDeletedScene else { return }
+        scenes.insert(scene, at: min(index, scenes.count))
+        lastDeletedScene = nil
+        persistScenes()
+        commandError = nil
+        commandErrorUndo = nil
     }
 
     func renameScene(_ sceneID: UUID, to name: String) {
@@ -822,6 +1050,51 @@ extension LightManager {
 
     var hasActiveSchedules: Bool {
         rooms.contains { room in room.schedules.contains { $0.isEnabled } }
+    }
+
+    func nextRunDescription(for entry: ScheduleEntry) -> String {
+        guard let today = scheduledOccurrenceToday(for: entry, relativeTo: Date()) else { return "No next run" }
+        let next = today > Date() ? today : Calendar.current.date(byAdding: .day, value: 1, to: today) ?? today
+        return "Next runs \(next.formatted(.relative(presentation: .named))) at \(next.formatted(date: .omitted, time: .shortened))"
+    }
+
+    func conflictWarnings(for roomID: UUID) -> [String] {
+        let entries = schedules(for: roomID).filter { $0.isEnabled }
+        var warnings: [String] = []
+        guard entries.count > 1 else { return [] }
+        for i in 0..<(entries.count - 1) {
+            for j in (i + 1)..<entries.count {
+                let first = entries[i]
+                let second = entries[j]
+                if abs(scheduledMinute(first) - scheduledMinute(second)) <= 5 {
+                    warnings.append("\(first.action.displayName) and \(second.action.displayName) are within 5 minutes.")
+                }
+            }
+        }
+        return warnings
+    }
+
+    fileprivate func scheduledMinute(_ entry: ScheduleEntry) -> Int {
+        switch entry.action {
+        case .atSunrise: return max(0, min(1439, sunriseHour * 60 + sunriseMinute + entry.offsetMinutes))
+        case .atSunset: return max(0, min(1439, sunsetHour * 60 + sunsetMinute + entry.offsetMinutes))
+        default: return max(0, min(1439, entry.hour * 60 + entry.minute))
+        }
+    }
+
+    func applyEstimatedSolarTimes() {
+        let month = Calendar.current.component(.month, from: Date())
+        switch month {
+        case 4...8:
+            setSunriseTime(hour: 5, minute: 45)
+            setSunsetTime(hour: 20, minute: 30)
+        case 11, 12, 1, 2:
+            setSunriseTime(hour: 7, minute: 15)
+            setSunsetTime(hour: 17, minute: 0)
+        default:
+            setSunriseTime(hour: 6, minute: 30)
+            setSunsetTime(hour: 19, minute: 0)
+        }
     }
 }
 

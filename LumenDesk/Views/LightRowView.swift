@@ -11,6 +11,12 @@ struct LightRowView: View {
     @State private var renamingName: Bool = false
     @State private var nameDraft: String = ""
     @FocusState private var nameFocused: Bool
+    @State private var colorMode: LightColorMode = .color
+
+    private enum LightColorMode: String, CaseIterable {
+        case color = "Color"
+        case white = "White"
+    }
 
     private var brightnessBinding: Binding<Double> {
         Binding(get: { device.brightness },
@@ -102,7 +108,14 @@ struct LightRowView: View {
                         Text(device.address)
                             .font(.caption).foregroundStyle(.secondary)
                             .accessibilityHidden(true)
+                        if manager.commandPendingIDs.contains(device.id) {
+                            ProgressView().controlSize(.mini)
+                                .help("Waiting for bulb confirmation")
+                        }
                     }
+                    Text(device.isStale ? "Last seen \(device.lastSeen.formatted(.relative(presentation: .named)))" : "Confirmed \(device.lastSeen.formatted(.relative(presentation: .named)))")
+                        .font(.caption2)
+                        .foregroundStyle(device.isStale ? .orange : .tertiary)
                 }
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel(
@@ -122,15 +135,26 @@ struct LightRowView: View {
             }
 
             VStack(spacing: 6) {
-                HStack(spacing: 6) {
-                    ForEach(Self.colorSwatches, id: \.label) { swatch in
-                        swatchButton(swatch)
+                Picker("Light mode", selection: $colorMode) {
+                    ForEach(LightColorMode.allCases, id: \.self) { mode in
+                        Text(mode.rawValue).tag(mode)
                     }
-                    Spacer(minLength: 0)
-                    ColorPicker("", selection: colorBinding, supportsOpacity: false)
-                        .labelsHidden()
-                        .disabled(controlsDisabled)
-                        .accessibilityLabel("\(device.label) color")
+                }
+                .pickerStyle(.segmented)
+                .disabled(selectionMode || !device.isOn)
+                .accessibilityLabel("\(device.label) light mode")
+
+                if colorMode == .color {
+                    HStack(spacing: 6) {
+                        ForEach(Self.colorSwatches, id: \.label) { swatch in
+                            swatchButton(swatch)
+                        }
+                        Spacer(minLength: 0)
+                        ColorPicker("", selection: colorBinding, supportsOpacity: false)
+                            .labelsHidden()
+                            .disabled(controlsDisabled)
+                            .accessibilityLabel("\(device.label) color")
+                    }
                 }
 
                 HStack(spacing: 10) {
@@ -144,25 +168,27 @@ struct LightRowView: View {
                         .accessibilityHidden(true)
                 }
 
-                // Colour-temperature slider — relevant when using white-light mode.
-                HStack(spacing: 10) {
-                    Image(systemName: "thermometer.low")
-                        .foregroundStyle(.orange.opacity(0.7))
-                        .font(.caption)
-                        .accessibilityHidden(true)
-                    Slider(value: kelvinBinding, in: 2500...9000, step: 100)
-                        .disabled(controlsDisabled)
-                        .accessibilityLabel("\(device.label) colour temperature")
-                        .accessibilityValue("\(device.kelvin) Kelvin")
-                    Image(systemName: "thermometer.high")
-                        .foregroundStyle(.blue.opacity(0.7))
-                        .font(.caption)
-                        .accessibilityHidden(true)
-                    Text("\(device.kelvin)K")
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        .frame(width: 40, alignment: .trailing)
-                        .accessibilityHidden(true)
+                if colorMode == .white {
+                    // Colour-temperature slider — relevant when using white-light mode.
+                    HStack(spacing: 10) {
+                        Image(systemName: "thermometer.low")
+                            .foregroundStyle(.orange.opacity(0.7))
+                            .font(.caption)
+                            .accessibilityHidden(true)
+                        Slider(value: kelvinBinding, in: 2500...9000, step: 100)
+                            .disabled(controlsDisabled)
+                            .accessibilityLabel("\(device.label) colour temperature")
+                            .accessibilityValue("\(device.kelvin) Kelvin")
+                        Image(systemName: "thermometer.high")
+                            .foregroundStyle(.blue.opacity(0.7))
+                            .font(.caption)
+                            .accessibilityHidden(true)
+                        Text("\(device.kelvin)K")
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .frame(width: 40, alignment: .trailing)
+                            .accessibilityHidden(true)
+                    }
                 }
             }
         }

@@ -1,14 +1,12 @@
 import SwiftUI
 
 /// A horizontally scrollable strip of compact tiles for the user's starred
-/// lights. Hidden entirely when no favorites are set. Each tile exposes the
-/// power toggle directly so frequently-used lights stay one click away.
+/// lights, rooms, and scenes. Hidden entirely when nothing is pinned.
 struct FavoritesStripView: View {
     @EnvironmentObject var manager: LightManager
 
     var body: some View {
-        let favorites = manager.favoriteDevices
-        if !favorites.isEmpty {
+        if hasFavorites {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
                     Image(systemName: "star.fill")
@@ -22,7 +20,13 @@ struct FavoritesStripView: View {
                 }
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 10) {
-                        ForEach(favorites) { device in
+                        ForEach(manager.favoriteRooms) { room in
+                            FavoriteRoomTile(room: room)
+                        }
+                        ForEach(manager.favoriteScenes) { scene in
+                            FavoriteSceneTile(scene: scene)
+                        }
+                        ForEach(manager.favoriteDevices) { device in
                             FavoriteTileView(device: device)
                         }
                     }
@@ -30,6 +34,65 @@ struct FavoritesStripView: View {
                 }
             }
         }
+    }
+
+    private var hasFavorites: Bool {
+        !manager.favoriteDevices.isEmpty || !manager.favoriteRooms.isEmpty || !manager.favoriteScenes.isEmpty
+    }
+}
+
+private struct FavoriteRoomTile: View {
+    @EnvironmentObject var manager: LightManager
+    let room: Room
+
+    var body: some View {
+        let lights = manager.devices(in: room)
+        let onCount = lights.filter { $0.isOn }.count
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Image(systemName: "rectangle.stack.fill")
+                    .foregroundStyle(Color.accentColor)
+                Text(room.name).lineLimit(1).help(room.name)
+                Toggle("", isOn: Binding(
+                    get: { !lights.isEmpty && lights.allSatisfy { $0.isOn } },
+                    set: { manager.setPower(in: room, on: $0) }
+                ))
+                .toggleStyle(.switch)
+                .labelsHidden()
+                .controlSize(.mini)
+                .disabled(lights.isEmpty)
+            }
+            Text("\(onCount) of \(lights.count) on")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .favoriteTileStyle()
+        .contextMenu { Button("Remove Room Favorite") { manager.toggleFavoriteRoom(room.id) } }
+    }
+}
+
+private struct FavoriteSceneTile: View {
+    @EnvironmentObject var manager: LightManager
+    let scene: LightingScene
+
+    var body: some View {
+        Button {
+            manager.applyScene(scene)
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "wand.and.stars")
+                    .foregroundStyle(.purple)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(scene.name).lineLimit(1).help(scene.name)
+                    Text("\(scene.snapshots.count) lights")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .favoriteTileStyle()
+        .contextMenu { Button("Remove Scene Favorite") { manager.toggleFavoriteScene(scene.id) } }
     }
 }
 
@@ -63,21 +126,28 @@ private struct FavoriteTileView: View {
                     .accessibilityLabel(device.isOn ? "Turn off \(device.label)" : "Turn on \(device.label)")
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color(nsColor: .controlBackgroundColor))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
-        )
+        .favoriteTileStyle()
         .opacity(device.isStale ? 0.6 : 1)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(device.label)\(device.isStale ? ", may be offline" : "")")
         .contextMenu {
             Button("Remove from Favorites") { manager.toggleFavorite(device.id) }
         }
+    }
+}
+
+private extension View {
+    func favoriteTileStyle() -> some View {
+        self
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color(nsColor: .controlBackgroundColor))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
+            )
     }
 }

@@ -3,6 +3,7 @@ import Foundation
 protocol LIFXClientDelegate: AnyObject {
     func lifxDiscovered(macHex: String, address: String)
     func lifxDidUpdate(macHex: String, label: String, color: LIFXHSBK, isOn: Bool)
+    func lifxCommandFailed(_ error: Error)
 }
 
 /// Drives LIFX LAN discovery and control. Discovery broadcasts a GetService
@@ -38,21 +39,29 @@ final class LIFXClient {
     func refresh(macHex: String) {
         guard let host = addressesByMac[macHex], let mac = Data(hex: macHex) else { return }
         let pkt = LIFXProtocol.packet(type: .lightGet, source: source, target: mac, payload: Data())
-        try? socket.send(pkt, to: host, port: LIFXProtocol.port)
+        sendCommand(pkt, to: host)
     }
 
     func setPower(macHex: String, on: Bool) {
         guard let host = addressesByMac[macHex], let mac = Data(hex: macHex) else { return }
         let payload = LIFXProtocol.setPowerPayload(on: on)
         let pkt = LIFXProtocol.packet(type: .setLightPower, source: source, target: mac, payload: payload)
-        try? socket.send(pkt, to: host, port: LIFXProtocol.port)
+        sendCommand(pkt, to: host)
     }
 
     func setColor(macHex: String, color: LIFXHSBK, durationMS: UInt32 = 200) {
         guard let host = addressesByMac[macHex], let mac = Data(hex: macHex) else { return }
         let payload = LIFXProtocol.setColorPayload(color, durationMS: durationMS)
         let pkt = LIFXProtocol.packet(type: .lightSetColor, source: source, target: mac, payload: payload)
-        try? socket.send(pkt, to: host, port: LIFXProtocol.port)
+        sendCommand(pkt, to: host)
+    }
+
+    private func sendCommand(_ data: Data, to host: String) {
+        do {
+            try socket.send(data, to: host, port: LIFXProtocol.port)
+        } catch {
+            delegate?.lifxCommandFailed(error)
+        }
     }
 
     // MARK: - Receive
@@ -75,7 +84,7 @@ final class LIFXClient {
             // Immediately query state.
             if let mac = Data(hex: macHex) {
                 let pkt = LIFXProtocol.packet(type: .lightGet, source: source, target: mac, payload: Data())
-                try? socket.send(pkt, to: host, port: LIFXProtocol.port)
+                sendCommand(pkt, to: host)
             }
         case .lightState:
             if let parsed = LIFXProtocol.parseLightState(header.payload) {

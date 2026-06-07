@@ -7,7 +7,14 @@ struct ScenesView: View {
     @State private var newSceneName: String = ""
     @State private var renamingID: UUID?
     @State private var renameDraft: String = ""
+    @State private var searchText: String = ""
     @FocusState private var renameFocused: Bool
+
+    private var visibleScenes: [LightingScene] {
+        let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return manager.scenes }
+        return manager.scenes.filter { $0.name.localizedCaseInsensitiveContains(trimmed) }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -26,9 +33,22 @@ struct ScenesView: View {
 
             Divider()
 
-            captureRow
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
+            VStack(spacing: 10) {
+                captureRow
+                HStack {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    TextField("Search scenes", text: $searchText)
+                        .textFieldStyle(.plain)
+                    if !searchText.isEmpty {
+                        Button { searchText = "" } label: { Image(systemName: "xmark.circle.fill") }
+                            .buttonStyle(.plain)
+                    }
+                }
+                .padding(8)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .textBackgroundColor)))
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
 
             Divider()
 
@@ -37,7 +57,13 @@ struct ScenesView: View {
             } else {
                 ScrollView {
                     VStack(spacing: 8) {
-                        ForEach(manager.scenes) { scene in
+                        if visibleScenes.isEmpty {
+                            Text("No scenes match “\(searchText)”.")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                                .padding(24)
+                        }
+                        ForEach(visibleScenes) { scene in
                             sceneRow(scene)
                         }
                     }
@@ -45,12 +71,12 @@ struct ScenesView: View {
                 }
             }
         }
-        .frame(width: 460, height: 480)
+        .frame(width: 520, height: 520)
     }
 
     private var captureRow: some View {
         HStack(spacing: 8) {
-            TextField("New scene name (e.g. \u{201C}Evening\u{201D})", text: $newSceneName)
+            TextField("New scene name (e.g. “Evening”)", text: $newSceneName)
                 .textFieldStyle(.roundedBorder)
                 .onSubmit(capture)
                 .accessibilityLabel("Scene name")
@@ -91,6 +117,15 @@ struct ScenesView: View {
 
     private func sceneRow(_ scene: LightingScene) -> some View {
         HStack(spacing: 10) {
+            Button {
+                manager.toggleFavoriteScene(scene.id)
+            } label: {
+                Image(systemName: manager.isFavoriteScene(scene.id) ? "star.fill" : "star")
+                    .foregroundStyle(manager.isFavoriteScene(scene.id) ? .yellow : .secondary)
+            }
+            .buttonStyle(.plain)
+            .help(manager.isFavoriteScene(scene.id) ? "Unpin scene" : "Pin scene to favorites")
+
             Image(systemName: "wand.and.stars")
                 .foregroundStyle(.purple)
                 .font(.title3)
@@ -114,7 +149,6 @@ struct ScenesView: View {
                         .font(.callout.weight(.medium))
                 }
 
-                // Preview swatches — one dot per snapshot, sorted by brightness descending.
                 let swatches = sceneSwatches(scene)
                 if !swatches.isEmpty {
                     HStack(spacing: 3) {
@@ -134,9 +168,12 @@ struct ScenesView: View {
                     }
                 }
 
-                Text("\(scene.snapshots.count) light\(scene.snapshots.count == 1 ? "" : "s") \u{00B7} captured \(scene.createdAt.formatted(.relative(presentation: .named)))")
+                Text("\(scene.snapshots.count) light\(scene.snapshots.count == 1 ? "" : "s") · captured \(scene.createdAt.formatted(.relative(presentation: .named)))")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                Text(scenePreview(scene))
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
             }
 
             Spacer()
@@ -147,7 +184,8 @@ struct ScenesView: View {
                 .accessibilityHint("Restores \(scene.snapshots.count) light\(scene.snapshots.count == 1 ? "" : "s") to the saved state")
 
             Menu {
-                Button("Rename\u{2026}") { beginRename(scene) }
+                Button("Rename…") { beginRename(scene) }
+                Button(manager.isFavoriteScene(scene.id) ? "Remove Favorite" : "Favorite") { manager.toggleFavoriteScene(scene.id) }
                 Button("Delete Scene", role: .destructive) { manager.deleteScene(scene.id) }
             } label: {
                 Image(systemName: "ellipsis.circle")
@@ -169,7 +207,12 @@ struct ScenesView: View {
         )
     }
 
-    /// Returns up to 8 preview swatches for a scene, sorted by on-state then brightness.
+    private func scenePreview(_ scene: LightingScene) -> String {
+        let affected = manager.devices.filter { scene.snapshots[$0.id] != nil }.map { $0.label }
+        guard !affected.isEmpty else { return "No currently discovered lights overlap" }
+        return "Affects: " + affected.prefix(4).joined(separator: ", ") + (affected.count > 4 ? " +\(affected.count - 4)" : "")
+    }
+
     private func sceneSwatches(_ scene: LightingScene) -> [(color: Color, isOn: Bool)] {
         let snaps = scene.snapshots.values
             .sorted { lhs, rhs in

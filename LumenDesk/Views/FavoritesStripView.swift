@@ -11,7 +11,7 @@ struct FavoritesStripView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 6) {
                         Image(systemName: "star.fill")
-                            .foregroundStyle(.yellow)
+                            .foregroundStyle(Lumen.gold)
                             .font(.caption)
                             .accessibilityHidden(true)
                         Text("Favorites")
@@ -64,6 +64,7 @@ private struct FavoriteRoomTile: View {
                 .toggleStyle(.switch)
                 .labelsHidden()
                 .controlSize(.mini)
+                .tint(Lumen.pink)
                 .disabled(lights.isEmpty)
             }
             Text(lights.isEmpty ? "No lights" : "\(onCount) of \(lights.count) on")
@@ -85,7 +86,7 @@ private struct FavoriteSceneTile: View {
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: "wand.and.stars")
-                    .foregroundStyle(.purple)
+                    .foregroundStyle(Lumen.violetBright)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(scene.name).lineLimit(1).help(scene.name)
                     Text("\(scene.snapshots.count) lights")
@@ -127,6 +128,7 @@ private struct FavoriteTileView: View {
                     .toggleStyle(.switch)
                     .labelsHidden()
                     .controlSize(.mini)
+                    .tint(Lumen.pink)
                     .accessibilityLabel(device.isOn ? "Turn off \(device.label)" : "Turn on \(device.label)")
             }
         }
@@ -147,11 +149,11 @@ private extension View {
             .padding(.vertical, 8)
             .background(
                 RoundedRectangle(cornerRadius: 8)
-                    .fill(Color(nsColor: .controlBackgroundColor))
+                    .fill(Lumen.surfaceRaised)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 8)
-                    .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
+                    .stroke(Lumen.hairline, lineWidth: 1)
             )
     }
 }

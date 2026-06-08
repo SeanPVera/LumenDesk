@@ -40,7 +40,7 @@ struct ContentView: View {
                     }
                 }
             }
-            .background(Color(nsColor: .windowBackgroundColor))
+            .background(LumenBackground())
             .background(findShortcutButton)
             .sheet(isPresented: $showingNewRoom) { newRoomSheet }
             .sheet(isPresented: $showingScenes) {
@@ -191,6 +191,7 @@ struct ContentView: View {
                         .toggleStyle(.switch)
                         .labelsHidden()
                         .controlSize(.small)
+                        .tint(Lumen.pink)
                         .help("Toggle all lights on or off (⇧⌘P)")
                         .accessibilityLabel("All lights power")
                         .accessibilityHint("Toggles every discovered light")
@@ -261,12 +262,12 @@ struct ContentView: View {
             .padding(.vertical, 5)
             .background(
                 RoundedRectangle(cornerRadius: 6)
-                    .fill(Color(nsColor: .textBackgroundColor))
+                    .fill(Lumen.surfaceRaised)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 6)
-                    .stroke(searchFocused ? Color.accentColor : Color(nsColor: .separatorColor),
-                            lineWidth: searchFocused ? 1.5 : 0.5)
+                    .stroke(searchFocused ? Color.accentColor : Lumen.hairline,
+                            lineWidth: searchFocused ? 1.5 : 1)
             )
 
             // "On only" filter chip
@@ -276,7 +277,7 @@ struct ContentView: View {
             }
             .toggleStyle(.button)
             .controlSize(.small)
-            .tint(.yellow)
+            .tint(Lumen.gold)
             .help("Show only lights that are currently on")
             .accessibilityLabel("Filter to on lights only")
         }
@@ -508,10 +509,7 @@ struct ContentView: View {
             }
             .frame(maxWidth: 440)
             .padding(16)
-            .background(
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(Color(nsColor: .controlBackgroundColor))
-            )
+            .lumenCard()
 
             Button("Scan Now") { manager.scan() }
                 .buttonStyle(.borderedProminent)
@@ -534,7 +532,7 @@ struct ContentView: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
+        .lumenCard(radius: Lumen.tileRadius)
     }
 
     private func setupStep(_ index: Int, _ title: String, _ detail: String) -> some View {
@@ -704,7 +702,7 @@ struct DiscoveryDiagnosticsCard: View {
         }
         .padding(12)
         .frame(maxWidth: 440, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
+        .lumenCard(radius: Lumen.tileRadius)
     }
 }
 
@@ -744,7 +742,7 @@ struct AuroraFireflyOverlay: View {
     var body: some View {
         GeometryReader { proxy in
             Canvas { context, size in
-                let palette = colors.isEmpty ? [Color.yellow, Color.orange, Color.purple] : colors
+                let palette = colors.isEmpty ? [Lumen.violet, Lumen.pink, Lumen.gold] : colors
                 for (idx, point) in points.enumerated() {
                     let color = palette[idx % palette.count]
                     let x = size.width * point.0 + (drift ? 18 : -18) * sin(Double(idx + 1))

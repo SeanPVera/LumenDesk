@@ -47,8 +47,8 @@ extension LightDevice.Brand {
 
     var tint: Color {
         switch self {
-        case .lifx: return .purple
-        case .govee: return .orange
+        case .lifx: return Lumen.violetBright
+        case .govee: return Lumen.coral
         }
     }
 }

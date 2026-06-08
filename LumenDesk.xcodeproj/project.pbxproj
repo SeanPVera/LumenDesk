@@ -27,6 +27,8 @@
 		B100000000000000000015 /* ScheduleEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000015 /* ScheduleEntry.swift */; };
 		B100000000000000000016 /* MenuBarPopoverView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000016 /* MenuBarPopoverView.swift */; };
 		B100000000000000000017 /* ScheduleEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000017 /* ScheduleEditorView.swift */; };
+		B100000000000000000018 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000018 /* Theme.swift */; };
+		B100000000000000000019 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000019 /* OnboardingView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -52,6 +54,8 @@
 		A100000000000000000015 /* ScheduleEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleEntry.swift; sourceTree = "<group>"; };
 		A100000000000000000016 /* MenuBarPopoverView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarPopoverView.swift; sourceTree = "<group>"; };
 		A100000000000000000017 /* ScheduleEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleEditorView.swift; sourceTree = "<group>"; };
+		A100000000000000000018 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
+		A100000000000000000019 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		A100000000000000000099 /* LumenDesk.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LumenDesk.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -79,6 +83,7 @@
 			children = (
 				A100000000000000000001 /* LumenDeskApp.swift */,
 				A100000000000000000002 /* ContentView.swift */,
+				A100000000000000000018 /* Theme.swift */,
 				C100000000000000000003 /* Models */,
 				C100000000000000000004 /* Services */,
 				C100000000000000000007 /* Views */,
@@ -139,6 +144,7 @@
 				A100000000000000000014 /* FavoritesStripView.swift */,
 				A100000000000000000016 /* MenuBarPopoverView.swift */,
 				A100000000000000000017 /* ScheduleEditorView.swift */,
+				A100000000000000000019 /* OnboardingView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -247,6 +253,8 @@
 				B100000000000000000015 /* ScheduleEntry.swift in Sources */,
 				B100000000000000000016 /* MenuBarPopoverView.swift in Sources */,
 				B100000000000000000017 /* ScheduleEditorView.swift in Sources */,
+				B100000000000000000018 /* Theme.swift in Sources */,
+				B100000000000000000019 /* OnboardingView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

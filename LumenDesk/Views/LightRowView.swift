@@ -80,7 +80,7 @@ struct LightRowView: View {
                         if manager.isFavorite(device.id) {
                             Image(systemName: "star.fill")
                                 .font(.caption2)
-                                .foregroundStyle(.yellow)
+                                .foregroundStyle(Lumen.gold)
                                 .accessibilityLabel("Favorite")
                         }
                         if renamingName {
@@ -136,6 +136,7 @@ struct LightRowView: View {
                 Toggle("", isOn: powerBinding)
                     .toggleStyle(.switch)
                     .labelsHidden()
+                    .tint(Lumen.pink)
                     .disabled(selectionMode)
                     .accessibilityLabel(device.isOn ? "Turn off \(device.label)" : "Turn on \(device.label)")
             }
@@ -208,12 +209,13 @@ struct LightRowView: View {
         .padding(12)
         .background(
             RoundedRectangle(cornerRadius: 10)
-                .fill(Color(nsColor: .controlBackgroundColor))
+                .fill(Lumen.surface)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 10)
                 .stroke(borderColor, lineWidth: borderWidth)
         )
+        .shadow(color: device.isOn ? device.color.opacity(0.18) : .clear, radius: 8)
         .overlay {
             if manager.newlyDiscoveredIDs.contains(device.id) {
                 RoundedRectangle(cornerRadius: 10)
@@ -240,8 +242,8 @@ struct LightRowView: View {
 
     private var borderColor: Color {
         if selected { return Color.accentColor }
-        if device.isStale { return Color.orange.opacity(0.5) }
-        return Color(nsColor: .separatorColor)
+        if device.isStale { return Lumen.warning.opacity(0.6) }
+        return Lumen.hairline
     }
 
     private var borderWidth: CGFloat {

@@ -80,6 +80,7 @@ struct ScheduleEditorView: View {
                     Spacer()
                     Button("Estimate") { manager.applyEstimatedSolarTimes() }
                         .font(.caption)
+                        .help("Estimate based on month (assumes Northern Hemisphere)")
                     Button("Configure\u{2026}") { showingSolarSettings = true }
                         .font(.caption)
                 }
@@ -193,22 +194,27 @@ struct ScheduleEditorView: View {
 
                 Spacer()
 
-                Button("Add") {
-                    let entry: ScheduleEntry
-                    if draftAction.isRelativeToSun {
-                        entry = ScheduleEntry(hour: 0, minute: 0,
-                                             offsetMinutes: draftOffset, action: draftAction)
-                    } else {
-                        entry = ScheduleEntry(hour: draftHour, minute: draftMinute,
-                                             offsetMinutes: 0, action: draftAction)
+                VStack(alignment: .trailing, spacing: 2) {
+                    Button("Add") {
+                        let entry: ScheduleEntry
+                        if draftAction.isRelativeToSun {
+                            entry = ScheduleEntry(hour: 0, minute: 0,
+                                                 offsetMinutes: draftOffset, action: draftAction)
+                        } else {
+                            entry = ScheduleEntry(hour: draftHour, minute: draftMinute,
+                                                 offsetMinutes: 0, action: draftAction)
+                        }
+                        manager.addSchedule(entry, to: room.id)
                     }
-                    manager.addSchedule(entry, to: room.id)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(atLimit)
+                    .help(atLimit ? "Maximum of 4 schedules per room" : "Add schedule")
+                    .accessibilityLabel("Add schedule")
+                    .accessibilityHint(atLimit ? "Maximum of 4 schedules reached" : "")
+                    Text("\(manager.schedules(for: room.id).count) of 4")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(atLimit ? .orange : .tertiary)
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(atLimit)
-                .help(atLimit ? "Maximum of 4 schedules per room" : "Add schedule")
-                .accessibilityLabel("Add schedule")
-                .accessibilityHint(atLimit ? "Maximum of 4 schedules reached" : "")
             }
         }
     }
@@ -229,7 +235,7 @@ struct ScheduleEditorView: View {
                 .accessibilityHidden(true)
 
             Picker("Minute", selection: $draftMinute) {
-                ForEach([0, 15, 30, 45], id: \.self) { m in
+                ForEach(0..<60, id: \.self) { m in
                     Text(String(format: "%02d", m)).tag(m)
                 }
             }
@@ -323,7 +329,7 @@ struct SolarSettingsView: View {
             .labelsHidden().frame(width: 60)
             Text(":").foregroundStyle(.secondary)
             Picker("Minute", selection: minute) {
-                ForEach([0, 15, 30, 45], id: \.self) { m in Text(String(format: "%02d", m)).tag(m) }
+                ForEach(0..<60, id: \.self) { m in Text(String(format: "%02d", m)).tag(m) }
             }
             .labelsHidden().frame(width: 60)
         }

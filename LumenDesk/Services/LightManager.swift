@@ -2,6 +2,13 @@ import Foundation
 import SwiftUI
 import AppKit
 
+enum NapPhase: Equatable {
+    case inactive
+    case dimming(endsAt: Date)
+    case holding(endsAt: Date)
+    case brightening(endsAt: Date)
+}
+
 @MainActor
 final class LightManager: ObservableObject {
     @Published private(set) var devices: [LightDevice] = []
@@ -22,12 +29,18 @@ final class LightManager: ObservableObject {
     // Holds the last deleted room and its position for undo.
     @Published private(set) var lastDeletedRoom: (room: Room, index: Int)? = nil
     @Published private(set) var lastDeletedScene: (scene: LightingScene, index: Int)? = nil
+    @Published private(set) var stalenessGeneration: Int = 0
+    @Published private(set) var newlyDiscoveredIDs: Set<String> = []
+    @Published private(set) var whiteModeDeviceIDs: Set<String> = []
+    @Published private(set) var napPhase: NapPhase = .inactive
 
     private var errorClearTask: Task<Void, Never>?
     private var lifx: LIFXClient?
     private var govee: GoveeClient?
     private var refreshTimer: Timer?
     private var scheduleTimer: Timer?
+    private var napTimer: Timer?
+    private var napSnapshotBrightness: [String: Double] = [:]
     private var scanGeneration: Int = 0     // incremented each scan; clears isScanning safely
     private var hasStarted = false
     private var lastScheduleCheck: Date?
@@ -55,6 +68,7 @@ final class LightManager: ObservableObject {
     private let customNamesDefaultsKey  = "LumenDesk.customNames.v1"
     private let collapsedRoomsKey       = "LumenDesk.collapsedRooms.v1"
     private let solarKey                = "LumenDesk.solar.v1"
+    private let whiteModeKey            = "LumenDesk.whiteMode.v1"
     fileprivate let roomFavoritesDefaultsKey = "LumenDesk.favoriteRooms.v1"
     fileprivate let sceneFavoritesDefaultsKey = "LumenDesk.favoriteScenes.v1"
     fileprivate let brightnessPresetsKey    = "LumenDesk.brightnessPresets.v1"
@@ -85,6 +99,7 @@ final class LightManager: ObservableObject {
         favoriteRoomIDs = loadUUIDSet(forKey: roomFavoritesDefaultsKey)
         favoriteSceneIDs = loadUUIDSet(forKey: sceneFavoritesDefaultsKey)
         customBrightnessPresets = loadBrightnessPresets()
+        whiteModeDeviceIDs = loadWhiteMode()
         loadSolarPrefs()
     }
 
@@ -212,7 +227,10 @@ final class LightManager: ObservableObject {
     private func refreshAll() {
         let now = Date()
         for d in devices {
-            if now.timeIntervalSince(d.lastSeen) > 75 { d.isStale = true }
+            if now.timeIntervalSince(d.lastSeen) > 75, !d.isStale {
+                d.isStale = true
+                stalenessGeneration += 1  // triggers manager @Published, re-renders rooms
+            }
             switch d.brand {
             case .lifx:  lifx?.refresh(macHex: d.backendID)
             case .govee: govee?.refresh(deviceID: d.backendID)
@@ -541,6 +559,12 @@ final class LightManager: ObservableObject {
         } else {
             devices.append(device)
             sortDevices()
+            // UX 9: briefly flag newly discovered devices so the UI can highlight them.
+            newlyDiscoveredIDs.insert(device.id)
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                self?.newlyDiscoveredIDs.remove(device.id)
+            }
         }
     }
 
@@ -814,6 +838,7 @@ extension LightManager {
         persistUUIDSet(favoriteRoomIDs, forKey: roomFavoritesDefaultsKey)
         persistUUIDSet(favoriteSceneIDs, forKey: sceneFavoritesDefaultsKey)
         persistBrightnessPresets()
+        persistWhiteMode()
     }
 
     fileprivate func persistRooms() {
@@ -1023,14 +1048,9 @@ extension LightManager {
         guard let idx = rooms.firstIndex(where: { $0.id == roomID }),
               rooms[idx].schedules.count < 4 else { return }
         rooms[idx].schedules.append(entry)
+        // Sort by resolved clock-minute so the list is always chronological.
         rooms[idx].schedules.sort { lhs, rhs in
-            // Sun-relative entries sort by offset; absolute entries by time.
-            if lhs.action.isRelativeToSun && rhs.action.isRelativeToSun {
-                return lhs.offsetMinutes < rhs.offsetMinutes
-            }
-            if lhs.action.isRelativeToSun { return false }
-            if rhs.action.isRelativeToSun { return true }
-            return lhs.hour != rhs.hour ? lhs.hour < rhs.hour : lhs.minute < rhs.minute
+            scheduledMinute(lhs) < scheduledMinute(rhs)
         }
         persistRooms()
     }
@@ -1082,6 +1102,7 @@ extension LightManager {
         }
     }
 
+    // Estimates are for the Northern Hemisphere. Southern Hemisphere users should set times manually.
     func applyEstimatedSolarTimes() {
         let month = Calendar.current.component(.month, from: Date())
         switch month {
@@ -1115,6 +1136,114 @@ extension LightManager {
         if trimmed.isEmpty { return true }
         if room.name.lowercased().contains(trimmed) { return true }
         return devices(in: room).contains { device($0, matchesQuery: query) }
+    }
+}
+
+// MARK: - White mode persistence (UX: color mode survives re-renders)
+
+extension LightManager {
+    func isWhiteMode(_ deviceID: String) -> Bool { whiteModeDeviceIDs.contains(deviceID) }
+
+    func setWhiteMode(_ deviceID: String, white: Bool) {
+        if white { whiteModeDeviceIDs.insert(deviceID) } else { whiteModeDeviceIDs.remove(deviceID) }
+        persistWhiteMode()
+    }
+
+    fileprivate func persistWhiteMode() {
+        if let data = try? JSONEncoder().encode(Array(whiteModeDeviceIDs)) {
+            UserDefaults.standard.set(data, forKey: whiteModeKey)
+        }
+    }
+
+    private func loadWhiteMode() -> Set<String> {
+        guard let data = UserDefaults.standard.data(forKey: whiteModeKey),
+              let arr = try? JSONDecoder().decode([String].self, from: data) else { return [] }
+        return Set(arr)
+    }
+}
+
+// MARK: - Nap Mode
+
+extension LightManager {
+    func startNapMode() {
+        guard napPhase == .inactive else { cancelNapMode(); return }
+        napSnapshotBrightness = Dictionary(uniqueKeysWithValues: devices.map { ($0.id, $0.brightness) })
+        napPhase = .dimming(endsAt: Date().addingTimeInterval(20 * 60))
+        napTimer?.invalidate()
+        napTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.tickNapMode() }
+        }
+    }
+
+    func cancelNapMode() {
+        napTimer?.invalidate()
+        napTimer = nil
+        for (id, brightness) in napSnapshotBrightness {
+            if let d = device(withID: id) { d.brightness = brightness; sendBrightness(d, value: brightness) }
+        }
+        napSnapshotBrightness = [:]
+        napPhase = .inactive
+    }
+
+    private func tickNapMode() {
+        let now = Date()
+        switch napPhase {
+        case .inactive:
+            break
+        case .dimming(let endsAt):
+            let total: TimeInterval = 20 * 60
+            let remaining = endsAt.timeIntervalSince(now)
+            if remaining <= 0 {
+                for d in devices { d.brightness = 0.01; sendBrightness(d, value: 0.01) }
+                napPhase = .holding(endsAt: now.addingTimeInterval(70 * 60))
+            } else {
+                let factor = pow((remaining / total), 1.5)
+                for (id, startBrightness) in napSnapshotBrightness {
+                    if let d = device(withID: id), d.isOn {
+                        let target = max(0.01, startBrightness * factor)
+                        d.brightness = target
+                        sendBrightness(d, value: target)
+                    }
+                }
+            }
+        case .holding(let endsAt):
+            if endsAt.timeIntervalSince(now) <= 0 {
+                napPhase = .brightening(endsAt: now.addingTimeInterval(10 * 60))
+            }
+        case .brightening(let endsAt):
+            let total: TimeInterval = 10 * 60
+            let remaining = endsAt.timeIntervalSince(now)
+            if remaining <= 0 {
+                let warmWhite = Color(red: 1.0, green: 0.87, blue: 0.67)
+                for d in devices {
+                    if !d.isOn { d.isOn = true; sendPower(d, on: true) }
+                    d.color = warmWhite; d.brightness = 0.5
+                    sendColor(d, color: warmWhite)
+                    if d.brand == .govee { govee?.setBrightness(deviceID: d.backendID, percent: 50) }
+                }
+                napTimer?.invalidate(); napTimer = nil
+                napSnapshotBrightness = []; napPhase = .inactive
+            } else {
+                let progress = (total - remaining) / total
+                for d in devices where d.isOn {
+                    let target = max(0.01, progress * 0.5)
+                    d.brightness = target; sendBrightness(d, value: target)
+                }
+            }
+        }
+    }
+
+    var napCountdownString: String {
+        let now = Date()
+        switch napPhase {
+        case .inactive: return ""
+        case .dimming(let endsAt):
+            return "Dimming · \(Int(max(0, endsAt.timeIntervalSince(now)) / 60))m"
+        case .holding(let endsAt):
+            return "Napping · \(Int(max(0, endsAt.timeIntervalSince(now)) / 60))m left"
+        case .brightening(let endsAt):
+            return "Waking · \(Int(max(0, endsAt.timeIntervalSince(now)) / 60))m"
+        }
     }
 }
 

@@ -233,7 +233,9 @@ struct ScenesView: View {
     }
 
     private func commitRename(_ scene: LightingScene) {
-        manager.renameScene(scene.id, to: renameDraft)
+        let trimmed = renameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { renamingID = nil; return }  // Bug 6: discard silently, keep old name
+        manager.renameScene(scene.id, to: trimmed)
         renamingID = nil
     }
 }

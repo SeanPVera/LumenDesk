@@ -80,6 +80,17 @@ struct LumenDeskApp: App {
         guard panel.runModal() == .OK,
               let url = panel.url,
               let data = try? Data(contentsOf: url) else { return }
+
+        // UX 5: Warn before silently overwriting existing configuration.
+        let alert = NSAlert()
+        alert.messageText = "Replace Current Configuration?"
+        let roomWord = manager.rooms.count == 1 ? "room" : "rooms"
+        let sceneWord = manager.scenes.count == 1 ? "scene" : "scenes"
+        alert.informativeText = "Importing \"\(url.lastPathComponent)\" will overwrite \(manager.rooms.count) \(roomWord) and \(manager.scenes.count) \(sceneWord), along with all favorites and custom names. This cannot be undone."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Import")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
         manager.importRoomsData(data)
     }
 }

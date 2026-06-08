@@ -8,9 +8,10 @@ struct LumenDeskApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            RootView()
                 .environmentObject(manager)
                 .frame(minWidth: 520, minHeight: 380)
+                .preferredColorScheme(.dark)
                 .onAppear { manager.start() }
         }
         .windowResizability(.contentSize)
@@ -40,6 +41,7 @@ struct LumenDeskApp: App {
         MenuBarExtra {
             MenuBarPopoverView()
                 .environmentObject(manager)
+                .preferredColorScheme(.dark)
         } label: {
             Image(systemName: "lightbulb.fill")
                 .foregroundStyle(moodColor)
@@ -92,5 +94,28 @@ struct LumenDeskApp: App {
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         manager.importRoomsData(data)
+    }
+}
+
+// MARK: - Root
+
+/// Decides between the first-run guided setup and the main app. The
+/// `hasOnboarded` flag is persisted, so the walkthrough only ever appears on a
+/// fresh install (or after the user resets it).
+struct RootView: View {
+    @EnvironmentObject var manager: LightManager
+    @AppStorage("LumenDesk.hasOnboarded.v1") private var hasOnboarded = false
+
+    var body: some View {
+        ZStack {
+            if hasOnboarded {
+                ContentView()
+                    .transition(.opacity)
+            } else {
+                OnboardingView(onFinish: { hasOnboarded = true })
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.4), value: hasOnboarded)
     }
 }

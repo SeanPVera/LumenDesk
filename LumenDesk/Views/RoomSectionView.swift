@@ -104,7 +104,7 @@ struct RoomSectionView: View {
                 manager.toggleFavoriteRoom(room.id)
             } label: {
                 Image(systemName: manager.isFavoriteRoom(room.id) ? "star.fill" : "star")
-                    .foregroundStyle(manager.isFavoriteRoom(room.id) ? .yellow : .secondary)
+                    .foregroundStyle(manager.isFavoriteRoom(room.id) ? Lumen.gold : .secondary)
             }
             .buttonStyle(.plain)
             .help(manager.isFavoriteRoom(room.id) ? "Unpin room from favorites" : "Pin room to favorites")
@@ -147,14 +147,14 @@ struct RoomSectionView: View {
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 5).padding(.vertical, 1)
-                    .background(Capsule().fill(Color.yellow.opacity(0.15)))
+                    .background(Capsule().fill(Lumen.gold.opacity(0.18)))
                     .accessibilityLabel("\(onCount) of \(allLights.count) on")
             } else if onCount == allLights.count && onCount > 0 {
                 Text("all on")
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 5).padding(.vertical, 1)
-                    .background(Capsule().fill(Color.yellow.opacity(0.15)))
+                    .background(Capsule().fill(Lumen.gold.opacity(0.18)))
                     .accessibilityHidden(true)
             }
 
@@ -170,7 +170,7 @@ struct RoomSectionView: View {
             if manager.schedules(for: room.id).contains(where: { $0.isEnabled }) {
                 Image(systemName: "clock.fill")
                     .font(.caption2)
-                    .foregroundStyle(.blue.opacity(0.8))
+                    .foregroundStyle(Lumen.violetBright)
                     .help("This room has active schedules")
                     .accessibilityLabel("Has active schedules")
             }
@@ -235,6 +235,7 @@ struct RoomSectionView: View {
                 .toggleStyle(.switch)
                 .labelsHidden()
                 .controlSize(.small)
+                .tint(Lumen.pink)
                 .help("Turn off all lights in \(room.name)")
                 .accessibilityLabel("All lights in \(room.name) on")
         case .allOff:
@@ -242,6 +243,7 @@ struct RoomSectionView: View {
                 .toggleStyle(.switch)
                 .labelsHidden()
                 .controlSize(.small)
+                .tint(Lumen.pink)
                 .help("Turn on all lights in \(room.name)")
                 .accessibilityLabel("All lights in \(room.name) off")
         case .mixed:

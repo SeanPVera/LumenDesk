@@ -6,34 +6,38 @@ struct FavoritesStripView: View {
     @EnvironmentObject var manager: LightManager
 
     var body: some View {
-        if hasFavorites {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 6) {
-                    Image(systemName: "star.fill")
-                        .foregroundStyle(.yellow)
-                        .font(.caption)
-                        .accessibilityHidden(true)
-                    Text("Favorites")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                }
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 10) {
-                        ForEach(manager.favoriteRooms) { room in
-                            FavoriteRoomTile(room: room)
-                        }
-                        ForEach(manager.favoriteScenes) { scene in
-                            FavoriteSceneTile(scene: scene)
-                        }
-                        ForEach(manager.favoriteDevices) { device in
-                            FavoriteTileView(device: device)
-                        }
+        Group {
+            if hasFavorites {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "star.fill")
+                            .foregroundStyle(.yellow)
+                            .font(.caption)
+                            .accessibilityHidden(true)
+                        Text("Favorites")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Spacer()
                     }
-                    .padding(.vertical, 2)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 10) {
+                            ForEach(manager.favoriteRooms) { room in
+                                FavoriteRoomTile(room: room)
+                            }
+                            ForEach(manager.favoriteScenes) { scene in
+                                FavoriteSceneTile(scene: scene)
+                            }
+                            ForEach(manager.favoriteDevices) { device in
+                                FavoriteTileView(device: device)
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
                 }
+                .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
+        .animation(.spring(duration: 0.35), value: hasFavorites)
     }
 
     private var hasFavorites: Bool {
@@ -62,7 +66,7 @@ private struct FavoriteRoomTile: View {
                 .controlSize(.mini)
                 .disabled(lights.isEmpty)
             }
-            Text("\(onCount) of \(lights.count) on")
+            Text(lights.isEmpty ? "No lights" : "\(onCount) of \(lights.count) on")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }

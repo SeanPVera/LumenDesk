@@ -132,6 +132,18 @@ struct ContentView: View {
                 .toggleStyle(.button)
                 .controlSize(.small)
                 .help("Aurora Firefly Mode — whimsical ambient glow")
+                Button {
+                    if manager.napPhase != .inactive { manager.cancelNapMode() } else { manager.startNapMode() }
+                } label: {
+                    Label(
+                        manager.napPhase == .inactive ? "Nap" : manager.napCountdownString,
+                        systemImage: manager.napPhase == .inactive ? "moon.fill" : "xmark.circle.fill"
+                    )
+                }
+                .help(manager.napPhase == .inactive
+                      ? "Nap Mode — dims all lights over 20 minutes, holds, then brightens gently to wake you"
+                      : "Cancel Nap Mode")
+                .tint(manager.napPhase == .inactive ? .indigo : .orange)
                 if !manager.devices.isEmpty {
                     Button {
                         selectionMode.toggle()

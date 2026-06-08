@@ -280,9 +280,10 @@ struct RoomSectionView: View {
                 .accessibilityValue("\(Int(masterBrightnessBinding.wrappedValue * 100)) percent")
             Image(systemName: "sun.max").foregroundStyle(.tertiary).font(.caption)
                 .accessibilityHidden(true)
-            Text("All")
-                .font(.caption2)
+            Text("\(Int(masterBrightnessBinding.wrappedValue * 100))%")
+                .font(.caption2.monospacedDigit())
                 .foregroundStyle(.tertiary)
+                .frame(width: 32, alignment: .trailing)
                 .accessibilityHidden(true)
         }
         .padding(.horizontal, 4)

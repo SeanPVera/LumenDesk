@@ -82,28 +82,58 @@ struct MenuBarPopoverView: View {
     private func roomRow(_ room: Room) -> some View {
         let lights = manager.devices(in: room)
         let onCount = lights.filter { $0.isOn }.count
-        return HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(room.name)
-                    .font(.callout.weight(.medium))
-                    .lineLimit(1)
-                Text("\(onCount) of \(lights.count) on")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+        let brightnessBinding = Binding<Double>(
+            get: {
+                let on = lights.filter { $0.isOn }
+                guard !on.isEmpty else { return 1.0 }
+                return on.reduce(0) { $0 + $1.brightness } / Double(on.count)
+            },
+            set: { manager.setBrightness(in: room, value: $0) }
+        )
+        return VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(room.name)
+                        .font(.callout.weight(.medium))
+                        .lineLimit(1)
+                    Text(lights.isEmpty ? "No lights" : "\(onCount) of \(lights.count) on")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Toggle("", isOn: Binding(
+                    get: { !lights.isEmpty && lights.allSatisfy { $0.isOn } },
+                    set: { manager.setPower(in: room, on: $0) }
+                ))
+                .toggleStyle(.switch)
+                .labelsHidden()
+                .controlSize(.small)
+                .disabled(lights.isEmpty)
+                .accessibilityLabel("\(room.name) power, \(onCount) of \(lights.count) on")
             }
-            Spacer()
-            Toggle("", isOn: Binding(
-                get: { !lights.isEmpty && lights.allSatisfy { $0.isOn } },
-                set: { manager.setPower(in: room, on: $0) }
-            ))
-            .toggleStyle(.switch)
-            .labelsHidden()
-            .controlSize(.small)
-            .disabled(lights.isEmpty)
-            .accessibilityLabel("\(room.name) power, \(onCount) of \(lights.count) on")
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+
+            if onCount > 0 {
+                HStack(spacing: 6) {
+                    Image(systemName: "sun.min").foregroundStyle(.tertiary).font(.caption2)
+                        .accessibilityHidden(true)
+                    Slider(value: brightnessBinding, in: 0...1)
+                        .controlSize(.mini)
+                        .accessibilityLabel("\(room.name) brightness")
+                        .accessibilityValue("\(Int(brightnessBinding.wrappedValue * 100)) percent")
+                    Image(systemName: "sun.max").foregroundStyle(.tertiary).font(.caption2)
+                        .accessibilityHidden(true)
+                    Text("\(Int(brightnessBinding.wrappedValue * 100))%")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                        .frame(width: 28, alignment: .trailing)
+                        .accessibilityHidden(true)
+                }
+                .padding(.horizontal, 14)
+                .padding(.bottom, 8)
+            }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
     }
 
     private var unassignedRow: some View {

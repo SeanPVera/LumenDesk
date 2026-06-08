@@ -11,11 +11,17 @@ struct LightRowView: View {
     @State private var renamingName: Bool = false
     @State private var nameDraft: String = ""
     @FocusState private var nameFocused: Bool
-    @State private var colorMode: LightColorMode = .color
 
     private enum LightColorMode: String, CaseIterable {
         case color = "Color"
         case white = "White"
+    }
+
+    private var colorModeBinding: Binding<LightColorMode> {
+        Binding(
+            get: { manager.isWhiteMode(device.id) ? .white : .color },
+            set: { manager.setWhiteMode(device.id, white: $0 == .white) }
+        )
     }
 
     private var brightnessBinding: Binding<Double> {
@@ -135,7 +141,7 @@ struct LightRowView: View {
             }
 
             VStack(spacing: 6) {
-                Picker("Light mode", selection: $colorMode) {
+                Picker("Light mode", selection: colorModeBinding) {
                     ForEach(LightColorMode.allCases, id: \.self) { mode in
                         Text(mode.rawValue).tag(mode)
                     }
@@ -144,7 +150,7 @@ struct LightRowView: View {
                 .disabled(selectionMode || !device.isOn)
                 .accessibilityLabel("\(device.label) light mode")
 
-                if colorMode == .color {
+                if colorModeBinding.wrappedValue == .color {
                     HStack(spacing: 6) {
                         ForEach(Self.colorSwatches, id: \.label) { swatch in
                             swatchButton(swatch)
@@ -168,7 +174,7 @@ struct LightRowView: View {
                         .accessibilityHidden(true)
                 }
 
-                if colorMode == .white {
+                if colorModeBinding.wrappedValue == .white {
                     // Colour-temperature slider — relevant when using white-light mode.
                     HStack(spacing: 10) {
                         Image(systemName: "thermometer.low")
@@ -208,6 +214,14 @@ struct LightRowView: View {
             RoundedRectangle(cornerRadius: 10)
                 .stroke(borderColor, lineWidth: borderWidth)
         )
+        .overlay {
+            if manager.newlyDiscoveredIDs.contains(device.id) {
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(Color.accentColor, lineWidth: 2)
+                    .transition(.opacity.animation(.easeOut(duration: 1.5)))
+            }
+        }
+        .animation(.easeOut(duration: 0.8), value: manager.newlyDiscoveredIDs.contains(device.id))
         .opacity(device.isStale ? 0.6 : 1)
         .help(device.isStale
               ? "Not responding \u{2014} last seen \(device.lastSeen.formatted(.relative(presentation: .named))). Check the bulb\u{2019}s power and network."
@@ -246,6 +260,7 @@ struct LightRowView: View {
 
     private func commitRename() {
         let trimmed = nameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { cancelRename(); return }  // Bug 1: empty submit cancels rather than clearing the name
         manager.setCustomName(device.id, name: trimmed)
         renamingName = false
     }
@@ -267,20 +282,38 @@ struct LightRowView: View {
         ("Purple",      Color(hue: 0.77, saturation: 1, brightness: 1)),
     ]
 
+    private func isActiveSwatch(_ swatch: (label: String, color: Color)) -> Bool {
+        guard device.isOn else { return false }
+        let swatchHSB = swatch.color.hsbComponents
+        let deviceHSB = device.color.hsbComponents
+        return abs(swatchHSB.h - deviceHSB.h) < 0.03 && abs(swatchHSB.s - deviceHSB.s) < 0.05
+    }
+
     private func swatchButton(_ swatch: (label: String, color: Color)) -> some View {
-        Button {
+        let active = isActiveSwatch(swatch)
+        return Button {
             manager.setColor(device, color: swatch.color)
         } label: {
             Circle()
                 .fill(swatch.color)
                 .frame(width: 18, height: 18)
-                .overlay(Circle().stroke(Color.primary.opacity(0.25), lineWidth: 0.5))
+                .overlay(Circle().stroke(active ? Color.white.opacity(0.9) : Color.primary.opacity(0.25),
+                                         lineWidth: active ? 1.5 : 0.5))
+                .overlay(alignment: .center) {
+                    if active {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(.white)
+                    }
+                }
+                .scaleEffect(active ? 1.2 : 1.0)
+                .animation(.spring(duration: 0.2), value: active)
                 .accessibilityHidden(true)
         }
         .buttonStyle(.plain)
         .disabled(controlsDisabled)
         .help(swatch.label)
-        .accessibilityLabel(swatch.label)
+        .accessibilityLabel(active ? "\(swatch.label) (active)" : swatch.label)
     }
 
     // MARK: - Context menu
@@ -330,9 +363,15 @@ struct LightRowView: View {
         }
 
         if let room = currentRoom {
+            let roomLights = manager.devices(in: room)
+            let position = roomLights.firstIndex(where: { $0.id == device.id }) ?? 0
             Divider()
-            Button("Move Up in \(room.name)") { manager.moveLight(device.id, in: room.id, by: -1) }
-            Button("Move Down in \(room.name)") { manager.moveLight(device.id, in: room.id, by: 1) }
+            if position > 0 {
+                Button("Move Up in \(room.name)") { manager.moveLight(device.id, in: room.id, by: -1) }
+            }
+            if position < roomLights.count - 1 {
+                Button("Move Down in \(room.name)") { manager.moveLight(device.id, in: room.id, by: 1) }
+            }
         }
     }
 }

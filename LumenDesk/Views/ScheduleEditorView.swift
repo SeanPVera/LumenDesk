@@ -213,7 +213,7 @@ struct ScheduleEditorView: View {
                     .accessibilityHint(atLimit ? "Maximum of 4 schedules reached" : "")
                     Text("\(manager.schedules(for: room.id).count) of 4")
                         .font(.caption2.monospacedDigit())
-                        .foregroundStyle(atLimit ? .orange : .tertiary)
+                        .foregroundStyle(atLimit ? AnyShapeStyle(.orange) : AnyShapeStyle(.tertiary))
                 }
             }
         }

@@ -134,11 +134,11 @@ enum LIFXProtocol {
 extension Data {
     mutating func appendLE(_ v: UInt16) {
         var x = v.littleEndian
-        withUnsafeBytes(of: &x) { append(contentsOf: $0) }
+        Swift.withUnsafeBytes(of: &x) { append(contentsOf: $0) }
     }
     mutating func appendLE(_ v: UInt32) {
         var x = v.littleEndian
-        withUnsafeBytes(of: &x) { append(contentsOf: $0) }
+        Swift.withUnsafeBytes(of: &x) { append(contentsOf: $0) }
     }
 
     func readLE<T: FixedWidthInteger>(at offset: Int) -> T {

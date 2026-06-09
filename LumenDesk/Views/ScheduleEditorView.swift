@@ -38,13 +38,14 @@ struct ScheduleEditorView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Label("Schedule conflict warning", systemImage: "exclamationmark.triangle.fill")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(Lumen.warning)
                     ForEach(warnings, id: \.self) { warning in
                         Text(warning).font(.caption2).foregroundStyle(.secondary)
                     }
                 }
                 .padding(10)
-                .background(RoundedRectangle(cornerRadius: 8).fill(Color.orange.opacity(0.12)))
+                .background(RoundedRectangle(cornerRadius: 8).fill(Lumen.warning.opacity(0.12)))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Lumen.warning.opacity(0.3), lineWidth: 1))
                 .padding(.horizontal, 16)
                 .padding(.top, 10)
             }
@@ -72,7 +73,7 @@ struct ScheduleEditorView: View {
             if draftAction.isRelativeToSun {
                 HStack(spacing: 6) {
                     Image(systemName: "sun.horizon.fill")
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(Lumen.gold)
                         .font(.caption)
                     Text("Sunrise: \(String(format: "%02d:%02d", manager.sunriseHour, manager.sunriseMinute))  \u{00B7}  Sunset: \(String(format: "%02d:%02d", manager.sunsetHour, manager.sunsetMinute))")
                         .font(.caption)
@@ -89,6 +90,7 @@ struct ScheduleEditorView: View {
             }
         }
         .frame(width: 420, height: 400)
+        .background(LumenBackground(glow: false))
         .sheet(isPresented: $showingSolarSettings) {
             SolarSettingsView().environmentObject(manager)
         }
@@ -152,7 +154,7 @@ struct ScheduleEditorView: View {
                 manager.deleteSchedule(entry.id, from: room.id)
             } label: {
                 Image(systemName: "trash")
-                    .foregroundStyle(.red)
+                    .foregroundStyle(Lumen.danger)
             }
             .buttonStyle(.plain)
             .help("Delete this schedule entry")
@@ -160,14 +162,7 @@ struct ScheduleEditorView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color(nsColor: .controlBackgroundColor))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
-        )
+        .lumenCard(radius: 8)
         .opacity(entry.isEnabled ? 1.0 : 0.5)
     }
 
@@ -213,7 +208,7 @@ struct ScheduleEditorView: View {
                     .accessibilityHint(atLimit ? "Maximum of 4 schedules reached" : "")
                     Text("\(manager.schedules(for: room.id).count) of 4")
                         .font(.caption2.monospacedDigit())
-                        .foregroundStyle(atLimit ? .orange : .tertiary)
+                        .foregroundStyle(atLimit ? Lumen.warning : .tertiary)
                 }
             }
         }
@@ -286,12 +281,12 @@ struct SolarSettingsView: View {
             Divider()
 
             HStack(spacing: 12) {
-                Image(systemName: "sunrise.fill").foregroundStyle(.orange)
+                Image(systemName: "sunrise.fill").foregroundStyle(Lumen.gold)
                 Text("Sunrise").frame(width: 70, alignment: .leading)
                 timePicker(hour: $sunriseHour, minute: $sunriseMinute)
             }
             HStack(spacing: 12) {
-                Image(systemName: "sunset.fill").foregroundStyle(.purple)
+                Image(systemName: "sunset.fill").foregroundStyle(Lumen.violetBright)
                 Text("Sunset").frame(width: 70, alignment: .leading)
                 timePicker(hour: $sunsetHour, minute: $sunsetMinute)
             }
@@ -313,6 +308,7 @@ struct SolarSettingsView: View {
         }
         .padding(20)
         .frame(width: 320)
+        .background(LumenBackground(glow: false))
         .onAppear {
             sunriseHour   = manager.sunriseHour
             sunriseMinute = manager.sunriseMinute

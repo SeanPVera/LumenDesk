@@ -191,9 +191,13 @@ struct OnboardingView: View {
             }
 
             if !manager.devices.isEmpty {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
+                Label("Toggle a light to see which bulb it is.", systemImage: "lightbulb.fill")
+                    .font(.caption)
+                    .foregroundStyle(Lumen.textTertiary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 175), spacing: 12)], spacing: 12) {
                     ForEach(manager.devices) { device in
-                        discoveredChip(device)
+                        DiscoverChip(device: device)
                     }
                 }
                 .animation(.spring(duration: 0.45), value: manager.devices.count)
@@ -226,32 +230,6 @@ struct OnboardingView: View {
                       : "Found \(n) light\(n == 1 ? "" : "s")."
     }
 
-    private func discoveredChip(_ device: LightDevice) -> some View {
-        HStack(spacing: 10) {
-            Circle()
-                .fill(device.isOn ? device.color : Color.gray.opacity(0.4))
-                .frame(width: 16, height: 16)
-                .shadow(color: device.isOn ? device.color.opacity(0.7) : .clear, radius: 5)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(device.label)
-                    .font(.callout.weight(.medium))
-                    .foregroundStyle(Lumen.textPrimary)
-                    .lineLimit(1)
-                Text(device.brand.displayName)
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(device.brand.tint)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .lumenCard(radius: Lumen.tileRadius)
-        .transition(.scale(scale: 0.85).combined(with: .opacity))
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(device.label), \(device.brand.displayName)")
-    }
-
     // MARK: - Step 4: Rooms
 
     private var roomsStep: some View {
@@ -259,16 +237,16 @@ struct OnboardingView: View {
             stepTitle("Group them into rooms",
                       manager.devices.isEmpty
                         ? "No lights to organize yet — you can set up rooms anytime from the main window."
-                        : "Create a room, then tap lights to add them. This is optional.")
+                        : "Pick a room, then tap lights to add them. Toggle a light to see which bulb it is. Optional.")
 
             if !manager.devices.isEmpty {
                 // Room pills + inline create field
                 roomPills
 
                 // Devices to assign
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 10)], spacing: 10) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: 10)], spacing: 10) {
                     ForEach(manager.devices) { device in
-                        assignableChip(device)
+                        AssignChip(device: device, activeRoomID: activeRoomID)
                     }
                 }
             }
@@ -333,41 +311,6 @@ struct OnboardingView: View {
         }
         .buttonStyle(.plain)
         .help(active ? "Tap lights to add them to \(room.name)" : "Select \(room.name)")
-    }
-
-    private func assignableChip(_ device: LightDevice) -> some View {
-        let room = manager.room(forLightID: device.id)
-        let inActiveRoom = room?.id == activeRoomID && activeRoomID != nil
-        return Button {
-            toggleAssign(device)
-        } label: {
-            HStack(spacing: 10) {
-                Circle()
-                    .fill(device.isOn ? device.color : Color.gray.opacity(0.4))
-                    .frame(width: 15, height: 15)
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(device.label)
-                        .font(.callout.weight(.medium))
-                        .foregroundStyle(Lumen.textPrimary)
-                        .lineLimit(1)
-                    Text(room?.name ?? "Unassigned")
-                        .font(.caption2)
-                        .foregroundStyle(room == nil ? Lumen.textTertiary : Lumen.violetBright)
-                }
-                Spacer(minLength: 0)
-                Image(systemName: inActiveRoom ? "checkmark.circle.fill" : "plus.circle")
-                    .foregroundStyle(inActiveRoom ? Lumen.pink : Lumen.textTertiary)
-                    .accessibilityHidden(true)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .lumenCard(radius: Lumen.tileRadius, highlighted: inActiveRoom)
-        }
-        .buttonStyle(.plain)
-        .disabled(activeRoomID == nil)
-        .help(activeRoomID == nil ? "Select or create a room first" : "Add \(device.label) to the selected room")
-        .accessibilityLabel("\(device.label), currently \(room?.name ?? "unassigned")")
     }
 
     // MARK: - Step 5: Done
@@ -472,15 +415,6 @@ struct OnboardingView: View {
         roomFieldFocused = false
     }
 
-    private func toggleAssign(_ device: LightDevice) {
-        guard let rid = activeRoomID else { return }
-        if manager.room(forLightID: device.id)?.id == rid {
-            manager.assign(lightID: device.id, toRoom: nil)
-        } else {
-            manager.assign(lightID: device.id, toRoom: rid)
-        }
-    }
-
     private func advance() {
         switch step {
         case .welcome:  go(.prepare)
@@ -531,5 +465,120 @@ private struct ScanPulse: View {
         .frame(width: 130, height: 130)
         .onAppear { animate = true }
         .accessibilityHidden(true)
+    }
+}
+
+// MARK: - Setup light chips
+
+/// A discovered-light chip with a power toggle, so the user can flip a bulb on
+/// or off and watch which physical light responds. Observes the device so the
+/// toggle and color dot update live; an on-light glows in its own color as an
+/// extra identification cue.
+private struct DiscoverChip: View {
+    @EnvironmentObject var manager: LightManager
+    @ObservedObject var device: LightDevice
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Circle()
+                .fill(device.isOn ? device.color : Color.gray.opacity(0.4))
+                .frame(width: 16, height: 16)
+                .shadow(color: device.isOn ? device.color.opacity(0.7) : .clear, radius: 5)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(device.label)
+                    .font(.callout.weight(.medium))
+                    .foregroundStyle(Lumen.textPrimary)
+                    .lineLimit(1)
+                Text(device.brand.displayName)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(device.brand.tint)
+            }
+            Spacer(minLength: 0)
+            Toggle("", isOn: powerBinding)
+                .toggleStyle(.switch)
+                .labelsHidden()
+                .controlSize(.mini)
+                .tint(Lumen.pink)
+                .help("Turn this light on or off to identify it")
+                .accessibilityLabel(device.isOn ? "Turn off \(device.label)" : "Turn on \(device.label)")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .lumenCard(radius: Lumen.tileRadius, glowColor: device.isOn ? device.color : nil)
+        .transition(.scale(scale: 0.85).combined(with: .opacity))
+    }
+
+    private var powerBinding: Binding<Bool> {
+        Binding(get: { device.isOn }, set: { manager.setPower(device, on: $0) })
+    }
+}
+
+/// An assignable-light chip: a power toggle to identify the bulb, plus a
+/// tappable body that adds or removes the light from the selected room.
+private struct AssignChip: View {
+    @EnvironmentObject var manager: LightManager
+    @ObservedObject var device: LightDevice
+    let activeRoomID: UUID?
+
+    var body: some View {
+        let room = manager.room(forLightID: device.id)
+        let inActiveRoom = room?.id == activeRoomID && activeRoomID != nil
+        return HStack(spacing: 10) {
+            Toggle("", isOn: powerBinding)
+                .toggleStyle(.switch)
+                .labelsHidden()
+                .controlSize(.mini)
+                .tint(Lumen.pink)
+                .help("Turn this light on or off to identify it")
+                .accessibilityLabel(device.isOn ? "Turn off \(device.label)" : "Turn on \(device.label)")
+
+            Button {
+                toggleAssign()
+            } label: {
+                HStack(spacing: 10) {
+                    Circle()
+                        .fill(device.isOn ? device.color : Color.gray.opacity(0.4))
+                        .frame(width: 15, height: 15)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(device.label)
+                            .font(.callout.weight(.medium))
+                            .foregroundStyle(Lumen.textPrimary)
+                            .lineLimit(1)
+                        Text(room?.name ?? "Unassigned")
+                            .font(.caption2)
+                            .foregroundStyle(room == nil ? Lumen.textTertiary : Lumen.violetBright)
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: inActiveRoom ? "checkmark.circle.fill" : "plus.circle")
+                        .font(.title3)
+                        .foregroundStyle(inActiveRoom ? Lumen.pink : Lumen.textTertiary)
+                        .accessibilityHidden(true)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(activeRoomID == nil)
+            .help(activeRoomID == nil ? "Select or create a room first" : "Add or remove \(device.label)")
+            .accessibilityLabel("\(device.label), currently \(room?.name ?? "unassigned")")
+            .accessibilityHint(activeRoomID == nil ? "Select a room first" : "Adds or removes this light from the selected room")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .lumenCard(radius: Lumen.tileRadius, highlighted: inActiveRoom)
+    }
+
+    private var powerBinding: Binding<Bool> {
+        Binding(get: { device.isOn }, set: { manager.setPower(device, on: $0) })
+    }
+
+    private func toggleAssign() {
+        guard let rid = activeRoomID else { return }
+        if manager.room(forLightID: device.id)?.id == rid {
+            manager.assign(lightID: device.id, toRoom: nil)
+        } else {
+            manager.assign(lightID: device.id, toRoom: rid)
+        }
     }
 }

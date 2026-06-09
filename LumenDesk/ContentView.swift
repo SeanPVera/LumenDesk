@@ -463,6 +463,7 @@ struct ContentView: View {
         }
         .padding(20)
         .frame(width: 360)
+        .background(LumenBackground(glow: false))
     }
 
     private func createRoom() {
@@ -489,9 +490,9 @@ struct ContentView: View {
                 .environmentObject(manager)
 
             HStack(spacing: 12) {
-                setupBrandCard("LIFX", icon: "dot.radiowaves.left.and.right", tint: .purple,
+                setupBrandCard("LIFX", icon: "dot.radiowaves.left.and.right", tint: Lumen.violetBright,
                                detail: "Uses UDP broadcast on 56700. Keep the Mac and bulbs on the same subnet.")
-                setupBrandCard("Govee", icon: "network", tint: .orange,
+                setupBrandCard("Govee", icon: "network", tint: Lumen.coral,
                                detail: "Requires LAN Control in the Govee Home app and UDP ports 4001–4003.")
             }
             .frame(maxWidth: 520)
@@ -566,7 +567,7 @@ struct CommandToastView: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
+                .foregroundStyle(Lumen.warning)
             Text(message)
                 .font(.callout)
                 .lineLimit(2)
@@ -587,12 +588,12 @@ struct CommandToastView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .background(RoundedRectangle(cornerRadius: 10).fill(Lumen.surfaceRaised))
         .overlay(
             RoundedRectangle(cornerRadius: 10)
-                .stroke(Color.orange.opacity(0.4), lineWidth: 1)
+                .stroke(Lumen.warning.opacity(0.5), lineWidth: 1)
         )
-        .shadow(color: .black.opacity(0.15), radius: 8, y: 4)
+        .shadow(color: .black.opacity(0.4), radius: 12, y: 6)
         .frame(maxWidth: 420)
     }
 }
@@ -658,12 +659,12 @@ struct BulkActionBar: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .background(RoundedRectangle(cornerRadius: 10).fill(Lumen.surfaceRaised))
         .overlay(
             RoundedRectangle(cornerRadius: 10)
-                .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
+                .stroke(Lumen.hairlineStrong, lineWidth: 1)
         )
-        .shadow(color: .black.opacity(0.15), radius: 8, y: 4)
+        .shadow(color: .black.opacity(0.4), radius: 12, y: 6)
         .frame(maxWidth: 640)
     }
 
@@ -724,13 +725,20 @@ struct KeyboardShortcutsView: View {
                 HStack {
                     Text(item.0)
                     Spacer()
-                    Text(item.1).font(.body.monospaced()).foregroundStyle(.secondary)
+                    Text(item.1)
+                        .font(.callout.monospaced())
+                        .foregroundStyle(Lumen.textSecondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(Lumen.surfaceRaised))
+                        .overlay(Capsule().stroke(Lumen.hairline, lineWidth: 1))
                 }
             }
             HStack { Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.defaultAction) }
         }
         .padding(20)
         .frame(width: 360)
+        .background(LumenBackground(glow: false))
     }
 }
 

@@ -64,10 +64,10 @@ struct LightRowView: View {
                         if device.isStale {
                             Image(systemName: "exclamationmark.triangle.fill")
                                 .font(.system(size: 11))
-                                .foregroundStyle(.orange)
+                                .foregroundStyle(Lumen.warning)
                                 .background(
                                     Circle()
-                                        .fill(Color(nsColor: .controlBackgroundColor))
+                                        .fill(Lumen.surface)
                                         .frame(width: 13, height: 13)
                                 )
                                 .accessibilityLabel("Device may be offline")
@@ -121,7 +121,7 @@ struct LightRowView: View {
                     }
                     Text(device.isStale ? "Last seen \(device.lastSeen.formatted(.relative(presentation: .named)))" : "Confirmed \(device.lastSeen.formatted(.relative(presentation: .named)))")
                         .font(.caption2)
-                        .foregroundStyle(device.isStale ? .orange : .tertiary)
+                        .foregroundStyle(device.isStale ? Lumen.warning : .tertiary)
                 }
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel(

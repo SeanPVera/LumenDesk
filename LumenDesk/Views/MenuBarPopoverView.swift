@@ -27,12 +27,13 @@ struct MenuBarPopoverView: View {
             .frame(maxHeight: 340)
         }
         .frame(width: 280)
+        .background(LumenBackground(glow: false))
     }
 
     private var menuBarHeader: some View {
         HStack {
             Image(systemName: "lightbulb.fill")
-                .foregroundStyle(.yellow)
+                .foregroundStyle(Lumen.brandGradient)
                 .font(.caption)
                 .accessibilityHidden(true)
             Text("LumenDesk")
@@ -72,6 +73,7 @@ struct MenuBarPopoverView: View {
             .toggleStyle(.switch)
             .labelsHidden()
             .controlSize(.small)
+            .tint(Lumen.pink)
             .disabled(manager.devices.isEmpty)
             .accessibilityLabel("All lights power")
         }
@@ -108,6 +110,7 @@ struct MenuBarPopoverView: View {
                 .toggleStyle(.switch)
                 .labelsHidden()
                 .controlSize(.small)
+                .tint(Lumen.pink)
                 .disabled(lights.isEmpty)
                 .accessibilityLabel("\(room.name) power, \(onCount) of \(lights.count) on")
             }
@@ -157,6 +160,7 @@ struct MenuBarPopoverView: View {
             .toggleStyle(.switch)
             .labelsHidden()
             .controlSize(.small)
+            .tint(Lumen.pink)
             .disabled(lights.isEmpty)
             .accessibilityLabel("Unassigned lights power")
         }

@@ -45,7 +45,8 @@ struct ScenesView: View {
                     }
                 }
                 .padding(8)
-                .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .textBackgroundColor)))
+                .background(RoundedRectangle(cornerRadius: 8).fill(Lumen.surfaceRaised))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Lumen.hairline, lineWidth: 1))
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
@@ -69,9 +70,11 @@ struct ScenesView: View {
                     }
                     .padding(16)
                 }
+                .scrollContentBackground(.hidden)
             }
         }
         .frame(width: 520, height: 520)
+        .background(LumenBackground(glow: false))
     }
 
     private var captureRow: some View {
@@ -121,13 +124,13 @@ struct ScenesView: View {
                 manager.toggleFavoriteScene(scene.id)
             } label: {
                 Image(systemName: manager.isFavoriteScene(scene.id) ? "star.fill" : "star")
-                    .foregroundStyle(manager.isFavoriteScene(scene.id) ? .yellow : .secondary)
+                    .foregroundStyle(manager.isFavoriteScene(scene.id) ? Lumen.gold : .secondary)
             }
             .buttonStyle(.plain)
             .help(manager.isFavoriteScene(scene.id) ? "Unpin scene" : "Pin scene to favorites")
 
             Image(systemName: "wand.and.stars")
-                .foregroundStyle(.purple)
+                .foregroundStyle(Lumen.violetBright)
                 .font(.title3)
 
             VStack(alignment: .leading, spacing: 4) {
@@ -197,14 +200,7 @@ struct ScenesView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color(nsColor: .controlBackgroundColor))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
-        )
+        .lumenCard(radius: 8)
     }
 
     private func scenePreview(_ scene: LightingScene) -> String {

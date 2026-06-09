@@ -1222,7 +1222,7 @@ extension LightManager {
                     if d.brand == .govee { govee?.setBrightness(deviceID: d.backendID, percent: 50) }
                 }
                 napTimer?.invalidate(); napTimer = nil
-                napSnapshotBrightness = []; napPhase = .inactive
+                napSnapshotBrightness = [:]; napPhase = .inactive
             } else {
                 let progress = (total - remaining) / total
                 for d in devices where d.isOn {

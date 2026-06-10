@@ -305,3 +305,104 @@ Items in the top-right (High impact, High effort = #10, #11, #17) anchor Phase 3
 - Phases 1 and 2 can be developed in parallel across two engineers without merge conflicts (Phase 1 touches display-only code; Phase 2 touches interaction code).
 - Phase 3's **Scenes** feature (#11) is a prerequisite for **Schedules** (#20) — build in that order.
 - Accessibility (#17) should be a continuous practice from Phase 2 onward, not a one-time audit at the end.
+
+---
+
+# Second-Pass UX Backlog: 20 Practical Ideas + 5 Gloriously Unnecessary Ones
+
+**Audited:** 2026-06-10
+
+**Baseline:** The original 20-item plan above has been implemented. This follow-up focuses on reducing complexity, clarifying system state, and polishing advanced workflows now that LumenDesk includes rooms, scenes, schedules, favorites, bulk selection, menu-bar controls, onboarding, search, undo/redo, Nap Mode, and Aurora Fireflies.
+
+## Practical recommendations
+
+| # | Recommendation | Why it helps | Suggested first step | Impact | Effort |
+|---|---|---|---|---|---|
+| 1 | Replace the crowded header with a compact primary toolbar and an overflow menu | Scan, Fireflies, Nap, selection, shortcuts, scenes, room creation, and global controls compete for attention. Keeping power, search, and scan visible while moving infrequent tools into a labeled `More` menu creates a clearer hierarchy. | Measure which header actions are used most, keep the top three visible, and move the remainder into a menu without removing keyboard shortcuts. | High | Medium |
+| 2 | Show true mixed states for global and room controls | A room with some lights on currently cannot be represented honestly by an ordinary binary switch. An indeterminate state would communicate “3 of 5 on” and make the result of the next click predictable. | Replace aggregate `allSatisfy` switch bindings with a three-state control or a labeled power button showing `Off`, `Some On`, or `All On`. | High | Medium |
+| 3 | Separate slider preview from command commit | Sending network commands for every tiny slider movement can feel laggy, create command backlogs, and make the thumb fight delayed device responses. | Update the UI optimistically while dragging, then transmit a throttled value and always send the final value on drag end. | High | Medium |
+| 4 | Add a first-class “Identify this light” action | Similar bulb names are hard to map to physical fixtures, especially during room setup. A short blink or color pulse is faster and less disruptive than manually toggling a bulb. | Add `Identify` to each light’s context menu and setup card, using a reversible two-second pulse with a warning for photosensitive users. | High | Low |
+| 5 | Add a device inspector with capabilities and diagnostics | Users need one place to see brand, model, IP address, color-temperature range, last seen time, room, and supported controls. This also makes support conversations much easier. | Open an inspector from an info button or context menu and provide a `Copy Diagnostics` action that omits sensitive data by default. | High | Medium |
+| 6 | Turn scan feedback into an actionable diagnostics flow | A scan phase and response count explain what is happening but not what to do when discovery fails. Users should be guided from symptom to likely fix. | Make the scan status clickable and show per-protocol results, local-network permission state, interface used, and vendor-specific remediation steps. | High | Medium |
+| 7 | Give unreachable lights explicit recovery actions | A stale badge is informative but leaves users at a dead end. Recovery should be available exactly where the problem is shown. | Add `Retry`, `Rescan`, and `Troubleshoot…` beside stale devices; distinguish “not seen recently” from a command that definitively timed out. | High | Medium |
+| 8 | Make schedules editable, duplicable, and testable | Recreating an entry to change one value is error-prone, and time-based automation is difficult to trust without a safe preview. | Let users edit inline, duplicate an entry, and run `Test now` with a confirmation that explains the temporary effect. | High | Medium |
+| 9 | Use locale-aware time controls and clearer day semantics | Fixed 24-hour hour/minute menus ignore the user’s macOS 12/24-hour preference, and “daily” is too limiting for common weekday/weekend routines. | Adopt locale-aware date/time pickers and add weekday chips plus plain-language summaries such as “Weekdays at 7:15 AM.” | High | Medium |
+| 10 | Add a schedule timeline and conflict explanation | A list of isolated rules makes overlaps hard to spot. A 24-hour visualization would reveal collisions and dark gaps immediately. | Show each room’s actions on a compact timeline and make every conflict warning explain which entries overlap and how to fix them. | Medium | High |
+| 11 | Preview scene changes before applying them | Applying a scene can unexpectedly turn off lights or overwrite carefully tuned colors. Users should see the scope of the change first. | Add an optional preview listing affected, unchanged, missing, and currently unreachable lights, with a “Do not turn lights off” override. | High | Medium |
+| 12 | Report partial scene success and offer targeted retry | A single failed bulb should not make a scene feel mysteriously unreliable. The result should identify which devices succeeded and which did not. | Display progress while applying, summarize partial failures, and offer `Retry failed lights` without replaying successful commands. | High | Medium |
+| 13 | Let users organize and curate favorites | Once lights, rooms, and scenes can all be pinned, the strip can become noisy and its ordering may not match real usage. | Support drag reordering, section by item type, and an option to show only favorites relevant to the current time or active room. | Medium | Medium |
+| 14 | Make search scope and filtering visible | Search currently combines rooms and lights while “Only On” is a separate filter. Hidden filter combinations can make devices appear to vanish. | Add visible filter tokens for `Lights`, `Rooms`, `Scenes`, `On`, `Offline`, and vendor, plus a result count and one-click `Clear all`. | Medium | Medium |
+| 15 | Strengthen bulk-selection safety | Selection can become ambiguous after searching, filtering, scanning, or switching layouts. A bulk command should never affect hidden items unexpectedly. | State “6 selected, 2 hidden by filters,” remove disappeared devices automatically, and confirm destructive or room-moving actions that include hidden selections. | High | Low |
+| 16 | Preserve context across sheets and app restarts | Closing Scenes or Schedule editing can make users lose their place, and reopening the app should restore a familiar workspace. | Persist window size, layout mode, expanded rooms, search/filter state when appropriate, and the last selected room or scene. | Medium | Medium |
+| 17 | Add a user-controlled density and layout preference | A hard width threshold decides between list and grid even when a user prefers one mode. Dense control panels and glanceable dashboards serve different jobs. | Add `View → List / Grid / Automatic` and `Comfortable / Compact` options, with Automatic retaining the existing responsive behavior. | Medium | Medium |
+| 18 | Improve onboarding recovery after denied permissions | Explaining the local-network prompt before it appears is good, but users who deny it need a direct route back to a working state. | Detect likely permission denial, explain the consequence, add `Open System Settings`, and verify the permission again when the app becomes active. | High | Medium |
+| 19 | Offer precise and accessible color entry | Swatches and a color picker are quick visually but less useful for exact matching, keyboard use, or users with color-vision differences. | Add optional Kelvin, RGB, HSB, and hex fields; label swatches by name and temperature; preserve recent colors; never rely on hue alone to communicate state. | High | Medium |
+| 20 | Add a lightweight activity and automation log | Toasts disappear, schedules run in the background, and LAN devices can fail intermittently. A short history builds trust and aids troubleshooting. | Keep a local rolling log of scans, manual commands, schedule runs, scene applications, retries, and failures with timestamps and privacy-safe export. | High | Medium |
+
+## Recommended delivery order
+
+### Phase A — Trust and clarity
+
+1. Mixed-state aggregate controls (#2)
+2. Slider command throttling (#3)
+3. Identify-light action (#4)
+4. Unreachable-light recovery (#7)
+5. Bulk-selection safety (#15)
+6. Permission recovery (#18)
+
+### Phase B — Automation confidence
+
+1. Editable/testable schedules (#8)
+2. Locale-aware and weekday schedules (#9)
+3. Scene preview (#11)
+4. Partial scene success and retry (#12)
+5. Activity log (#20)
+
+### Phase C — Information architecture and personalization
+
+1. Header simplification (#1)
+2. Device inspector and diagnostics (#5–6)
+3. Search/filter tokens (#14)
+4. Workspace restoration and manual layout controls (#16–17)
+5. Favorites curation and precise color entry (#13, #19)
+6. Schedule timeline (#10)
+
+## Five whimsical, unreasonably complicated, and totally unnecessary ideas
+
+These are intentionally poor scope-management decisions. They should not displace any practical recommendation above.
+
+### W1. Ray-Traced Digital Twin of the Home
+
+Ask the user to scan every room with LiDAR, reconstruct a textured 3D model, infer each bulb’s physical position, and simulate photometric output in real time. Dragging the virtual sun across the model would preview how every scene interacts with wall paint, furniture, and estimated lampshade translucency before sending a single LAN packet. Naturally, this requires a miniature rendering engine, an asset pipeline, calibration targets, and an entire privacy policy for a feature whose practical replacement is “look at the room.”
+
+### W2. Democratic Lighting Parliament
+
+Give every bulb a procedurally generated name, political party, voting record, and opinion about the requested scene. Before a bulk action runs, the bulbs hold a tiny parliamentary debate and vote on brightness, hue, and transition duration. Users may form coalitions, invoke cloture, or override the result with an “Executive Illumination Order.” Unreachable bulbs become abstentions; stale bulbs become hereditary peers.
+
+### W3. Aurora Firefly Ecosystem Simulator
+
+Upgrade the decorative fireflies into a persistent artificial-life simulation. Each firefly would have genetics, hunger, preferred color temperature, migration behavior, and a family tree stored in Core Data. The population would evolve based on real light usage, with warm-white rooms producing one species and saturated scenes producing another. Include conservation alerts when turning off a room threatens a rare digital subspecies.
+
+### W4. Cinematic Nap Mission Control
+
+Replace the simple Nap Mode button with a 3D mission-control dashboard that models sleep pressure, sunrise azimuth, room topology, bulb latency, and a fictional circadian “launch window.” The 20-minute dimming sequence becomes a multi-stage orbital insertion with countdown voice-over, redundant telemetry, abort procedures, and a post-nap mission report. Add watchOS haptics even though the app otherwise has no watch component.
+
+### W5. International Bureau of Lumens Compliance Suite
+
+Require every scene to pass an absurd certification workflow before use. The suite would generate a 47-page PDF assessing color harmony, naming consistency, fictional treaty compliance, estimated moth attraction, and whether “Movie Night” is sufficiently cinematic. Scenes receive bronze, silver, or gold seals; uncertified scenes may still run, but only after the user signs a digitally notarized waiver witnessed by two nearby bulbs.
+
+## Closing principle
+
+The practical backlog should make LumenDesk feel calmer as it becomes more capable: show honest state, keep advanced controls discoverable rather than dominant, make automation outcomes explainable, and always provide a useful next step when the local network behaves unpredictably. The whimsical backlog should remain exactly where it belongs—on paper, entertaining everyone and shipping never.
+
+## Implementation status — 2026-06-10
+
+The second-pass practical backlog and the selected whimsical concepts are now implemented in the application:
+
+- **Practical #1–7:** compact toolbar/overflow navigation, honest mixed-state power, throttled brightness commits, light identification, device inspection, discovery diagnostics, and inline recovery actions.
+- **Practical #8–12:** editable/duplicable/testable weekday schedules, locale-aware times, a 24-hour timeline with conflict explanations, scene previews, partial-result reporting, and targeted retries.
+- **Practical #13–17:** reorderable cross-type favorites, visible search/filter tokens, hidden-selection warnings, persisted workspace context, and user-selected layout/density.
+- **Practical #18–20:** local-network permission recovery, precise RGB/HSB/hex/Kelvin color controls with recent colors, and an exportable local activity log.
+- **W2:** Democratic Lighting Parliament with parties, voting records, abstentions for unreachable bulbs, motions, and executive illumination orders.
+- **W3:** a persistent, evolving Aurora Firefly population with generations, genetics, energy, rarity, parentage, and conservatory controls.
+- **W5:** International Bureau of Lumens scene certification with scored seals, treaty findings, moth-attraction estimates, and a genuinely 47-page PDF dossier export.

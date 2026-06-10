@@ -46,15 +46,32 @@ struct ScheduleEntry: Identifiable, Equatable {
     var minute: Int     // 0–59 multiples of 15 (absolute); ignored for sun-relative entries
     var offsetMinutes: Int  // signed offset applied to sunrise/sunset base time
     var action: ScheduleAction
+    /// Calendar weekday numbers (1 = Sunday ... 7 = Saturday). Empty means every day.
+    var weekdays: Set<Int>
 
     init(id: UUID = UUID(), isEnabled: Bool = true,
-         hour: Int, minute: Int, offsetMinutes: Int = 0, action: ScheduleAction) {
+         hour: Int, minute: Int, offsetMinutes: Int = 0, action: ScheduleAction,
+         weekdays: Set<Int> = Set(1...7)) {
         self.id = id
         self.isEnabled = isEnabled
         self.hour = hour
         self.minute = minute
         self.offsetMinutes = offsetMinutes
         self.action = action
+        self.weekdays = weekdays
+    }
+
+    var runsToday: Bool {
+        weekdays.isEmpty || weekdays.contains(Calendar.current.component(.weekday, from: Date()))
+    }
+
+    var daySummary: String {
+        let days = weekdays.isEmpty ? Set(1...7) : weekdays
+        if days == Set(1...7) { return "Every day" }
+        if days == Set(2...6) { return "Weekdays" }
+        if days == Set([1, 7]) { return "Weekends" }
+        let symbols = Calendar.current.veryShortWeekdaySymbols
+        return days.sorted().map { symbols[$0 - 1] }.joined(separator: ", ")
     }
 
     var timeString: String {
@@ -64,13 +81,16 @@ struct ScheduleEntry: Identifiable, Equatable {
             let sign = offsetMinutes > 0 ? "+" : ""
             return "\(symbol) \(sign)\(offsetMinutes)m"
         }
-        return String(format: "%02d:%02d", hour, minute)
+        var components = DateComponents()
+        components.hour = hour; components.minute = minute
+        let date = Calendar.current.date(from: components) ?? Date()
+        return date.formatted(date: .omitted, time: .shortened)
     }
 }
 
 extension ScheduleEntry: Codable {
     enum CodingKeys: String, CodingKey {
-        case id, isEnabled, hour, minute, offsetMinutes, action
+        case id, isEnabled, hour, minute, offsetMinutes, action, weekdays
     }
 
     init(from decoder: Decoder) throws {
@@ -81,5 +101,6 @@ extension ScheduleEntry: Codable {
         minute = try c.decode(Int.self, forKey: .minute)
         offsetMinutes = (try? c.decode(Int.self, forKey: .offsetMinutes)) ?? 0
         action = try c.decode(ScheduleAction.self, forKey: .action)
+        weekdays = (try? c.decode(Set<Int>.self, forKey: .weekdays)) ?? Set(1...7)
     }
 }

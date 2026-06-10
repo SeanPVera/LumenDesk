@@ -4,6 +4,7 @@ import SwiftUI
 /// lights, rooms, and scenes. Hidden entirely when nothing is pinned.
 struct FavoritesStripView: View {
     @EnvironmentObject var manager: LightManager
+    @State private var showingOrganizer = false
 
     var body: some View {
         Group {
@@ -18,17 +19,12 @@ struct FavoritesStripView: View {
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
                         Spacer()
+                        Button("Organize") { showingOrganizer = true }.font(.caption).buttonStyle(.plain)
                     }
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 10) {
-                            ForEach(manager.favoriteRooms) { room in
-                                FavoriteRoomTile(room: room)
-                            }
-                            ForEach(manager.favoriteScenes) { scene in
-                                FavoriteSceneTile(scene: scene)
-                            }
-                            ForEach(manager.favoriteDevices) { device in
-                                FavoriteTileView(device: device)
+                            ForEach(manager.favoriteOrder) { reference in
+                                favoriteView(reference)
                             }
                         }
                         .padding(.vertical, 2)
@@ -38,10 +34,49 @@ struct FavoritesStripView: View {
             }
         }
         .animation(.spring(duration: 0.35), value: hasFavorites)
+        .onAppear { manager.reconcileFavoriteOrder() }
+        .onChange(of: hasFavorites) { _ in manager.reconcileFavoriteOrder() }
+        .sheet(isPresented: $showingOrganizer) { FavoriteOrganizerView().environmentObject(manager) }
+    }
+
+    @ViewBuilder
+    private func favoriteView(_ reference: FavoriteReference) -> some View {
+        switch reference.kind {
+        case .light:
+            if let device = manager.devices.first(where: { $0.id == reference.rawID }) { FavoriteTileView(device: device) }
+        case .room:
+            if let id = UUID(uuidString: reference.rawID), let room = manager.rooms.first(where: { $0.id == id }) { FavoriteRoomTile(room: room) }
+        case .scene:
+            if let id = UUID(uuidString: reference.rawID), let scene = manager.scenes.first(where: { $0.id == id }) { FavoriteSceneTile(scene: scene) }
+        }
     }
 
     private var hasFavorites: Bool {
         !manager.favoriteDevices.isEmpty || !manager.favoriteRooms.isEmpty || !manager.favoriteScenes.isEmpty
+    }
+}
+
+struct FavoriteOrganizerView: View {
+    @EnvironmentObject var manager: LightManager
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        VStack(spacing: 12) {
+            HStack { Text("Organize Favorites").font(.title3.weight(.semibold)); Spacer(); Button("Done") { dismiss() } }
+            Text("Drag favorites into the order you want. Lights, rooms, and scenes remain clearly labeled.").font(.caption).foregroundStyle(.secondary)
+            List {
+                ForEach(manager.favoriteOrder) { reference in
+                    HStack { Image(systemName: icon(reference.kind)); Text(name(reference)); Spacer(); Text(reference.kind.rawValue.capitalized).font(.caption).foregroundStyle(.secondary) }
+                }.onMove(perform: manager.moveFavorite)
+            }.listStyle(.inset)
+        }.padding(20).frame(width: 430, height: 460).background(LumenBackground(glow: false)).onAppear { manager.reconcileFavoriteOrder() }
+    }
+    private func icon(_ kind: FavoriteReference.Kind) -> String { switch kind { case .light: return "lightbulb"; case .room: return "rectangle.stack"; case .scene: return "wand.and.stars" } }
+    private func name(_ reference: FavoriteReference) -> String {
+        switch reference.kind {
+        case .light: return manager.devices.first(where: { $0.id == reference.rawID })?.label ?? "Missing light"
+        case .room: return UUID(uuidString: reference.rawID).flatMap { id in manager.rooms.first(where: { $0.id == id })?.name } ?? "Missing room"
+        case .scene: return UUID(uuidString: reference.rawID).flatMap { id in manager.scenes.first(where: { $0.id == id })?.name } ?? "Missing scene"
+        }
     }
 }
 

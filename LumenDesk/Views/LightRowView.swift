@@ -11,6 +11,8 @@ struct LightRowView: View {
     @State private var renamingName: Bool = false
     @State private var nameDraft: String = ""
     @FocusState private var nameFocused: Bool
+    @State private var showingInspector = false
+    @State private var showingPreciseColor = false
 
     private enum LightColorMode: String, CaseIterable {
         case color = "Color"
@@ -26,7 +28,7 @@ struct LightRowView: View {
 
     private var brightnessBinding: Binding<Double> {
         Binding(get: { device.brightness },
-                set: { manager.setBrightness(device, value: $0) })
+                set: { manager.previewBrightness(device, value: $0) })
     }
 
     private var kelvinBinding: Binding<Double> {
@@ -167,7 +169,9 @@ struct LightRowView: View {
                 HStack(spacing: 10) {
                     Image(systemName: "sun.min").foregroundStyle(.secondary)
                         .accessibilityHidden(true)
-                    Slider(value: brightnessBinding, in: 0...1)
+                    Slider(value: brightnessBinding, in: 0...1, onEditingChanged: { editing in
+                        if !editing { manager.commitBrightness(device, value: device.brightness) }
+                    })
                         .disabled(controlsDisabled)
                         .accessibilityLabel("\(device.label) brightness")
                         .accessibilityValue("\(Int(device.brightness * 100)) percent")
@@ -235,9 +239,9 @@ struct LightRowView: View {
                     .onTapGesture { onToggleSelection?() }
             }
         }
-        .contextMenu {
-            if !selectionMode { roomMenuContents }
-        }
+        .sheet(isPresented: $showingInspector) { DeviceInspectorView(device: device).environmentObject(manager) }
+        .sheet(isPresented: $showingPreciseColor) { PreciseColorEditorView(device: device).environmentObject(manager) }
+        .contextMenu { if !selectionMode { roomMenuContents } }
     }
 
     private var borderColor: Color {
@@ -335,6 +339,10 @@ struct LightRowView: View {
         }
 
         Button("Rename\u{2026}") { beginRename() }
+        Button("Identify Light") { manager.identify(device) }
+        Button("Device Inspector\u{2026}") { showingInspector = true }
+        Button("Precise Color\u{2026}") { showingPreciseColor = true }
+        if device.isStale { Button("Retry Connection") { manager.retry(device) } }
 
         Divider()
 

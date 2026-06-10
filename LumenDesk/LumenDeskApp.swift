@@ -28,6 +28,17 @@ struct LumenDeskApp: App {
                 Button("Export Configuration\u{2026}") { exportConfiguration() }
                 Button("Import Configuration\u{2026}") { importConfiguration() }
             }
+            CommandMenu("View") {
+                Picker("Layout", selection: Binding(
+                    get: { UserDefaults.standard.string(forKey: "LumenDesk.workspaceLayout.v1") ?? WorkspaceLayout.automatic.rawValue },
+                    set: { UserDefaults.standard.set($0, forKey: "LumenDesk.workspaceLayout.v1") }
+                )) { ForEach(WorkspaceLayout.allCases) { Text($0.title).tag($0.rawValue) } }
+                Divider()
+                Picker("Density", selection: Binding(
+                    get: { UserDefaults.standard.string(forKey: "LumenDesk.interfaceDensity.v1") ?? InterfaceDensity.comfortable.rawValue },
+                    set: { UserDefaults.standard.set($0, forKey: "LumenDesk.interfaceDensity.v1") }
+                )) { ForEach(InterfaceDensity.allCases) { Text($0.title).tag($0.rawValue) } }
+            }
             CommandGroup(replacing: .undoRedo) {
                 Button("Undo Light Change") { manager.undo() }
                     .keyboardShortcut("z", modifiers: .command)

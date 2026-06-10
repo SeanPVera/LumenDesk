@@ -21,7 +21,7 @@ struct DiagnosticsCenterView: View {
                 Button("Scan Again") { manager.scan() }.buttonStyle(.borderedProminent)
             }
         }
-        .padding(20).frame(width: 560)
+        .padding(20).frame(minWidth: 520, idealWidth: 640)
         .background(LumenBackground(glow: false))
     }
 
@@ -48,6 +48,20 @@ struct DeviceInspectorView: View {
                 Button("Retry") { manager.retry(device) }
             }
             ForEach(manager.diagnostics(for: device)) { diagnostic in DiagnosticRow(diagnostic: diagnostic) }
+            let command = manager.commandState(for: device.id)
+            if command.phase != .idle || manager.confirmedStates[device.id] != nil {
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("Desired vs. confirmed state", systemImage: command.phase.symbol).font(.headline)
+                    HStack {
+                        VStack(alignment: .leading) { Text("Desired").font(.caption).foregroundStyle(.secondary); Text("\(device.isOn ? "On" : "Off") · \(Int(device.brightness * 100))% · \(device.kelvin) K") }
+                        Spacer()
+                        if let confirmed = manager.confirmedStates[device.id] {
+                            VStack(alignment: .trailing) { Text("Confirmed \(confirmed.confirmedAt.formatted(.relative(presentation: .named)))").font(.caption).foregroundStyle(.secondary); Text("\(confirmed.isOn ? "On" : "Off") · \(Int(confirmed.brightness * 100))% · \(confirmed.kelvin) K") }
+                        } else { Text("Awaiting first confirmation").foregroundStyle(.secondary) }
+                    }
+                    if command.phase == .failed { Button("Keep Trying") { manager.retryCommand(for: device) } }
+                }.padding(10).background(Lumen.surfaceRaised, in: RoundedRectangle(cornerRadius: 8))
+            }
             Divider()
             HStack {
                 Button("Copy Diagnostics") {
@@ -60,7 +74,7 @@ struct DeviceInspectorView: View {
                 if device.isStale { Button("Rescan Network") { manager.scan() }.buttonStyle(.borderedProminent) }
             }
         }
-        .padding(20).frame(width: 500)
+        .padding(20).frame(minWidth: 480, idealWidth: 580)
         .background(LumenBackground(glow: false))
     }
 }
@@ -117,7 +131,7 @@ struct ActivityLogView: View {
                 }.padding(.vertical, 4)
             }.listStyle(.inset)
         }
-        .padding(20).frame(width: 700, height: 560).background(LumenBackground(glow: false))
+        .padding(20).frame(minWidth: 620, idealWidth: 760, minHeight: 460, idealHeight: 620).background(LumenBackground(glow: false))
     }
 
     private func icon(for kind: ActivityEvent.Kind) -> String {
@@ -160,7 +174,7 @@ struct PreciseColorEditorView: View {
             }
             HStack { Spacer(); Button("Apply White") { manager.setKelvin(device, kelvin: Int(kelvin)); dismiss() }; Button("Apply Color") { manager.setColor(device, color: candidate); dismiss() }.buttonStyle(.borderedProminent) }
         }
-        .padding(20).frame(width: 460).background(LumenBackground(glow: false))
+        .padding(20).frame(minWidth: 440, idealWidth: 540).background(LumenBackground(glow: false))
         .onAppear { set(device.color); kelvin = Double(device.kelvin) }
         .onChange(of: red) { _ in updateHex() }.onChange(of: green) { _ in updateHex() }.onChange(of: blue) { _ in updateHex() }
     }
@@ -189,7 +203,7 @@ struct LightingParliamentView: View {
             List(manager.parliamentMembers) { member in
                 HStack { Image(systemName: "lightbulb.fill").foregroundStyle(partyColor(member.party)); VStack(alignment: .leading) { Text(member.parliamentaryName); Text(member.party.rawValue).font(.caption).foregroundStyle(.secondary) }; Spacer(); Text(member.lastVote).font(.caption); Gauge(value: Double(member.approval), in: 0...100) { Text("Approval") }.gaugeStyle(.accessoryLinear).frame(width: 90) }
             }.listStyle(.inset)
-        }.padding(20).frame(width: 760, height: 580).background(LumenBackground(glow: false)).onAppear { manager.ensureParliament() }
+        }.padding(20).frame(minWidth: 680, idealWidth: 800, minHeight: 500, idealHeight: 640).background(LumenBackground(glow: false)).onAppear { manager.ensureParliament() }
     }
 
     private func result(_ name: String, _ value: Int, _ color: Color) -> some View { VStack { Text("\(value)").font(.title2.bold()).foregroundStyle(color); Text(name).font(.caption) } }
@@ -217,7 +231,7 @@ struct FireflyEcosystemView: View {
                     }
                 }.padding(4)
             }
-        }.padding(20).frame(width: 760, height: 600).background(LumenBackground(glow: false))
+        }.padding(20).frame(minWidth: 680, idealWidth: 800, minHeight: 500, idealHeight: 660).background(LumenBackground(glow: false))
     }
     private func metric(_ title: String, _ value: String) -> some View { VStack(alignment: .leading) { Text(value).font(.title3.bold()); Text(title).font(.caption).foregroundStyle(.secondary) }.padding(10).lumenCard(radius: 8) }
 }
@@ -240,7 +254,7 @@ struct ComplianceSuiteView: View {
                     Text("Certification is legally meaningless in every known jurisdiction.").font(.caption).foregroundStyle(.tertiary)
                 }.padding(16).lumenCard(radius: 12)
             } else { Spacer(); VStack(spacing: 8) { Image(systemName: "checkmark.seal").font(.system(size: 36)).foregroundStyle(.secondary); Text("Awaiting Inspection").font(.headline); Text("Select a scene to begin an entirely unnecessary compliance process.").foregroundStyle(.secondary) }; Spacer() }
-        }.padding(20).frame(width: 700, height: 520).background(LumenBackground(glow: false))
+        }.padding(20).frame(minWidth: 620, idealWidth: 760, minHeight: 440, idealHeight: 580).background(LumenBackground(glow: false))
     }
 
     private func sealColor(_ seal: SceneCertification.Seal) -> Color { seal == .gold ? .yellow : seal == .silver ? .gray : .brown }
@@ -288,7 +302,234 @@ struct ScenePreviewView: View {
                 HStack { Label("\(result.failedIDs.count) light(s) need retry", systemImage: "wifi.slash").foregroundStyle(Lumen.warning); Spacer(); Button("Retry Failed Lights") { manager.retryLastSceneFailures() } }
             }
             HStack { Spacer(); Button("Cancel") { dismiss() }; Button("Apply Scene") { manager.applyScene(scene, allowTurningOff: allowTurningOff); dismiss() }.buttonStyle(.borderedProminent) }
-        }.padding(20).frame(width: 560, height: 500).background(LumenBackground(glow: false))
+        }.padding(20).frame(minWidth: 520, idealWidth: 620, minHeight: 420, idealHeight: 560).background(LumenBackground(glow: false))
     }
     private func previewMetric(_ title: String, _ value: Int, _ color: Color) -> some View { VStack { Text("\(value)").font(.title2.bold()).foregroundStyle(color); Text(title).font(.caption) }.frame(maxWidth: .infinity).padding(8).lumenCard(radius: 8) }
+}
+
+struct LumenDeskSettingsView: View {
+    @EnvironmentObject var manager: LightManager
+    @AppStorage("LumenDesk.workspaceLayout.v1") private var layout = WorkspaceLayout.automatic.rawValue
+    @AppStorage("LumenDesk.interfaceDensity.v1") private var density = InterfaceDensity.comfortable.rawValue
+    @AppStorage(AppPreferenceKey.quietInterface) private var quietInterface = false
+    @AppStorage(AppPreferenceKey.confirmationPolicy) private var confirmationPolicy = ConfirmationPolicy.balanced.rawValue
+    @AppStorage(AppPreferenceKey.menuBarScope) private var menuBarScope = MenuBarScope.activeRooms.rawValue
+    @AppStorage(AppPreferenceKey.showMenuBarUrgentOnly) private var urgentOnly = false
+    @AppStorage(AppPreferenceKey.audioPrivacyAcknowledged) private var audioAcknowledged = false
+    @AppStorage("LumenDesk.auroraFireflies.v1") private var fireflies = true
+
+    var body: some View {
+        TabView {
+            Form {
+                Picker("Workspace layout", selection: $layout) { ForEach(WorkspaceLayout.allCases) { Text($0.title).tag($0.rawValue) } }
+                Picker("Interface density", selection: $density) { ForEach(InterfaceDensity.allCases) { Text($0.title).tag($0.rawValue) } }
+                Picker("Confirmation policy", selection: $confirmationPolicy) { ForEach(ConfirmationPolicy.allCases) { Text($0.title).tag($0.rawValue) } }
+                Text("Reversible changes run immediately and offer Undo. Destructive imports and broad disruptive actions retain confirmation.").font(.caption).foregroundStyle(.secondary)
+            }.padding(20).tabItem { Label("General", systemImage: "gear") }
+
+            Form {
+                Toggle("Quiet interface", isOn: $quietInterface)
+                Text("Removes ornamental motion, translucent decoration, and nonessential visual activity. System Reduce Motion and Reduce Transparency are respected automatically.").font(.caption).foregroundStyle(.secondary)
+                Toggle("Aurora Fireflies", isOn: $fireflies).disabled(quietInterface)
+            }.padding(20).tabItem { Label("Appearance", systemImage: "paintbrush") }
+
+            Form {
+                Picker("Menu bar content", selection: $menuBarScope) { ForEach(MenuBarScope.allCases) { Text($0.title).tag($0.rawValue) } }
+                Toggle("Show only rooms needing attention", isOn: $urgentOnly)
+                Divider()
+                if manager.isDemoMode {
+                    Label("Demo workspace active", systemImage: "testtube.2").foregroundStyle(.orange)
+                    HStack { Button("Reset Demo") { manager.resetDemoMode() }; Button("Return to Live Lights") { manager.exitDemoMode() } }
+                } else {
+                    Button("Enter Safe Demo Workspace") { manager.enterDemoMode() }
+                    Text("Uses isolated simulated rooms, schedules, delays, and failures. Demo changes never enter your live configuration.").font(.caption).foregroundStyle(.secondary)
+                }
+            }.padding(20).tabItem { Label("Advanced", systemImage: "slider.horizontal.3") }
+
+            Form {
+                Label("Audio-reactive effects process live level measurements locally. LumenDesk does not record or retain microphone audio.", systemImage: "mic.badge.plus")
+                Toggle("I understand the microphone behavior", isOn: $audioAcknowledged)
+                Button("Open Microphone Privacy Settings") {
+                    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")!)
+                }
+                Divider()
+                Label("Color swatches are always paired with names, values, outlines, or symbols; status never relies on color alone.", systemImage: "accessibility")
+            }.padding(20).tabItem { Label("Privacy", systemImage: "hand.raised") }
+        }
+        .frame(minWidth: 620, idealWidth: 680, minHeight: 390, idealHeight: 440)
+    }
+}
+
+struct DiscoveryInboxView: View {
+    @EnvironmentObject var manager: LightManager
+    @Environment(\.dismiss) private var dismiss
+    @State private var selectedRoom: UUID?
+    @State private var selectedDeviceIDs: Set<String> = []
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack { Label("Discovery Review", systemImage: "dot.radiowaves.left.and.right").font(.title2.bold()); Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.defaultAction) }
+            Text("Review what changed during the latest scan instead of silently accepting network changes.").foregroundStyle(.secondary)
+            if manager.discoveryChanges.isEmpty {
+                VStack(spacing: 8) {
+                    Spacer(); Image(systemName: "checkmark.circle").font(.system(size: 36)).foregroundStyle(.secondary)
+                    Text("No discovery changes").font(.headline)
+                    Text("Run a scan to compare new, returning, changed, and missing lights.").foregroundStyle(.secondary)
+                    Spacer()
+                }.frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List {
+                    ForEach(DiscoveryChange.Kind.allCasesCompat, id: \.rawValue) { kind in
+                        let changes = manager.discoveryChanges.filter { $0.kind == kind }
+                        if !changes.isEmpty {
+                            Section(kind.rawValue) {
+                                ForEach(changes) { change in
+                                    HStack {
+                                        if kind == .new {
+                                            Toggle("", isOn: Binding(get: { selectedDeviceIDs.contains(change.deviceID) }, set: { selected in
+                                                if selected { selectedDeviceIDs.insert(change.deviceID) } else { selectedDeviceIDs.remove(change.deviceID) }
+                                            })).labelsHidden().accessibilityLabel("Select \(change.name)")
+                                        }
+                                        Image(systemName: symbol(for: kind)).foregroundStyle(kind == .missing ? Color.orange : Color.accentColor)
+                                        VStack(alignment: .leading) { Text(change.name); Text(change.detail).font(.caption).foregroundStyle(.secondary) }
+                                        Spacer()
+                                        if kind == .new, let device = manager.devices.first(where: { $0.id == change.deviceID }) {
+                                            Menu("Assign") {
+                                                Button("Unassigned") { manager.assign(lightID: device.id, toRoom: nil) }
+                                                ForEach(manager.rooms) { room in Button(room.name) { manager.assign(lightID: device.id, toRoom: room.id) } }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            HStack {
+                Button("Clear Review") { manager.clearDiscoveryChanges(); selectedDeviceIDs = [] }.disabled(manager.discoveryChanges.isEmpty)
+                if !selectedDeviceIDs.isEmpty {
+                    Menu("Assign \(selectedDeviceIDs.count) Selected") {
+                        Button("Unassigned") { manager.assign(lightIDs: selectedDeviceIDs, toRoom: nil); selectedDeviceIDs = [] }
+                        ForEach(manager.rooms) { room in Button(room.name) { manager.assign(lightIDs: selectedDeviceIDs, toRoom: room.id); selectedDeviceIDs = [] } }
+                    }
+                }
+                Spacer(); Button("Scan Again") { manager.scan() }.disabled(manager.isScanning)
+            }
+        }
+        .padding(20).frame(minWidth: 560, idealWidth: 680, minHeight: 380, idealHeight: 520)
+    }
+
+    private func symbol(for kind: DiscoveryChange.Kind) -> String {
+        switch kind { case .new: return "plus.circle.fill"; case .backOnline: return "wifi"; case .changed: return "arrow.triangle.2.circlepath"; case .missing: return "wifi.slash" }
+    }
+}
+
+private extension DiscoveryChange.Kind {
+    static var allCasesCompat: [DiscoveryChange.Kind] { [.new, .backOnline, .changed, .missing] }
+}
+
+struct MissedAutomationsView: View {
+    @EnvironmentObject var manager: LightManager
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack { Label("Missed Automations", systemImage: "clock.badge.exclamationmark").font(.title2.bold()); Spacer(); Button("Done") { dismiss() } }
+            Text("LumenDesk found actions that were scheduled while the Mac was asleep or unavailable. Nothing runs until you choose.").foregroundStyle(.secondary)
+            List(manager.missedAutomations) { item in
+                HStack {
+                    VStack(alignment: .leading) { Text(item.roomName).font(.headline); Text("\(item.entry.action.displayName) · \(item.scheduledAt.formatted(date: .abbreviated, time: .shortened)) · \(TimeZone.current.identifier)").font(.caption).foregroundStyle(.secondary) }
+                    Spacer(); Button("Skip") { manager.skipMissedAutomation(item) }; Button("Run Now") { manager.runMissedAutomation(item) }.buttonStyle(.borderedProminent)
+                }
+            }
+        }.padding(20).frame(minWidth: 560, minHeight: 360)
+    }
+}
+
+struct SceneEditorView: View {
+    @EnvironmentObject var manager: LightManager
+    @Environment(\.dismiss) private var dismiss
+    let original: LightingScene
+    @State private var draft: LightingScene
+    @State private var selectedForRehearsal: Set<String> = []
+    @State private var showingHistory = false
+    @State private var showingDiscard = false
+    @State private var restorePointLabel = "Before edit"
+
+    init(scene: LightingScene) { original = scene; _draft = State(initialValue: scene) }
+    private var dirty: Bool { draft != original }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("Edit Scene Draft", systemImage: "pencil.and.outline").font(.title2.bold())
+                if dirty { Text("Unsaved").font(.caption.bold()).padding(.horizontal, 7).padding(.vertical, 3).background(.orange.opacity(0.18), in: Capsule()) }
+                Spacer(); Button("History") { showingHistory = true }; Button("Close") { attemptDismiss() }
+            }
+            HStack {
+                TextField("Scene name", text: $draft.name).textFieldStyle(.roundedBorder)
+                TextField("Restore point label", text: $restorePointLabel).textFieldStyle(.roundedBorder).frame(maxWidth: 220)
+                    .help("Names the version saved before these changes")
+            }
+            if let warning = manager.duplicateSceneNameMessage(draft.name, excludingSceneID: draft.id) { Label(warning, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange) }
+            Text("Before → After · choose test lights to audition changes without disturbing the entire scene.").font(.caption).foregroundStyle(.secondary)
+            List {
+                ForEach(draft.snapshots.keys.sorted(), id: \.self) { id in
+                    if let binding = snapshotBinding(id), let device = manager.devices.first(where: { $0.id == id }) {
+                        HStack {
+                            Toggle("", isOn: Binding(get: { selectedForRehearsal.contains(id) }, set: { selected in
+                                if selected { selectedForRehearsal.insert(id) } else { selectedForRehearsal.remove(id) }
+                            })).labelsHidden()
+                            VStack(alignment: .leading) { Text(device.label); Text(diffText(id: id, value: binding.wrappedValue)).font(.caption2).foregroundStyle(.secondary) }
+                            Spacer(); Toggle("On", isOn: binding.isOn).labelsHidden(); Slider(value: binding.brightness, in: 0.01...1).frame(width: 130); Text("\(Int(binding.wrappedValue.brightness * 100))%").monospacedDigit().frame(width: 38)
+                        }
+                    }
+                }
+            }
+            HStack {
+                if manager.rehearsalSceneID == draft.id { Button("End & Restore") { manager.stopSceneRehearsal() }.tint(.orange) }
+                else { Button("Rehearse Selected") { manager.startSceneRehearsal(draft, deviceIDs: selectedForRehearsal) }.disabled(selectedForRehearsal.isEmpty) }
+                Spacer(); Button("Discard") { showingDiscard = true }.disabled(!dirty); Button("Save Draft") { manager.updateScene(draft, revisionLabel: restorePointLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Before edit" : restorePointLabel); dismiss() }.buttonStyle(.borderedProminent).disabled(!dirty || draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(20).frame(minWidth: 650, idealWidth: 760, minHeight: 460, idealHeight: 600)
+        .onAppear { if let recovered = manager.recoveredDraft(for: original.id), recovered != original { draft = recovered } }
+        .onChange(of: draft) { value in if value != original { manager.autosaveSceneDraft(value) } }
+        .confirmationDialog("Discard unsaved scene changes?", isPresented: $showingDiscard) { Button("Discard Changes", role: .destructive) { manager.discardSceneDraft(for: original.id); manager.stopSceneRehearsal(); dismiss() } }
+        .sheet(isPresented: $showingHistory) { SceneHistoryView(sceneID: draft.id).environmentObject(manager) }
+    }
+
+    private func snapshotBinding(_ id: String) -> Binding<DeviceSnapshot>? {
+        guard draft.snapshots[id] != nil else { return nil }
+        return Binding(get: { draft.snapshots[id]! }, set: { draft.snapshots[id] = $0 })
+    }
+    private func diffText(id: String, value: DeviceSnapshot) -> String {
+        guard let before = original.snapshots[id] else { return "New light" }
+        if before == value { return "Unchanged" }
+        return "\(before.isOn ? "On" : "Off") \(Int(before.brightness * 100))% → \(value.isOn ? "On" : "Off") \(Int(value.brightness * 100))%"
+    }
+    private func attemptDismiss() { if dirty { showingDiscard = true } else { manager.stopSceneRehearsal(); dismiss() } }
+}
+
+struct SceneHistoryView: View {
+    @EnvironmentObject var manager: LightManager
+    @Environment(\.dismiss) private var dismiss
+    let sceneID: UUID
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack { Text("Scene Version History").font(.title2.bold()); Spacer(); Button("Done") { dismiss() } }
+            List(manager.revisions(for: sceneID)) { revision in
+                HStack { VStack(alignment: .leading) { Text(revision.label); Text(revision.savedAt.formatted(date: .abbreviated, time: .shortened)).font(.caption).foregroundStyle(.secondary) }; Spacer(); Button("Restore") { manager.restoreSceneRevision(revision); dismiss() } }
+            }
+        }.padding(20).frame(minWidth: 500, minHeight: 340)
+    }
+}
+
+private extension Binding where Value == DeviceSnapshot {
+    var isOn: Binding<Bool> {
+        Binding<Bool>(get: { wrappedValue.isOn }, set: { value in var snapshot = wrappedValue; snapshot.isOn = value; wrappedValue = snapshot })
+    }
+    var brightness: Binding<Double> {
+        Binding<Double>(get: { wrappedValue.brightness }, set: { value in var snapshot = wrappedValue; snapshot.brightness = value; wrappedValue = snapshot })
+    }
 }

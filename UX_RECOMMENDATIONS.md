@@ -502,3 +502,14 @@ Model each room as a civilization whose prosperity depends on furniture directio
 ## Third-pass design principle
 
 LumenDesk’s next practical gains should come from **truthfulness, reversibility, and restraint**, not from adding more permanent controls to the main surface. Network state should say what is desired, what is pending, and what is confirmed; automations should yield gracefully to human intent; advanced creation tools should protect experimentation; and every decorative or privacy-sensitive feature should have a calm, accessible alternative. The five ideas immediately above should, for the continued wellbeing of the product, remain gloriously unbuilt.
+
+## Third-pass implementation status — 2026-06-10
+
+All 20 practical recommendations in this third-pass review are now represented in the application:
+
+- **#1–3:** coalescing command queues, per-light queued/sending/applied/failed feedback, desired-versus-confirmed diagnostics, cancellation/retry, and clickable room-health information.
+- **#4–7:** duplicate-name guidance, a discovery-change inbox with bulk assignment, temporary automation overrides, timezone disclosure, and reviewable sleep/wake missed actions.
+- **#8–10:** autosaved scene drafts, before/after comparisons, named local version history, restore controls, and reversible rehearsal on selected bulbs.
+- **#11–14:** a native Settings scene, resizable content-heavy tools, a user-selectable confirmation policy, and scoped undo feedback that identifies affected lights.
+- **#15–18:** expanded app commands and focus/accessibility actions, quiet/reduced-motion/reduced-transparency behavior, non-color status labels and color names, and just-in-time microphone privacy disclosure.
+- **#19–20:** an adaptive configurable menu-bar view and a visibly isolated safe demo workspace with simulated latency, offline devices, schedules, and partial failures.

@@ -15,6 +15,11 @@ struct ContentView: View {
     @State private var showingParliament = false
     @State private var showingEcosystem = false
     @State private var showingCompliance = false
+    @State private var showingDiscoveryInbox = false
+    @State private var showingMissedAutomations = false
+    @AppStorage(AppPreferenceKey.quietInterface) private var quietInterface = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @AppStorage("LumenDesk.workspaceLayout.v1") private var layoutRaw = WorkspaceLayout.automatic.rawValue
     @AppStorage("LumenDesk.interfaceDensity.v1") private var densityRaw = InterfaceDensity.comfortable.rawValue
 
@@ -34,6 +39,10 @@ struct ContentView: View {
         ZStack(alignment: .bottom) {
             VStack(spacing: 0) {
                 header
+                if manager.isDemoMode {
+                    HStack { Label("SAFE DEMO — no physical lights are being controlled", systemImage: "testtube.2").font(.caption.bold()); Spacer(); Button("Return to Live") { manager.exitDemoMode() }.controlSize(.small) }
+                        .padding(.horizontal, 16).padding(.vertical, 6).background(Color.orange.opacity(0.16))
+                }
 
                 if manager.devices.isEmpty {
                     emptyState
@@ -61,6 +70,8 @@ struct ContentView: View {
             .sheet(isPresented: $showingParliament) { LightingParliamentView().environmentObject(manager) }
             .sheet(isPresented: $showingEcosystem) { FireflyEcosystemView().environmentObject(manager) }
             .sheet(isPresented: $showingCompliance) { ComplianceSuiteView().environmentObject(manager) }
+            .sheet(isPresented: $showingDiscoveryInbox) { DiscoveryInboxView().environmentObject(manager) }
+            .sheet(isPresented: $showingMissedAutomations) { MissedAutomationsView().environmentObject(manager) }
 
             if selectionMode && !selectedIDs.isEmpty {
                 VStack(spacing: 6) {
@@ -74,10 +85,22 @@ struct ContentView: View {
                 }
             }
 
-            if auroraFireflies && !manager.devices.isEmpty {
+            if auroraFireflies && !quietInterface && !reduceMotion && !manager.devices.isEmpty {
                 AuroraFireflyOverlay(colors: manager.fireflyCitizens.map { Color(hue: $0.hue, saturation: 0.82, brightness: max(0.45, $0.energy)) })
                     .allowsHitTesting(false)
                     .transition(.opacity)
+            }
+
+            if let summary = manager.lastActionSummary {
+                HStack(spacing: 10) {
+                    Label(summary, systemImage: "arrow.uturn.backward.circle")
+                    Button("Undo") { manager.undo() }.disabled(!manager.canUndo)
+                    Button { manager.dismissLastActionSummary() } label: { Image(systemName: "xmark") }.buttonStyle(.plain)
+                }
+                .font(.caption).padding(.horizontal, 12).padding(.vertical, 8)
+                .background(reduceTransparency ? Color.black : Color.black.opacity(0.8), in: Capsule())
+                .padding(.bottom, manager.commandError == nil ? 16 : 70)
+                .accessibilityElement(children: .combine)
             }
 
             if let error = manager.commandError {
@@ -212,6 +235,9 @@ struct ContentView: View {
                     Button { if manager.napPhase != .inactive { manager.cancelNapMode() } else { manager.startNapMode() } } label: { Label(manager.napPhase == .inactive ? "Start Nap Mode" : "Cancel Nap Mode", systemImage: "moon.fill") }
                     Divider()
                     Button { showingDiagnostics = true } label: { Label("Discovery Diagnostics", systemImage: "stethoscope") }
+                    Button { showingDiscoveryInbox = true } label: { Label("Review Discovery Changes", systemImage: "tray.full") }
+                    if !manager.missedAutomations.isEmpty { Button { showingMissedAutomations = true } label: { Label("Missed Automations (\(manager.missedAutomations.count))", systemImage: "clock.badge.exclamationmark") } }
+                    if !manager.commandPendingIDs.isEmpty { Button("Cancel Queued Commands") { manager.cancelQueuedCommands() } }
                     Button { showingActivity = true } label: { Label("Activity Log", systemImage: "clock.arrow.circlepath") }
                     Button { showingShortcuts = true } label: { Label("Keyboard Shortcuts", systemImage: "keyboard") }
                     Divider()

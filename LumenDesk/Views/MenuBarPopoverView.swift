@@ -1,9 +1,24 @@
 import SwiftUI
+import AppKit
 
 /// Compact popover shown in the macOS menu bar. Exposes master room toggles so
 /// the user can control their lights without switching to the main window.
 struct MenuBarPopoverView: View {
     @EnvironmentObject var manager: LightManager
+    @AppStorage(AppPreferenceKey.menuBarScope) private var scopeRaw = MenuBarScope.activeRooms.rawValue
+    @AppStorage(AppPreferenceKey.showMenuBarUrgentOnly) private var urgentOnly = false
+
+    private var visibleRooms: [Room] {
+        let scope = MenuBarScope(rawValue: scopeRaw) ?? .activeRooms
+        let scoped: [Room]
+        switch scope {
+        case .favorites: scoped = manager.rooms.filter { manager.isFavoriteRoom($0.id) }
+        case .activeRooms: scoped = manager.rooms.filter { manager.devices(in: $0).contains(where: { $0.isOn || $0.isStale || manager.commandPendingIDs.contains($0.id) }) }
+        case .allRooms: scoped = manager.rooms
+        }
+        guard urgentOnly else { return scoped }
+        return scoped.filter { manager.devices(in: $0).contains(where: { $0.isStale || manager.commandPendingIDs.contains($0.id) }) }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -15,7 +30,7 @@ struct MenuBarPopoverView: View {
                     if !manager.rooms.isEmpty || !manager.unassignedDevices.isEmpty {
                         Divider().padding(.horizontal, 12)
                     }
-                    ForEach(manager.rooms) { room in
+                    ForEach(visibleRooms) { room in
                         roomRow(room)
                         Divider().padding(.horizontal, 12)
                     }
@@ -36,9 +51,16 @@ struct MenuBarPopoverView: View {
                 .foregroundStyle(Lumen.brandGradient)
                 .font(.caption)
                 .accessibilityHidden(true)
-            Text("LumenDesk")
-                .font(.caption.weight(.semibold))
+            VStack(alignment: .leading, spacing: 0) {
+                Text("LumenDesk").font(.caption.weight(.semibold))
+                if manager.isDemoMode { Text("SAFE DEMO").font(.system(size: 8, weight: .bold)).foregroundStyle(.orange) }
+            }
             Spacer()
+            Button {
+                NSApp.activate(ignoringOtherApps: true)
+                NSApp.windows.first(where: { $0.canBecomeKey })?.makeKeyAndOrderFront(nil)
+            } label: { Image(systemName: "macwindow") }
+            .buttonStyle(.borderless).help("Resume in LumenDesk")
             if manager.isScanning {
                 ProgressView().controlSize(.mini)
             } else {
@@ -52,6 +74,7 @@ struct MenuBarPopoverView: View {
                 .help("Scan for lights")
                 .accessibilityLabel("Scan for lights")
             }
+            if !manager.commandPendingIDs.isEmpty { Label("\(manager.commandPendingIDs.count)", systemImage: "arrow.up.circle").font(.caption2).help("Commands in progress") }
             Text("\(manager.devices.count) light\(manager.devices.count == 1 ? "" : "s")")
                 .font(.caption2)
                 .foregroundStyle(.secondary)

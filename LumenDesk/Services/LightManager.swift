@@ -42,6 +42,16 @@ final class LightManager: ObservableObject {
     @Published private(set) var fireflyCitizens: [FireflyCitizen] = []
     @Published private(set) var sceneCertifications: [SceneCertification] = []
     @Published private(set) var recentColors: [RecentColor] = []
+    @Published private(set) var commandStates: [String: DeviceCommandState] = [:]
+    @Published private(set) var confirmedStates: [String: ConfirmedDeviceState] = [:]
+    @Published private(set) var discoveryChanges: [DiscoveryChange] = []
+    @Published private(set) var automationOverrides: [UUID: RoomAutomationOverride] = [:]
+    @Published private(set) var missedAutomations: [MissedAutomation] = []
+    @Published private(set) var sceneRevisions: [SceneRevision] = []
+    @Published private(set) var sceneDrafts: [UUID: LightingScene] = [:]
+    @Published private(set) var isDemoMode = false
+    @Published private(set) var lastActionSummary: String?
+    @Published private(set) var rehearsalSceneID: UUID?
 
     private var errorClearTask: Task<Void, Never>?
     private var lifx: LIFXClient?
@@ -55,6 +65,13 @@ final class LightManager: ObservableObject {
     private var scanGeneration: Int = 0     // incremented each scan; clears isScanning safely
     private var hasStarted = false
     private var lastScheduleCheck: Date?
+    private var commandTasks: [String: Task<Void, Never>] = [:]
+    private var commandTimeoutTasks: [String: Task<Void, Never>] = [:]
+    private var scanStartingIDs: Set<String> = []
+    private var scanStartingAddresses: [String: String] = [:]
+    private var demoLiveDevices: [LightDevice] = []
+    private var demoLiveRooms: [Room] = []
+    private var rehearsalSnapshot: [DeviceState] = []
 
     // Custom display names keyed by device id, persisted across sessions.
     private var customNames: [String: String] = [:]
@@ -90,6 +107,9 @@ final class LightManager: ObservableObject {
     private let firefliesKey = "LumenDesk.fireflies.v1"
     private let certificationsKey = "LumenDesk.certifications.v1"
     private let recentColorsKey = "LumenDesk.recentColors.v1"
+    private let automationOverridesKey = "LumenDesk.automationOverrides.v1"
+    private let sceneRevisionsKey = "LumenDesk.sceneRevisions.v1"
+    private let sceneDraftsKey = "LumenDesk.sceneDrafts.v1"
 
     // MARK: - Undo / redo state
 
@@ -131,6 +151,9 @@ final class LightManager: ObservableObject {
         fireflyCitizens = loadValue([FireflyCitizen].self, key: firefliesKey) ?? []
         sceneCertifications = loadValue([SceneCertification].self, key: certificationsKey) ?? []
         recentColors = loadValue([RecentColor].self, key: recentColorsKey) ?? []
+        automationOverrides = loadValue([UUID: RoomAutomationOverride].self, key: automationOverridesKey) ?? [:]
+        sceneRevisions = loadValue([SceneRevision].self, key: sceneRevisionsKey) ?? []
+        sceneDrafts = loadValue([UUID: LightingScene].self, key: sceneDraftsKey) ?? [:]
     }
 
     func start() {
@@ -163,6 +186,9 @@ final class LightManager: ObservableObject {
     func scan() {
         logActivity(.scan, title: "Discovery scan started", detail: "Broadcasting to LIFX and Govee devices.")
         isScanning = true
+        discoveryChanges = []
+        scanStartingIDs = Set(devices.map(\.id))
+        scanStartingAddresses = Dictionary(uniqueKeysWithValues: devices.map { ($0.id, $0.address) })
         scanPhase = "Sending discovery broadcasts"
         lastScanDate = Date()
         scanResponseCount = 0
@@ -181,6 +207,12 @@ final class LightManager: ObservableObject {
                 guard let self, self.scanGeneration == gen else { return }
                 self.isScanning = false
                 self.scanPhase = self.scanResponseCount == 0 ? "No responses found" : "Scan complete: \(self.scanResponseCount) response\(self.scanResponseCount == 1 ? "" : "s")"
+                let seenSinceScan = Set(self.devices.filter { $0.lastSeen >= (self.lastScanDate ?? .distantPast) }.map(\.id))
+                for id in self.scanStartingIDs.subtracting(seenSinceScan) {
+                    if let device = self.device(withID: id) {
+                        self.appendDiscoveryChange(device, kind: .missing, detail: "No response during this scan")
+                    }
+                }
                 self.logActivity(.scan, title: self.scanResponseCount == 0 ? "Scan found no lights" : "Scan completed", detail: self.scanPhase, isFailure: self.scanResponseCount == 0)
             }
         }
@@ -222,6 +254,18 @@ final class LightManager: ObservableObject {
                 if scheduleFiredThisMinute[entry.id] == nowKey { continue }
                 guard schedule(entry, shouldFireBetween: previous, and: now) else { continue }
 
+                if let override = activeAutomationOverride(for: room.id) {
+                    if override.skipNextSchedule { resumeAutomation(for: room.id) }
+                    logActivity(.schedule, title: "Automation skipped", detail: "\(room.name): manual override was active")
+                    continue
+                }
+                if now.timeIntervalSince(previous) > 120,
+                   let scheduledAt = scheduledOccurrenceToday(for: entry, relativeTo: now) {
+                    missedAutomations.append(MissedAutomation(roomID: room.id, roomName: room.name, entry: entry, scheduledAt: scheduledAt))
+                    logActivity(.schedule, title: "Automation needs review", detail: "\(room.name): \(entry.action.displayName) was missed while LumenDesk was unavailable")
+                    continue
+                }
+
                 scheduleFiredThisMinute[entry.id] = nowKey
                 logActivity(.schedule, title: "Automation ran", detail: "\(room.name): \(entry.action.displayName) at \(entry.timeString)")
                 let lights = devices(in: room)
@@ -239,6 +283,46 @@ final class LightManager: ObservableObject {
         }
         scheduleFiredThisMinute = scheduleFiredThisMinute.filter { $0.value == nowKey }
     }
+
+    func setAutomationOverride(for roomID: UUID, duration: AutomationOverrideDuration) {
+        let value: RoomAutomationOverride
+        switch duration {
+        case .nextSchedule: value = RoomAutomationOverride(createdAt: Date(), expiresAt: nil, skipNextSchedule: true)
+        case .oneHour: value = RoomAutomationOverride(createdAt: Date(), expiresAt: Date().addingTimeInterval(3600), skipNextSchedule: false)
+        case .untilResumed: value = RoomAutomationOverride(createdAt: Date(), expiresAt: nil, skipNextSchedule: false)
+        }
+        automationOverrides[roomID] = value
+        persistValue(automationOverrides, key: automationOverridesKey)
+        lastActionSummary = "Automation paused — \(value.summary)"
+    }
+
+    func activeAutomationOverride(for roomID: UUID) -> RoomAutomationOverride? {
+        guard let value = automationOverrides[roomID] else { return nil }
+        if value.isActive() { return value }
+        automationOverrides.removeValue(forKey: roomID)
+        persistValue(automationOverrides, key: automationOverridesKey)
+        return nil
+    }
+
+    func resumeAutomation(for roomID: UUID) {
+        automationOverrides.removeValue(forKey: roomID)
+        persistValue(automationOverrides, key: automationOverridesKey)
+        lastActionSummary = "Automation resumed"
+    }
+
+    func runMissedAutomation(_ missed: MissedAutomation) {
+        guard let room = rooms.first(where: { $0.id == missed.roomID }) else { return }
+        let lights = devices(in: room)
+        if let brightness = missed.entry.action.brightnessValue {
+            for device in lights { device.brightness = brightness; sendBrightness(device, value: brightness) }
+        } else {
+            let on = missed.entry.action == .turnOn || missed.entry.action == .atSunrise
+            for device in lights { device.isOn = on; sendPower(device, on: on) }
+        }
+        missedAutomations.removeAll { $0.id == missed.id }
+    }
+
+    func skipMissedAutomation(_ missed: MissedAutomation) { missedAutomations.removeAll { $0.id == missed.id } }
 
     private func schedule(_ entry: ScheduleEntry, shouldFireBetween previous: Date, and now: Date) -> Bool {
         guard let target = scheduledOccurrenceToday(for: entry, relativeTo: now) else { return false }
@@ -274,10 +358,37 @@ final class LightManager: ObservableObject {
     }
 
     private func markSeen(_ device: LightDevice) {
+        let wasStale = device.isStale
         device.lastSeen = Date()
         device.isStale = false
+        for key in commandTasks.keys.filter({ $0.hasPrefix("\(device.id)|") }) { commandTasks[key]?.cancel(); commandTasks[key] = nil }
+        commandTimeoutTasks[device.id]?.cancel(); commandTimeoutTasks[device.id] = nil
         commandPendingIDs.remove(device.id)
+        let rgb = device.color.rgbComponents
+        let hex = String(format: "#%02X%02X%02X", Int(rgb.r * 255), Int(rgb.g * 255), Int(rgb.b * 255))
+        confirmedStates[device.id] = ConfirmedDeviceState(isOn: device.isOn, brightness: device.brightness, colorHex: hex, kelvin: device.kelvin, confirmedAt: Date())
+        commandStates[device.id] = DeviceCommandState(phase: .applied, summary: "Confirmed by light", updatedAt: Date())
+        if wasStale { appendDiscoveryChange(device, kind: .backOnline, detail: "Responded again") }
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            guard self?.commandStates[device.id]?.phase == .applied else { return }
+            self?.commandStates[device.id] = DeviceCommandState(phase: .idle, summary: "Confirmed", updatedAt: Date())
+        }
     }
+
+    private func refresh(_ device: LightDevice) {
+        switch device.brand {
+        case .lifx: lifx?.refresh(macHex: device.backendID)
+        case .govee: govee?.refresh(deviceID: device.backendID)
+        }
+    }
+
+    private func appendDiscoveryChange(_ device: LightDevice, kind: DiscoveryChange.Kind, detail: String) {
+        guard !discoveryChanges.contains(where: { $0.deviceID == device.id && $0.kind == kind }) else { return }
+        discoveryChanges.append(DiscoveryChange(deviceID: device.id, name: device.label, kind: kind, detail: detail))
+    }
+
+    func clearDiscoveryChanges() { discoveryChanges = [] }
 
     // MARK: - Custom display names
 
@@ -358,6 +469,16 @@ final class LightManager: ObservableObject {
 
     // MARK: - Error / toast
 
+    func dismissLastActionSummary() { lastActionSummary = nil }
+
+    private func announceAction(_ title: String, lights: [LightDevice]) {
+        lastActionSummary = "\(title) · \(lights.count) light\(lights.count == 1 ? "" : "s")"
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 6_000_000_000)
+            if self?.lastActionSummary?.hasPrefix(title) == true { self?.lastActionSummary = nil }
+        }
+    }
+
     func publishError(_ message: String, undo: (() -> Void)? = nil) {
         commandError = message
         commandErrorUndo = undo
@@ -371,13 +492,70 @@ final class LightManager: ObservableObject {
         }
     }
 
-    // MARK: - Command pending state
+    // MARK: - Command queue and confirmed state
 
-    fileprivate func markPending(_ deviceID: String) {
+    fileprivate func markPending(_ deviceID: String, summary: String = "Applying change") {
         commandPendingIDs.insert(deviceID)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
-            Task { @MainActor in self?.commandPendingIDs.remove(deviceID) }
+        commandStates[deviceID] = DeviceCommandState(phase: .queued, summary: summary, updatedAt: Date())
+    }
+
+    private func enqueueCommand(for device: LightDevice, coalescingKey: String, summary: String, operation: @escaping @MainActor () -> Void) {
+        if isDemoMode {
+            markPending(device.id, summary: summary)
+            let demoKey = "\(device.id)|\(coalescingKey)"
+            commandTasks[demoKey]?.cancel()
+            commandTasks[demoKey] = Task { @MainActor [weak self, weak device] in
+                try? await Task.sleep(nanoseconds: 450_000_000)
+                guard !Task.isCancelled, let self, let device else { return }
+                self.commandPendingIDs.remove(device.id)
+                self.commandStates[device.id] = DeviceCommandState(phase: device.isStale ? .failed : .applied, summary: device.isStale ? "Simulated timeout" : "Simulated: \(summary)", updatedAt: Date())
+                if device.isStale { self.publishError("Demo failure: \(device.label) intentionally did not respond.") }
+            }
+            return
         }
+        markPending(device.id, summary: summary)
+        let taskKey = "\(device.id)|\(coalescingKey)"
+        commandTasks[taskKey]?.cancel()
+        commandTasks[taskKey] = Task { @MainActor [weak self, weak device] in
+            try? await Task.sleep(nanoseconds: 80_000_000)
+            guard !Task.isCancelled, let self, let device else { return }
+            self.commandStates[device.id] = DeviceCommandState(phase: .sending, summary: summary, updatedAt: Date())
+            operation()
+            self.startCommandTimeout(for: device, summary: summary)
+        }
+    }
+
+    private func startCommandTimeout(for device: LightDevice, summary: String) {
+        commandTimeoutTasks[device.id]?.cancel()
+        commandTimeoutTasks[device.id] = Task { @MainActor [weak self, weak device] in
+            try? await Task.sleep(nanoseconds: 3_500_000_000)
+            guard !Task.isCancelled, let self, let device,
+                  self.commandStates[device.id]?.phase == .sending else { return }
+            self.commandPendingIDs.remove(device.id)
+            self.commandStates[device.id] = DeviceCommandState(phase: .failed, summary: "No confirmation: \(summary)", updatedAt: Date(), retryCount: (self.commandStates[device.id]?.retryCount ?? 0) + 1)
+            self.publishError("\(device.label) did not confirm the change. Keep trying or rescan.")
+        }
+    }
+
+    func cancelQueuedCommands(deviceIDs: Set<String>? = nil) {
+        let ids = deviceIDs ?? Set(commandTasks.keys.map { $0.split(separator: "|").first.map(String.init) ?? $0 })
+        for id in ids {
+            for key in commandTasks.keys.filter({ $0.hasPrefix("\(id)|") }) { commandTasks[key]?.cancel(); commandTasks[key] = nil }
+            commandTimeoutTasks[id]?.cancel(); commandTimeoutTasks[id] = nil
+            commandPendingIDs.remove(id)
+            commandStates[id] = DeviceCommandState(phase: .idle, summary: "Cancelled", updatedAt: Date())
+        }
+        lastActionSummary = "Cancelled \(ids.count) queued command\(ids.count == 1 ? "" : "s")"
+    }
+
+    func retryCommand(for device: LightDevice) {
+        refresh(device)
+        commandStates[device.id] = DeviceCommandState(phase: .sending, summary: "Checking confirmed state", updatedAt: Date(), retryCount: (commandStates[device.id]?.retryCount ?? 0) + 1)
+        startCommandTimeout(for: device, summary: "state refresh")
+    }
+
+    func commandState(for deviceID: String) -> DeviceCommandState {
+        commandStates[deviceID] ?? DeviceCommandState()
     }
 
     // MARK: - Control
@@ -426,6 +604,7 @@ final class LightManager: ObservableObject {
             publishError("\(staleCount) light\(staleCount == 1 ? "" : "s") in \u{201C}\(room.name)\u{201D} may be offline.")
         }
         recordChange(lights)
+        announceAction("\(room.name) turned \(on ? "on" : "off")", lights: lights)
         for d in lights { d.isOn = on; markPending(d.id); sendPower(d, on: on) }
     }
 
@@ -436,11 +615,22 @@ final class LightManager: ObservableObject {
     }
 
     func setAllPower(on: Bool) {
+        if UserDefaults.standard.string(forKey: AppPreferenceKey.confirmationPolicy) == ConfirmationPolicy.cautious.rawValue,
+           devices.count > 3 {
+            let alert = NSAlert()
+            alert.messageText = on ? "Turn On All Lights?" : "Turn Off All Lights?"
+            alert.informativeText = "This will physically change \(devices.count) lights. Reversible changes normally run immediately; cautious confirmation is enabled in Settings."
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: on ? "Turn On" : "Turn Off")
+            alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+        }
         let staleCount = devices.filter { $0.isStale }.count
         if staleCount > 0 {
             publishError("\(staleCount) light\(staleCount == 1 ? "" : "s") may be offline.")
         }
         recordChange(devices)
+        announceAction("All lights turned \(on ? "on" : "off")", lights: devices)
         for d in devices { d.isOn = on; markPending(d.id); sendPower(d, on: on) }
     }
 
@@ -614,53 +804,54 @@ final class LightManager: ObservableObject {
     // MARK: - Vendor send helpers
 
     private func sendPower(_ device: LightDevice, on: Bool) {
-        switch device.brand {
-        case .lifx:  lifx?.setPower(macHex: device.backendID, on: on)
-        case .govee: govee?.setPower(deviceID: device.backendID, on: on)
+        enqueueCommand(for: device, coalescingKey: "power", summary: on ? "Turning on" : "Turning off") { [weak self, weak device] in
+            guard let self, let device else { return }
+            switch device.brand {
+            case .lifx: self.lifx?.setPower(macHex: device.backendID, on: on)
+            case .govee: self.govee?.setPower(deviceID: device.backendID, on: on)
+            }
         }
     }
 
     private func sendBrightness(_ device: LightDevice, value: Double) {
-        switch device.brand {
-        case .lifx:
-            let hsb = device.color.hsbComponents
-            let lifxColor = LIFXHSBK(
-                hue: UInt16(hsb.h * 65535),
-                saturation: UInt16(hsb.s * 65535),
-                brightness: UInt16(max(0, min(1, value)) * 65535),
-                kelvin: UInt16(device.kelvin)
-            )
-            lifx?.setColor(macHex: device.backendID, color: lifxColor)
-        case .govee:
-            govee?.setBrightness(deviceID: device.backendID, percent: Int(value * 100))
+        enqueueCommand(for: device, coalescingKey: "brightness", summary: "Brightness \(Int(value * 100)) percent") { [weak self, weak device] in
+            guard let self, let device else { return }
+            switch device.brand {
+            case .lifx:
+                let hsb = device.color.hsbComponents
+                let lifxColor = LIFXHSBK(hue: UInt16(hsb.h * 65535), saturation: UInt16(hsb.s * 65535), brightness: UInt16(max(0, min(1, value)) * 65535), kelvin: UInt16(device.kelvin))
+                self.lifx?.setColor(macHex: device.backendID, color: lifxColor)
+            case .govee:
+                self.govee?.setBrightness(deviceID: device.backendID, percent: Int(value * 100))
+            }
         }
     }
 
     private func sendColor(_ device: LightDevice, color: Color) {
-        switch device.brand {
-        case .lifx:
-            let hsb = color.hsbComponents
-            let lifxColor = LIFXHSBK(
-                hue: UInt16(hsb.h * 65535),
-                saturation: UInt16(hsb.s * 65535),
-                brightness: UInt16(device.brightness * 65535),
-                kelvin: UInt16(device.kelvin)
-            )
-            lifx?.setColor(macHex: device.backendID, color: lifxColor)
-        case .govee:
-            let rgb = color.rgbComponents
-            govee?.setColor(deviceID: device.backendID,
-                            r: Int(rgb.r * 255), g: Int(rgb.g * 255), b: Int(rgb.b * 255),
-                            kelvin: 0)
+        enqueueCommand(for: device, coalescingKey: "color", summary: "Changing color") { [weak self, weak device] in
+            guard let self, let device else { return }
+            switch device.brand {
+            case .lifx:
+                let hsb = color.hsbComponents
+                let lifxColor = LIFXHSBK(hue: UInt16(hsb.h * 65535), saturation: UInt16(hsb.s * 65535), brightness: UInt16(device.brightness * 65535), kelvin: UInt16(device.kelvin))
+                self.lifx?.setColor(macHex: device.backendID, color: lifxColor)
+            case .govee:
+                let rgb = color.rgbComponents
+                self.govee?.setColor(deviceID: device.backendID, r: Int(rgb.r * 255), g: Int(rgb.g * 255), b: Int(rgb.b * 255), kelvin: 0)
+            }
         }
     }
 
     private func sendColorTemperature(_ device: LightDevice, kelvin: Int) {
-        switch device.brand {
-        case .lifx:
-            sendBrightness(device, value: device.brightness)
-        case .govee:
-            govee?.setColor(deviceID: device.backendID, r: 255, g: 255, b: 255, kelvin: kelvin)
+        enqueueCommand(for: device, coalescingKey: "kelvin", summary: "Color temperature \(kelvin) kelvin") { [weak self, weak device] in
+            guard let self, let device else { return }
+            switch device.brand {
+            case .lifx:
+                let hsb = device.color.hsbComponents
+                self.lifx?.setColor(macHex: device.backendID, color: LIFXHSBK(hue: UInt16(hsb.h * 65535), saturation: 0, brightness: UInt16(device.brightness * 65535), kelvin: UInt16(kelvin)))
+            case .govee:
+                self.govee?.setColor(deviceID: device.backendID, r: 255, g: 255, b: 255, kelvin: kelvin)
+            }
         }
     }
 
@@ -738,12 +929,15 @@ final class LightManager: ObservableObject {
 
         if let idx = devices.firstIndex(where: { $0.id == device.id }) {
             let existing = devices[idx]
+            let oldAddress = existing.address
             existing.name = device.name
             existing.address = device.address
+            if oldAddress != device.address { appendDiscoveryChange(existing, kind: .changed, detail: "Address changed from \(oldAddress) to \(device.address)") }
             existing.customName = customNames[existing.id]
             markSeen(existing)
         } else {
             devices.append(device)
+            appendDiscoveryChange(device, kind: .new, detail: "Ready to assign to a room")
             sortDevices()
             // UX 9: briefly flag newly discovered devices so the UI can highlight them.
             newlyDiscoveredIDs.insert(device.id)
@@ -771,7 +965,9 @@ extension LightManager: LIFXClientDelegate {
             let id = "lifx:\(macHex)"
             if let existing = self.device(withID: id) {
                 self.scanResponseCount += 1
+                let oldAddress = existing.address
                 existing.address = address
+                if oldAddress != address { self.appendDiscoveryChange(existing, kind: .changed, detail: "Address changed from \(oldAddress) to \(address)") }
                 self.markSeen(existing)
             } else {
                 let device = LightDevice(id: id, brand: .lifx, backendID: macHex,
@@ -800,7 +996,13 @@ extension LightManager: LIFXClientDelegate {
     }
 
     nonisolated func lifxCommandFailed(_ error: Error) {
-        Task { @MainActor in self.publishError("LIFX command failed: \(error)") }
+        Task { @MainActor in
+            for device in self.devices where device.brand == .lifx && self.commandPendingIDs.contains(device.id) {
+                self.commandPendingIDs.remove(device.id)
+                self.commandStates[device.id] = DeviceCommandState(phase: .failed, summary: "LIFX rejected the command", updatedAt: Date())
+            }
+            self.publishError("LIFX command failed: \(error)")
+        }
     }
 }
 
@@ -812,7 +1014,9 @@ extension LightManager: GoveeClientDelegate {
             let id = "govee:\(deviceID)"
             if let existing = self.device(withID: id) {
                 self.scanResponseCount += 1
+                let oldAddress = existing.address
                 existing.address = address
+                if oldAddress != address { self.appendDiscoveryChange(existing, kind: .changed, detail: "Address changed from \(oldAddress) to \(address)") }
                 self.markSeen(existing)
             } else {
                 let suffix = deviceID.split(separator: ":").suffix(2).joined(separator: "")
@@ -840,7 +1044,13 @@ extension LightManager: GoveeClientDelegate {
     }
 
     nonisolated func goveeCommandFailed(_ error: Error) {
-        Task { @MainActor in self.publishError("Govee command failed: \(error)") }
+        Task { @MainActor in
+            for device in self.devices where device.brand == .govee && self.commandPendingIDs.contains(device.id) {
+                self.commandPendingIDs.remove(device.id)
+                self.commandStates[device.id] = DeviceCommandState(phase: .failed, summary: "Govee rejected the command", updatedAt: Date())
+            }
+            self.publishError("Govee command failed: \(error)")
+        }
     }
 }
 
@@ -1183,6 +1393,74 @@ extension LightManager {
         guard !trimmed.isEmpty, let idx = scenes.firstIndex(where: { $0.id == sceneID }) else { return }
         scenes[idx].name = trimmed
         persistScenes()
+    }
+
+    func updateScene(_ draft: LightingScene, revisionLabel: String = "Before edit") {
+        guard let index = scenes.firstIndex(where: { $0.id == draft.id }) else { return }
+        sceneRevisions.insert(SceneRevision(scene: scenes[index], label: revisionLabel), at: 0)
+        sceneRevisions = Array(sceneRevisions.prefix(60))
+        scenes[index] = draft
+        sceneDrafts.removeValue(forKey: draft.id)
+        persistValue(sceneDrafts, key: sceneDraftsKey)
+        persistScenes()
+        persistValue(sceneRevisions, key: sceneRevisionsKey)
+        lastActionSummary = "Saved \(draft.name) — Undo restores the previous version"
+    }
+
+    func revisions(for sceneID: UUID) -> [SceneRevision] { sceneRevisions.filter { $0.sceneID == sceneID } }
+
+    func recoveredDraft(for sceneID: UUID) -> LightingScene? { sceneDrafts[sceneID] }
+    func autosaveSceneDraft(_ draft: LightingScene) {
+        sceneDrafts[draft.id] = draft
+        persistValue(sceneDrafts, key: sceneDraftsKey)
+    }
+    func discardSceneDraft(for sceneID: UUID) {
+        sceneDrafts.removeValue(forKey: sceneID)
+        persistValue(sceneDrafts, key: sceneDraftsKey)
+    }
+
+    func restoreSceneRevision(_ revision: SceneRevision) {
+        guard let index = scenes.firstIndex(where: { $0.id == revision.sceneID }) else { return }
+        sceneRevisions.insert(SceneRevision(scene: scenes[index], label: "Before restore"), at: 0)
+        scenes[index].name = revision.name
+        scenes[index].snapshots = revision.snapshots
+        persistScenes(); persistValue(sceneRevisions, key: sceneRevisionsKey)
+        lastActionSummary = "Restored \(revision.label)"
+    }
+
+    func startSceneRehearsal(_ scene: LightingScene, deviceIDs: Set<String>) {
+        stopSceneRehearsal(restore: true)
+        let targets = devices.filter { deviceIDs.contains($0.id) && scene.snapshots[$0.id] != nil }
+        rehearsalSnapshot = targets.map(snapshot)
+        rehearsalSceneID = scene.id
+        for device in targets {
+            guard let value = scene.snapshots[device.id] else { continue }
+            device.isOn = value.isOn; device.brightness = value.brightness; device.kelvin = value.kelvin
+            device.color = Color(hue: value.hue, saturation: value.saturation, brightness: 1)
+            sendColor(device, color: device.color); sendPower(device, on: value.isOn)
+        }
+        lastActionSummary = "Rehearsing \(scene.name) on \(targets.count) light\(targets.count == 1 ? "" : "s")"
+    }
+
+    func stopSceneRehearsal(restore: Bool = true) {
+        guard rehearsalSceneID != nil else { return }
+        if restore { restoreDeviceStates(rehearsalSnapshot) }
+        rehearsalSnapshot = []
+        rehearsalSceneID = nil
+        lastActionSummary = restore ? "Rehearsal ended — prior state restored" : "Rehearsal kept"
+    }
+
+    func duplicateNameMessage(_ candidate: String, excludingDeviceID: String? = nil) -> String? {
+        let normalized = candidate.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else { return nil }
+        let matches = devices.filter { $0.id != excludingDeviceID && $0.label.lowercased() == normalized }
+        guard !matches.isEmpty else { return nil }
+        let roomNames = rooms.filter { room in matches.contains(where: { room.lightIDs.contains($0.id) }) }.map(\.name)
+        return roomNames.isEmpty ? "Another light already uses this name." : "Already used in \(roomNames.joined(separator: ", ")). Consider adding the room name."
+    }
+
+    func duplicateSceneNameMessage(_ candidate: String, excludingSceneID: UUID? = nil) -> String? {
+        scenes.contains { $0.id != excludingSceneID && $0.name.caseInsensitiveCompare(candidate.trimmingCharacters(in: .whitespacesAndNewlines)) == .orderedSame } ? "Another scene already uses this name." : nil
     }
 
     fileprivate func persistScenes() {
@@ -1712,4 +1990,46 @@ extension LightManager {
     }
 
     func certification(for sceneID: UUID) -> SceneCertification? { sceneCertifications.first { $0.sceneID == sceneID } }
+}
+
+// MARK: - Demo workspace
+
+extension LightManager {
+    func enterDemoMode() {
+        guard !isDemoMode else { return }
+        demoLiveDevices = devices
+        demoLiveRooms = rooms
+        let palette: [Color] = [.orange, .cyan, .purple, .mint, .pink, .yellow]
+        devices = (0..<6).map { index in
+            let device = LightDevice(id: "demo:\(index)", brand: index.isMultiple(of: 2) ? .lifx : .govee,
+                                     backendID: "SIM-\(index)", name: ["Desk Glow", "Reading Lamp", "Window Wash", "Shelf Light", "Floor Lamp", "Ceiling"][index],
+                                     address: "Simulation", isOn: index != 4, brightness: 0.35 + Double(index) * 0.1,
+                                     color: palette[index], kelvin: 2700 + index * 500)
+            if index == 4 { device.isStale = true; device.lastSeen = Date().addingTimeInterval(-600) }
+            return device
+        }
+        let office = Room(name: "Demo Office", lightIDs: Array(devices.prefix(3).map(\.id)), schedules: [ScheduleEntry(hour: 9, minute: 0, action: .turnOn)])
+        let lounge = Room(name: "Demo Lounge", lightIDs: Array(devices.suffix(3).map(\.id)), schedules: [ScheduleEntry(hour: 22, minute: 30, action: .turnOff)])
+        rooms = [office, lounge]
+        isDemoMode = true
+        commandStates = [:]; confirmedStates = [:]
+        for device in devices { markSeen(device) }
+        publishError("Demo workspace is active. No physical lights will be changed.")
+        logActivity(.system, title: "Demo mode entered", detail: "Using isolated simulated lights and rooms.")
+    }
+
+    func exitDemoMode() {
+        guard isDemoMode else { return }
+        devices = demoLiveDevices
+        rooms = demoLiveRooms
+        demoLiveDevices = []; demoLiveRooms = []
+        isDemoMode = false
+        commandStates = [:]; confirmedStates = [:]
+        publishError("Returned to live lights.")
+    }
+
+    func resetDemoMode() {
+        guard isDemoMode else { return }
+        exitDemoMode(); enterDemoMode()
+    }
 }

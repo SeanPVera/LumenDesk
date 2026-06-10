@@ -171,12 +171,20 @@ struct RoomSectionView: View {
                     .help("Average brightness and dominant room color")
             }
 
+            let offlineCount = allLights.filter(\.isStale).count
+            let pendingCount = allLights.filter { manager.commandPendingIDs.contains($0.id) }.count
+            if offlineCount > 0 {
+                Label("\(offlineCount) offline", systemImage: "wifi.slash").font(.caption2).foregroundStyle(Lumen.warning)
+            }
+            if pendingCount > 0 {
+                Label("\(pendingCount) pending", systemImage: "arrow.up.circle").font(.caption2).foregroundStyle(.secondary)
+            }
             if manager.schedules(for: room.id).contains(where: { $0.isEnabled }) {
-                Image(systemName: "clock.fill")
-                    .font(.caption2)
-                    .foregroundStyle(Lumen.violetBright)
-                    .help("This room has active schedules")
-                    .accessibilityLabel("Has active schedules")
+                Label("\(manager.schedules(for: room.id).filter(\.isEnabled).count) scheduled", systemImage: "clock.fill")
+                    .font(.caption2).foregroundStyle(Lumen.violetBright).help("This room has active schedules")
+            }
+            if let override = manager.activeAutomationOverride(for: room.id) {
+                Label(override.summary, systemImage: "pause.circle.fill").font(.caption2).foregroundStyle(.orange)
             }
 
             Spacer()
@@ -188,6 +196,10 @@ struct RoomSectionView: View {
             Menu {
                 Button("Rename\u{2026}") { beginRename() }
                 Button("Edit Schedules\u{2026}") { showingSchedules = true }
+                Menu("Manual Override") {
+                    ForEach(AutomationOverrideDuration.allCases) { duration in Button(duration.title) { manager.setAutomationOverride(for: room.id, duration: duration) } }
+                    if manager.activeAutomationOverride(for: room.id) != nil { Divider(); Button("Resume Automation") { manager.resumeAutomation(for: room.id) } }
+                }
                 Button("Move Up") { manager.moveRoom(room.id, by: -1) }
                 Button("Move Down") { manager.moveRoom(room.id, by: 1) }
                 Divider()

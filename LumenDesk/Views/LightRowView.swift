@@ -86,6 +86,7 @@ struct LightRowView: View {
                                 .accessibilityLabel("Favorite")
                         }
                         if renamingName {
+                            VStack(alignment: .leading, spacing: 2) {
                             TextField("Name", text: $nameDraft)
                                 .textFieldStyle(.roundedBorder)
                                 .font(.headline)
@@ -93,6 +94,10 @@ struct LightRowView: View {
                                 .onSubmit(commitRename)
                                 .onExitCommand(cancelRename)
                                 .frame(maxWidth: 200)
+                            if let warning = manager.duplicateNameMessage(nameDraft, excludingDeviceID: device.id) {
+                                Text(warning).font(.caption2).foregroundStyle(Lumen.warning).fixedSize(horizontal: false, vertical: true)
+                            }
+                            }
                         } else {
                             Text(device.label)
                                 .font(.headline)
@@ -116,9 +121,11 @@ struct LightRowView: View {
                         Text(device.address)
                             .font(.caption).foregroundStyle(.secondary)
                             .accessibilityHidden(true)
-                        if manager.commandPendingIDs.contains(device.id) {
-                            ProgressView().controlSize(.mini)
-                                .help("Waiting for bulb confirmation")
+                        let command = manager.commandState(for: device.id)
+                        if command.phase != .idle {
+                            Label(command.phase.title, systemImage: command.phase.symbol)
+                                .font(.caption2).foregroundStyle(command.phase == .failed ? Lumen.warning : Color.secondary)
+                                .help(command.summary)
                         }
                     }
                     Text(device.isStale ? "Last seen \(device.lastSeen.formatted(.relative(presentation: .named)))" : "Confirmed \(device.lastSeen.formatted(.relative(presentation: .named)))")
@@ -159,6 +166,7 @@ struct LightRowView: View {
                             swatchButton(swatch)
                         }
                         Spacer(minLength: 0)
+                        Text(colorDescription).font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
                         ColorPicker("", selection: colorBinding, supportsOpacity: false)
                             .labelsHidden()
                             .disabled(controlsDisabled)
@@ -210,6 +218,9 @@ struct LightRowView: View {
         .accessibilityAddTraits(selectionMode ? .isButton : [])
         .accessibilityHint(selectionMode ? "Double-tap to toggle selection" : "")
         .accessibilityAction(.default) { if selectionMode { onToggleSelection?() } }
+        .accessibilityAction(named: "Toggle Power") { if !selectionMode { manager.setPower(device, on: !device.isOn) } }
+        .accessibilityAction(named: "Open Inspector") { if !selectionMode { showingInspector = true } }
+        .focusable(true)
         .padding(12)
         .background(
             RoundedRectangle(cornerRadius: 10)
@@ -273,6 +284,13 @@ struct LightRowView: View {
 
     private func cancelRename() {
         renamingName = false
+    }
+
+    private var colorDescription: String {
+        if manager.isWhiteMode(device.id) { return "Warm white · \(device.kelvin) K" }
+        let h = Int(device.color.hsbComponents.h * 360)
+        let names = [(15, "Red"), (45, "Orange"), (75, "Yellow"), (165, "Green"), (200, "Cyan"), (255, "Blue"), (290, "Purple"), (345, "Pink"), (360, "Red")]
+        return "\(names.first(where: { h < $0.0 })?.1 ?? "Red") · \(h)°"
     }
 
     // MARK: - Color swatches
@@ -343,6 +361,8 @@ struct LightRowView: View {
         Button("Device Inspector\u{2026}") { showingInspector = true }
         Button("Precise Color\u{2026}") { showingPreciseColor = true }
         if device.isStale { Button("Retry Connection") { manager.retry(device) } }
+        if manager.commandState(for: device.id).phase == .failed { Button("Keep Trying") { manager.retryCommand(for: device) } }
+        if manager.commandPendingIDs.contains(device.id) { Button("Cancel Queued Command") { manager.cancelQueuedCommands(deviceIDs: [device.id]) } }
 
         Divider()
 

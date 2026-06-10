@@ -406,3 +406,110 @@ The second-pass practical backlog and the selected whimsical concepts are now im
 - **W2:** Democratic Lighting Parliament with parties, voting records, abstentions for unreachable bulbs, motions, and executive illumination orders.
 - **W3:** a persistent, evolving Aurora Firefly population with generations, genetics, energy, rarity, parentage, and conservatory controls.
 - **W5:** International Bureau of Lumens scene certification with scored seals, treaty findings, moth-attraction estimates, and a genuinely 47-page PDF dossier export.
+
+---
+
+# Third-Pass UX Review: 20 New Improvements + 5 Spectacularly Excessive Ideas
+
+**Audited:** 2026-06-10
+
+**Baseline:** This review assumes the original and second-pass backlogs are complete, including diagnostics, activity history, scene previews, schedule timelines, mixed states, persistent layout preferences, cross-type favorites, and the three shipped novelty features. The recommendations below intentionally avoid repeating those capabilities.
+
+## 20 new practical recommendations
+
+| # | Recommendation | Usability problem | Proposed improvement | Impact | Effort |
+|---|---|---|---|---|---|
+| 1 | Add a command queue with visible pending state | Local UDP control is not instantaneous, but controls can look finished before a bulb has responded. Rapid edits can also supersede one another invisibly. | Show a tiny per-device `Sending`, `Applied`, or `Failed` state, coalesce obsolete commands, and let users cancel queued room-wide operations before transmission. Keep successful status subtle and announce failures accessibly. | High | High |
+| 2 | Distinguish desired state from confirmed device state | Optimistic UI is responsive, but a failed command can leave the interface claiming a value the physical light never reached. | While awaiting confirmation, render the desired value with a pending treatment; on timeout, restore the last confirmed value or offer `Keep trying`. Explain the distinction in the inspector rather than silently snapping controls backward. | High | High |
+| 3 | Provide a room health summary at a glance | Users must inspect individual rows to understand whether a room is fully reachable, partly offline, actively scheduled, or processing commands. | Add a compact summary such as `5 on · 1 offline · 2 scheduled` to each room header, with each segment clickable as a temporary filter. Suppress zero-value segments to keep calm rooms quiet. | High | Low |
+| 4 | Introduce duplicate-name detection and guided naming | Several bulbs called “Lamp” or scenes called “Evening” make search results, VoiceOver output, activity records, and menu-bar controls ambiguous. | Detect duplicate names within the relevant scope, suggest room-aware alternatives such as `Desk Lamp — Office`, and show contextual location in results without forcing globally unique names. | Medium | Low |
+| 5 | Create an inbox for newly discovered and changed devices | A rescan can silently add a bulb, revive a missing bulb, or reveal that a device changed address. Users have no single place to review discovery changes. | After scanning, show a review panel grouped into `New`, `Back online`, `Changed`, and `Still missing`, with bulk room assignment and a safe `Ignore for now` action. | High | Medium |
+| 6 | Add temporary manual-override semantics for automations | A schedule may undo a user’s manual adjustment minutes later, which feels like the app is fighting them. | When a scheduled room is changed manually, offer `Until next schedule`, `For 1 hour`, or `Keep until resumed`. Display the override and its expiry in the room header and schedule timeline. | High | High |
+| 7 | Add timezone, daylight-saving, and sleep/wake safeguards | Calendar automations can run twice, late, or not at all across daylight-saving changes, travel, system sleep, and clock corrections. | Define behavior explicitly for skipped/repeated times, show the timezone on schedule details, and summarize missed actions after wake with choices to `Run now` or `Skip`. | High | High |
+| 8 | Give scenes drafts, dirty-state protection, and change comparison | A complex scene can be accidentally dismissed or overwritten, and it is hard to know what changed since the last save. | Keep scene edits in a draft, warn before discarding, autosave recovery copies, and provide a compact `Before → After` diff for affected lights, brightness, hue, and power. | High | Medium |
+| 9 | Add scene version history with named restore points | Experimenting with a trusted scene is risky when saving permanently replaces its known-good configuration. | Keep a small local history, allow labels such as `Before party`, and support previewing or restoring one version. Prune automatically and expose storage limits in Settings. | Medium | High |
+| 10 | Offer a staged “rehearsal room” for scene editing | Testing a scene on every included bulb can disrupt people who are using the room. A static preview cannot reveal how the physical result feels. | Let users temporarily audition edits on selected test bulbs, then restore their exact prior states. Clearly mark rehearsal mode and guarantee cleanup after cancel, timeout, or app termination. | Medium | High |
+| 11 | Consolidate preferences into a native Settings experience | Layout, density, decorative effects, diagnostics, and behavior controls spread across menus and sheets become difficult to rediscover. | Add a standard macOS Settings window with `General`, `Appearance`, `Automation`, `Network`, `Accessibility`, and `Advanced` sections. Keep contextual actions near content, but put durable policy choices in Settings. | High | Medium |
+| 12 | Make every fixed-size sheet responsive and resizable | Fixed frames can clip localized text, feel cramped with larger accessibility sizes, and waste space on large displays. They also prevent users from comparing long device or activity lists comfortably. | Adopt sensible minimum sizes, resizable windows or sheets for content-heavy tools, scroll only the content region, and persist user-chosen sizes where appropriate. | High | Medium |
+| 13 | Establish one consistent confirmation and recovery policy | Similar high-consequence actions may confirm differently—or not at all—while harmless actions can become needlessly interruptive. | Classify actions as reversible, disruptive, or destructive. Prefer immediate action plus Undo for reversible changes; use confirmation only for broad physical disruption, data loss, or privacy-sensitive operations. | High | Low |
+| 14 | Improve undo feedback with scope and expiry | Generic undo/redo availability does not tell users which room or devices will change, and network delays can make the result surprising. | Show a temporary message such as `Office turned off — Undo`, include the number of affected lights, and disable or revise the action if discovery changes make a full reversal impossible. | Medium | Medium |
+| 15 | Build a complete macOS focus and command model | Individual shortcuts exist, but keyboard users also need predictable traversal, selection, and command routing across rooms, favorites, filters, and sheets. | Add visible focus rings, arrow-key movement within collections, Space to toggle, Return to inspect, consistent Escape behavior, and a populated app menu whose enabled state follows the focused item. | High | High |
+| 16 | Add reduced-motion, reduced-transparency, and low-distraction modes | Fireflies, pulsing scan indicators, color animation, glows, and layered materials can be distracting or uncomfortable even when system accessibility settings are available. | Respect macOS accessibility environment values everywhere and add an optional `Quiet interface` preset that removes ornamental motion, translucency, animated counts, and nonessential sound while preserving status feedback. | High | Medium |
+| 17 | Never communicate light color by color alone | Tiny swatches are difficult for users with color-vision differences and give imprecise information even to sighted users. | Pair swatches with names or values such as `Warm white · 2700 K` and `Blue · 220°`; add patterned or outlined selected states and ensure warnings never rely only on red/amber/green. | High | Low |
+| 18 | Add privacy-first onboarding for microphone-reactive features | A microphone permission prompt without just-in-time context can feel alarming in an otherwise local-network lighting app. Users also need confidence that audio is not recorded. | Explain why permission is requested immediately before use, show a persistent listening indicator, state that only levels are processed, provide a one-click stop, and link directly to the relevant System Settings pane after denial. | High | Medium |
+| 19 | Make the menu-bar experience adaptive rather than miniature | Copying room controls into a narrow popover can become unwieldy as the home grows and may expose different state than the main window. | Let users choose which rooms/scenes appear, surface only urgent offline or pending states, provide a `Resume last activity` shortcut, and guarantee that selection, overrides, and command progress synchronize instantly with the main app. | Medium | Medium |
+| 20 | Add a safe demo mode for learning and support | Many interactions cannot be explored without changing real lights, while screenshots and support instructions are hard to follow with an empty or unstable network. | Provide an explicit demo workspace with simulated rooms, delays, partial failures, schedules, and scenes. Visually separate it from live control, prevent simulated data from entering real configuration, and make reset instantaneous. | Medium | Medium |
+
+## Recommended delivery sequence
+
+### Phase 1 — Truthful feedback and everyday clarity
+
+1. **#3 Room health summaries**
+2. **#4 Duplicate-name guidance**
+3. **#13 Consistent confirmation and recovery policy**
+4. **#14 Scoped undo feedback**
+5. **#17 Non-color status communication**
+
+These changes are comparatively contained and immediately improve comprehension without adding another major destination to the app.
+
+### Phase 2 — Trustworthy network and automation behavior
+
+1. **#1 Visible command queue**
+2. **#2 Desired versus confirmed state**
+3. **#5 Discovery-change inbox**
+4. **#6 Temporary automation overrides**
+5. **#7 Time-change and sleep/wake safeguards**
+
+This phase should share one state model so command confirmation, discovery reconciliation, overrides, and activity reporting cannot contradict one another.
+
+### Phase 3 — Safer creation and platform polish
+
+1. **#8 Scene drafts and diffs**
+2. **#9 Scene history**
+3. **#10 Scene rehearsal**
+4. **#11 Native Settings**
+5. **#12 Responsive tool windows**
+6. **#15 Complete keyboard model**
+7. **#16 Low-distraction modes**
+8. **#18 Microphone privacy onboarding**
+9. **#19 Adaptive menu-bar configuration**
+10. **#20 Demo mode**
+
+Build scene drafts before version history and rehearsal so all three use the same representation of staged versus committed state.
+
+## Five more whimsical, unreasonably complicated, and totally unnecessary ideas
+
+### W6. Quantum Lighting Possibility Engine
+
+Before applying a scene, simulate every plausible bulb response across a branching multiverse. Render thousands of parallel living rooms in a Metal-powered probability cloud, including universes where UDP packets arrive out of order, a lamp becomes self-aware, or `Movie Night` is accidentally 0.7% too mauve. Users must collapse the waveform by rotating a virtual interferometer; indecision leaves the room in a tasteful superposition of on and off.
+
+### W7. Fully Staged Bulb Opera Company
+
+Assign every light an operatic voice type based on brightness range, color gamut, and network latency. Rooms become ensembles, scenes become arias, and command failures trigger improvised recitative explaining the outage. Include a season planner, digital costume department, union-mandated intermissions, supertitles translated into twelve languages, and a conductor mode that requires the user to wave the trackpad in 4/4 time before the lights accept a cue.
+
+### W8. Municipal Zoning Board for Illumination
+
+Treat each room as a tiny city whose lamps require zoning approval. Changing a bulb from warm white to cyan demands an environmental impact study, public-comment period, shadow analysis, and scale model of neighboring fixtures. Users can appeal denied scenes to a nine-member appellate chandelier, while historic lamps receive landmark protection and may not be dimmed without preservation grants.
+
+### W9. Interplanetary Circadian Traffic Control
+
+Calculate schedules not merely for the user’s timezone, but for hypothetical residents on the Moon, Mars, Europa, and a rotating O’Neill cylinder. A relativistic scheduler compensates for signal delay, orbital sunrise, leap seconds, and fictional alien labor law. The menu-bar icon becomes a mission patch, and every delayed bedroom fade produces a 600-page incident report for the Solar System Illumination Authority.
+
+### W10. Generational Light-Feng-Shui Civilization Simulator
+
+Model each room as a civilization whose prosperity depends on furniture direction, lumen flow, bulb ancestry, and invented geomantic ley lines. Centuries pass whenever a scene runs. Lamps establish dynasties, wage chromatic wars, discover warm-white agriculture, and leave archaeological layers in the activity log. Moving a favorite can accidentally end an empire; Undo requires negotiating with its descendants.
+
+## Third-pass design principle
+
+LumenDesk’s next practical gains should come from **truthfulness, reversibility, and restraint**, not from adding more permanent controls to the main surface. Network state should say what is desired, what is pending, and what is confirmed; automations should yield gracefully to human intent; advanced creation tools should protect experimentation; and every decorative or privacy-sensitive feature should have a calm, accessible alternative. The five ideas immediately above should, for the continued wellbeing of the product, remain gloriously unbuilt.
+
+## Third-pass implementation status — 2026-06-10
+
+All 20 practical recommendations in this third-pass review are now represented in the application:
+
+- **#1–3:** coalescing command queues, per-light queued/sending/applied/failed feedback, desired-versus-confirmed diagnostics, cancellation/retry, and clickable room-health information.
+- **#4–7:** duplicate-name guidance, a discovery-change inbox with bulk assignment, temporary automation overrides, timezone disclosure, and reviewable sleep/wake missed actions.
+- **#8–10:** autosaved scene drafts, before/after comparisons, named local version history, restore controls, and reversible rehearsal on selected bulbs.
+- **#11–14:** a native Settings scene, resizable content-heavy tools, a user-selectable confirmation policy, and scoped undo feedback that identifies affected lights.
+- **#15–18:** expanded app commands and focus/accessibility actions, quiet/reduced-motion/reduced-transparency behavior, non-color status labels and color names, and just-in-time microphone privacy disclosure.
+- **#19–20:** an adaptive configurable menu-bar view and a visibly isolated safe demo workspace with simulated latency, offline devices, schedules, and partial failures.

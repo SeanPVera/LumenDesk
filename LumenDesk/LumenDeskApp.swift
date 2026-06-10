@@ -14,7 +14,7 @@ struct LumenDeskApp: App {
                 .preferredColorScheme(.dark)
                 .onAppear { manager.start() }
         }
-        .windowResizability(.contentSize)
+        .windowResizability(.automatic)
         .commands {
             CommandGroup(after: .newItem) {
                 Button("Scan for Lights") { manager.scan() }
@@ -23,6 +23,10 @@ struct LumenDeskApp: App {
                     manager.setAllPower(on: !manager.devices.contains(where: { $0.isOn }))
                 }
                 .keyboardShortcut("p", modifiers: [.command, .shift])
+                Divider()
+                Button("Cancel Queued Light Commands") { manager.cancelQueuedCommands() }
+                    .keyboardShortcut(".", modifiers: .command)
+                    .disabled(manager.commandPendingIDs.isEmpty)
             }
             CommandGroup(after: .importExport) {
                 Button("Export Configuration\u{2026}") { exportConfiguration() }
@@ -47,6 +51,12 @@ struct LumenDeskApp: App {
                     .keyboardShortcut("z", modifiers: [.command, .shift])
                     .disabled(!manager.canRedo)
             }
+        }
+
+        Settings {
+            LumenDeskSettingsView()
+                .environmentObject(manager)
+                .preferredColorScheme(.dark)
         }
 
         MenuBarExtra {

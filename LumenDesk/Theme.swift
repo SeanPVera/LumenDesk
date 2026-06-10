@@ -93,11 +93,13 @@ extension Color {
 /// safe area so it bleeds to every edge.
 struct LumenBackground: View {
     var glow: Bool = true
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @AppStorage(AppPreferenceKey.quietInterface) private var quietInterface = false
 
     var body: some View {
         ZStack {
-            Lumen.backdropGradient
-            if glow {
+            if reduceTransparency || quietInterface { Lumen.inkDeep } else { Lumen.backdropGradient }
+            if glow && !quietInterface && !reduceTransparency {
                 RadialGradient(
                     colors: [Lumen.violet.opacity(0.22), .clear],
                     center: .topLeading, startRadius: 0, endRadius: 440

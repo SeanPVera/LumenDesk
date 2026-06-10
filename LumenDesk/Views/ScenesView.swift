@@ -265,6 +265,9 @@ struct ScenesView: View {
                 }.scrollContentBackground(.hidden)
             }
         }
+        .frame(width: 520, height: 520)
+        .sheet(item: $previewScene) { ScenePreviewView(scene: $0).environmentObject(manager) }
+        .background(LumenBackground(glow: false))
     }
 
     private var captureRow: some View {
@@ -317,8 +320,15 @@ struct ScenesView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
-            Button("Apply") { manager.applyScene(scene) }.buttonStyle(.bordered)
+
+            Button("Preview & Apply") { previewScene = scene }
+                .buttonStyle(.bordered)
+                .accessibilityLabel("Apply \(scene.name)")
+                .accessibilityHint("Restores \(scene.snapshots.count) light\(scene.snapshots.count == 1 ? "" : "s") to the saved state")
+
             Menu {
+                Button("Preview & Apply…") { previewScene = scene }
+                Button("Certify with Bureau of Lumens") { _ = manager.certify(scene) }
                 Button("Rename…") { beginRename(scene) }
                 Button(manager.isFavoriteScene(scene.id) ? "Remove Favorite" : "Favorite") { manager.toggleFavoriteScene(scene.id) }
                 Button("Delete Scene", role: .destructive) { manager.deleteScene(scene.id) }

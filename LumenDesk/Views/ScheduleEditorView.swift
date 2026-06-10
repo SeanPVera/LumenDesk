@@ -3,260 +3,129 @@ import SwiftUI
 struct ScheduleEditorView: View {
     @EnvironmentObject var manager: LightManager
     @Environment(\.dismiss) private var dismiss
-
     let room: Room
 
-    @State private var draftHour: Int = 20
-    @State private var draftMinute: Int = 0
-    @State private var draftOffset: Int = 0   // signed offset in minutes for sun-relative
-    @State private var draftAction: ScheduleAction = .turnOff
-
-    @State private var showingSolarSettings: Bool = false
+    @State private var editingEntry: ScheduleEntry?
+    @State private var showingNewEntry = false
+    @State private var showingSolarSettings = false
+    @State private var testingEntry: ScheduleEntry?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Schedules \u{2014} \(room.name)")
-                        .font(.title3.weight(.semibold))
-                    Text("Automatically control these lights at a set time every day.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    Text("Schedules — \(room.name)").font(.title3.weight(.semibold))
+                    Text("Choose days, edit rules in place, preview the timeline, and test safely.").font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button("Done") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
-            }
-            .padding(16)
-
+                Button("Solar Times…") { showingSolarSettings = true }
+                Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
+            }.padding(16)
             Divider()
 
             let schedules = manager.schedules(for: room.id)
             let warnings = manager.conflictWarnings(for: room.id)
-
-            if !warnings.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    Label("Schedule conflict warning", systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(Lumen.warning)
-                    ForEach(warnings, id: \.self) { warning in
-                        Text(warning).font(.caption2).foregroundStyle(.secondary)
-                    }
-                }
-                .padding(10)
-                .background(RoundedRectangle(cornerRadius: 8).fill(Lumen.warning.opacity(0.12)))
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Lumen.warning.opacity(0.3), lineWidth: 1))
-                .padding(.horizontal, 16)
-                .padding(.top, 10)
-            }
+            ScheduleTimelineView(entries: schedules, warnings: warnings)
+                .padding(.horizontal, 16).padding(.top, 12)
 
             if schedules.isEmpty {
-                emptyState
+                VStack(spacing: 8) { Spacer(); Image(systemName: "clock.badge.plus").font(.system(size: 34)).foregroundStyle(.secondary); Text("No schedules yet").font(.headline); Text("Add a rule with locale-aware time and weekday controls.").foregroundStyle(.secondary); Spacer() }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                ScrollView {
-                    VStack(spacing: 8) {
-                        ForEach(schedules) { entry in
-                            scheduleRow(entry)
-                        }
-                    }
-                    .padding(16)
-                }
+                List(schedules) { entry in scheduleRow(entry) }.listStyle(.inset)
             }
 
             Divider()
-
-            addRow
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-
-            // Solar settings hint
-            if draftAction.isRelativeToSun {
-                HStack(spacing: 6) {
-                    Image(systemName: "sun.horizon.fill")
-                        .foregroundStyle(Lumen.gold)
-                        .font(.caption)
-                    Text("Sunrise: \(String(format: "%02d:%02d", manager.sunriseHour, manager.sunriseMinute))  \u{00B7}  Sunset: \(String(format: "%02d:%02d", manager.sunsetHour, manager.sunsetMinute))")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Estimate") { manager.applyEstimatedSolarTimes() }
-                        .font(.caption)
-                        .help("Estimate based on month (assumes Northern Hemisphere)")
-                    Button("Configure\u{2026}") { showingSolarSettings = true }
-                        .font(.caption)
-                }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 10)
-            }
+            HStack {
+                Text("\(schedules.count) automation rule\(schedules.count == 1 ? "" : "s")").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button { showingNewEntry = true } label: { Label("Add Schedule", systemImage: "plus") }.buttonStyle(.borderedProminent)
+            }.padding(16)
         }
-        .frame(width: 420, height: 400)
-        .background(LumenBackground(glow: false))
-        .sheet(isPresented: $showingSolarSettings) {
-            SolarSettingsView().environmentObject(manager)
-        }
-    }
-
-    private var emptyState: some View {
-        VStack(spacing: 8) {
-            Spacer()
-            Image(systemName: "clock")
-                .font(.system(size: 32))
-                .foregroundStyle(.secondary)
-                .accessibilityHidden(true)
-            Text("No schedules yet")
-                .font(.headline)
-            Text("Add a schedule below to automatically control lights at a set time each day.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-            Spacer()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(24)
+        .frame(width: 620, height: 560).background(LumenBackground(glow: false))
+        .sheet(isPresented: $showingSolarSettings) { SolarSettingsView().environmentObject(manager) }
+        .sheet(isPresented: $showingNewEntry) { ScheduleFormView(room: room, entry: nil).environmentObject(manager) }
+        .sheet(item: $editingEntry) { ScheduleFormView(room: room, entry: $0).environmentObject(manager) }
+        .confirmationDialog("Test this automation now?", isPresented: Binding(get: { testingEntry != nil }, set: { if !$0 { testingEntry = nil } })) {
+            Button("Run Test") { if let entry = testingEntry { manager.testSchedule(entry, in: room) }; testingEntry = nil }
+            Button("Cancel", role: .cancel) { testingEntry = nil }
+        } message: { Text("The room will change immediately. You can use Undo afterward.") }
     }
 
     private func scheduleRow(_ entry: ScheduleEntry) -> some View {
         HStack(spacing: 10) {
-            Toggle("", isOn: Binding(
-                get: { entry.isEnabled },
-                set: { manager.setScheduleEnabled(entry.id, in: room.id, enabled: $0) }
-            ))
-            .toggleStyle(.switch)
-            .labelsHidden()
-            .controlSize(.small)
-            .accessibilityLabel("\(entry.timeString) \u{2014} \(entry.action.displayName)")
-            .accessibilityHint(entry.isEnabled ? "Tap to disable" : "Tap to enable")
-
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 4) {
-                    Text(entry.timeString)
-                        .font(.callout.weight(.semibold).monospacedDigit())
-                    if entry.action.isRelativeToSun {
-                        let base = entry.action == .atSunrise
-                            ? String(format: "%02d:%02d", manager.sunriseHour, manager.sunriseMinute)
-                            : String(format: "%02d:%02d", manager.sunsetHour, manager.sunsetMinute)
-                        Text("(\u{2248} \(base))")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                Text(entry.action.displayName)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Text(manager.nextRunDescription(for: entry))
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+            Toggle("", isOn: Binding(get: { entry.isEnabled }, set: { manager.setScheduleEnabled(entry.id, in: room.id, enabled: $0) })).labelsHidden().toggleStyle(.switch).controlSize(.small)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack { Text(entry.timeString).font(.headline.monospacedDigit()); Text(entry.daySummary).font(.caption).padding(.horizontal, 6).padding(.vertical, 2).background(.secondary.opacity(0.15), in: Capsule()) }
+                Text(entry.action.displayName).font(.caption).foregroundStyle(.secondary)
+                Text(manager.nextRunDescription(for: entry)).font(.caption2).foregroundStyle(.tertiary)
             }
-
             Spacer()
-
-            Button(role: .destructive) {
-                manager.deleteSchedule(entry.id, from: room.id)
-            } label: {
-                Image(systemName: "trash")
-                    .foregroundStyle(Lumen.danger)
-            }
-            .buttonStyle(.plain)
-            .help("Delete this schedule entry")
-            .accessibilityLabel("Delete \(entry.timeString) \(entry.action.displayName)")
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .lumenCard(radius: 8)
-        .opacity(entry.isEnabled ? 1.0 : 0.5)
+            Button("Test") { testingEntry = entry }
+            Menu {
+                Button("Edit…") { editingEntry = entry }
+                Button("Duplicate") { manager.duplicateSchedule(entry, in: room.id) }
+                Divider()
+                Button("Delete", role: .destructive) { manager.deleteSchedule(entry.id, from: room.id) }
+            } label: { Image(systemName: "ellipsis.circle") }.menuStyle(.borderlessButton).fixedSize()
+        }.padding(.vertical, 5)
     }
+}
 
-    @ViewBuilder private var addRow: some View {
-        let atLimit = manager.schedules(for: room.id).count >= 4
-        VStack(spacing: 8) {
-            HStack(spacing: 8) {
-                // Show clock pickers for absolute actions; offset picker for solar.
-                if draftAction.isRelativeToSun {
-                    offsetPicker
-                } else {
-                    clockPickers
-                }
-
-                Picker("Action", selection: $draftAction) {
-                    ForEach(ScheduleAction.allCases, id: \.self) { action in
-                        Text(action.displayName).tag(action)
+private struct ScheduleTimelineView: View {
+    let entries: [ScheduleEntry]
+    let warnings: [String]
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack { Text("24-hour timeline").font(.caption.weight(.semibold)); Spacer(); Text("Midnight   6 AM   Noon   6 PM   Midnight").font(.caption2).foregroundStyle(.tertiary) }
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.secondary.opacity(0.14)).frame(height: 8)
+                    ForEach(entries) { entry in
+                        let minute = entry.action.isRelativeToSun ? 720 : entry.hour * 60 + entry.minute
+                        Circle().fill(entry.isEnabled ? Lumen.violetBright : .gray).frame(width: 12, height: 12).offset(x: max(0, min(proxy.size.width - 12, CGFloat(minute) / 1440 * proxy.size.width))).help("\(entry.daySummary), \(entry.timeString): \(entry.action.displayName)")
                     }
-                }
-                .labelsHidden()
-                .pickerStyle(.menu)
-                .frame(minWidth: 120)
-                .accessibilityLabel("Action")
+                }.frame(height: 14)
+            }.frame(height: 14)
+            if !warnings.isEmpty { ForEach(warnings, id: \.self) { Label($0, systemImage: "exclamationmark.triangle.fill").font(.caption2).foregroundStyle(Lumen.warning) } }
+        }.padding(10).lumenCard(radius: 8)
+    }
+}
 
-                Spacer()
+private struct ScheduleFormView: View {
+    @EnvironmentObject var manager: LightManager
+    @Environment(\.dismiss) private var dismiss
+    let room: Room
+    let entry: ScheduleEntry?
+    @State private var date = Date()
+    @State private var action: ScheduleAction = .turnOff
+    @State private var offset = 0
+    @State private var weekdays = Set(1...7)
 
-                VStack(alignment: .trailing, spacing: 2) {
-                    Button("Add") {
-                        let entry: ScheduleEntry
-                        if draftAction.isRelativeToSun {
-                            entry = ScheduleEntry(hour: 0, minute: 0,
-                                                 offsetMinutes: draftOffset, action: draftAction)
-                        } else {
-                            entry = ScheduleEntry(hour: draftHour, minute: draftMinute,
-                                                 offsetMinutes: 0, action: draftAction)
-                        }
-                        manager.addSchedule(entry, to: room.id)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(atLimit)
-                    .help(atLimit ? "Maximum of 4 schedules per room" : "Add schedule")
-                    .accessibilityLabel("Add schedule")
-                    .accessibilityHint(atLimit ? "Maximum of 4 schedules reached" : "")
-                    Text("\(manager.schedules(for: room.id).count) of 4")
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(atLimit ? AnyShapeStyle(Lumen.warning) : AnyShapeStyle(.tertiary))
-                  main
-                }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(entry == nil ? "New Schedule" : "Edit Schedule").font(.title3.weight(.semibold))
+            Picker("Action", selection: $action) { ForEach(ScheduleAction.allCases, id: \.self) { Text($0.displayName).tag($0) } }
+            if action.isRelativeToSun {
+                Picker("Offset", selection: $offset) { ForEach([-120,-90,-60,-30,-15,0,15,30,60,90,120], id: \.self) { Text($0 == 0 ? "Exactly" : "\($0 > 0 ? "+" : "")\($0) minutes").tag($0) } }
+            } else {
+                DatePicker("Time", selection: $date, displayedComponents: .hourAndMinute).datePickerStyle(.field)
             }
-        }
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Days").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                HStack { ForEach(1...7, id: \.self) { day in Button(Calendar.current.veryShortWeekdaySymbols[day - 1]) { if weekdays.contains(day) { weekdays.remove(day) } else { weekdays.insert(day) } }.buttonStyle(.bordered).tint(weekdays.contains(day) ? Lumen.violetBright : .secondary).accessibilityLabel(Calendar.current.weekdaySymbols[day - 1]) } }
+                HStack { Button("Every day") { weekdays = Set(1...7) }; Button("Weekdays") { weekdays = Set(2...6) }; Button("Weekends") { weekdays = [1,7] } }.font(.caption)
+            }
+            HStack { Spacer(); Button("Cancel") { dismiss() }; Button("Save") { save() }.buttonStyle(.borderedProminent).disabled(weekdays.isEmpty) }
+        }.padding(20).frame(width: 440).background(LumenBackground(glow: false)).onAppear(perform: load)
     }
 
-    private var clockPickers: some View {
-        HStack(spacing: 4) {
-            Picker("Hour", selection: $draftHour) {
-                ForEach(0..<24, id: \.self) { h in
-                    Text(String(format: "%02d", h)).tag(h)
-                }
-            }
-            .labelsHidden()
-            .frame(width: 60)
-            .accessibilityLabel("Hour")
-
-            Text(":")
-                .foregroundStyle(.secondary)
-                .accessibilityHidden(true)
-
-            Picker("Minute", selection: $draftMinute) {
-                ForEach(0..<60, id: \.self) { m in
-                    Text(String(format: "%02d", m)).tag(m)
-                }
-            }
-            .labelsHidden()
-            .frame(width: 60)
-            .accessibilityLabel("Minute")
-        }
-    }
-
-    private var offsetPicker: some View {
-        HStack(spacing: 4) {
-            Picker("Offset", selection: $draftOffset) {
-                ForEach([-120, -90, -60, -45, -30, -15, 0, 15, 30, 45, 60, 90, 120], id: \.self) { min in
-                    let label: String = {
-                        if min == 0 { return "exactly" }
-                        let sign = min > 0 ? "+" : ""
-                        return "\(sign)\(min)m"
-                    }()
-                    Text(label).tag(min)
-                }
-            }
-            .labelsHidden()
-            .frame(width: 80)
-            .accessibilityLabel("Offset from \(draftAction == .atSunrise ? "sunrise" : "sunset")")
-        }
+    private func load() { guard let entry else { return }; action = entry.action; offset = entry.offsetMinutes; weekdays = entry.weekdays; date = Calendar.current.date(bySettingHour: entry.hour, minute: entry.minute, second: 0, of: Date()) ?? Date() }
+    private func save() {
+        let parts = Calendar.current.dateComponents([.hour,.minute], from: date)
+        let value = ScheduleEntry(id: entry?.id ?? UUID(), isEnabled: entry?.isEnabled ?? true, hour: parts.hour ?? 0, minute: parts.minute ?? 0, offsetMinutes: action.isRelativeToSun ? offset : 0, action: action, weekdays: weekdays)
+        if entry == nil { manager.addSchedule(value, to: room.id) } else { manager.updateSchedule(value, in: room.id) }
+        dismiss()
     }
 }
 

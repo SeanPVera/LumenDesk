@@ -24,6 +24,8 @@
     <string>$(MACOSX_DEPLOYMENT_TARGET)</string>
     <key>NSHumanReadableCopyright</key>
     <string>LumenDesk</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>LumenDesk listens to audio levels to animate music-reactive lighting effects.</string>
     <key>NSLocalNetworkUsageDescription</key>
     <string>LumenDesk discovers and controls LIFX and Govee smart bulbs on your local network.</string>
     <key>NSBonjourServices</key>

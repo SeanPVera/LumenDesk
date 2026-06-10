@@ -1,225 +1,344 @@
 import SwiftUI
 
 struct ScenesView: View {
+    private enum LibrarySection: String, CaseIterable, Identifiable {
+        case scenes = "My Scenes"
+        case themes = "Themes"
+        case effects = "Effects"
+        var id: String { rawValue }
+    }
+
     @EnvironmentObject var manager: LightManager
     @Environment(\.dismiss) private var dismiss
 
-    @State private var newSceneName: String = ""
+    @State private var section: LibrarySection = .themes
+    @State private var newSceneName = ""
     @State private var renamingID: UUID?
-    @State private var renameDraft: String = ""
-    @State private var searchText: String = ""
+    @State private var renameDraft = ""
+    @State private var searchText = ""
+    @State private var themeCategory: LightingTheme.Category?
     @FocusState private var renameFocused: Bool
 
+    private let columns = [GridItem(.adaptive(minimum: 218), spacing: 12)]
+
     private var visibleScenes: [LightingScene] {
-        let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return manager.scenes }
-        return manager.scenes.filter { $0.name.localizedCaseInsensitiveContains(trimmed) }
+        guard !normalizedSearch.isEmpty else { return manager.scenes }
+        return manager.scenes.filter { $0.name.localizedCaseInsensitiveContains(normalizedSearch) }
+    }
+
+    private var visibleThemes: [LightingTheme] {
+        LightingCatalog.themes.filter { theme in
+            (themeCategory == nil || theme.category == themeCategory) &&
+            (normalizedSearch.isEmpty || theme.name.localizedCaseInsensitiveContains(normalizedSearch) || theme.summary.localizedCaseInsensitiveContains(normalizedSearch))
+        }
+    }
+
+    private var visibleEffects: [LightingEffect] {
+        guard !normalizedSearch.isEmpty else { return LightingCatalog.effects }
+        return LightingCatalog.effects.filter {
+            $0.name.localizedCaseInsensitiveContains(normalizedSearch) || $0.summary.localizedCaseInsensitiveContains(normalizedSearch)
+        }
+    }
+
+    private var normalizedSearch: String {
+        searchText.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Scenes").font(.title3.weight(.semibold))
-                    Text("Capture the current lighting state, recall it later in one tap.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button("Done") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
-            }
-            .padding(16)
-
+            header
             Divider()
+            toolbar
+            Divider()
+            content
+        }
+        .frame(width: 760, height: 620)
+        .background(LumenBackground(glow: false))
+        .onChange(of: section) { _ in
+            searchText = ""
+            themeCategory = nil
+        }
+    }
 
-            VStack(spacing: 10) {
-                captureRow
+    private var header: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle().fill(Lumen.brandGradient).frame(width: 38, height: 38)
+                Image(systemName: "wand.and.stars").foregroundStyle(.white)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Lighting Library").font(.title3.weight(.semibold))
+                Text("Color and motion designed for both LIFX and Govee bulbs.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            if let activeID = manager.activeEffectID,
+               let effect = LightingCatalog.effects.first(where: { $0.id == activeID }) {
+                HStack(spacing: 8) {
+                    Image(systemName: "waveform")
+                    Text(effect.name).font(.caption.weight(.semibold))
+                    Button("Stop") { manager.stopEffect() }.buttonStyle(.bordered)
+                }
+                .padding(6)
+                .background(Capsule().fill(Lumen.pink.opacity(0.14)))
+            }
+            Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
+        }
+        .padding(16)
+    }
+
+    private var toolbar: some View {
+        VStack(spacing: 10) {
+            Picker("Library section", selection: $section) {
+                ForEach(LibrarySection.allCases) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+
+            HStack(spacing: 10) {
                 HStack {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                    TextField("Search scenes", text: $searchText)
-                        .textFieldStyle(.plain)
+                    TextField(searchPlaceholder, text: $searchText).textFieldStyle(.plain)
                     if !searchText.isEmpty {
                         Button { searchText = "" } label: { Image(systemName: "xmark.circle.fill") }
-                            .buttonStyle(.plain)
+                            .buttonStyle(.plain).foregroundStyle(.secondary)
                     }
                 }
                 .padding(8)
                 .background(RoundedRectangle(cornerRadius: 8).fill(Lumen.surfaceRaised))
                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(Lumen.hairline, lineWidth: 1))
+
+                if section == .themes {
+                    Menu {
+                        Button("All moods") { themeCategory = nil }
+                        Divider()
+                        ForEach(LightingTheme.Category.allCases, id: \.self) { category in
+                            Button(category.rawValue) { themeCategory = category }
+                        }
+                    } label: {
+                        Label(themeCategory?.rawValue ?? "All moods", systemImage: "line.3.horizontal.decrease.circle")
+                    }
+                    .fixedSize()
+                }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+    }
 
+    private var searchPlaceholder: String {
+        switch section {
+        case .scenes: return "Search saved scenes"
+        case .themes: return "Search 18 color themes"
+        case .effects: return "Search 10 animated effects"
+        }
+    }
+
+    @ViewBuilder private var content: some View {
+        switch section {
+        case .scenes: scenesContent
+        case .themes: themesContent
+        case .effects: effectsContent
+        }
+    }
+
+    private var themesContent: some View {
+        ScrollView {
+            if visibleThemes.isEmpty {
+                noResults
+            } else {
+                LazyVGrid(columns: columns, spacing: 12) {
+                    ForEach(visibleThemes) { themeCard($0) }
+                }
+                .padding(16)
+            }
+        }
+        .scrollContentBackground(.hidden)
+    }
+
+    private func themeCard(_ theme: LightingTheme) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Image(systemName: theme.icon)
+                    .font(.title2).foregroundStyle(theme.colors.first?.color ?? Lumen.violetBright)
+                Spacer()
+                Text(theme.category.rawValue.uppercased())
+                    .font(.system(size: 9, weight: .bold)).tracking(0.7)
+                    .foregroundStyle(.secondary)
+            }
+            Text(theme.name).font(.headline)
+            Text(theme.summary)
+                .font(.caption).foregroundStyle(.secondary)
+                .lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 0) {
+                ForEach(Array(theme.colors.enumerated()), id: \.offset) { _, swatch in
+                    Rectangle().fill(swatch.color).frame(height: 24)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.white.opacity(0.12), lineWidth: 1))
+            HStack {
+                Label("\(Int(theme.brightness * 100))%", systemImage: "sun.max.fill")
+                    .font(.caption2).foregroundStyle(.secondary)
+                Spacer()
+                Button("Apply") { manager.applyTheme(theme) }
+                    .buttonStyle(.borderedProminent).controlSize(.small)
+                    .disabled(manager.devices.isEmpty)
+            }
+        }
+        .padding(12)
+        .lumenCard(radius: 10)
+    }
+
+    private var effectsContent: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 8) {
+                    Image(systemName: "info.circle.fill").foregroundStyle(Lumen.violetBright)
+                    Text("Effects run locally using common RGB and brightness commands. High-energy effects may not be suitable for people sensitive to flashing light.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                .padding(10).lumenCard(radius: 8, fill: Lumen.surfaceRaised)
+
+                if visibleEffects.isEmpty {
+                    noResults
+                } else {
+                    LazyVGrid(columns: columns, spacing: 12) {
+                        ForEach(visibleEffects) { effectCard($0) }
+                    }
+                }
+            }
+            .padding(16)
+        }
+        .scrollContentBackground(.hidden)
+    }
+
+    private func effectCard(_ effect: LightingEffect) -> some View {
+        let isActive = manager.activeEffectID == effect.id
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Image(systemName: effect.icon).font(.title2)
+                    .foregroundStyle(isActive ? Lumen.pinkBright : Lumen.violetBright)
+                Spacer()
+                if effect.isAudioReactive {
+                    Label("AUDIO", systemImage: "mic.fill").font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(Lumen.pinkBright)
+                } else if effect.isHighEnergy {
+                    Label("ENERGY", systemImage: "bolt.fill").font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(Lumen.warning)
+                }
+            }
+            Text(effect.name).font(.headline)
+            Text(effect.summary).font(.caption).foregroundStyle(.secondary)
+                .lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 4) {
+                ForEach(Array(effect.colors.enumerated()), id: \.offset) { _, swatch in
+                    Circle().fill(swatch.color).frame(width: 18, height: 18)
+                        .overlay(Circle().stroke(Color.white.opacity(0.16), lineWidth: 1))
+                }
+                Spacer()
+                if isActive {
+                    Button("Stop") { manager.stopEffect() }
+                        .buttonStyle(.bordered).controlSize(.small)
+                } else {
+                    Button("Start") { manager.startEffect(effect) }
+                        .buttonStyle(.borderedProminent).controlSize(.small)
+                        .disabled(manager.devices.isEmpty)
+                }
+            }
+        }
+        .padding(12)
+        .lumenCard(radius: 10, highlighted: isActive, glowColor: isActive ? Lumen.pink : nil)
+    }
+
+    private var scenesContent: some View {
+        VStack(spacing: 0) {
+            captureRow.padding(16)
             Divider()
-
             if manager.scenes.isEmpty {
-                emptyState
+                emptyScenes
             } else {
                 ScrollView {
                     VStack(spacing: 8) {
-                        if visibleScenes.isEmpty {
-                            Text("No scenes match “\(searchText)”.")
-                                .font(.callout)
-                                .foregroundStyle(.secondary)
-                                .padding(24)
-                        }
-                        ForEach(visibleScenes) { scene in
-                            sceneRow(scene)
-                        }
-                    }
-                    .padding(16)
-                }
-                .scrollContentBackground(.hidden)
+                        if visibleScenes.isEmpty { noResults }
+                        ForEach(visibleScenes) { sceneRow($0) }
+                    }.padding(16)
+                }.scrollContentBackground(.hidden)
             }
         }
-        .frame(width: 520, height: 520)
-        .background(LumenBackground(glow: false))
     }
 
     private var captureRow: some View {
         HStack(spacing: 8) {
             TextField("New scene name (e.g. “Evening”)", text: $newSceneName)
-                .textFieldStyle(.roundedBorder)
-                .onSubmit(capture)
-                .accessibilityLabel("Scene name")
+                .textFieldStyle(.roundedBorder).onSubmit(capture)
             Button("Capture Current State", action: capture)
                 .buttonStyle(.borderedProminent)
-                .disabled(newSceneName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                          || manager.devices.isEmpty)
-                .accessibilityLabel("Capture current lighting state")
-                .accessibilityHint(manager.devices.isEmpty
-                                   ? "No lights discovered yet"
-                                   : "Saves all \(manager.devices.count) lights as a scene named \(newSceneName)")
+                .disabled(newSceneName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || manager.devices.isEmpty)
         }
     }
 
-    private func capture() {
-        let trimmed = newSceneName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        manager.captureScene(name: trimmed)
-        newSceneName = ""
-    }
-
-    private var emptyState: some View {
+    private var emptyScenes: some View {
         VStack(spacing: 8) {
             Spacer()
-            Image(systemName: "sparkles")
-                .font(.system(size: 32))
-                .foregroundStyle(.secondary)
+            Image(systemName: "sparkles").font(.system(size: 32)).foregroundStyle(.secondary)
             Text("No scenes yet").font(.headline)
             Text("Set the lights how you like them, then capture the moment above.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
+                .font(.callout).foregroundStyle(.secondary)
             Spacer()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(24)
+        }.frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var noResults: some View {
+        Text("No lighting looks match your search.")
+            .font(.callout).foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity).padding(32)
     }
 
     private func sceneRow(_ scene: LightingScene) -> some View {
         HStack(spacing: 10) {
-            Button {
-                manager.toggleFavoriteScene(scene.id)
-            } label: {
+            Button { manager.toggleFavoriteScene(scene.id) } label: {
                 Image(systemName: manager.isFavoriteScene(scene.id) ? "star.fill" : "star")
                     .foregroundStyle(manager.isFavoriteScene(scene.id) ? Lumen.gold : .secondary)
-            }
-            .buttonStyle(.plain)
-            .help(manager.isFavoriteScene(scene.id) ? "Unpin scene" : "Pin scene to favorites")
-
-            Image(systemName: "wand.and.stars")
-                .foregroundStyle(Lumen.violetBright)
-                .font(.title3)
-
+            }.buttonStyle(.plain)
+            Image(systemName: "wand.and.stars").foregroundStyle(Lumen.violetBright).font(.title3)
             VStack(alignment: .leading, spacing: 4) {
                 if renamingID == scene.id {
-                    HStack(spacing: 4) {
-                        TextField("Scene name", text: $renameDraft)
-                            .textFieldStyle(.roundedBorder)
-                            .focused($renameFocused)
-                            .onSubmit { commitRename(scene) }
-                            .onExitCommand { renamingID = nil }
-                        Button { renamingID = nil } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundStyle(.secondary)
-                        }
-                        .buttonStyle(.plain)
-                    }
+                    TextField("Scene name", text: $renameDraft).textFieldStyle(.roundedBorder)
+                        .focused($renameFocused).onSubmit { commitRename(scene) }
                 } else {
-                    Text(scene.name)
-                        .font(.callout.weight(.medium))
+                    Text(scene.name).font(.callout.weight(.medium))
                 }
-
-                let swatches = sceneSwatches(scene)
-                if !swatches.isEmpty {
-                    HStack(spacing: 3) {
-                        ForEach(swatches.indices, id: \.self) { i in
-                            Circle()
-                                .fill(swatches[i].color)
-                                .opacity(swatches[i].isOn ? 1.0 : 0.25)
-                                .frame(width: 10, height: 10)
-                                .overlay(Circle().stroke(Color.primary.opacity(0.15), lineWidth: 0.5))
-                                .accessibilityHidden(true)
-                        }
-                        if scene.snapshots.count > swatches.count {
-                            Text("+\(scene.snapshots.count - swatches.count)")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
+                HStack(spacing: 3) {
+                    ForEach(Array(sceneSwatches(scene).enumerated()), id: \.offset) { _, swatch in
+                        Circle().fill(swatch.color).opacity(swatch.isOn ? 1 : 0.25).frame(width: 10, height: 10)
                     }
                 }
-
                 Text("\(scene.snapshots.count) light\(scene.snapshots.count == 1 ? "" : "s") · captured \(scene.createdAt.formatted(.relative(presentation: .named)))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Text(scenePreview(scene))
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .font(.caption).foregroundStyle(.secondary)
             }
-
             Spacer()
-
-            Button("Apply") { manager.applyScene(scene) }
-                .buttonStyle(.bordered)
-                .accessibilityLabel("Apply \(scene.name)")
-                .accessibilityHint("Restores \(scene.snapshots.count) light\(scene.snapshots.count == 1 ? "" : "s") to the saved state")
-
+            Button("Apply") { manager.applyScene(scene) }.buttonStyle(.bordered)
             Menu {
                 Button("Rename…") { beginRename(scene) }
                 Button(manager.isFavoriteScene(scene.id) ? "Remove Favorite" : "Favorite") { manager.toggleFavoriteScene(scene.id) }
                 Button("Delete Scene", role: .destructive) { manager.deleteScene(scene.id) }
-            } label: {
-                Image(systemName: "ellipsis.circle")
-                    .foregroundStyle(.secondary)
-            }
-            .menuStyle(.borderlessButton)
-            .fixedSize()
-            .accessibilityLabel("More options for \(scene.name)")
+            } label: { Image(systemName: "ellipsis.circle") }
+            .menuStyle(.borderlessButton).fixedSize()
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .lumenCard(radius: 8)
-    }
-
-    private func scenePreview(_ scene: LightingScene) -> String {
-        let affected = manager.devices.filter { scene.snapshots[$0.id] != nil }.map { $0.label }
-        guard !affected.isEmpty else { return "No currently discovered lights overlap" }
-        return "Affects: " + affected.prefix(4).joined(separator: ", ") + (affected.count > 4 ? " +\(affected.count - 4)" : "")
+        .padding(12).lumenCard(radius: 8)
     }
 
     private func sceneSwatches(_ scene: LightingScene) -> [(color: Color, isOn: Bool)] {
-        let snaps = scene.snapshots.values
-            .sorted { lhs, rhs in
-                if lhs.isOn != rhs.isOn { return lhs.isOn }
-                return lhs.brightness > rhs.brightness
-            }
-            .prefix(8)
-        return snaps.map { snap in
-            let color = Color(hue: snap.hue, saturation: snap.saturation, brightness: max(0.5, snap.brightness))
-            return (color: color, isOn: snap.isOn)
+        scene.snapshots.values.prefix(8).map {
+            (Color(hue: $0.hue, saturation: $0.saturation, brightness: max(0.5, $0.brightness)), $0.isOn)
         }
+    }
+
+    private func capture() {
+        let name = newSceneName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        manager.captureScene(name: name)
+        newSceneName = ""
     }
 
     private func beginRename(_ scene: LightingScene) {
@@ -229,9 +348,9 @@ struct ScenesView: View {
     }
 
     private func commitRename(_ scene: LightingScene) {
-        let trimmed = renameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { renamingID = nil; return }  // Bug 6: discard silently, keep old name
-        manager.renameScene(scene.id, to: trimmed)
+        let name = renameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { renamingID = nil; return }
+        manager.renameScene(scene.id, to: name)
         renamingID = nil
     }
 }

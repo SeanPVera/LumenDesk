@@ -165,10 +165,10 @@ struct ContentView: View {
                 }
                 .help("Show keyboard shortcuts")
                 Button { showingScenes = true } label: {
-                    Label("Scenes", systemImage: "wand.and.stars")
+                    Label("Library", systemImage: "wand.and.stars")
                 }
                 .keyboardShortcut("s", modifiers: [.command, .shift])
-                .help("Save and recall lighting scenes (⇧⌘S)")
+                .help("Browse themes, effects, and saved scenes (⇧⌘S)")
                 Button {
                     newRoomName = ""
                     showingNewRoom = true
@@ -713,7 +713,7 @@ struct KeyboardShortcutsView: View {
         ("Scan for Lights", "⌘R"),
         ("New Room", "⌘N"),
         ("Find", "⌘F"),
-        ("Scenes", "⇧⌘S"),
+        ("Library", "⇧⌘S"),
         ("Toggle All Lights", "⇧⌘P"),
         ("Undo / Redo", "⌘Z / ⇧⌘Z")
     ]

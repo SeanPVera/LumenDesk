@@ -33,6 +33,7 @@ final class LightManager: ObservableObject {
     @Published private(set) var newlyDiscoveredIDs: Set<String> = []
     @Published private(set) var whiteModeDeviceIDs: Set<String> = []
     @Published private(set) var napPhase: NapPhase = .inactive
+    @Published private(set) var activeEffectID: String?
 
     private var errorClearTask: Task<Void, Never>?
     private var lifx: LIFXClient?
@@ -82,6 +83,11 @@ final class LightManager: ObservableObject {
         let color: Color
         let kelvin: Int
     }
+    private var effectTimer: Timer?
+    private var effectSnapshot: [DeviceState] = []
+    private var effectPhase: Double = 0
+    private var audioLevel: Double = 0
+    private let audioLevelMonitor = AudioLevelMonitor()
     private var undoStack: [[DeviceState]] = []
     private var redoStack: [[DeviceState]] = []
     private var lastChangeTime: [String: Date] = [:]
@@ -423,6 +429,156 @@ final class LightManager: ObservableObject {
         let lights = devices.filter { deviceIDs.contains($0.id) }
         recordChange(lights)
         for d in lights { d.brightness = value; markPending(d.id); sendBrightness(d, value: value) }
+    }
+
+    // MARK: - Theme & effect catalog
+
+    func applyTheme(_ theme: LightingTheme) {
+        guard !devices.isEmpty else {
+            publishError("Discover a light before applying a theme.")
+            return
+        }
+        stopEffect(restore: false)
+        recordChange(devices)
+        for (index, device) in devices.enumerated() {
+            let color = theme.colors[index % theme.colors.count].color
+            device.isOn = true
+            device.brightness = theme.brightness
+            device.color = color
+            markPending(device.id)
+            sendPower(device, on: true)
+            sendColor(device, color: color)
+            if device.brand == .govee { sendBrightness(device, value: theme.brightness) }
+        }
+        publishError("Applied “\(theme.name)” to \(devices.count) light\(devices.count == 1 ? "" : "s").")
+    }
+
+    func startEffect(_ effect: LightingEffect) {
+        guard !devices.isEmpty else {
+            publishError("Discover a light before starting an effect.")
+            return
+        }
+        let startingSnapshot = activeEffectID == nil ? devices.map(snapshot) : effectSnapshot
+        stopEffect(restore: false)
+        effectSnapshot = startingSnapshot
+        recordChange(devices)
+        activeEffectID = effect.id
+        effectPhase = 0
+        audioLevel = 0
+        for device in devices {
+            device.isOn = true
+            markPending(device.id)
+            sendPower(device, on: true)
+        }
+
+        let begin: () -> Void = { [weak self] in
+            guard let self, self.activeEffectID == effect.id else { return }
+            self.runEffectFrame(effect)
+            self.effectTimer = Timer.scheduledTimer(withTimeInterval: 0.22, repeats: true) { [weak self] _ in
+                Task { @MainActor in self?.runEffectFrame(effect) }
+            }
+        }
+
+        if effect.isAudioReactive {
+            audioLevelMonitor.onLevel = { [weak self] level in self?.audioLevel = level }
+            audioLevelMonitor.requestAccessAndStart { [weak self] started in
+                guard let self else { return }
+                if started {
+                    begin()
+                } else {
+                    self.activeEffectID = nil
+                    self.effectSnapshot = []
+                    self.publishError("Soundcheck needs microphone access. Enable it in System Settings → Privacy & Security → Microphone.")
+                }
+            }
+        } else {
+            begin()
+        }
+    }
+
+    func stopEffect(restore: Bool = true) {
+        effectTimer?.invalidate()
+        effectTimer = nil
+        audioLevelMonitor.stop()
+        audioLevelMonitor.onLevel = nil
+        activeEffectID = nil
+        guard restore, !effectSnapshot.isEmpty else {
+            effectSnapshot = []
+            return
+        }
+        restoreDeviceStates(effectSnapshot)
+        effectSnapshot = []
+    }
+
+    private func runEffectFrame(_ effect: LightingEffect) {
+        guard activeEffectID == effect.id, !effect.colors.isEmpty else { return }
+        effectPhase += effect.speed
+        let palette = effect.colors
+
+        for (index, device) in devices.enumerated() {
+            var color = palette[(index + Int(effectPhase)) % palette.count].color
+            var brightness = 0.72
+
+            switch effect.style {
+            case .colorFlow:
+                let hue = (effectPhase * 0.08 + Double(index) / Double(max(1, devices.count))).truncatingRemainder(dividingBy: 1)
+                color = Color(hue: hue, saturation: 0.86, brightness: 1)
+                brightness = 0.78
+            case .oceanWave:
+                let wave = (sin(effectPhase + Double(index) * 0.85) + 1) / 2
+                color = palette[Int(wave * Double(palette.count - 1))].color
+                brightness = 0.38 + wave * 0.42
+            case .breathe:
+                let breath = (sin(effectPhase) + 1) / 2
+                color = palette[index % palette.count].color
+                brightness = 0.18 + breath * 0.62
+            case .candlelight:
+                color = palette.randomElement()?.color ?? color
+                brightness = Double.random(in: 0.38...0.76)
+            case .twinkle:
+                let spark = Double.random(in: 0...1) > 0.78
+                color = (spark ? palette[0] : palette[(index % max(1, palette.count - 1)) + 1]).color
+                brightness = spark ? Double.random(in: 0.72...1) : Double.random(in: 0.16...0.34)
+            case .musicPulse:
+                color = palette[(index + Int(effectPhase * 4)) % palette.count].color
+                brightness = 0.16 + pow(audioLevel, 0.62) * 0.84
+            case .prismShuffle:
+                color = palette.randomElement()?.color ?? color
+                brightness = Double.random(in: 0.62...0.92)
+            case .lightning:
+                let strike = Double.random(in: 0...1) > 0.91
+                color = strike ? palette.last!.color : palette[index % max(1, palette.count - 1)].color
+                brightness = strike ? 1 : Double.random(in: 0.18...0.42)
+            case .sunrise:
+                let progress = min(0.999, effectPhase / 12)
+                color = palette[min(palette.count - 1, Int(progress * Double(palette.count)))].color
+                brightness = 0.08 + progress * 0.82
+            case .sunset:
+                let progress = min(0.999, effectPhase / 12)
+                color = palette[min(palette.count - 1, Int(progress * Double(palette.count)))].color
+                brightness = 0.82 - progress * 0.58
+            }
+
+            device.isOn = true
+            device.color = color
+            device.brightness = max(0.05, min(1, brightness))
+            sendColor(device, color: color)
+            if device.brand == .govee { sendBrightness(device, value: device.brightness) }
+        }
+    }
+
+    private func restoreDeviceStates(_ states: [DeviceState]) {
+        for state in states {
+            guard let device = devices.first(where: { $0.id == state.deviceID }) else { continue }
+            device.isOn = state.isOn
+            device.brightness = state.brightness
+            device.color = state.color
+            device.kelvin = state.kelvin
+            markPending(device.id)
+            sendColor(device, color: state.color)
+            if device.brand == .govee { sendBrightness(device, value: state.brightness) }
+            sendPower(device, on: state.isOn)
+        }
     }
 
     // MARK: - Vendor send helpers

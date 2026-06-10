@@ -5,6 +5,8 @@ struct RoomSectionView: View {
     let room: Room
     var searchQuery: String = ""
     var showOnlyOn: Bool = false
+    var showOfflineOnly: Bool = false
+    var vendorFilter: LightDevice.Brand? = nil
     var selectionMode: Bool = false
     var selectedIDs: Set<String> = []
     var onToggleSelection: ((String) -> Void)? = nil
@@ -28,6 +30,8 @@ struct RoomSectionView: View {
             lights = allLights.filter { manager.device($0, matchesQuery: trimmed) }
         }
         if showOnlyOn { lights = lights.filter { $0.isOn } }
+        if showOfflineOnly { lights = lights.filter { $0.isStale } }
+        if let vendorFilter { lights = lights.filter { $0.brand == vendorFilter } }
         return lights
     }
 

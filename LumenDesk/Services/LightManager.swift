@@ -33,6 +33,14 @@ final class LightManager: ObservableObject {
     @Published private(set) var newlyDiscoveredIDs: Set<String> = []
     @Published private(set) var whiteModeDeviceIDs: Set<String> = []
     @Published private(set) var napPhase: NapPhase = .inactive
+    @Published private(set) var activityEvents: [ActivityEvent] = []
+    @Published private(set) var lastSceneResult: SceneApplicationResult?
+    @Published private(set) var favoriteOrder: [FavoriteReference] = []
+    @Published private(set) var parliamentMembers: [ParliamentMember] = []
+    @Published private(set) var parliamentSessions: [ParliamentSession] = []
+    @Published private(set) var fireflyCitizens: [FireflyCitizen] = []
+    @Published private(set) var sceneCertifications: [SceneCertification] = []
+    @Published private(set) var recentColors: [RecentColor] = []
 
     private var errorClearTask: Task<Void, Never>?
     private var lifx: LIFXClient?
@@ -40,6 +48,8 @@ final class LightManager: ObservableObject {
     private var refreshTimer: Timer?
     private var scheduleTimer: Timer?
     private var napTimer: Timer?
+    private var ecosystemTimer: Timer?
+    private var brightnessTasks: [String: Task<Void, Never>] = [:]
     private var napSnapshotBrightness: [String: Double] = [:]
     private var scanGeneration: Int = 0     // incremented each scan; clears isScanning safely
     private var hasStarted = false
@@ -72,6 +82,13 @@ final class LightManager: ObservableObject {
     fileprivate let roomFavoritesDefaultsKey = "LumenDesk.favoriteRooms.v1"
     fileprivate let sceneFavoritesDefaultsKey = "LumenDesk.favoriteScenes.v1"
     fileprivate let brightnessPresetsKey    = "LumenDesk.brightnessPresets.v1"
+    private let activityKey = "LumenDesk.activity.v1"
+    private let favoriteOrderKey = "LumenDesk.favoriteOrder.v1"
+    private let parliamentKey = "LumenDesk.parliament.v1"
+    private let parliamentSessionsKey = "LumenDesk.parliamentSessions.v1"
+    private let firefliesKey = "LumenDesk.fireflies.v1"
+    private let certificationsKey = "LumenDesk.certifications.v1"
+    private let recentColorsKey = "LumenDesk.recentColors.v1"
 
     // MARK: - Undo / redo state
 
@@ -101,6 +118,13 @@ final class LightManager: ObservableObject {
         customBrightnessPresets = loadBrightnessPresets()
         whiteModeDeviceIDs = loadWhiteMode()
         loadSolarPrefs()
+        activityEvents = loadValue([ActivityEvent].self, key: activityKey) ?? []
+        favoriteOrder = loadValue([FavoriteReference].self, key: favoriteOrderKey) ?? []
+        parliamentMembers = loadValue([ParliamentMember].self, key: parliamentKey) ?? []
+        parliamentSessions = loadValue([ParliamentSession].self, key: parliamentSessionsKey) ?? []
+        fireflyCitizens = loadValue([FireflyCitizen].self, key: firefliesKey) ?? []
+        sceneCertifications = loadValue([SceneCertification].self, key: certificationsKey) ?? []
+        recentColors = loadValue([RecentColor].self, key: recentColorsKey) ?? []
     }
 
     func start() {
@@ -126,9 +150,12 @@ final class LightManager: ObservableObject {
         scan()
         scheduleRefresh()
         startScheduleTimer()
+        startEcosystemTimer()
+        logActivity(.system, title: "LumenDesk started", detail: "Local automation and discovery services are active.")
     }
 
     func scan() {
+        logActivity(.scan, title: "Discovery scan started", detail: "Broadcasting to LIFX and Govee devices.")
         isScanning = true
         scanPhase = "Sending discovery broadcasts"
         lastScanDate = Date()
@@ -148,6 +175,7 @@ final class LightManager: ObservableObject {
                 guard let self, self.scanGeneration == gen else { return }
                 self.isScanning = false
                 self.scanPhase = self.scanResponseCount == 0 ? "No responses found" : "Scan complete: \(self.scanResponseCount) response\(self.scanResponseCount == 1 ? "" : "s")"
+                self.logActivity(.scan, title: self.scanResponseCount == 0 ? "Scan found no lights" : "Scan completed", detail: self.scanPhase, isFailure: self.scanResponseCount == 0)
             }
         }
     }
@@ -184,11 +212,12 @@ final class LightManager: ObservableObject {
         let nowKey    = String(format: "%02d:%02d", nowHour, nowMinute)
 
         for room in rooms {
-            for entry in room.schedules where entry.isEnabled {
+            for entry in room.schedules where entry.isEnabled && entry.runsToday {
                 if scheduleFiredThisMinute[entry.id] == nowKey { continue }
                 guard schedule(entry, shouldFireBetween: previous, and: now) else { continue }
 
                 scheduleFiredThisMinute[entry.id] = nowKey
+                logActivity(.schedule, title: "Automation ran", detail: "\(room.name): \(entry.action.displayName) at \(entry.timeString)")
                 let lights = devices(in: room)
                 switch entry.action {
                 case .turnOn, .atSunrise:
@@ -365,6 +394,7 @@ final class LightManager: ObservableObject {
     }
 
     func setColor(_ device: LightDevice, color: Color) {
+        rememberColor(color, name: "Custom")
         if device.isStale {
             publishError("\u{201C}\(device.label)\u{201D} may be offline — command sent anyway.")
         }
@@ -396,7 +426,7 @@ final class LightManager: ObservableObject {
     func setBrightness(in room: Room, value: Double) {
         let lights = devices(in: room)
         recordChange(lights)
-        for d in lights { d.brightness = value; markPending(d.id); sendBrightness(d, value: value) }
+        for d in lights { previewBrightness(d, value: value) }
     }
 
     func setAllPower(on: Bool) {
@@ -410,7 +440,7 @@ final class LightManager: ObservableObject {
 
     func setAllBrightness(_ value: Double) {
         recordChange(devices)
-        for d in devices { d.brightness = value; markPending(d.id); sendBrightness(d, value: value) }
+        for d in devices { previewBrightness(d, value: value) }
     }
 
     func setPower(deviceIDs: Set<String>, on: Bool) {
@@ -965,36 +995,11 @@ extension LightManager {
         }
         scenes.append(LightingScene(name: trimmed, snapshots: snapshots))
         persistScenes()
+        logActivity(.scene, title: "Scene captured", detail: "\(trimmed): \(snapshots.count) lights")
     }
 
     func applyScene(_ scene: LightingScene) {
-        let affected = devices.filter { scene.snapshots[$0.id] != nil }
-        guard !affected.isEmpty else {
-            publishError("\u{201C}\(scene.name)\u{201D} has no lights in common with what\u{2019}s on the network.")
-            return
-        }
-        recordChange(affected)
-        var staleCount = 0
-        for d in affected {
-            guard let snap = scene.snapshots[d.id] else { continue }
-            if d.isStale { staleCount += 1 }
-            let color = Color(hue: snap.hue, saturation: snap.saturation, brightness: 1.0)
-            d.color = color
-            d.brightness = snap.brightness
-            d.kelvin = snap.kelvin
-            d.isOn = snap.isOn
-            markPending(d.id)
-            sendColor(d, color: color)
-            if d.brand == .govee {
-                govee?.setBrightness(deviceID: d.backendID, percent: Int(snap.brightness * 100))
-            }
-            sendPower(d, on: snap.isOn)
-        }
-        if staleCount > 0 {
-            publishError("Applied \u{201C}\(scene.name)\u{201D} — \(staleCount) light\(staleCount == 1 ? "" : "s") may be offline.") { self.undo() }
-        } else {
-            publishError("Applied \u{201C}\(scene.name)\u{201D}.") { self.undo() }
-        }
+        applyScene(scene, allowTurningOff: true)
     }
 
     func deleteScene(_ sceneID: UUID) {
@@ -1046,7 +1051,7 @@ extension LightManager {
 
     func addSchedule(_ entry: ScheduleEntry, to roomID: UUID) {
         guard let idx = rooms.firstIndex(where: { $0.id == roomID }),
-              rooms[idx].schedules.count < 4 else { return }
+              rooms[idx].schedules.count < 12 else { return }
         rooms[idx].schedules.append(entry)
         // Sort by resolved clock-minute so the list is always chronological.
         rooms[idx].schedules.sort { lhs, rhs in
@@ -1263,4 +1268,292 @@ extension Color {
         ns.getRed(&r, green: &g, blue: &bb, alpha: &a)
         return (Double(r), Double(g), Double(bb))
     }
+}
+
+// MARK: - Second-pass UX services
+
+extension LightManager {
+    private func persistValue<T: Encodable>(_ value: T, key: String) {
+        if let data = try? JSONEncoder().encode(value) { UserDefaults.standard.set(data, forKey: key) }
+    }
+
+    private func loadValue<T: Decodable>(_ type: T.Type, key: String) -> T? {
+        guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
+        return try? JSONDecoder().decode(type, from: data)
+    }
+
+    func logActivity(_ kind: ActivityEvent.Kind, title: String, detail: String = "", isFailure: Bool = false) {
+        activityEvents.insert(ActivityEvent(kind: kind, title: title, detail: detail, isFailure: isFailure), at: 0)
+        if activityEvents.count > 250 { activityEvents.removeLast(activityEvents.count - 250) }
+        persistValue(activityEvents, key: activityKey)
+    }
+
+    func clearActivity() {
+        activityEvents.removeAll()
+        persistValue(activityEvents, key: activityKey)
+    }
+
+    func activityExportText() -> String {
+        activityEvents.reversed().map {
+            "[\($0.date.formatted(date: .numeric, time: .standard))] \($0.kind.rawValue.uppercased()) — \($0.title)\($0.detail.isEmpty ? "" : ": \($0.detail)")"
+        }.joined(separator: "\n")
+    }
+
+    func aggregatePowerState(for lights: [LightDevice]) -> AggregatePowerState {
+        let on = lights.filter(\.isOn).count
+        if on == 0 { return .off }
+        if on == lights.count { return .on }
+        return .mixed(on: on, total: lights.count)
+    }
+
+    func toggleAggregatePower(_ lights: [LightDevice]) {
+        let target = lights.filter(\.isOn).count < lights.count
+        setPower(deviceIDs: Set(lights.map(\.id)), on: target)
+        logActivity(.command, title: target ? "Lights turned on" : "Lights turned off", detail: "\(lights.count) selected lights")
+    }
+
+    /// Optimistically updates the UI while coalescing LAN traffic to one send per 120 ms.
+    func previewBrightness(_ device: LightDevice, value: Double) {
+        device.brightness = value
+        brightnessTasks[device.id]?.cancel()
+        brightnessTasks[device.id] = Task { @MainActor [weak self, weak device] in
+            try? await Task.sleep(for: .milliseconds(120))
+            guard !Task.isCancelled, let self, let device else { return }
+            self.markPending(device.id)
+            self.sendBrightness(device, value: value)
+        }
+    }
+
+    func commitBrightness(_ device: LightDevice, value: Double) {
+        brightnessTasks[device.id]?.cancel()
+        brightnessTasks[device.id] = nil
+        device.brightness = value
+        markPending(device.id)
+        sendBrightness(device, value: value)
+        logActivity(.command, title: "Brightness changed", detail: "\(device.label): \(Int(value * 100))%")
+    }
+
+    func identify(_ device: LightDevice) {
+        let originalPower = device.isOn
+        let originalColor = device.color
+        let originalBrightness = device.brightness
+        device.isOn = true
+        device.color = .cyan
+        device.brightness = 1
+        sendPower(device, on: true); sendColor(device, color: .cyan); sendBrightness(device, value: 1)
+        logActivity(.recovery, title: "Identifying light", detail: device.label)
+        Task { @MainActor [weak self, weak device] in
+            try? await Task.sleep(for: .seconds(2))
+            guard let self, let device else { return }
+            device.color = originalColor; device.brightness = originalBrightness; device.isOn = originalPower
+            self.sendColor(device, color: originalColor); self.sendBrightness(device, value: originalBrightness); self.sendPower(device, on: originalPower)
+        }
+    }
+
+    func retry(_ device: LightDevice) {
+        markPending(device.id)
+        switch device.brand {
+        case .lifx: lifx?.refresh(macHex: device.backendID)
+        case .govee: govee?.refresh(deviceID: device.backendID)
+        }
+        logActivity(.recovery, title: "Retried unreachable light", detail: device.label)
+    }
+
+    func diagnostics(for device: LightDevice) -> [ScanDiagnostic] {
+        [
+            ScanDiagnostic(title: "Vendor", value: device.brand.displayName, status: .neutral),
+            ScanDiagnostic(title: "Address", value: device.address, status: .neutral),
+            ScanDiagnostic(title: "Last seen", value: device.lastSeen.formatted(date: .abbreviated, time: .standard), status: device.isStale ? .warning : .good),
+            ScanDiagnostic(title: "Reachability", value: device.isStale ? "Not seen recently" : "Responding", status: device.isStale ? .warning : .good),
+            ScanDiagnostic(title: "Color temperature", value: "2,500–9,000 K", status: .neutral),
+            ScanDiagnostic(title: "LAN identifier", value: device.backendID, status: .neutral)
+        ]
+    }
+
+    var likelyLocalNetworkPermissionIssue: Bool {
+        lastScanDate != nil && scanResponseCount == 0 && devices.isEmpty
+    }
+
+    var scanDiagnostics: [ScanDiagnostic] {
+        [
+            ScanDiagnostic(title: "LIFX protocol", value: lifx == nil ? "Unavailable" : "Ready on UDP 56700", status: lifx == nil ? .warning : .good),
+            ScanDiagnostic(title: "Govee protocol", value: govee == nil ? "Unavailable" : "Ready on UDP 4001–4003", status: govee == nil ? .warning : .good),
+            ScanDiagnostic(title: "Last scan", value: lastScanDate?.formatted(date: .abbreviated, time: .standard) ?? "Not yet scanned", status: .neutral),
+            ScanDiagnostic(title: "Responses", value: "\(scanResponseCount)", status: scanResponseCount == 0 ? .warning : .good),
+            ScanDiagnostic(title: "Discovered lights", value: "\(devices.count)", status: devices.isEmpty ? .warning : .good)
+        ]
+    }
+
+    func updateSchedule(_ entry: ScheduleEntry, in roomID: UUID) {
+        guard let roomIndex = rooms.firstIndex(where: { $0.id == roomID }),
+              let entryIndex = rooms[roomIndex].schedules.firstIndex(where: { $0.id == entry.id }) else { return }
+        rooms[roomIndex].schedules[entryIndex] = entry
+        persistRooms()
+        logActivity(.schedule, title: "Schedule updated", detail: "\(rooms[roomIndex].name): \(entry.daySummary) at \(entry.timeString)")
+    }
+
+    func duplicateSchedule(_ entry: ScheduleEntry, in roomID: UUID) {
+        guard let roomIndex = rooms.firstIndex(where: { $0.id == roomID }), rooms[roomIndex].schedules.count < 12 else { return }
+        let copy = ScheduleEntry(hour: entry.hour, minute: entry.minute, offsetMinutes: entry.offsetMinutes, action: entry.action, weekdays: entry.weekdays)
+        rooms[roomIndex].schedules.append(copy); persistRooms()
+        logActivity(.schedule, title: "Schedule duplicated", detail: rooms[roomIndex].name)
+    }
+
+    func testSchedule(_ entry: ScheduleEntry, in room: Room) {
+        let lights = devices(in: room)
+        switch entry.action {
+        case .turnOn, .atSunrise: setPower(deviceIDs: Set(lights.map(\.id)), on: true)
+        case .turnOff, .atSunset: setPower(deviceIDs: Set(lights.map(\.id)), on: false)
+        default: if let value = entry.action.brightnessValue { setBrightness(deviceIDs: Set(lights.map(\.id)), value: value) }
+        }
+        logActivity(.schedule, title: "Schedule tested", detail: "\(room.name): \(entry.action.displayName)")
+    }
+
+    func scenePreview(_ scene: LightingScene) -> SceneApplicationPreview {
+        let affected = devices.filter { scene.snapshots[$0.id] != nil }
+        let unreachable = affected.filter(\.isStale)
+        let missing = scene.snapshots.keys.filter { id in !devices.contains(where: { $0.id == id }) }
+        let unchanged = affected.filter { d in
+            guard let snap = scene.snapshots[d.id] else { return false }
+            let hsb = d.color.hsbComponents
+            return d.isOn == snap.isOn && abs(d.brightness - snap.brightness) < 0.01 && abs(hsb.h - snap.hue) < 0.01
+        }
+        return SceneApplicationPreview(scene: scene, affected: affected, unreachable: unreachable, missingIDs: missing, unchanged: unchanged)
+    }
+
+    func applyScene(_ scene: LightingScene, allowTurningOff: Bool) {
+        let preview = scenePreview(scene)
+        guard !preview.affected.isEmpty else { publishError("“\(scene.name)” has no discovered lights to change."); return }
+        recordChange(preview.affected)
+        var succeeded: [String] = [], failed: [String] = [], skipped: [String] = []
+        for device in preview.affected {
+            guard let snap = scene.snapshots[device.id] else { continue }
+            if !allowTurningOff && !snap.isOn { skipped.append(device.id); continue }
+            if device.isStale { failed.append(device.id) } else { succeeded.append(device.id) }
+            let color = Color(hue: snap.hue, saturation: snap.saturation, brightness: 1)
+            device.color = color; device.brightness = snap.brightness; device.kelvin = snap.kelvin; device.isOn = snap.isOn
+            markPending(device.id); sendColor(device, color: color)
+            if device.brand == .govee { govee?.setBrightness(deviceID: device.backendID, percent: Int(snap.brightness * 100)) }
+            sendPower(device, on: snap.isOn)
+        }
+        lastSceneResult = SceneApplicationResult(sceneName: scene.name, succeededIDs: succeeded, failedIDs: failed, skippedOffIDs: skipped)
+        logActivity(.scene, title: "Scene applied", detail: "\(scene.name): \(succeeded.count) succeeded, \(failed.count) need retry", isFailure: !failed.isEmpty)
+    }
+
+    func retryLastSceneFailures() {
+        guard let result = lastSceneResult, let scene = scenes.first(where: { $0.name == result.sceneName }) else { return }
+        let failed = devices.filter { result.failedIDs.contains($0.id) }
+        for device in failed { retry(device) }
+        applyScene(scene, allowTurningOff: true)
+    }
+
+    func reconcileFavoriteOrder() {
+        let active = Set(favoriteIDs.map { FavoriteReference(kind: .light, rawID: $0) }
+            + favoriteRoomIDs.map { FavoriteReference(kind: .room, rawID: $0.uuidString) }
+            + favoriteSceneIDs.map { FavoriteReference(kind: .scene, rawID: $0.uuidString) })
+        favoriteOrder = favoriteOrder.filter(active.contains)
+        favoriteOrder.append(contentsOf: active.filter { !favoriteOrder.contains($0) }.sorted { $0.id < $1.id })
+        persistValue(favoriteOrder, key: favoriteOrderKey)
+    }
+
+    func moveFavorite(from source: IndexSet, to destination: Int) {
+        reconcileFavoriteOrder(); favoriteOrder.move(fromOffsets: source, toOffset: destination)
+        persistValue(favoriteOrder, key: favoriteOrderKey)
+    }
+
+    func rememberColor(_ color: Color, name: String) {
+        let candidate = RecentColor(color: color, name: name)
+        recentColors.removeAll { $0.hex == candidate.hex }
+        recentColors.insert(candidate, at: 0)
+        if recentColors.count > 8 { recentColors.removeLast(recentColors.count - 8) }
+        persistValue(recentColors, key: recentColorsKey)
+    }
+
+    func ensureParliament() {
+        let existing = Set(parliamentMembers.map(\.id))
+        for (index, device) in devices.enumerated() where !existing.contains(device.id) {
+            let titles = ["The Rt. Hon. Glow", "Baron von Bulb", "Dame Incandescence", "Minister Lux", "Sir Filament"]
+            let parties = ParliamentMember.Party.allCases
+            parliamentMembers.append(ParliamentMember(id: device.id, parliamentaryName: "\(titles[index % titles.count]) of \(device.label)", party: parties[index % parties.count], approval: 50, lastVote: "Newly seated"))
+        }
+        parliamentMembers.removeAll { member in !devices.contains(where: { $0.id == member.id }) }
+        persistValue(parliamentMembers, key: parliamentKey)
+    }
+
+    @discardableResult
+    func conveneParliament(motion: String) -> ParliamentSession {
+        ensureParliament()
+        var ayes = 0, noes = 0, abstentions = 0
+        for index in parliamentMembers.indices {
+            guard let device = device(withID: parliamentMembers[index].id), !device.isStale else {
+                abstentions += 1; parliamentMembers[index].lastVote = "Abstained (unreachable)"; continue
+            }
+            let bias = parliamentMembers[index].party == .efficiencyBloc && motion.lowercased().contains("off") ? 25 : 0
+            let vote = Int.random(in: 0..<100) < 55 + bias
+            if vote { ayes += 1; parliamentMembers[index].lastVote = "Aye" } else { noes += 1; parliamentMembers[index].lastVote = "No" }
+            parliamentMembers[index].approval = max(0, min(100, parliamentMembers[index].approval + (vote ? 1 : -1)))
+        }
+        let passed = ayes > noes
+        let session = ParliamentSession(id: UUID(), date: Date(), motion: motion, ayes: ayes, noes: noes, abstentions: abstentions, verdict: passed ? "Motion carried" : "Motion defeated")
+        parliamentSessions.insert(session, at: 0)
+        if parliamentSessions.count > 50 { parliamentSessions.removeLast() }
+        persistValue(parliamentMembers, key: parliamentKey); persistValue(parliamentSessions, key: parliamentSessionsKey)
+        logActivity(.parliament, title: session.verdict, detail: "\(ayes) ayes, \(noes) noes, \(abstentions) abstentions — \(motion)")
+        if passed { executiveIlluminationOrder(motion: motion) }
+        return session
+    }
+
+    func executiveIlluminationOrder(motion: String) {
+        if motion.lowercased().contains("off") { setAllPower(on: false) }
+        else if motion.lowercased().contains("on") { setAllPower(on: true) }
+        else { setAllBrightness(0.5) }
+        logActivity(.parliament, title: "Executive Illumination Order", detail: motion)
+    }
+
+    func startEcosystemTimer() {
+        if fireflyCitizens.isEmpty { seedFireflies() }
+        ecosystemTimer?.invalidate()
+        ecosystemTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in Task { @MainActor in self?.evolveFireflies() } }
+    }
+
+    func seedFireflies() {
+        fireflyCitizens = (0..<max(6, min(18, devices.count * 2))).map { index in
+            FireflyCitizen(id: UUID(), name: "Luxling \(index + 1)", generation: 1, hue: Double.random(in: 0...1), preferredKelvin: Int.random(in: 2500...6500), energy: Double.random(in: 0.55...1), rarity: index == 0 ? "Rare" : "Common", parentIDs: [])
+        }
+        persistValue(fireflyCitizens, key: firefliesKey)
+    }
+
+    func evolveFireflies() {
+        let litFraction = Double(devices.filter(\.isOn).count) / Double(max(1, devices.count))
+        for index in fireflyCitizens.indices {
+            fireflyCitizens[index].energy = max(0.05, min(1, fireflyCitizens[index].energy + litFraction * 0.08 - 0.03))
+            fireflyCitizens[index].hue = (fireflyCitizens[index].hue + Double.random(in: -0.015...0.015) + 1).truncatingRemainder(dividingBy: 1)
+        }
+        if litFraction > 0.6, fireflyCitizens.count < 40, let a = fireflyCitizens.randomElement(), let b = fireflyCitizens.randomElement() {
+            fireflyCitizens.append(FireflyCitizen(id: UUID(), name: "Luxling \(fireflyCitizens.count + 1)", generation: max(a.generation, b.generation) + 1, hue: (a.hue + b.hue) / 2, preferredKelvin: (a.preferredKelvin + b.preferredKelvin) / 2, energy: 0.7, rarity: Int.random(in: 0..<12) == 0 ? "Iridescent" : "Common", parentIDs: [a.id, b.id]))
+        }
+        fireflyCitizens.removeAll { $0.energy <= 0.05 && fireflyCitizens.count > 6 }
+        persistValue(fireflyCitizens, key: firefliesKey)
+    }
+
+    func certify(_ scene: LightingScene) -> SceneCertification {
+        let onCount = scene.snapshots.values.filter(\.isOn).count
+        let hues = scene.snapshots.values.map(\.hue)
+        let variety = Set(hues.map { Int($0 * 12) }).count
+        let score = min(100, 45 + onCount * 4 + variety * 7 + min(12, scene.name.count))
+        let seal: SceneCertification.Seal = score >= 85 ? .gold : (score >= 65 ? .silver : .bronze)
+        let findings = [
+            "Chromatic diversity: \(variety) recognized hue families.",
+            "Estimated moth attraction: \(max(1, onCount * 3)) ceremonial moths per hour.",
+            scene.name.count >= 4 ? "Scene nomenclature satisfies Article IV." : "Scene name is suspiciously terse.",
+            "Wall-paint diplomacy risk: \(score > 75 ? "Acceptable" : "Requires bilateral consultation")."
+        ]
+        let certification = SceneCertification(id: UUID(), sceneID: scene.id, issuedAt: Date(), score: score, seal: seal, findings: findings, treatyCode: "IBL-\(Int.random(in: 10000...99999))-LUX")
+        sceneCertifications.removeAll { $0.sceneID == scene.id }
+        sceneCertifications.append(certification); persistValue(sceneCertifications, key: certificationsKey)
+        logActivity(.compliance, title: "Scene certified \(seal.rawValue.capitalized)", detail: "\(scene.name) scored \(score)/100")
+        return certification
+    }
+
+    func certification(for sceneID: UUID) -> SceneCertification? { sceneCertifications.first { $0.sceneID == sceneID } }
 }

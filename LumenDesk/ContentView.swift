@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct ContentView: View {
     @EnvironmentObject var manager: LightManager
@@ -8,11 +9,21 @@ struct ContentView: View {
     @State private var setupChecks: Set<Int> = []
     @State private var showingScenes: Bool = false
     @State private var showingShortcuts: Bool = false
-    @State private var auroraFireflies: Bool = true
+    @AppStorage("LumenDesk.auroraFireflies.v1") private var auroraFireflies: Bool = true
+    @State private var showingDiagnostics = false
+    @State private var showingActivity = false
+    @State private var showingParliament = false
+    @State private var showingEcosystem = false
+    @State private var showingCompliance = false
+    @AppStorage("LumenDesk.workspaceLayout.v1") private var layoutRaw = WorkspaceLayout.automatic.rawValue
+    @AppStorage("LumenDesk.interfaceDensity.v1") private var densityRaw = InterfaceDensity.comfortable.rawValue
 
-    @State private var searchText: String = ""
+    @AppStorage("LumenDesk.searchText.v1") private var searchText: String = ""
     @FocusState private var searchFocused: Bool
-    @State private var showOnlyOn: Bool = false
+    @AppStorage("LumenDesk.showOnlyOn.v1") private var showOnlyOn: Bool = false
+    @State private var showOfflineOnly = false
+    @State private var vendorFilter: LightDevice.Brand?
+    @AppStorage("LumenDesk.searchScope.v1") private var searchScopeRaw = SearchScope.all.rawValue
 
     @State private var selectionMode: Bool = false
     @State private var selectedIDs: Set<String> = []
@@ -26,17 +37,15 @@ struct ContentView: View {
 
                 if manager.devices.isEmpty {
                     emptyState
+                } else if searchScope == .scenes {
+                    sceneSearchResults
                 } else {
                     FavoritesStripView()
                         .padding(.horizontal, 16)
-                        .padding(.top, 12)
+                        .padding(.top, density == .compact ? 6 : 12)
 
                     GeometryReader { proxy in
-                        if proxy.size.width >= gridThreshold {
-                            gridLayout
-                        } else {
-                            listLayout
-                        }
+                        if effectiveLayout(for: proxy.size.width) == .grid { gridLayout } else { listLayout }
                     }
                 }
             }
@@ -46,18 +55,27 @@ struct ContentView: View {
             .sheet(isPresented: $showingScenes) {
                 ScenesView().environmentObject(manager)
             }
-            .sheet(isPresented: $showingShortcuts) {
-                KeyboardShortcutsView()
-            }
+            .sheet(isPresented: $showingShortcuts) { KeyboardShortcutsView() }
+            .sheet(isPresented: $showingDiagnostics) { DiagnosticsCenterView().environmentObject(manager) }
+            .sheet(isPresented: $showingActivity) { ActivityLogView().environmentObject(manager) }
+            .sheet(isPresented: $showingParliament) { LightingParliamentView().environmentObject(manager) }
+            .sheet(isPresented: $showingEcosystem) { FireflyEcosystemView().environmentObject(manager) }
+            .sheet(isPresented: $showingCompliance) { ComplianceSuiteView().environmentObject(manager) }
 
             if selectionMode && !selectedIDs.isEmpty {
-                BulkActionBar(selectedIDs: $selectedIDs, selectionMode: $selectionMode)
+                VStack(spacing: 6) {
+                    if !selectedIDs.subtracting(visibleDeviceIDs).isEmpty {
+                        Text("\(selectedIDs.count) selected · \(selectedIDs.subtracting(visibleDeviceIDs).count) hidden by filters")
+                            .font(.caption).padding(.horizontal, 10).padding(.vertical, 5).background(Lumen.warning.opacity(0.18), in: Capsule())
+                    }
+                    BulkActionBar(selectedIDs: $selectedIDs, selectionMode: $selectionMode)
                     .padding(.bottom, manager.commandError == nil ? 16 : 72)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
             }
 
             if auroraFireflies && !manager.devices.isEmpty {
-                AuroraFireflyOverlay(colors: manager.devices.filter { $0.isOn }.map { $0.color })
+                AuroraFireflyOverlay(colors: manager.fireflyCitizens.map { Color(hue: $0.hue, saturation: 0.82, brightness: max(0.45, $0.energy)) })
                     .allowsHitTesting(false)
                     .transition(.opacity)
             }
@@ -74,6 +92,7 @@ struct ContentView: View {
         }
         .animation(.spring(duration: 0.25), value: manager.commandError)
         .animation(.spring(duration: 0.25), value: selectionMode)
+        .onChange(of: manager.devices.map(\.id)) { ids in selectedIDs.formIntersection(Set(ids)) }
     }
 
     private var findShortcutButton: some View {
@@ -126,60 +145,31 @@ struct ContentView: View {
                     ProgressView().controlSize(.small)
                         .help(manager.scanPhase)
                 }
-                Toggle(isOn: $auroraFireflies) {
-                    Image(systemName: "sparkles")
-                }
-                .toggleStyle(.button)
-                .controlSize(.small)
-                .help("Aurora Firefly Mode — whimsical ambient glow")
-                Button {
-                    if manager.napPhase != .inactive { manager.cancelNapMode() } else { manager.startNapMode() }
-                } label: {
-                    Label(
-                        manager.napPhase == .inactive ? "Nap" : manager.napCountdownString,
-                        systemImage: manager.napPhase == .inactive ? "moon.fill" : "xmark.circle.fill"
-                    )
-                }
-                .help(manager.napPhase == .inactive
-                      ? "Nap Mode — dims all lights over 20 minutes, holds, then brightens gently to wake you"
-                      : "Cancel Nap Mode")
-                .tint(manager.napPhase == .inactive ? .indigo : .orange)
-                if !manager.devices.isEmpty {
-                    Button {
-                        selectionMode.toggle()
-                        if !selectionMode { selectedIDs.removeAll() }
-                    } label: {
-                        Label(selectionMode ? "Done" : "Select",
-                              systemImage: selectionMode ? "checkmark.circle.fill" : "checkmark.circle")
-                    }
-                    .help(selectionMode ? "Exit selection mode" : "Select multiple lights for bulk actions")
-                    if selectionMode {
-                        Button("Select Visible") { selectedIDs = visibleDeviceIDs }
-                            .disabled(visibleDeviceIDs.isEmpty)
-                        Button("Clear") { selectedIDs.removeAll() }
-                            .disabled(selectedIDs.isEmpty)
-                    }
-                }
-                Button { showingShortcuts = true } label: {
-                    Label("Shortcuts", systemImage: "keyboard")
-                }
-                .help("Show keyboard shortcuts")
-                Button { showingScenes = true } label: {
-                    Label("Scenes", systemImage: "wand.and.stars")
-                }
-                .keyboardShortcut("s", modifiers: [.command, .shift])
-                .help("Save and recall lighting scenes (⇧⌘S)")
-                Button {
-                    newRoomName = ""
-                    showingNewRoom = true
-                } label: {
-                    Label("New Room", systemImage: "rectangle.stack.badge.plus")
-                }
-                .keyboardShortcut("n", modifiers: .command)
                 Button { manager.scan() } label: {
                     Label("Scan", systemImage: "arrow.clockwise")
                 }
                 .keyboardShortcut("r", modifiers: .command)
+                Button { showingScenes = true } label: { Label("Scenes", systemImage: "wand.and.stars") }
+                    .keyboardShortcut("s", modifiers: [.command, .shift])
+                Menu {
+                    Button { newRoomName = ""; showingNewRoom = true } label: { Label("New Room", systemImage: "rectangle.stack.badge.plus") }
+                    Button { selectionMode.toggle(); if !selectionMode { selectedIDs.removeAll() } } label: { Label(selectionMode ? "Finish Selection" : "Select Lights", systemImage: "checkmark.circle") }
+                    Divider()
+                    Picker("Layout", selection: $layoutRaw) { ForEach(WorkspaceLayout.allCases) { Text($0.title).tag($0.rawValue) } }
+                    Picker("Density", selection: $densityRaw) { ForEach(InterfaceDensity.allCases) { Text($0.title).tag($0.rawValue) } }
+                    Divider()
+                    Toggle("Aurora Fireflies", isOn: $auroraFireflies)
+                    Button { if manager.napPhase != .inactive { manager.cancelNapMode() } else { manager.startNapMode() } } label: { Label(manager.napPhase == .inactive ? "Start Nap Mode" : "Cancel Nap Mode", systemImage: "moon.fill") }
+                    Divider()
+                    Button { showingDiagnostics = true } label: { Label("Discovery Diagnostics", systemImage: "stethoscope") }
+                    Button { showingActivity = true } label: { Label("Activity Log", systemImage: "clock.arrow.circlepath") }
+                    Button { showingShortcuts = true } label: { Label("Keyboard Shortcuts", systemImage: "keyboard") }
+                    Divider()
+                    Button { showingParliament = true } label: { Label("Lighting Parliament", systemImage: "building.columns") }
+                    Button { showingEcosystem = true } label: { Label("Firefly Conservatory", systemImage: "ladybug") }
+                    Button { showingCompliance = true } label: { Label("Lumens Compliance", systemImage: "checkmark.seal") }
+                } label: { Label("More", systemImage: "ellipsis.circle") }
+                .menuStyle(.borderlessButton)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
@@ -187,14 +177,14 @@ struct ContentView: View {
             if !manager.devices.isEmpty {
                 Divider()
                 HStack(spacing: 10) {
-                    Toggle("", isOn: globalPowerBinding)
-                        .toggleStyle(.switch)
-                        .labelsHidden()
-                        .controlSize(.small)
-                        .tint(Lumen.pink)
-                        .help("Toggle all lights on or off (⇧⌘P)")
-                        .accessibilityLabel("All lights power")
-                        .accessibilityHint("Toggles every discovered light")
+                    Button { manager.toggleAggregatePower(manager.devices) } label: {
+                        let state = manager.aggregatePowerState(for: manager.devices)
+                        Label(state.title, systemImage: state.symbol).font(.caption.weight(.medium))
+                    }
+                    .buttonStyle(.bordered).controlSize(.small)
+                    .tint(manager.devices.contains(where: \.isOn) ? Lumen.pink : .secondary)
+                    .help("Aggregate power state — mixed rooms are shown explicitly")
+                    .accessibilityLabel("All lights: \(manager.aggregatePowerState(for: manager.devices).title)")
                     Image(systemName: "sun.min").foregroundStyle(.secondary).font(.caption)
                         .accessibilityHidden(true)
                     Slider(value: globalBrightnessBinding, in: 0...1)
@@ -244,7 +234,7 @@ struct ContentView: View {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.secondary)
                     .font(.caption)
-                TextField("Search lights or rooms", text: $searchText)
+                TextField("Search lights, rooms, or scenes", text: $searchText)
                     .textFieldStyle(.plain)
                     .focused($searchFocused)
                 if !searchText.isEmpty {
@@ -270,6 +260,9 @@ struct ContentView: View {
                             lineWidth: searchFocused ? 1.5 : 1)
             )
 
+            Picker("Scope", selection: $searchScopeRaw) { ForEach(SearchScope.allCases) { Text($0.title).tag($0.rawValue) } }
+                .pickerStyle(.menu).frame(width: 90)
+
             // "On only" filter chip
             Toggle(isOn: $showOnlyOn) {
                 Label("On only", systemImage: "lightbulb.fill")
@@ -280,27 +273,45 @@ struct ContentView: View {
             .tint(Lumen.gold)
             .help("Show only lights that are currently on")
             .accessibilityLabel("Filter to on lights only")
+
+            Toggle(isOn: $showOfflineOnly) { Label("Offline", systemImage: "wifi.slash").font(.caption.weight(.medium)) }
+                .toggleStyle(.button).controlSize(.small).tint(Lumen.warning)
+            Menu {
+                Button("All Vendors") { vendorFilter = nil }
+                Button("LIFX") { vendorFilter = .lifx }
+                Button("Govee") { vendorFilter = .govee }
+            } label: { Label(vendorFilter?.displayName ?? "Vendor", systemImage: "line.3.horizontal.decrease.circle").font(.caption) }
+            .menuStyle(.borderlessButton)
+            if showOnlyOn || showOfflineOnly || vendorFilter != nil {
+                Button("Clear Filters") { showOnlyOn = false; showOfflineOnly = false; vendorFilter = nil }
+                    .controlSize(.small)
+            }
         }
     }
 
     // MARK: - Layout
 
     private var visibleRooms: [Room] {
-        manager.rooms.filter { room in
+        guard searchScope != .lights else { return [] }
+        return manager.rooms.filter { room in
             let matchesSearch = manager.room(room, matchesQuery: searchText)
             guard matchesSearch else { return false }
-            if showOnlyOn {
-                return manager.devices(in: room).contains { $0.isOn }
-            }
+            let lights = manager.devices(in: room)
+            if showOnlyOn && !lights.contains(where: \.isOn) { return false }
+            if showOfflineOnly && !lights.contains(where: \.isStale) { return false }
+            if let vendorFilter, !lights.contains(where: { $0.brand == vendorFilter }) { return false }
             return true
         }
     }
 
     private var visibleUnassigned: [LightDevice] {
-        manager.unassignedDevices.filter { device in
+        guard searchScope != .rooms else { return [] }
+        return manager.unassignedDevices.filter { device in
             let matchesSearch = manager.device(device, matchesQuery: searchText)
             guard matchesSearch else { return false }
-            if showOnlyOn { return device.isOn }
+            if showOnlyOn && !device.isOn { return false }
+            if showOfflineOnly && !device.isStale { return false }
+            if let vendorFilter, device.brand != vendorFilter { return false }
             return true
         }
     }
@@ -309,7 +320,7 @@ struct ContentView: View {
         var ids = Set(visibleUnassigned.map { $0.id })
         for room in visibleRooms {
             ids.formUnion(manager.devices(in: room).filter { device in
-                manager.device(device, matchesQuery: searchText) && (!showOnlyOn || device.isOn)
+                manager.device(device, matchesQuery: searchText) && (!showOnlyOn || device.isOn) && (!showOfflineOnly || device.isStale) && (vendorFilter == nil || device.brand == vendorFilter)
             }.map { $0.id })
         }
         return ids
@@ -322,11 +333,13 @@ struct ContentView: View {
                     room: room,
                     searchQuery: searchText,
                     showOnlyOn: showOnlyOn,
+                    showOfflineOnly: showOfflineOnly,
+                    vendorFilter: vendorFilter,
                     selectionMode: selectionMode,
                     selectedIDs: selectedIDs,
                     onToggleSelection: toggleSelection
                 )
-                .listRowInsets(EdgeInsets(top: 9, leading: 16, bottom: 9, trailing: 16))
+                .listRowInsets(EdgeInsets(top: density == .compact ? 4 : 9, leading: 16, bottom: density == .compact ? 4 : 9, trailing: 16))
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
             }
@@ -349,13 +362,15 @@ struct ContentView: View {
                     GridItem(.flexible(), spacing: 16)
                 ],
                 alignment: .leading,
-                spacing: 18
+                spacing: density == .compact ? 10 : 18
             ) {
                 ForEach(visibleRooms) { room in
                     RoomSectionView(
                         room: room,
                         searchQuery: searchText,
                         showOnlyOn: showOnlyOn,
+                        showOfflineOnly: showOfflineOnly,
+                        vendorFilter: vendorFilter,
                         selectionMode: selectionMode,
                         selectedIDs: selectedIDs,
                         onToggleSelection: toggleSelection
@@ -373,13 +388,30 @@ struct ContentView: View {
         if selectedIDs.contains(id) { selectedIDs.remove(id) } else { selectedIDs.insert(id) }
     }
 
+    private var searchScope: SearchScope { SearchScope(rawValue: searchScopeRaw) ?? .all }
+
+    private var sceneSearchResults: some View {
+        let matches = manager.scenes.filter { searchText.isEmpty || $0.name.localizedCaseInsensitiveContains(searchText) }
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack { Text("Scene Results").font(.headline); Text("\(matches.count)").foregroundStyle(.secondary); Spacer(); Button("Open Scene Library") { showingScenes = true } }
+            if matches.isEmpty { Spacer(); Text("No scenes match your search.").foregroundStyle(.secondary).frame(maxWidth: .infinity); Spacer() }
+            else { List(matches) { scene in HStack { Label(scene.name, systemImage: "wand.and.stars"); Spacer(); Text("\(scene.snapshots.count) lights").foregroundStyle(.secondary); Button("Apply") { manager.applyScene(scene) } } }.listStyle(.inset) }
+        }.padding(16)
+    }
+
+    private var layoutPreference: WorkspaceLayout { WorkspaceLayout(rawValue: layoutRaw) ?? .automatic }
+    private var density: InterfaceDensity { InterfaceDensity(rawValue: densityRaw) ?? .comfortable }
+    private func effectiveLayout(for width: CGFloat) -> WorkspaceLayout {
+        layoutPreference == .automatic ? (width >= gridThreshold ? .grid : .list) : layoutPreference
+    }
+
     // MARK: - Unassigned section
 
     @ViewBuilder
     private var unassignedSection: some View {
         if !visibleUnassigned.isEmpty {
             unassignedContent
-                .listRowInsets(EdgeInsets(top: 9, leading: 16, bottom: 9, trailing: 16))
+                .listRowInsets(EdgeInsets(top: density == .compact ? 4 : 9, leading: 16, bottom: density == .compact ? 4 : 9, trailing: 16))
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
         }
@@ -697,8 +729,18 @@ struct DiscoveryDiagnosticsCard: View {
             .foregroundStyle(.secondary)
             if let date = manager.lastScanDate {
                 Text("Last scan: \(date.formatted(.relative(presentation: .named)))")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .font(.caption2).foregroundStyle(.tertiary)
+            }
+            if manager.likelyLocalNetworkPermissionIssue {
+                Label("No UDP replies were received. Local Network access may be denied; verify it in System Settings.", systemImage: "lock.trianglebadge.exclamationmark")
+                    .font(.caption).foregroundStyle(Lumen.warning)
+            }
+            HStack {
+                Button("Open Local Network Privacy") {
+                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_LocalNetwork") { NSWorkspace.shared.open(url) }
+                }.font(.caption)
+                Spacer()
+                Button("Scan Again") { manager.scan() }.font(.caption)
             }
         }
         .padding(12)

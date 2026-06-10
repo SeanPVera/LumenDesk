@@ -145,6 +145,56 @@ struct ContentView: View {
                     ProgressView().controlSize(.small)
                         .help(manager.scanPhase)
                 }
+                Toggle(isOn: $auroraFireflies) {
+                    Image(systemName: "sparkles")
+                }
+                .toggleStyle(.button)
+                .controlSize(.small)
+                .help("Aurora Firefly Mode — whimsical ambient glow")
+                Button {
+                    if manager.napPhase != .inactive { manager.cancelNapMode() } else { manager.startNapMode() }
+                } label: {
+                    Label(
+                        manager.napPhase == .inactive ? "Nap" : manager.napCountdownString,
+                        systemImage: manager.napPhase == .inactive ? "moon.fill" : "xmark.circle.fill"
+                    )
+                }
+                .help(manager.napPhase == .inactive
+                      ? "Nap Mode — dims all lights over 20 minutes, holds, then brightens gently to wake you"
+                      : "Cancel Nap Mode")
+                .tint(manager.napPhase == .inactive ? .indigo : .orange)
+                if !manager.devices.isEmpty {
+                    Button {
+                        selectionMode.toggle()
+                        if !selectionMode { selectedIDs.removeAll() }
+                    } label: {
+                        Label(selectionMode ? "Done" : "Select",
+                              systemImage: selectionMode ? "checkmark.circle.fill" : "checkmark.circle")
+                    }
+                    .help(selectionMode ? "Exit selection mode" : "Select multiple lights for bulk actions")
+                    if selectionMode {
+                        Button("Select Visible") { selectedIDs = visibleDeviceIDs }
+                            .disabled(visibleDeviceIDs.isEmpty)
+                        Button("Clear") { selectedIDs.removeAll() }
+                            .disabled(selectedIDs.isEmpty)
+                    }
+                }
+                Button { showingShortcuts = true } label: {
+                    Label("Shortcuts", systemImage: "keyboard")
+                }
+                .help("Show keyboard shortcuts")
+                Button { showingScenes = true } label: {
+                    Label("Library", systemImage: "wand.and.stars")
+                }
+                .keyboardShortcut("s", modifiers: [.command, .shift])
+                .help("Browse themes, effects, and saved scenes (⇧⌘S)")
+                Button {
+                    newRoomName = ""
+                    showingNewRoom = true
+                } label: {
+                    Label("New Room", systemImage: "rectangle.stack.badge.plus")
+                }
+                .keyboardShortcut("n", modifiers: .command)
                 Button { manager.scan() } label: {
                     Label("Scan", systemImage: "arrow.clockwise")
                 }
@@ -755,7 +805,7 @@ struct KeyboardShortcutsView: View {
         ("Scan for Lights", "⌘R"),
         ("New Room", "⌘N"),
         ("Find", "⌘F"),
-        ("Scenes", "⇧⌘S"),
+        ("Library", "⇧⌘S"),
         ("Toggle All Lights", "⇧⌘P"),
         ("Undo / Redo", "⌘Z / ⇧⌘Z")
     ]

@@ -17,6 +17,9 @@ struct ScenesView: View {
     @State private var renameDraft = ""
     @State private var searchText = ""
     @State private var themeCategory: LightingTheme.Category?
+    @State private var previewScene: LightingScene?
+    @State private var editingScene: LightingScene?
+    @State private var pendingAudioEffect: LightingEffect?
     @FocusState private var renameFocused: Bool
 
     private let columns = [GridItem(.adaptive(minimum: 218), spacing: 12)]
@@ -52,8 +55,18 @@ struct ScenesView: View {
             Divider()
             content
         }
-        .frame(width: 760, height: 620)
+        .frame(minWidth: 680, idealWidth: 820, minHeight: 500, idealHeight: 680)
         .background(LumenBackground(glow: false))
+        .alert("Allow Music-Reactive Lighting?", isPresented: Binding(get: { pendingAudioEffect != nil }, set: { if !$0 { pendingAudioEffect = nil } })) {
+            Button("Cancel", role: .cancel) { pendingAudioEffect = nil }
+            Button("Continue") {
+                UserDefaults.standard.set(true, forKey: AppPreferenceKey.audioPrivacyAcknowledged)
+                if let effect = pendingAudioEffect { manager.startEffect(effect) }
+                pendingAudioEffect = nil
+            }
+        } message: {
+            Text("LumenDesk requests microphone access to measure live audio levels locally. Audio is never recorded or retained, and the active effect remains visible with a one-click Stop control.")
+        }
         .onChange(of: section) { _ in
             searchText = ""
             themeCategory = nil
@@ -240,7 +253,10 @@ struct ScenesView: View {
                     Button("Stop") { manager.stopEffect() }
                         .buttonStyle(.bordered).controlSize(.small)
                 } else {
-                    Button("Start") { manager.startEffect(effect) }
+                    Button("Start") {
+                        if effect.isAudioReactive && !UserDefaults.standard.bool(forKey: AppPreferenceKey.audioPrivacyAcknowledged) { pendingAudioEffect = effect }
+                        else { manager.startEffect(effect) }
+                    }
                         .buttonStyle(.borderedProminent).controlSize(.small)
                         .disabled(manager.devices.isEmpty)
                 }
@@ -265,15 +281,19 @@ struct ScenesView: View {
                 }.scrollContentBackground(.hidden)
             }
         }
-        .frame(width: 520, height: 520)
+        .frame(minWidth: 520, minHeight: 460)
         .sheet(item: $previewScene) { ScenePreviewView(scene: $0).environmentObject(manager) }
+        .sheet(item: $editingScene) { SceneEditorView(scene: $0).environmentObject(manager) }
         .background(LumenBackground(glow: false))
     }
 
     private var captureRow: some View {
         HStack(spacing: 8) {
-            TextField("New scene name (e.g. “Evening”)", text: $newSceneName)
-                .textFieldStyle(.roundedBorder).onSubmit(capture)
+            VStack(alignment: .leading, spacing: 2) {
+                TextField("New scene name (e.g. “Evening”)", text: $newSceneName)
+                    .textFieldStyle(.roundedBorder).onSubmit(capture)
+                if let warning = manager.duplicateSceneNameMessage(newSceneName) { Text(warning).font(.caption2).foregroundStyle(Lumen.warning) }
+            }
             Button("Capture Current State", action: capture)
                 .buttonStyle(.borderedProminent)
                 .disabled(newSceneName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || manager.devices.isEmpty)
@@ -328,6 +348,8 @@ struct ScenesView: View {
 
             Menu {
                 Button("Preview & Apply…") { previewScene = scene }
+                Button("Edit Draft…") { editingScene = scene }
+                if !manager.revisions(for: scene.id).isEmpty { Button("Version History…") { editingScene = scene } }
                 Button("Certify with Bureau of Lumens") { _ = manager.certify(scene) }
                 Button("Rename…") { beginRename(scene) }
                 Button(manager.isFavoriteScene(scene.id) ? "Remove Favorite" : "Favorite") { manager.toggleFavoriteScene(scene.id) }

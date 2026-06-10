@@ -146,3 +146,125 @@ struct RecentColor: Identifiable, Codable, Equatable {
     var color: Color { Color(red: red, green: green, blue: blue) }
     var hex: String { String(format: "#%02X%02X%02X", Int(red * 255), Int(green * 255), Int(blue * 255)) }
 }
+
+enum DeviceCommandPhase: String, Codable {
+    case idle, queued, sending, applied, failed
+
+    var title: String {
+        switch self {
+        case .idle: return "Confirmed"
+        case .queued: return "Queued"
+        case .sending: return "Sending"
+        case .applied: return "Applied"
+        case .failed: return "Failed"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .idle: return "checkmark.circle"
+        case .queued: return "clock"
+        case .sending: return "arrow.up.circle"
+        case .applied: return "checkmark.circle.fill"
+        case .failed: return "exclamationmark.triangle.fill"
+        }
+    }
+}
+
+struct DeviceCommandState: Equatable {
+    var phase: DeviceCommandPhase = .idle
+    var summary: String = "Confirmed"
+    var updatedAt: Date = Date()
+    var retryCount: Int = 0
+}
+
+struct ConfirmedDeviceState: Equatable {
+    var isOn: Bool
+    var brightness: Double
+    var colorHex: String
+    var kelvin: Int
+    var confirmedAt: Date
+}
+
+struct DiscoveryChange: Identifiable, Equatable {
+    enum Kind: String { case new = "New", backOnline = "Back online", changed = "Changed", missing = "Still missing" }
+    let id: UUID
+    let deviceID: String
+    let name: String
+    let kind: Kind
+    let detail: String
+    let date: Date
+
+    init(deviceID: String, name: String, kind: Kind, detail: String, date: Date = Date()) {
+        id = UUID(); self.deviceID = deviceID; self.name = name; self.kind = kind; self.detail = detail; self.date = date
+    }
+}
+
+enum AutomationOverrideDuration: String, CaseIterable, Identifiable {
+    case nextSchedule, oneHour, untilResumed
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .nextSchedule: return "Until next schedule"
+        case .oneHour: return "For 1 hour"
+        case .untilResumed: return "Until I resume"
+        }
+    }
+}
+
+struct RoomAutomationOverride: Codable, Equatable {
+    var createdAt: Date
+    var expiresAt: Date?
+    var skipNextSchedule: Bool
+
+    var summary: String {
+        if skipNextSchedule { return "Paused until next schedule" }
+        if let expiresAt { return "Paused until \(expiresAt.formatted(date: .omitted, time: .shortened))" }
+        return "Paused until resumed"
+    }
+
+    func isActive(at date: Date = Date()) -> Bool { expiresAt.map { $0 > date } ?? true }
+}
+
+struct MissedAutomation: Identifiable, Equatable {
+    let id = UUID()
+    let roomID: UUID
+    let roomName: String
+    let entry: ScheduleEntry
+    let scheduledAt: Date
+}
+
+struct SceneRevision: Identifiable, Codable, Equatable {
+    let id: UUID
+    let sceneID: UUID
+    let savedAt: Date
+    let label: String
+    let name: String
+    let snapshots: [String: DeviceSnapshot]
+
+    init(scene: LightingScene, label: String) {
+        id = UUID(); sceneID = scene.id; savedAt = Date(); self.label = label; name = scene.name; snapshots = scene.snapshots
+    }
+}
+
+enum ConfirmationPolicy: String, CaseIterable, Identifiable {
+    case balanced, cautious
+    var id: String { rawValue }
+    var title: String { rawValue.capitalized }
+}
+
+enum MenuBarScope: String, CaseIterable, Identifiable {
+    case favorites, activeRooms, allRooms
+    var id: String { rawValue }
+    var title: String {
+        switch self { case .favorites: return "Favorites"; case .activeRooms: return "Active rooms"; case .allRooms: return "All rooms" }
+    }
+}
+
+enum AppPreferenceKey {
+    static let quietInterface = "LumenDesk.quietInterface.v1"
+    static let confirmationPolicy = "LumenDesk.confirmationPolicy.v1"
+    static let menuBarScope = "LumenDesk.menuBarScope.v1"
+    static let showMenuBarUrgentOnly = "LumenDesk.menuBarUrgentOnly.v1"
+    static let audioPrivacyAcknowledged = "LumenDesk.audioPrivacyAcknowledged.v1"
+}

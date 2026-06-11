@@ -67,6 +67,7 @@ final class LightManager: ObservableObject {
     private var lastScheduleCheck: Date?
     private var commandTasks: [String: Task<Void, Never>] = [:]
     private var commandTimeoutTasks: [String: Task<Void, Never>] = [:]
+    private var confirmationRefreshTasks: [String: Task<Void, Never>] = [:]
     private var scanStartingIDs: Set<String> = []
     private var scanStartingAddresses: [String: String] = [:]
     private var demoLiveDevices: [LightDevice] = []
@@ -361,7 +362,9 @@ final class LightManager: ObservableObject {
         let wasStale = device.isStale
         device.lastSeen = Date()
         device.isStale = false
-        for key in commandTasks.keys.filter({ $0.hasPrefix("\(device.id)|") }) { commandTasks[key]?.cancel(); commandTasks[key] = nil }
+        // Note: queued outgoing commands in `commandTasks` must survive this —
+        // a status report only confirms past state and must not cancel sends
+        // that are still waiting out their debounce window.
         commandTimeoutTasks[device.id]?.cancel(); commandTimeoutTasks[device.id] = nil
         commandPendingIDs.remove(device.id)
         let rgb = device.color.rgbComponents
@@ -522,6 +525,21 @@ final class LightManager: ObservableObject {
             self.commandStates[device.id] = DeviceCommandState(phase: .sending, summary: summary, updatedAt: Date())
             operation()
             self.startCommandTimeout(for: device, summary: summary)
+            self.scheduleConfirmationRefresh(for: device)
+        }
+    }
+
+    /// Pull fresh state shortly after the last command to a device so its
+    /// pending badge resolves from the light's own report. Without this, the
+    /// only confirmation source is the 30-second refresh cycle, and the
+    /// 3.5-second timeout reports "did not confirm" even for commands that
+    /// the light applied — neither brand replies to bare set commands.
+    private func scheduleConfirmationRefresh(for device: LightDevice) {
+        confirmationRefreshTasks[device.id]?.cancel()
+        confirmationRefreshTasks[device.id] = Task { @MainActor [weak self, weak device] in
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            guard !Task.isCancelled, let self, let device else { return }
+            self.refresh(device)
         }
     }
 
@@ -689,6 +707,9 @@ final class LightManager: ObservableObject {
             device.isOn = true
             markPending(device.id)
             sendPower(device, on: true)
+            // Effect frames fold brightness into the RGB payload for Govee, so
+            // open the device's own brightness to full range once up front.
+            if device.brand == .govee { sendBrightness(device, value: 1.0) }
         }
 
         let begin: () -> Void = { [weak self] in
@@ -782,8 +803,31 @@ final class LightManager: ObservableObject {
             device.isOn = true
             device.color = color
             device.brightness = max(0.05, min(1, brightness))
-            sendColor(device, color: color)
-            if device.brand == .govee { sendBrightness(device, value: device.brightness) }
+            switch device.brand {
+            case .lifx:
+                sendColor(device, color: color) // brightness rides inside the HSBK packet
+            case .govee:
+                sendGoveeEffectFrame(device, color: color, brightness: device.brightness)
+            }
+        }
+    }
+
+    /// Govee has no combined color+brightness command, and a separate
+    /// brightness packet chasing every color packet doubles traffic and lets
+    /// the two halves of a frame land out of step (worst on slow multi-segment
+    /// devices like curtain lights). Effects instead scale the RGB payload by
+    /// the frame brightness so each frame is a single atomic command; the
+    /// device's own brightness is set to 100% in `startEffect`.
+    private func sendGoveeEffectFrame(_ device: LightDevice, color: Color, brightness: Double) {
+        enqueueCommand(for: device, coalescingKey: "color", summary: "Effect frame") { [weak self, weak device] in
+            guard let self, let device else { return }
+            let rgb = color.rgbComponents
+            let scale = max(0, min(1, brightness))
+            self.govee?.setColor(deviceID: device.backendID,
+                                 r: Int(rgb.r * 255 * scale),
+                                 g: Int(rgb.g * 255 * scale),
+                                 b: Int(rgb.b * 255 * scale),
+                                 kelvin: 0)
         }
     }
 
@@ -913,9 +957,7 @@ final class LightManager: ObservableObject {
             d.kelvin = snap.kelvin
             sendColor(d, color: snap.color)
             // Govee needs an explicit brightness call; LIFX brightness is embedded in setColor.
-            if d.brand == .govee {
-                govee?.setBrightness(deviceID: d.backendID, percent: Int(snap.brightness * 100))
-            }
+            if d.brand == .govee { sendBrightness(d, value: snap.brightness) }
             sendPower(d, on: snap.isOn)
         }
     }
@@ -985,12 +1027,18 @@ extension LightManager: LIFXClientDelegate {
                 device.name = label
                 self.sortDevices()
             }
-            device.isOn = isOn
-            device.brightness = Double(color.brightness) / 65535.0
-            device.kelvin = Int(color.kelvin)
-            let h = Double(color.hue) / 65535.0
-            let s = Double(color.saturation) / 65535.0
-            device.color = Color(hue: h, saturation: s, brightness: 1.0)
+            // A report that raced our own outgoing commands (or arrived while
+            // an effect is animating) reflects state from before them; adopting
+            // it would snap the UI back and corrupt the brightness/kelvin we
+            // embed in subsequent sends.
+            if self.activeEffectID == nil && !self.commandPendingIDs.contains(id) {
+                device.isOn = isOn
+                device.brightness = Double(color.brightness) / 65535.0
+                device.kelvin = Int(color.kelvin)
+                let h = Double(color.hue) / 65535.0
+                let s = Double(color.saturation) / 65535.0
+                device.color = Color(hue: h, saturation: s, brightness: 1.0)
+            }
             self.markSeen(device)
         }
     }
@@ -1033,12 +1081,17 @@ extension LightManager: GoveeClientDelegate {
         Task { @MainActor in
             let id = "govee:\(deviceID)"
             guard let device = self.device(withID: id) else { return }
-            device.isOn = isOn
-            device.brightness = Double(brightness) / 100.0
-            device.kelvin = kelvin > 0 ? kelvin : device.kelvin
-            device.color = Color(red: Double(r) / 255.0,
-                                 green: Double(g) / 255.0,
-                                 blue: Double(b) / 255.0)
+            // Govee lights can report pre-command state for a few seconds after
+            // a change; don't let that clobber optimistic local state while
+            // commands are pending or an effect is animating.
+            if self.activeEffectID == nil && !self.commandPendingIDs.contains(id) {
+                device.isOn = isOn
+                device.brightness = Double(brightness) / 100.0
+                device.kelvin = kelvin > 0 ? kelvin : device.kelvin
+                device.color = Color(red: Double(r) / 255.0,
+                                     green: Double(g) / 255.0,
+                                     blue: Double(b) / 255.0)
+            }
             self.markSeen(device)
         }
     }
@@ -1658,7 +1711,7 @@ extension LightManager {
                     if !d.isOn { d.isOn = true; sendPower(d, on: true) }
                     d.color = warmWhite; d.brightness = 0.5
                     sendColor(d, color: warmWhite)
-                    if d.brand == .govee { govee?.setBrightness(deviceID: d.backendID, percent: 50) }
+                    if d.brand == .govee { sendBrightness(d, value: 0.5) }
                 }
                 napTimer?.invalidate(); napTimer = nil
                 napSnapshotBrightness = [:]; napPhase = .inactive
@@ -1867,7 +1920,7 @@ extension LightManager {
             let color = Color(hue: snap.hue, saturation: snap.saturation, brightness: 1)
             device.color = color; device.brightness = snap.brightness; device.kelvin = snap.kelvin; device.isOn = snap.isOn
             markPending(device.id); sendColor(device, color: color)
-            if device.brand == .govee { govee?.setBrightness(deviceID: device.backendID, percent: Int(snap.brightness * 100)) }
+            if device.brand == .govee { sendBrightness(device, value: snap.brightness) }
             sendPower(device, on: snap.isOn)
         }
         lastSceneResult = SceneApplicationResult(sceneName: scene.name, succeededIDs: succeeded, failedIDs: failed, skippedOffIDs: skipped)

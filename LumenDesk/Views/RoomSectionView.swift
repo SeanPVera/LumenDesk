@@ -63,6 +63,7 @@ struct RoomSectionView: View {
                 } else {
                     if visibleLights.count > 1 {
                         masterBrightnessRow
+                        roomColorRow
                     }
                     VStack(spacing: 10) {
                         ForEach(visibleLights) { device in
@@ -179,6 +180,12 @@ struct RoomSectionView: View {
             if pendingCount > 0 {
                 Label("\(pendingCount) pending", systemImage: "arrow.up.circle").font(.caption2).foregroundStyle(.secondary)
             }
+            if let effectID = manager.activeEffects[.room(room.id)],
+               let effect = LightingCatalog.effects.first(where: { $0.id == effectID }) {
+                Label(effect.name, systemImage: "waveform")
+                    .font(.caption2).foregroundStyle(Lumen.pinkBright)
+                    .help("\u{201C}\(effect.name)\u{201D} is animating this room")
+            }
             if manager.schedules(for: room.id).contains(where: { $0.isEnabled }) {
                 Label("\(manager.schedules(for: room.id).filter(\.isEnabled).count) scheduled", systemImage: "clock.fill")
                     .font(.caption2).foregroundStyle(Lumen.violetBright).help("This room has active schedules")
@@ -196,6 +203,30 @@ struct RoomSectionView: View {
             Menu {
                 Button("Rename\u{2026}") { beginRename() }
                 Button("Edit Schedules\u{2026}") { showingSchedules = true }
+                if !allLights.isEmpty {
+                    Menu("Apply Theme") {
+                        ForEach(LightingTheme.Category.allCases, id: \.self) { category in
+                            let themes = LightingCatalog.themes.filter { $0.category == category }
+                            if !themes.isEmpty {
+                                Section(category.rawValue) {
+                                    ForEach(themes) { theme in
+                                        Button(theme.name) { manager.applyTheme(theme, scope: .room(room.id)) }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Menu("Start Effect") {
+                        // Audio-reactive effects stay in the Lighting Library,
+                        // where the microphone-privacy explainer lives.
+                        ForEach(LightingCatalog.effects.filter { !$0.isAudioReactive }) { effect in
+                            Button(effect.name) { manager.startEffect(effect, scope: .room(room.id)) }
+                        }
+                    }
+                    if manager.activeEffects[.room(room.id)] != nil {
+                        Button("Stop Effect") { manager.stopEffect(scope: .room(room.id)) }
+                    }
+                }
                 Menu("Manual Override") {
                     ForEach(AutomationOverrideDuration.allCases) { duration in Button(duration.title) { manager.setAutomationOverride(for: room.id, duration: duration) } }
                     if manager.activeAutomationOverride(for: room.id) != nil { Divider(); Button("Resume Automation") { manager.resumeAutomation(for: room.id) } }
@@ -305,6 +336,63 @@ struct RoomSectionView: View {
                 .accessibilityHidden(true)
         }
         .padding(.horizontal, 4)
+    }
+
+    // MARK: - Room color row
+
+    private static let whitePresets: [(name: String, kelvin: Int)] = [
+        ("Candlelight", 2700),
+        ("Warm", 3000),
+        ("Neutral", 4000),
+        ("Daylight", 5500),
+        ("Cool", 6500)
+    ]
+
+    private var roomColorRow: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "paintpalette")
+                .foregroundStyle(.tertiary).font(.caption)
+                .accessibilityHidden(true)
+            ForEach(LightRowView.colorSwatches, id: \.label) { swatch in
+                Button {
+                    manager.setColor(in: room, color: swatch.color)
+                } label: {
+                    Circle()
+                        .fill(swatch.color)
+                        .frame(width: 16, height: 16)
+                        .overlay(Circle().stroke(Color.primary.opacity(0.25), lineWidth: 0.5))
+                }
+                .buttonStyle(.plain)
+                .help("Set every light in \(room.name) to \(swatch.label)")
+                .accessibilityLabel("\(swatch.label) for \(room.name)")
+            }
+            Menu {
+                ForEach(Self.whitePresets, id: \.kelvin) { preset in
+                    Button("\(preset.name) · \(preset.kelvin) K") {
+                        manager.setKelvin(in: room, kelvin: preset.kelvin)
+                    }
+                }
+            } label: {
+                Image(systemName: "thermometer.medium")
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help("Set a white color temperature for \(room.name)")
+            .accessibilityLabel("\(room.name) white color temperature")
+            Spacer(minLength: 0)
+            ColorPicker("", selection: roomColorBinding, supportsOpacity: false)
+                .labelsHidden()
+                .accessibilityLabel("\(room.name) color")
+        }
+        .disabled(selectionMode || allLights.allSatisfy { !$0.isOn })
+        .padding(.horizontal, 4)
+    }
+
+    private var roomColorBinding: Binding<Color> {
+        Binding(
+            get: { dominantRoomColor },
+            set: { manager.setColor(in: room, color: $0) }
+        )
     }
 
     // MARK: - Bindings

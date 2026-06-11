@@ -33,7 +33,7 @@ final class LightManager: ObservableObject {
     @Published private(set) var newlyDiscoveredIDs: Set<String> = []
     @Published private(set) var whiteModeDeviceIDs: Set<String> = []
     @Published private(set) var napPhase: NapPhase = .inactive
-    @Published private(set) var activeEffectID: String?
+    @Published private(set) var activeEffects: [LightScope: String] = [:]
     @Published private(set) var activityEvents: [ActivityEvent] = []
     @Published private(set) var lastSceneResult: SceneApplicationResult?
     @Published private(set) var favoriteOrder: [FavoriteReference] = []
@@ -121,9 +121,22 @@ final class LightManager: ObservableObject {
         let color: Color
         let kelvin: Int
     }
-    private var effectTimer: Timer?
-    private var effectSnapshot: [DeviceState] = []
-    private var effectPhase: Double = 0
+    /// One animated effect running against one scope. Several runs can be
+    /// active at once as long as their device sets don't overlap (e.g. a
+    /// different effect per room).
+    private final class EffectRun {
+        let effect: LightingEffect
+        let scope: LightScope
+        var phase: Double = 0
+        var snapshot: [DeviceState]
+        var timer: Timer?
+        init(effect: LightingEffect, scope: LightScope, snapshot: [DeviceState]) {
+            self.effect = effect
+            self.scope = scope
+            self.snapshot = snapshot
+        }
+    }
+    private var effectRuns: [LightScope: EffectRun] = [:]
     private var audioLevel: Double = 0
     private let audioLevelMonitor = AudioLevelMonitor()
     private var undoStack: [[DeviceState]] = []
@@ -632,6 +645,25 @@ final class LightManager: ObservableObject {
         for d in lights { previewBrightness(d, value: value) }
     }
 
+    func setColor(in room: Room, color: Color) {
+        let lights = devices(in: room)
+        guard !lights.isEmpty else { return }
+        rememberColor(color, name: "Custom")
+        stopEffects(touching: Set(lights.map(\.id)))
+        recordChange(lights)
+        announceAction("\(room.name) color changed", lights: lights)
+        for d in lights { d.color = color; markPending(d.id); sendColor(d, color: color) }
+    }
+
+    func setKelvin(in room: Room, kelvin: Int) {
+        let lights = devices(in: room)
+        guard !lights.isEmpty else { return }
+        stopEffects(touching: Set(lights.map(\.id)))
+        recordChange(lights)
+        announceAction("\(room.name) set to \(kelvin) K white", lights: lights)
+        for d in lights { d.kelvin = kelvin; markPending(d.id); sendColorTemperature(d, kelvin: kelvin) }
+    }
+
     func setAllPower(on: Bool) {
         if UserDefaults.standard.string(forKey: AppPreferenceKey.confirmationPolicy) == ConfirmationPolicy.cautious.rawValue,
            devices.count > 3 {
@@ -671,14 +703,34 @@ final class LightManager: ObservableObject {
 
     // MARK: - Theme & effect catalog
 
-    func applyTheme(_ theme: LightingTheme) {
-        guard !devices.isEmpty else {
-            publishError("Discover a light before applying a theme.")
+    func devices(in scope: LightScope) -> [LightDevice] {
+        switch scope {
+        case .all:
+            return devices
+        case .room(let roomID):
+            guard let room = rooms.first(where: { $0.id == roomID }) else { return [] }
+            return devices(in: room)
+        }
+    }
+
+    func scopeDisplayName(_ scope: LightScope) -> String {
+        switch scope {
+        case .all: return "All Lights"
+        case .room(let roomID): return rooms.first(where: { $0.id == roomID })?.name ?? "Room"
+        }
+    }
+
+    func applyTheme(_ theme: LightingTheme, scope: LightScope = .all) {
+        let targets = devices(in: scope)
+        guard !targets.isEmpty else {
+            publishError(scope == .all
+                         ? "Discover a light before applying a theme."
+                         : "No lights in “\(scopeDisplayName(scope))” to theme.")
             return
         }
-        stopEffect(restore: false)
-        recordChange(devices)
-        for (index, device) in devices.enumerated() {
+        stopEffects(touching: Set(targets.map(\.id)))
+        recordChange(targets)
+        for (index, device) in targets.enumerated() {
             let color = theme.colors[index % theme.colors.count].color
             device.isOn = true
             device.brightness = theme.brightness
@@ -688,22 +740,28 @@ final class LightManager: ObservableObject {
             sendColor(device, color: color)
             if device.brand == .govee { sendBrightness(device, value: theme.brightness) }
         }
-        publishError("Applied “\(theme.name)” to \(devices.count) light\(devices.count == 1 ? "" : "s").")
+        let suffix = scope == .all ? "" : " in “\(scopeDisplayName(scope))”"
+        publishError("Applied “\(theme.name)” to \(targets.count) light\(targets.count == 1 ? "" : "s")\(suffix).")
     }
 
-    func startEffect(_ effect: LightingEffect) {
-        guard !devices.isEmpty else {
-            publishError("Discover a light before starting an effect.")
+    func startEffect(_ effect: LightingEffect, scope: LightScope = .all) {
+        let targets = devices(in: scope)
+        guard !targets.isEmpty else {
+            publishError(scope == .all
+                         ? "Discover a light before starting an effect."
+                         : "No lights in “\(scopeDisplayName(scope))” to animate.")
             return
         }
-        let startingSnapshot = activeEffectID == nil ? devices.map(snapshot) : effectSnapshot
-        stopEffect(restore: false)
-        effectSnapshot = startingSnapshot
-        recordChange(devices)
-        activeEffectID = effect.id
-        effectPhase = 0
-        audioLevel = 0
-        for device in devices {
+        // Inherit snapshots from any run these lights are leaving, so stopping
+        // the new run later restores the true pre-effect state rather than a
+        // mid-effect frame.
+        let inherited = stopEffects(touching: Set(targets.map(\.id)))
+        let startingSnapshot = targets.map { inherited[$0.id] ?? snapshot($0) }
+        recordChange(targets)
+        let run = EffectRun(effect: effect, scope: scope, snapshot: startingSnapshot)
+        effectRuns[scope] = run
+        activeEffects[scope] = effect.id
+        for device in targets {
             device.isOn = true
             markPending(device.id)
             sendPower(device, on: true)
@@ -713,10 +771,13 @@ final class LightManager: ObservableObject {
         }
 
         let begin: () -> Void = { [weak self] in
-            guard let self, self.activeEffectID == effect.id else { return }
-            self.runEffectFrame(effect)
-            self.effectTimer = Timer.scheduledTimer(withTimeInterval: 0.22, repeats: true) { [weak self] _ in
-                Task { @MainActor in self?.runEffectFrame(effect) }
+            guard let self, self.effectRuns[scope] === run else { return }
+            self.runEffectFrame(run)
+            run.timer = Timer.scheduledTimer(withTimeInterval: 0.22, repeats: true) { [weak self, weak run] _ in
+                Task { @MainActor in
+                    guard let self, let run else { return }
+                    self.runEffectFrame(run)
+                }
             }
         }
 
@@ -727,8 +788,11 @@ final class LightManager: ObservableObject {
                 if started {
                     begin()
                 } else {
-                    self.activeEffectID = nil
-                    self.effectSnapshot = []
+                    if self.effectRuns[scope] === run {
+                        self.effectRuns[scope] = nil
+                        self.activeEffects[scope] = nil
+                    }
+                    self.stopAudioMonitorIfIdle()
                     self.publishError("Soundcheck needs microphone access. Enable it in System Settings → Privacy & Security → Microphone.")
                 }
             }
@@ -737,32 +801,71 @@ final class LightManager: ObservableObject {
         }
     }
 
-    func stopEffect(restore: Bool = true) {
-        effectTimer?.invalidate()
-        effectTimer = nil
-        audioLevelMonitor.stop()
-        audioLevelMonitor.onLevel = nil
-        activeEffectID = nil
-        guard restore, !effectSnapshot.isEmpty else {
-            effectSnapshot = []
-            return
-        }
-        restoreDeviceStates(effectSnapshot)
-        effectSnapshot = []
+    func stopEffect(scope: LightScope, restore: Bool = true) {
+        guard let run = effectRuns.removeValue(forKey: scope) else { return }
+        run.timer?.invalidate()
+        activeEffects[scope] = nil
+        if restore { restoreDeviceStates(run.snapshot) }
+        stopAudioMonitorIfIdle()
     }
 
-    private func runEffectFrame(_ effect: LightingEffect) {
-        guard activeEffectID == effect.id, !effect.colors.isEmpty else { return }
-        effectPhase += effect.speed
-        let palette = effect.colors
+    func stopAllEffects(restore: Bool = true) {
+        for scope in Array(effectRuns.keys) { stopEffect(scope: scope, restore: restore) }
+    }
 
-        for (index, device) in devices.enumerated() {
+    /// Stops every effect run that animates any of `deviceIDs`. Lights covered
+    /// by a stopped run but outside `deviceIDs` are restored to that run's
+    /// snapshot; snapshot entries for lights inside `deviceIDs` are returned so
+    /// the caller can overwrite those lights (themes) or carry the entries
+    /// into a replacement run (effects).
+    @discardableResult
+    private func stopEffects(touching deviceIDs: Set<String>) -> [String: DeviceState] {
+        var inherited: [String: DeviceState] = [:]
+        for (scope, run) in effectRuns {
+            let runIDs = Set(run.snapshot.map(\.deviceID)).union(devices(in: scope).map(\.id))
+            guard !runIDs.isDisjoint(with: deviceIDs) else { continue }
+            run.timer?.invalidate()
+            effectRuns[scope] = nil
+            activeEffects[scope] = nil
+            for snap in run.snapshot where deviceIDs.contains(snap.deviceID) {
+                inherited[snap.deviceID] = snap
+            }
+            restoreDeviceStates(run.snapshot.filter { !deviceIDs.contains($0.deviceID) })
+        }
+        stopAudioMonitorIfIdle()
+        return inherited
+    }
+
+    private func stopAudioMonitorIfIdle() {
+        guard !effectRuns.values.contains(where: { $0.effect.isAudioReactive }) else { return }
+        audioLevelMonitor.stop()
+        audioLevelMonitor.onLevel = nil
+        audioLevel = 0
+    }
+
+    /// True when the device belongs to a currently animating effect run.
+    private func isEffectAnimating(_ deviceID: String) -> Bool {
+        effectRuns.contains { scope, run in
+            run.snapshot.contains { $0.deviceID == deviceID } ||
+            devices(in: scope).contains { $0.id == deviceID }
+        }
+    }
+
+    private func runEffectFrame(_ run: EffectRun) {
+        guard effectRuns[run.scope] === run, !run.effect.colors.isEmpty else { return }
+        run.phase += run.effect.speed
+        let effect = run.effect
+        let effectPhase = run.phase
+        let palette = effect.colors
+        let targets = devices(in: run.scope)
+
+        for (index, device) in targets.enumerated() {
             var color = palette[(index + Int(effectPhase)) % palette.count].color
             var brightness = 0.72
 
             switch effect.style {
             case .colorFlow:
-                let hue = (effectPhase * 0.08 + Double(index) / Double(max(1, devices.count))).truncatingRemainder(dividingBy: 1)
+                let hue = (effectPhase * 0.08 + Double(index) / Double(max(1, targets.count))).truncatingRemainder(dividingBy: 1)
                 color = Color(hue: hue, saturation: 0.86, brightness: 1)
                 brightness = 0.78
             case .oceanWave:
@@ -1028,10 +1131,10 @@ extension LightManager: LIFXClientDelegate {
                 self.sortDevices()
             }
             // A report that raced our own outgoing commands (or arrived while
-            // an effect is animating) reflects state from before them; adopting
-            // it would snap the UI back and corrupt the brightness/kelvin we
-            // embed in subsequent sends.
-            if self.activeEffectID == nil && !self.commandPendingIDs.contains(id) {
+            // an effect is animating this light) reflects state from before
+            // them; adopting it would snap the UI back and corrupt the
+            // brightness/kelvin we embed in subsequent sends.
+            if !self.isEffectAnimating(id) && !self.commandPendingIDs.contains(id) {
                 device.isOn = isOn
                 device.brightness = Double(color.brightness) / 65535.0
                 device.kelvin = Int(color.kelvin)
@@ -1083,8 +1186,8 @@ extension LightManager: GoveeClientDelegate {
             guard let device = self.device(withID: id) else { return }
             // Govee lights can report pre-command state for a few seconds after
             // a change; don't let that clobber optimistic local state while
-            // commands are pending or an effect is animating.
-            if self.activeEffectID == nil && !self.commandPendingIDs.contains(id) {
+            // commands are pending or an effect is animating this light.
+            if !self.isEffectAnimating(id) && !self.commandPendingIDs.contains(id) {
                 device.isOn = isOn
                 device.brightness = Double(brightness) / 100.0
                 device.kelvin = kelvin > 0 ? kelvin : device.kelvin
@@ -1138,6 +1241,7 @@ extension LightManager {
 
     func deleteRoom(_ roomID: UUID) {
         guard let idx = rooms.firstIndex(where: { $0.id == roomID }) else { return }
+        stopEffect(scope: .room(roomID))
         let deleted = rooms[idx]
         lastDeletedRoom = (room: deleted, index: idx)
         rooms.remove(at: idx)
@@ -1911,6 +2015,7 @@ extension LightManager {
     func applyScene(_ scene: LightingScene, allowTurningOff: Bool) {
         let preview = scenePreview(scene)
         guard !preview.affected.isEmpty else { publishError("“\(scene.name)” has no discovered lights to change."); return }
+        stopEffects(touching: Set(preview.affected.map(\.id)))
         recordChange(preview.affected)
         var succeeded: [String] = [], failed: [String] = [], skipped: [String] = []
         for device in preview.affected {

@@ -1,5 +1,12 @@
 import Foundation
 
+/// A target for bulk lighting actions — themes, effects, colors — covering
+/// either every discovered light or just the lights assigned to one room.
+enum LightScope: Hashable {
+    case all
+    case room(UUID)
+}
+
 /// A user-defined grouping of lights. Rooms are vendor-agnostic — a single room
 /// can contain LIFX and Govee bulbs side by side, independent of how each vendor
 /// app groups them.

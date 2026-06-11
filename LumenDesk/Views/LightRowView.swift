@@ -50,166 +50,8 @@ struct LightRowView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 12) {
-                if selectionMode {
-                    Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                        .font(.title3)
-                        .foregroundStyle(selected ? Color.accentColor : Color.secondary)
-                        .accessibilityHidden(true)
-                }
-
-                Circle()
-                    .fill(device.isOn ? device.color : Color.gray.opacity(0.35))
-                    .frame(width: 28, height: 28)
-                    .overlay(Circle().stroke(.secondary.opacity(0.4), lineWidth: 1))
-                    .overlay(alignment: .bottomTrailing) {
-                        if device.isStale {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .font(.system(size: 11))
-                                .foregroundStyle(Lumen.warning)
-                                .background(
-                                    Circle()
-                                        .fill(Lumen.surface)
-                                        .frame(width: 13, height: 13)
-                                )
-                                .accessibilityLabel("Device may be offline")
-                        }
-                    }
-                    .accessibilityHidden(true)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 4) {
-                        if manager.isFavorite(device.id) {
-                            Image(systemName: "star.fill")
-                                .font(.caption2)
-                                .foregroundStyle(Lumen.gold)
-                                .accessibilityLabel("Favorite")
-                        }
-                        if renamingName {
-                            VStack(alignment: .leading, spacing: 2) {
-                            TextField("Name", text: $nameDraft)
-                                .textFieldStyle(.roundedBorder)
-                                .font(.headline)
-                                .focused($nameFocused)
-                                .onSubmit(commitRename)
-                                .onExitCommand(cancelRename)
-                                .frame(maxWidth: 200)
-                            if let warning = manager.duplicateNameMessage(nameDraft, excludingDeviceID: device.id) {
-                                Text(warning).font(.caption2).foregroundStyle(Lumen.warning).fixedSize(horizontal: false, vertical: true)
-                            }
-                            }
-                        } else {
-                            Text(device.label)
-                                .font(.headline)
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                                .help(device.label)
-                                .onTapGesture(count: 2) {
-                                    guard !selectionMode else { return }
-                                    beginRename()
-                                }
-                        }
-                    }
-                    HStack(spacing: 6) {
-                        Text(device.brand.displayName)
-                            .font(.caption2.weight(.semibold))
-                            .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(device.brand.tint.opacity(0.18))
-                            .foregroundStyle(device.brand.tint)
-                            .clipShape(Capsule())
-                            .accessibilityHidden(true)
-                        Text(device.address)
-                            .font(.caption).foregroundStyle(.secondary)
-                            .accessibilityHidden(true)
-                        let command = manager.commandState(for: device.id)
-                        if command.phase != .idle {
-                            Label(command.phase.title, systemImage: command.phase.symbol)
-                                .font(.caption2).foregroundStyle(command.phase == .failed ? Lumen.warning : Color.secondary)
-                                .help(command.summary)
-                        }
-                    }
-                    Text(device.isStale ? "Last seen \(device.lastSeen.formatted(.relative(presentation: .named)))" : "Confirmed \(device.lastSeen.formatted(.relative(presentation: .named)))")
-                        .font(.caption2)
-                        .foregroundStyle(device.isStale ? Lumen.warning : .tertiary)
-                }
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel(
-                    [device.label,
-                     manager.isFavorite(device.id) ? "Favorite" : nil,
-                     device.isStale ? "may be offline" : nil]
-                        .compactMap { $0 }.joined(separator: ", ")
-                )
-
-                Spacer()
-
-                Toggle("", isOn: powerBinding)
-                    .toggleStyle(.switch)
-                    .labelsHidden()
-                    .tint(Lumen.pink)
-                    .disabled(selectionMode)
-                    .accessibilityLabel(device.isOn ? "Turn off \(device.label)" : "Turn on \(device.label)")
-            }
-
-            VStack(spacing: 6) {
-                Picker("Light mode", selection: colorModeBinding) {
-                    ForEach(LightColorMode.allCases, id: \.self) { mode in
-                        Text(mode.rawValue).tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .disabled(selectionMode || !device.isOn)
-                .accessibilityLabel("\(device.label) light mode")
-
-                if colorModeBinding.wrappedValue == .color {
-                    HStack(spacing: 6) {
-                        ForEach(Self.colorSwatches, id: \.label) { swatch in
-                            swatchButton(swatch)
-                        }
-                        Spacer(minLength: 0)
-                        Text(colorDescription).font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
-                        ColorPicker("", selection: colorBinding, supportsOpacity: false)
-                            .labelsHidden()
-                            .disabled(controlsDisabled)
-                            .accessibilityLabel("\(device.label) color")
-                    }
-                }
-
-                HStack(spacing: 10) {
-                    Image(systemName: "sun.min").foregroundStyle(.secondary)
-                        .accessibilityHidden(true)
-                    Slider(value: brightnessBinding, in: 0...1, onEditingChanged: { editing in
-                        if !editing { manager.commitBrightness(device, value: device.brightness) }
-                    })
-                        .disabled(controlsDisabled)
-                        .accessibilityLabel("\(device.label) brightness")
-                        .accessibilityValue("\(Int(device.brightness * 100)) percent")
-                    Image(systemName: "sun.max").foregroundStyle(.secondary)
-                        .accessibilityHidden(true)
-                }
-
-                if colorModeBinding.wrappedValue == .white {
-                    // Colour-temperature slider — relevant when using white-light mode.
-                    HStack(spacing: 10) {
-                        Image(systemName: "thermometer.low")
-                            .foregroundStyle(.orange.opacity(0.7))
-                            .font(.caption)
-                            .accessibilityHidden(true)
-                        Slider(value: kelvinBinding, in: 2500...9000, step: 100)
-                            .disabled(controlsDisabled)
-                            .accessibilityLabel("\(device.label) colour temperature")
-                            .accessibilityValue("\(device.kelvin) Kelvin")
-                        Image(systemName: "thermometer.high")
-                            .foregroundStyle(.blue.opacity(0.7))
-                            .font(.caption)
-                            .accessibilityHidden(true)
-                        Text("\(device.kelvin)K")
-                            .font(.caption2.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                            .frame(width: 40, alignment: .trailing)
-                            .accessibilityHidden(true)
-                    }
-                }
-            }
+            headerRow
+            controlsSection
         }
         .accessibilityElement(children: selectionMode ? .ignore : .contain)
         .accessibilityLabel(selectionMode
@@ -253,6 +95,219 @@ struct LightRowView: View {
         .sheet(isPresented: $showingInspector) { DeviceInspectorView(device: device).environmentObject(manager) }
         .sheet(isPresented: $showingPreciseColor) { PreciseColorEditorView(device: device).environmentObject(manager) }
         .contextMenu { if !selectionMode { roomMenuContents } }
+    }
+
+    // MARK: - Header row
+
+    private var headerRow: some View {
+        HStack(spacing: 12) {
+            if selectionMode {
+                selectionIndicator
+            }
+            statusCircle
+            deviceInfo
+            Spacer()
+            powerToggle
+        }
+    }
+
+    private var selectionIndicator: some View {
+        Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+            .font(.title3)
+            .foregroundStyle(selected ? Color.accentColor : Color.secondary)
+            .accessibilityHidden(true)
+    }
+
+    private var statusCircle: some View {
+        Circle()
+            .fill(device.isOn ? device.color : Color.gray.opacity(0.35))
+            .frame(width: 28, height: 28)
+            .overlay(Circle().stroke(.secondary.opacity(0.4), lineWidth: 1))
+            .overlay(alignment: .bottomTrailing) {
+                if device.isStale {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Lumen.warning)
+                        .background(
+                            Circle()
+                                .fill(Lumen.surface)
+                                .frame(width: 13, height: 13)
+                        )
+                        .accessibilityLabel("Device may be offline")
+                }
+            }
+            .accessibilityHidden(true)
+    }
+
+    private var deviceInfo: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            nameRow
+            metadataRow
+            Text(lastSeenText)
+                .font(.caption2)
+                .foregroundStyle(device.isStale ? Lumen.warning : .tertiary)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(deviceInfoAccessibilityLabel)
+    }
+
+    private var nameRow: some View {
+        HStack(spacing: 4) {
+            if manager.isFavorite(device.id) {
+                Image(systemName: "star.fill")
+                    .font(.caption2)
+                    .foregroundStyle(Lumen.gold)
+                    .accessibilityLabel("Favorite")
+            }
+            if renamingName {
+                renameField
+            } else {
+                Text(device.label)
+                    .font(.headline)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .help(device.label)
+                    .onTapGesture(count: 2) {
+                        guard !selectionMode else { return }
+                        beginRename()
+                    }
+            }
+        }
+    }
+
+    private var renameField: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            TextField("Name", text: $nameDraft)
+                .textFieldStyle(.roundedBorder)
+                .font(.headline)
+                .focused($nameFocused)
+                .onSubmit(commitRename)
+                .onExitCommand(perform: cancelRename)
+                .frame(maxWidth: 200)
+            if let warning = manager.duplicateNameMessage(nameDraft, excludingDeviceID: device.id) {
+                Text(warning).font(.caption2).foregroundStyle(Lumen.warning).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private var metadataRow: some View {
+        HStack(spacing: 6) {
+            Text(device.brand.displayName)
+                .font(.caption2.weight(.semibold))
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(device.brand.tint.opacity(0.18))
+                .foregroundStyle(device.brand.tint)
+                .clipShape(Capsule())
+                .accessibilityHidden(true)
+            Text(device.address)
+                .font(.caption).foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            let command = manager.commandState(for: device.id)
+            if command.phase != .idle {
+                Label(command.phase.title, systemImage: command.phase.symbol)
+                    .font(.caption2).foregroundStyle(command.phase == .failed ? Lumen.warning : Color.secondary)
+                    .help(command.summary)
+            }
+        }
+    }
+
+    private var lastSeenText: String {
+        let relative = device.lastSeen.formatted(.relative(presentation: .named))
+        return device.isStale ? "Last seen \(relative)" : "Confirmed \(relative)"
+    }
+
+    private var deviceInfoAccessibilityLabel: String {
+        [device.label,
+         manager.isFavorite(device.id) ? "Favorite" : nil,
+         device.isStale ? "may be offline" : nil]
+            .compactMap { $0 }.joined(separator: ", ")
+    }
+
+    private var powerToggle: some View {
+        Toggle("", isOn: powerBinding)
+            .toggleStyle(.switch)
+            .labelsHidden()
+            .tint(Lumen.pink)
+            .disabled(selectionMode)
+            .accessibilityLabel(device.isOn ? "Turn off \(device.label)" : "Turn on \(device.label)")
+    }
+
+    // MARK: - Controls
+
+    private var controlsSection: some View {
+        VStack(spacing: 6) {
+            modePicker
+            if colorModeBinding.wrappedValue == .color {
+                colorRow
+            }
+            brightnessRow
+            if colorModeBinding.wrappedValue == .white {
+                kelvinRow
+            }
+        }
+    }
+
+    private var modePicker: some View {
+        Picker("Light mode", selection: colorModeBinding) {
+            ForEach(LightColorMode.allCases, id: \.self) { mode in
+                Text(mode.rawValue).tag(mode)
+            }
+        }
+        .pickerStyle(.segmented)
+        .disabled(selectionMode || !device.isOn)
+        .accessibilityLabel("\(device.label) light mode")
+    }
+
+    private var colorRow: some View {
+        HStack(spacing: 6) {
+            ForEach(Self.colorSwatches, id: \.label) { swatch in
+                swatchButton(swatch)
+            }
+            Spacer(minLength: 0)
+            Text(colorDescription).font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+            ColorPicker("", selection: colorBinding, supportsOpacity: false)
+                .labelsHidden()
+                .disabled(controlsDisabled)
+                .accessibilityLabel("\(device.label) color")
+        }
+    }
+
+    private var brightnessRow: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "sun.min").foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            Slider(value: brightnessBinding, in: 0...1, onEditingChanged: { editing in
+                if !editing { manager.commitBrightness(device, value: device.brightness) }
+            })
+                .disabled(controlsDisabled)
+                .accessibilityLabel("\(device.label) brightness")
+                .accessibilityValue("\(Int(device.brightness * 100)) percent")
+            Image(systemName: "sun.max").foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+        }
+    }
+
+    // Colour-temperature slider — relevant when using white-light mode.
+    private var kelvinRow: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "thermometer.low")
+                .foregroundStyle(.orange.opacity(0.7))
+                .font(.caption)
+                .accessibilityHidden(true)
+            Slider(value: kelvinBinding, in: 2500...9000, step: 100)
+                .disabled(controlsDisabled)
+                .accessibilityLabel("\(device.label) colour temperature")
+                .accessibilityValue("\(device.kelvin) Kelvin")
+            Image(systemName: "thermometer.high")
+                .foregroundStyle(.blue.opacity(0.7))
+                .font(.caption)
+                .accessibilityHidden(true)
+            Text("\(device.kelvin)K")
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: 40, alignment: .trailing)
+                .accessibilityHidden(true)
+        }
     }
 
     private var borderColor: Color {

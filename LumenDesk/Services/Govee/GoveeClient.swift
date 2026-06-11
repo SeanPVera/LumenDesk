@@ -15,6 +15,18 @@ final class GoveeClient {
     private let queue = DispatchQueue(label: "LumenDesk.govee")
     private var addressByDevice: [String: String] = [:]
 
+    /// Minimum spacing between commands sent to one device. Govee firmware
+    /// processes one LAN command at a time and drops datagrams that arrive
+    /// back-to-back; multi-segment devices (curtain and string lights) are the
+    /// slowest, so power/color/brightness bursts from themes and effects were
+    /// only partially applied on them. Commands of the same kind coalesce to
+    /// the newest payload so effect frames never back up the queue.
+    private let commandGap: TimeInterval = 0.1
+    private var queuedOrder: [String: [String]] = [:]          // deviceID -> kinds in send order
+    private var queuedPayloads: [String: [String: Data]] = [:] // deviceID -> kind -> latest payload
+    private var drainScheduled: Set<String> = []
+    private var earliestSend: [String: DispatchTime] = [:]
+
     init() throws {
         socket = try UDPSocket(boundPort: GoveeProtocol.responsePort, queue: queue)
         try socket.joinMulticast(GoveeProtocol.multicastGroup)
@@ -33,23 +45,54 @@ final class GoveeClient {
     }
 
     func refresh(deviceID: String) {
-        guard let host = addressByDevice[deviceID] else { return }
-        sendCommand(GoveeProtocol.statusRequest(), to: host)
+        enqueue(deviceID: deviceID, kind: "status", payload: GoveeProtocol.statusRequest())
     }
 
     func setPower(deviceID: String, on: Bool) {
-        guard let host = addressByDevice[deviceID] else { return }
-        sendCommand(GoveeProtocol.turnRequest(on: on), to: host)
+        enqueue(deviceID: deviceID, kind: "turn", payload: GoveeProtocol.turnRequest(on: on))
     }
 
     func setBrightness(deviceID: String, percent: Int) {
-        guard let host = addressByDevice[deviceID] else { return }
-        sendCommand(GoveeProtocol.brightnessRequest(percent), to: host)
+        enqueue(deviceID: deviceID, kind: "brightness", payload: GoveeProtocol.brightnessRequest(percent))
     }
 
     func setColor(deviceID: String, r: Int, g: Int, b: Int, kelvin: Int = 0) {
-        guard let host = addressByDevice[deviceID] else { return }
-        sendCommand(GoveeProtocol.colorRequest(r: r, g: g, b: b, kelvin: kelvin), to: host)
+        enqueue(deviceID: deviceID, kind: "colorwc", payload: GoveeProtocol.colorRequest(r: r, g: g, b: b, kelvin: kelvin))
+    }
+
+    // MARK: - Paced per-device send queue
+
+    private func enqueue(deviceID: String, kind: String, payload: Data) {
+        queue.async { [weak self] in
+            guard let self, self.addressByDevice[deviceID] != nil else { return }
+            if self.queuedPayloads[deviceID, default: [:]].updateValue(payload, forKey: kind) == nil {
+                self.queuedOrder[deviceID, default: []].append(kind)
+            }
+            self.scheduleDrain(deviceID)
+        }
+    }
+
+    private func scheduleDrain(_ deviceID: String) {
+        guard !drainScheduled.contains(deviceID) else { return }
+        drainScheduled.insert(deviceID)
+        let now = DispatchTime.now()
+        let deadline = max(earliestSend[deviceID] ?? now, now)
+        queue.asyncAfter(deadline: deadline) { [weak self] in self?.drainQueued(deviceID) }
+    }
+
+    private func drainQueued(_ deviceID: String) {
+        drainScheduled.remove(deviceID)
+        guard let host = addressByDevice[deviceID],
+              var order = queuedOrder[deviceID], !order.isEmpty else { return }
+        let kind = order.removeFirst()
+        queuedOrder[deviceID] = order
+        guard let payload = queuedPayloads[deviceID]?.removeValue(forKey: kind) else {
+            if !order.isEmpty { scheduleDrain(deviceID) }
+            return
+        }
+        earliestSend[deviceID] = DispatchTime.now() + commandGap
+        sendCommand(payload, to: host)
+        if !order.isEmpty { scheduleDrain(deviceID) }
     }
 
     private func sendCommand(_ data: Data, to host: String) {
@@ -72,7 +115,7 @@ final class GoveeClient {
                 delegate?.goveeDiscovered(deviceID: id, address: scan.msg.data.ip, sku: scan.msg.data.sku)
             }
             // Pull status right after discovery.
-            sendCommand(GoveeProtocol.statusRequest(), to: scan.msg.data.ip)
+            refresh(deviceID: id)
             return
         }
 

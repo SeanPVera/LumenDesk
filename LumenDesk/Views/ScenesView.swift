@@ -12,6 +12,7 @@ struct ScenesView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var section: LibrarySection = .themes
+    @State private var scope: LightScope = .all
     @State private var newSceneName = ""
     @State private var renamingID: UUID?
     @State private var renameDraft = ""
@@ -47,6 +48,12 @@ struct ScenesView: View {
         searchText.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private var activeEffectScopes: [LightScope] {
+        manager.activeEffects.keys.sorted { manager.scopeDisplayName($0) < manager.scopeDisplayName($1) }
+    }
+
+    private var scopedDeviceCount: Int { manager.devices(in: scope).count }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
@@ -61,7 +68,7 @@ struct ScenesView: View {
             Button("Cancel", role: .cancel) { pendingAudioEffect = nil }
             Button("Continue") {
                 UserDefaults.standard.set(true, forKey: AppPreferenceKey.audioPrivacyAcknowledged)
-                if let effect = pendingAudioEffect { manager.startEffect(effect) }
+                if let effect = pendingAudioEffect { manager.startEffect(effect, scope: scope) }
                 pendingAudioEffect = nil
             }
         } message: {
@@ -85,15 +92,24 @@ struct ScenesView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
-            if let activeID = manager.activeEffectID,
-               let effect = LightingCatalog.effects.first(where: { $0.id == activeID }) {
-                HStack(spacing: 8) {
-                    Image(systemName: "waveform")
-                    Text(effect.name).font(.caption.weight(.semibold))
-                    Button("Stop") { manager.stopEffect() }.buttonStyle(.bordered)
+            ForEach(activeEffectScopes, id: \.self) { runScope in
+                if let effectID = manager.activeEffects[runScope],
+                   let effect = LightingCatalog.effects.first(where: { $0.id == effectID }) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "waveform")
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text(effect.name).font(.caption.weight(.semibold))
+                            Text(manager.scopeDisplayName(runScope)).font(.caption2).foregroundStyle(.secondary)
+                        }
+                        Button("Stop") { manager.stopEffect(scope: runScope) }
+                            .buttonStyle(.bordered).controlSize(.small)
+                    }
+                    .padding(6)
+                    .background(Capsule().fill(Lumen.pink.opacity(0.14)))
                 }
-                .padding(6)
-                .background(Capsule().fill(Lumen.pink.opacity(0.14)))
+            }
+            if activeEffectScopes.count > 1 {
+                Button("Stop All") { manager.stopAllEffects() }.buttonStyle(.bordered)
             }
             Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
         }
@@ -131,6 +147,24 @@ struct ScenesView: View {
                         Label(themeCategory?.rawValue ?? "All moods", systemImage: "line.3.horizontal.decrease.circle")
                     }
                     .fixedSize()
+                }
+
+                if section != .scenes {
+                    HStack(spacing: 6) {
+                        Text("Apply to").font(.caption).foregroundStyle(.secondary)
+                        Picker("Apply to", selection: $scope) {
+                            Text("All Lights").tag(LightScope.all)
+                            if !manager.rooms.isEmpty {
+                                Divider()
+                                ForEach(manager.rooms) { room in
+                                    Text(room.name).tag(LightScope.room(room.id))
+                                }
+                            }
+                        }
+                        .labelsHidden()
+                        .fixedSize()
+                        .accessibilityLabel("Apply themes and effects to")
+                    }
                 }
             }
         }
@@ -193,9 +227,12 @@ struct ScenesView: View {
                 Label("\(Int(theme.brightness * 100))%", systemImage: "sun.max.fill")
                     .font(.caption2).foregroundStyle(.secondary)
                 Spacer()
-                Button("Apply") { manager.applyTheme(theme) }
+                Button("Apply") { manager.applyTheme(theme, scope: scope) }
                     .buttonStyle(.borderedProminent).controlSize(.small)
-                    .disabled(manager.devices.isEmpty)
+                    .disabled(scopedDeviceCount == 0)
+                    .help(scopedDeviceCount == 0
+                          ? "No lights in \(manager.scopeDisplayName(scope))"
+                          : "Apply to \(manager.scopeDisplayName(scope))")
             }
         }
         .padding(12)
@@ -226,7 +263,7 @@ struct ScenesView: View {
     }
 
     private func effectCard(_ effect: LightingEffect) -> some View {
-        let isActive = manager.activeEffectID == effect.id
+        let isActive = manager.activeEffects[scope] == effect.id
         return VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Image(systemName: effect.icon).font(.title2)
@@ -250,15 +287,18 @@ struct ScenesView: View {
                 }
                 Spacer()
                 if isActive {
-                    Button("Stop") { manager.stopEffect() }
+                    Button("Stop") { manager.stopEffect(scope: scope) }
                         .buttonStyle(.bordered).controlSize(.small)
                 } else {
                     Button("Start") {
                         if effect.isAudioReactive && !UserDefaults.standard.bool(forKey: AppPreferenceKey.audioPrivacyAcknowledged) { pendingAudioEffect = effect }
-                        else { manager.startEffect(effect) }
+                        else { manager.startEffect(effect, scope: scope) }
                     }
                         .buttonStyle(.borderedProminent).controlSize(.small)
-                        .disabled(manager.devices.isEmpty)
+                        .disabled(scopedDeviceCount == 0)
+                        .help(scopedDeviceCount == 0
+                              ? "No lights in \(manager.scopeDisplayName(scope))"
+                              : "Run in \(manager.scopeDisplayName(scope))")
                 }
             }
         }

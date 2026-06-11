@@ -295,7 +295,8 @@ struct LightRowView: View {
 
     // MARK: - Color swatches
 
-    private static let colorSwatches: [(label: String, color: Color)] = [
+    // Shared with RoomSectionView's room-wide color row.
+    static let colorSwatches: [(label: String, color: Color)] = [
         ("Warm White",  Color(red: 1.0,  green: 0.64, blue: 0.25)),
         ("Neutral",     Color(red: 1.0,  green: 0.87, blue: 0.67)),
         ("Daylight",    Color(red: 0.93, green: 0.95, blue: 1.0)),

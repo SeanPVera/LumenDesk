@@ -2,6 +2,7 @@ name: LumenDesk
 options:
   deploymentTarget:
     macOS: "13.0"
+    iOS: "16.0"
   createIntermediateGroups: true
 settings:
   base:
@@ -11,7 +12,7 @@ settings:
 targets:
   LumenDesk:
     type: application
-    platform: macOS
+    supportedDestinations: [macOS, iOS]
     sources:
       - path: LumenDesk
     info:
@@ -26,18 +27,25 @@ targets:
         NSBonjourServices:
           - _lifx._udp
           - _hap._tcp
-    entitlements:
-      path: LumenDesk/LumenDesk.entitlements
-      properties:
-        com.apple.security.app-sandbox: true
-        com.apple.security.device.audio-input: true
-        com.apple.security.network.client: true
-        com.apple.security.network.server: true
-        com.apple.security.files.user-selected.read-write: true
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.lumendesk.LumenDesk
-        ENABLE_HARDENED_RUNTIME: YES
+        # The sandbox entitlements only exist on macOS; iOS device builds are
+        # signed without an entitlements file (Local Network needs none).
+        CODE_SIGN_ENTITLEMENTS[sdk=macosx*]: LumenDesk/LumenDesk.entitlements
+        ENABLE_HARDENED_RUNTIME[sdk=macosx*]: YES
+        SUPPORTS_MACCATALYST: NO
+        TARGETED_DEVICE_FAMILY: "1,2"
         ENABLE_PREVIEWS: YES
         GENERATE_INFOPLIST_FILE: NO
         DEVELOPMENT_ASSET_PATHS: '"LumenDesk/Preview Content"'

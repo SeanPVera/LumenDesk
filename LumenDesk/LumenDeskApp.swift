@@ -1,12 +1,28 @@
 import SwiftUI
+#if os(macOS)
 import AppKit
 import UniformTypeIdentifiers
+#endif
 
 @main
 struct LumenDeskApp: App {
     @StateObject private var manager = LightManager()
 
     var body: some Scene {
+        #if os(macOS)
+        macScenes
+        #else
+        WindowGroup {
+            RootView()
+                .environmentObject(manager)
+                .preferredColorScheme(.dark)
+                .onAppear { manager.start() }
+        }
+        #endif
+    }
+
+    #if os(macOS)
+    @SceneBuilder private var macScenes: some Scene {
         WindowGroup {
             RootView()
                 .environmentObject(manager)
@@ -116,6 +132,7 @@ struct LumenDeskApp: App {
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         manager.importRoomsData(data)
     }
+    #endif
 }
 
 // MARK: - Root

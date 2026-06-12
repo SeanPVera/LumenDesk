@@ -62,7 +62,7 @@ struct ScenesView: View {
             Divider()
             content
         }
-        .frame(minWidth: 680, idealWidth: 820, minHeight: 500, idealHeight: 680)
+        .sheetFrame(minWidth: 680, idealWidth: 820, minHeight: 500, idealHeight: 680)
         .background(LumenBackground(glow: false))
         .alert("Allow Music-Reactive Lighting?", isPresented: Binding(get: { pendingAudioEffect != nil }, set: { if !$0 { pendingAudioEffect = nil } })) {
             Button("Cancel", role: .cancel) { pendingAudioEffect = nil }
@@ -321,7 +321,7 @@ struct ScenesView: View {
                 }.scrollContentBackground(.hidden)
             }
         }
-        .frame(minWidth: 520, minHeight: 460)
+        .sheetFrame(minWidth: 520, minHeight: 460)
         .sheet(item: $previewScene) { ScenePreviewView(scene: $0).environmentObject(manager) }
         .sheet(item: $editingScene) { SceneEditorView(scene: $0).environmentObject(manager) }
         .background(LumenBackground(glow: false))

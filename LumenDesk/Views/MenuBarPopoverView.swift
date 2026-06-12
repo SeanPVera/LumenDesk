@@ -1,3 +1,4 @@
+#if os(macOS)
 import SwiftUI
 import AppKit
 
@@ -193,3 +194,4 @@ struct MenuBarPopoverView: View {
         .accessibilityLabel("Unassigned, \(onCount) of \(lights.count) on")
     }
 }
+#endif

@@ -1,7 +1,11 @@
 import SwiftUI
-import AppKit
 import UniformTypeIdentifiers
+#if os(macOS)
+import AppKit
 import PDFKit
+#else
+import UIKit
+#endif
 
 struct DiagnosticsCenterView: View {
     @EnvironmentObject var manager: LightManager
@@ -15,17 +19,19 @@ struct DiagnosticsCenterView: View {
             ForEach(manager.scanDiagnostics) { diagnostic in DiagnosticRow(diagnostic: diagnostic) }
             Divider()
             HStack {
-                Button("Open Network Settings") { openSettings("x-apple.systempreferences:com.apple.Network-Settings.extension") }
-                Button("Open Privacy Settings") { openSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_LocalNetwork") }
+                #if os(macOS)
+                Button("Open Network Settings") { PlatformOpener.openSettings(macPane: "x-apple.systempreferences:com.apple.Network-Settings.extension") }
+                Button("Open Privacy Settings") { PlatformOpener.openSettings(macPane: "x-apple.systempreferences:com.apple.preference.security?Privacy_LocalNetwork") }
+                #else
+                Button("Open Settings") { PlatformOpener.openSettings(macPane: "") }
+                #endif
                 Spacer()
                 Button("Scan Again") { manager.scan() }.buttonStyle(.borderedProminent)
             }
         }
-        .padding(20).frame(minWidth: 520, idealWidth: 640)
+        .padding(20).sheetFrame(minWidth: 520, idealWidth: 640)
         .background(LumenBackground(glow: false))
     }
-
-    private func openSettings(_ value: String) { if let url = URL(string: value) { NSWorkspace.shared.open(url) } }
 }
 
 struct DeviceInspectorView: View {
@@ -68,13 +74,17 @@ struct DeviceInspectorView: View {
                     let text = manager.diagnostics(for: device)
                         .filter { $0.title != "Address" && $0.title != "LAN identifier" }
                         .map { "\($0.title): \($0.value)" }.joined(separator: "\n")
+                    #if os(macOS)
                     NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string)
+                    #else
+                    UIPasteboard.general.string = text
+                    #endif
                 }
                 Spacer()
                 if device.isStale { Button("Rescan Network") { manager.scan() }.buttonStyle(.borderedProminent) }
             }
         }
-        .padding(20).frame(minWidth: 480, idealWidth: 580)
+        .padding(20).sheetFrame(minWidth: 480, idealWidth: 580)
         .background(LumenBackground(glow: false))
     }
 }
@@ -115,7 +125,9 @@ struct ActivityLogView: View {
                     Text("All Types").tag(ActivityEvent.Kind?.none)
                     ForEach(ActivityEvent.Kind.allCases, id: \.self) { Text($0.rawValue.capitalized).tag(Optional($0)) }
                 }.frame(width: 160)
+                #if os(macOS)
                 Button("Export…", action: export)
+                #endif
                 Button("Clear", role: .destructive) { manager.clearActivity() }
             }
             List(events) { event in
@@ -131,17 +143,19 @@ struct ActivityLogView: View {
                 }.padding(.vertical, 4)
             }.listStyle(.inset)
         }
-        .padding(20).frame(minWidth: 620, idealWidth: 760, minHeight: 460, idealHeight: 620).background(LumenBackground(glow: false))
+        .padding(20).sheetFrame(minWidth: 620, idealWidth: 760, minHeight: 460, idealHeight: 620).background(LumenBackground(glow: false))
     }
 
     private func icon(for kind: ActivityEvent.Kind) -> String {
         switch kind { case .scan: return "antenna.radiowaves.left.and.right"; case .schedule: return "clock"; case .scene: return "wand.and.stars"; case .recovery: return "wrench"; case .parliament: return "building.columns"; case .ecosystem: return "ladybug"; case .compliance: return "checkmark.seal"; default: return "lightbulb" }
     }
 
+    #if os(macOS)
     private func export() {
         let panel = NSSavePanel(); panel.allowedContentTypes = [.plainText]; panel.nameFieldStringValue = "LumenDesk-Activity.txt"
         if panel.runModal() == .OK, let url = panel.url { try? manager.activityExportText().write(to: url, atomically: true, encoding: .utf8) }
     }
+    #endif
 }
 
 struct PreciseColorEditorView: View {
@@ -174,7 +188,7 @@ struct PreciseColorEditorView: View {
             }
             HStack { Spacer(); Button("Apply White") { manager.setKelvin(device, kelvin: Int(kelvin)); dismiss() }; Button("Apply Color") { manager.setColor(device, color: candidate); dismiss() }.buttonStyle(.borderedProminent) }
         }
-        .padding(20).frame(minWidth: 440, idealWidth: 540).background(LumenBackground(glow: false))
+        .padding(20).sheetFrame(minWidth: 440, idealWidth: 540).background(LumenBackground(glow: false))
         .onAppear { set(device.color); kelvin = Double(device.kelvin) }
         .onChange(of: red) { _ in updateHex() }.onChange(of: green) { _ in updateHex() }.onChange(of: blue) { _ in updateHex() }
     }
@@ -203,7 +217,7 @@ struct LightingParliamentView: View {
             List(manager.parliamentMembers) { member in
                 HStack { Image(systemName: "lightbulb.fill").foregroundStyle(partyColor(member.party)); VStack(alignment: .leading) { Text(member.parliamentaryName); Text(member.party.rawValue).font(.caption).foregroundStyle(.secondary) }; Spacer(); Text(member.lastVote).font(.caption); Gauge(value: Double(member.approval), in: 0...100) { Text("Approval") }.gaugeStyle(.accessoryLinear).frame(width: 90) }
             }.listStyle(.inset)
-        }.padding(20).frame(minWidth: 680, idealWidth: 800, minHeight: 500, idealHeight: 640).background(LumenBackground(glow: false)).onAppear { manager.ensureParliament() }
+        }.padding(20).sheetFrame(minWidth: 680, idealWidth: 800, minHeight: 500, idealHeight: 640).background(LumenBackground(glow: false)).onAppear { manager.ensureParliament() }
     }
 
     private func result(_ name: String, _ value: Int, _ color: Color) -> some View { VStack { Text("\(value)").font(.title2.bold()).foregroundStyle(color); Text(name).font(.caption) } }
@@ -231,7 +245,7 @@ struct FireflyEcosystemView: View {
                     }
                 }.padding(4)
             }
-        }.padding(20).frame(minWidth: 680, idealWidth: 800, minHeight: 500, idealHeight: 660).background(LumenBackground(glow: false))
+        }.padding(20).sheetFrame(minWidth: 680, idealWidth: 800, minHeight: 500, idealHeight: 660).background(LumenBackground(glow: false))
     }
     private func metric(_ title: String, _ value: String) -> some View { VStack(alignment: .leading) { Text(value).font(.title3.bold()); Text(title).font(.caption).foregroundStyle(.secondary) }.padding(10).lumenCard(radius: 8) }
 }
@@ -249,15 +263,21 @@ struct ComplianceSuiteView: View {
             HStack { Picker("Scene", selection: $selectedSceneID) { Text("Choose a scene").tag(UUID?.none); ForEach(manager.scenes) { Text($0.name).tag(Optional($0.id)) } }.frame(maxWidth: 320); Button("Begin 47-Point Inspection") { if let id = selectedSceneID, let scene = manager.scenes.first(where: { $0.id == id }) { certification = manager.certify(scene) } }.buttonStyle(.borderedProminent).disabled(selectedSceneID == nil); Spacer() }
             if let certification {
                 VStack(alignment: .leading, spacing: 12) {
-                    HStack { Image(systemName: "seal.fill").font(.system(size: 52)).foregroundStyle(sealColor(certification.seal)); VStack(alignment: .leading) { Text("\(certification.seal.rawValue.capitalized) Seal").font(.title2.bold()); Text("Score \(certification.score)/100 · \(certification.treatyCode)").foregroundStyle(.secondary) }; Spacer(); Button("Export 47-Page Dossier…") { exportPDF(certification) } }
+                    HStack { Image(systemName: "seal.fill").font(.system(size: 52)).foregroundStyle(sealColor(certification.seal)); VStack(alignment: .leading) { Text("\(certification.seal.rawValue.capitalized) Seal").font(.title2.bold()); Text("Score \(certification.score)/100 · \(certification.treatyCode)").foregroundStyle(.secondary) }; Spacer()
+                        #if os(macOS)
+                        Button("Export 47-Page Dossier…") { exportPDF(certification) }
+                        #endif
+                    }
                     ForEach(certification.findings, id: \.self) { Label($0, systemImage: "doc.text.magnifyingglass") }
                     Text("Certification is legally meaningless in every known jurisdiction.").font(.caption).foregroundStyle(.tertiary)
                 }.padding(16).lumenCard(radius: 12)
             } else { Spacer(); VStack(spacing: 8) { Image(systemName: "checkmark.seal").font(.system(size: 36)).foregroundStyle(.secondary); Text("Awaiting Inspection").font(.headline); Text("Select a scene to begin an entirely unnecessary compliance process.").foregroundStyle(.secondary) }; Spacer() }
-        }.padding(20).frame(minWidth: 620, idealWidth: 760, minHeight: 440, idealHeight: 580).background(LumenBackground(glow: false))
+        }.padding(20).sheetFrame(minWidth: 620, idealWidth: 760, minHeight: 440, idealHeight: 580).background(LumenBackground(glow: false))
     }
 
     private func sealColor(_ seal: SceneCertification.Seal) -> Color { seal == .gold ? .yellow : seal == .silver ? .gray : .brown }
+
+    #if os(macOS)
     private func exportPDF(_ certificate: SceneCertification) {
         let panel = NSSavePanel(); panel.allowedContentTypes = [.pdf]; panel.nameFieldStringValue = "IBL-\(certificate.treatyCode)-Dossier.pdf"
         guard panel.runModal() == .OK, let url = panel.url else { return }
@@ -273,6 +293,7 @@ struct ComplianceSuiteView: View {
         }
         document.write(to: url)
     }
+    #endif
 }
 
 @ViewBuilder
@@ -302,7 +323,7 @@ struct ScenePreviewView: View {
                 HStack { Label("\(result.failedIDs.count) light(s) need retry", systemImage: "wifi.slash").foregroundStyle(Lumen.warning); Spacer(); Button("Retry Failed Lights") { manager.retryLastSceneFailures() } }
             }
             HStack { Spacer(); Button("Cancel") { dismiss() }; Button("Apply Scene") { manager.applyScene(scene, allowTurningOff: allowTurningOff); dismiss() }.buttonStyle(.borderedProminent) }
-        }.padding(20).frame(minWidth: 520, idealWidth: 620, minHeight: 420, idealHeight: 560).background(LumenBackground(glow: false))
+        }.padding(20).sheetFrame(minWidth: 520, idealWidth: 620, minHeight: 420, idealHeight: 560).background(LumenBackground(glow: false))
     }
     private func previewMetric(_ title: String, _ value: Int, _ color: Color) -> some View { VStack { Text("\(value)").font(.title2.bold()).foregroundStyle(color); Text(title).font(.caption) }.frame(maxWidth: .infinity).padding(8).lumenCard(radius: 8) }
 }
@@ -350,13 +371,13 @@ struct LumenDeskSettingsView: View {
                 Label("Audio-reactive effects process live level measurements locally. LumenDesk does not record or retain microphone audio.", systemImage: "mic.badge.plus")
                 Toggle("I understand the microphone behavior", isOn: $audioAcknowledged)
                 Button("Open Microphone Privacy Settings") {
-                    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")!)
+                    PlatformOpener.openSettings(macPane: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
                 }
                 Divider()
                 Label("Color swatches are always paired with names, values, outlines, or symbols; status never relies on color alone.", systemImage: "accessibility")
             }.padding(20).tabItem { Label("Privacy", systemImage: "hand.raised") }
         }
-        .frame(minWidth: 620, idealWidth: 680, minHeight: 390, idealHeight: 440)
+        .sheetFrame(minWidth: 620, idealWidth: 680, minHeight: 390, idealHeight: 440)
     }
 }
 
@@ -417,7 +438,7 @@ struct DiscoveryInboxView: View {
                 Spacer(); Button("Scan Again") { manager.scan() }.disabled(manager.isScanning)
             }
         }
-        .padding(20).frame(minWidth: 560, idealWidth: 680, minHeight: 380, idealHeight: 520)
+        .padding(20).sheetFrame(minWidth: 560, idealWidth: 680, minHeight: 380, idealHeight: 520)
     }
 
     private func symbol(for kind: DiscoveryChange.Kind) -> String {
@@ -442,7 +463,7 @@ struct MissedAutomationsView: View {
                     Spacer(); Button("Skip") { manager.skipMissedAutomation(item) }; Button("Run Now") { manager.runMissedAutomation(item) }.buttonStyle(.borderedProminent)
                 }
             }
-        }.padding(20).frame(minWidth: 560, minHeight: 360)
+        }.padding(20).sheetFrame(minWidth: 560, minHeight: 360)
     }
 }
 
@@ -492,7 +513,7 @@ struct SceneEditorView: View {
                 Spacer(); Button("Discard") { showingDiscard = true }.disabled(!dirty); Button("Save Draft") { manager.updateScene(draft, revisionLabel: restorePointLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Before edit" : restorePointLabel); dismiss() }.buttonStyle(.borderedProminent).disabled(!dirty || draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
-        .padding(20).frame(minWidth: 650, idealWidth: 760, minHeight: 460, idealHeight: 600)
+        .padding(20).sheetFrame(minWidth: 650, idealWidth: 760, minHeight: 460, idealHeight: 600)
         .onAppear { if let recovered = manager.recoveredDraft(for: original.id), recovered != original { draft = recovered } }
         .onChange(of: draft) { value in if value != original { manager.autosaveSceneDraft(value) } }
         .confirmationDialog("Discard unsaved scene changes?", isPresented: $showingDiscard) { Button("Discard Changes", role: .destructive) { manager.discardSceneDraft(for: original.id); manager.stopSceneRehearsal(); dismiss() } }
@@ -521,7 +542,7 @@ struct SceneHistoryView: View {
             List(manager.revisions(for: sceneID)) { revision in
                 HStack { VStack(alignment: .leading) { Text(revision.label); Text(revision.savedAt.formatted(date: .abbreviated, time: .shortened)).font(.caption).foregroundStyle(.secondary) }; Spacer(); Button("Restore") { manager.restoreSceneRevision(revision); dismiss() } }
             }
-        }.padding(20).frame(minWidth: 500, minHeight: 340)
+        }.padding(20).sheetFrame(minWidth: 500, minHeight: 340)
     }
 }
 

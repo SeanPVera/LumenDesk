@@ -121,7 +121,7 @@ struct RoomSectionView: View {
                         .frame(maxWidth: 220)
                         .focused($nameFieldFocused)
                         .onSubmit(commitRename)
-                        .onExitCommand(perform: cancelRename)
+                        .onExitCommandCompat(perform: cancelRename)
                     Button(action: cancelRename) {
                         Image(systemName: "xmark.circle.fill")
                             .foregroundStyle(.secondary)

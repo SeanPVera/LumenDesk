@@ -29,7 +29,13 @@ final class GoveeClient {
 
     init() throws {
         socket = try UDPSocket(boundPort: GoveeProtocol.responsePort, queue: queue)
-        try socket.joinMulticast(GoveeProtocol.multicastGroup)
+        do {
+            try socket.joinMulticast(GoveeProtocol.multicastGroup)
+        } catch {
+            // iOS denies multicast membership without the restricted
+            // entitlement; discovery still works via the unicast sweep below.
+            NSLog("Govee multicast join failed: \(error)")
+        }
         socket.onReceive = { [weak self] data, host, _ in
             self?.handle(data: data, from: host)
         }
@@ -42,6 +48,15 @@ final class GoveeClient {
         } catch {
             NSLog("Govee discover send failed: \(error)")
         }
+        #if os(iOS)
+        // Without the multicast entitlement the group send above fails, but
+        // Govee bulbs also answer scan requests sent straight to their IP.
+        queue.async { [socket] in
+            for host in LocalSubnet.probeHosts() {
+                try? socket.send(pkt, to: host, port: GoveeProtocol.discoveryPort)
+            }
+        }
+        #endif
     }
 
     func refresh(deviceID: String) {

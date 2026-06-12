@@ -1,6 +1,6 @@
 # LumenDesk
 
-A native macOS desktop app for controlling **LIFX** and **Govee** smart bulbs
+A native macOS and iOS app for controlling **LIFX** and **Govee** smart bulbs
 over your local network — no cloud, no API keys.
 
 LumenDesk speaks each vendor's LAN protocol directly:
@@ -20,9 +20,9 @@ LumenDesk speaks each vendor's LAN protocol directly:
 
 ## Requirements
 
-- macOS 13 Ventura or later
+- macOS 13 Ventura or later, or iOS 16 or later
 - Xcode 15 or later
-- Bulbs and Mac on the same Wi-Fi/LAN
+- Bulbs and Mac/iPhone on the same Wi-Fi/LAN
 - Govee bulbs must have **LAN Control** turned on in the Govee Home app
   (Device Settings → LAN Control). Only certain Govee SKUs support the LAN API.
 
@@ -31,6 +31,31 @@ LumenDesk speaks each vendor's LAN protocol directly:
 Open `LumenDesk.xcodeproj` in Xcode and press ⌘R.
 
 The first run will prompt for local-network access — accept it.
+
+### Running on your iPhone
+
+The single `LumenDesk` target is multiplatform — the same scheme builds for
+Mac and iPhone.
+
+1. Connect your iPhone over USB (or pair it wirelessly via
+   Window → Devices and Simulators).
+2. In the toolbar's destination picker, choose your iPhone instead of
+   "My Mac".
+3. In the target's **Signing & Capabilities** tab, pick your Apple ID team
+   (a free personal team works).
+4. Press ⌘R. On first launch the phone will block the unsigned developer
+   app — approve it under Settings → General → VPN & Device Management.
+5. Accept the **Local Network** permission prompt when the app first scans.
+
+**How discovery works on iPhone:** iOS does not allow UDP broadcast or
+multicast unless Apple grants the app the restricted
+`com.apple.developer.networking.multicast` entitlement. LumenDesk therefore
+falls back to a unicast sweep on iOS — it probes every address on your /24
+subnet directly (LIFX `GetService` to `:56700`, Govee scan to `:4001`), and
+the bulbs reply unicast. This works on typical home networks; if your subnet
+is wider than /24, only the 253 addresses nearest your phone's IP are probed.
+If you have the multicast entitlement on your account, add it in Signing &
+Capabilities and discovery will also use real broadcast/multicast.
 
 ### Optional: regenerate the project with XcodeGen
 

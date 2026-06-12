@@ -62,7 +62,7 @@ struct LightRowView: View {
         .accessibilityAction(.default) { if selectionMode { onToggleSelection?() } }
         .accessibilityAction(named: "Toggle Power") { if !selectionMode { manager.setPower(device, on: !device.isOn) } }
         .accessibilityAction(named: "Open Inspector") { if !selectionMode { showingInspector = true } }
-        .focusable(true)
+        .focusableCompat()
         .padding(12)
         .background(
             RoundedRectangle(cornerRadius: 10)
@@ -182,7 +182,7 @@ struct LightRowView: View {
                 .font(.headline)
                 .focused($nameFocused)
                 .onSubmit(commitRename)
-                .onExitCommand(perform: cancelRename)
+                .onExitCommandCompat(perform: cancelRename)
                 .frame(maxWidth: 200)
             if let warning = manager.duplicateNameMessage(nameDraft, excludingDeviceID: device.id) {
                 Text(warning).font(.caption2).foregroundStyle(Lumen.warning).fixedSize(horizontal: false, vertical: true)

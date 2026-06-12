@@ -34,6 +34,15 @@ final class LIFXClient {
         } catch {
             NSLog("LIFX discover send failed: \(error)")
         }
+        #if os(iOS)
+        // Broadcast requires the restricted multicast entitlement on iOS, so
+        // also probe each subnet host directly; bulbs answer via unicast.
+        queue.async { [socket] in
+            for host in LocalSubnet.probeHosts() {
+                try? socket.send(pkt, to: host, port: LIFXProtocol.port)
+            }
+        }
+        #endif
     }
 
     func refresh(macHex: String) {

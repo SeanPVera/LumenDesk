@@ -1,5 +1,7 @@
 import SwiftUI
+#if os(macOS)
 import AppKit
+#endif
 
 struct ContentView: View {
     @EnvironmentObject var manager: LightManager
@@ -813,7 +815,7 @@ struct DiscoveryDiagnosticsCard: View {
             }
             HStack {
                 Button("Open Local Network Privacy") {
-                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_LocalNetwork") { NSWorkspace.shared.open(url) }
+                    PlatformOpener.openSettings(macPane: "x-apple.systempreferences:com.apple.preference.security?Privacy_LocalNetwork")
                 }.font(.caption)
                 Spacer()
                 Button("Scan Again") { manager.scan() }.font(.caption)

@@ -126,3 +126,50 @@ final class UDPSocket {
         return String(cString: buf)
     }
 }
+
+/// Enumerates candidate peer addresses on the local IPv4 subnet.
+///
+/// iOS refuses UDP broadcast and multicast unless the app carries Apple's
+/// special `com.apple.developer.networking.multicast` entitlement, so on
+/// iPhone the clients fall back to probing every host on the /24 around each
+/// active interface with a unicast discovery packet. Replies are ordinary
+/// unicast datagrams, which need no entitlement.
+enum LocalSubnet {
+    /// Our own IPv4 addresses on active, non-loopback interfaces.
+    static func localIPv4Addresses() -> [UInt32] {
+        var addresses: [UInt32] = []
+        var ifaddrPtr: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&ifaddrPtr) == 0, let first = ifaddrPtr else { return [] }
+        defer { freeifaddrs(ifaddrPtr) }
+        for ptr in sequence(first: first, next: { $0.pointee.ifa_next }) {
+            let ifa = ptr.pointee
+            guard (ifa.ifa_flags & UInt32(IFF_UP)) != 0,
+                  (ifa.ifa_flags & UInt32(IFF_LOOPBACK)) == 0,
+                  let sa = ifa.ifa_addr,
+                  sa.pointee.sa_family == sa_family_t(AF_INET) else { continue }
+            let ip = sa.withMemoryRebound(to: sockaddr_in.self, capacity: 1) {
+                UInt32(bigEndian: $0.pointee.sin_addr.s_addr)
+            }
+            addresses.append(ip)
+        }
+        return addresses
+    }
+
+    /// Dotted-quad strings for every other host on the /24 containing each
+    /// local address (the .0 network and .255 broadcast slots are skipped).
+    /// Capping at /24 bounds the sweep to 253 probes per interface even on
+    /// networks with a wider netmask.
+    static func probeHosts() -> [String] {
+        var seen = Set<UInt32>()
+        var hosts: [String] = []
+        for ip in localIPv4Addresses() {
+            let base = ip & 0xFFFF_FF00
+            for low in UInt32(1)...254 {
+                let candidate = base | low
+                guard candidate != ip, seen.insert(candidate).inserted else { continue }
+                hosts.append("\((candidate >> 24) & 255).\((candidate >> 16) & 255).\((candidate >> 8) & 255).\(candidate & 255)")
+            }
+        }
+        return hosts
+    }
+}

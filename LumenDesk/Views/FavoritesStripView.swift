@@ -68,7 +68,7 @@ struct FavoriteOrganizerView: View {
                     HStack { Image(systemName: icon(reference.kind)); Text(name(reference)); Spacer(); Text(reference.kind.rawValue.capitalized).font(.caption).foregroundStyle(.secondary) }
                 }.onMove(perform: manager.moveFavorite)
             }.listStyle(.inset)
-        }.padding(20).frame(minWidth: 400, idealWidth: 500, minHeight: 380, idealHeight: 520).background(LumenBackground(glow: false)).onAppear { manager.reconcileFavoriteOrder() }
+        }.padding(20).sheetFrame(minWidth: 400, idealWidth: 500, minHeight: 380, idealHeight: 520).background(LumenBackground(glow: false)).onAppear { manager.reconcileFavoriteOrder() }
     }
     private func icon(_ kind: FavoriteReference.Kind) -> String { switch kind { case .light: return "lightbulb"; case .room: return "rectangle.stack"; case .scene: return "wand.and.stars" } }
     private func name(_ reference: FavoriteReference) -> String {

@@ -22,6 +22,13 @@ final class AudioLevelMonitor {
     @discardableResult
     private func start() -> Bool {
         guard !engine.isRunning else { return true }
+        #if os(iOS)
+        // iOS routes the microphone through AVAudioSession; mix with other
+        // audio so music keeps playing while the lights react to it.
+        let session = AVAudioSession.sharedInstance()
+        try? session.setCategory(.playAndRecord, options: [.mixWithOthers, .defaultToSpeaker])
+        try? session.setActive(true)
+        #endif
         let input = engine.inputNode
         let format = input.outputFormat(forBus: 0)
         guard format.channelCount > 0 else { return false }

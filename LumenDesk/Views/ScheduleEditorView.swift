@@ -42,7 +42,7 @@ struct ScheduleEditorView: View {
                 Button { showingNewEntry = true } label: { Label("Add Schedule", systemImage: "plus") }.buttonStyle(.borderedProminent)
             }.padding(16)
         }
-        .frame(minWidth: 560, idealWidth: 680, minHeight: 460, idealHeight: 620).background(LumenBackground(glow: false))
+        .sheetFrame(minWidth: 560, idealWidth: 680, minHeight: 460, idealHeight: 620).background(LumenBackground(glow: false))
         .sheet(isPresented: $showingSolarSettings) { SolarSettingsView().environmentObject(manager) }
         .sheet(isPresented: $showingNewEntry) { ScheduleFormView(room: room, entry: nil).environmentObject(manager) }
         .sheet(item: $editingEntry) { ScheduleFormView(room: room, entry: $0).environmentObject(manager) }
@@ -119,7 +119,7 @@ private struct ScheduleFormView: View {
                 HStack { Button("Every day") { weekdays = Set(1...7) }; Button("Weekdays") { weekdays = Set(2...6) }; Button("Weekends") { weekdays = [1,7] } }.font(.caption)
             }
             HStack { Spacer(); Button("Cancel") { dismiss() }; Button("Save") { save() }.buttonStyle(.borderedProminent).disabled(weekdays.isEmpty) }
-        }.padding(20).frame(minWidth: 440, idealWidth: 520).background(LumenBackground(glow: false)).onAppear(perform: load)
+        }.padding(20).sheetFrame(minWidth: 440, idealWidth: 520).background(LumenBackground(glow: false)).onAppear(perform: load)
     }
 
     private func load() { guard let entry else { return }; action = entry.action; offset = entry.offsetMinutes; weekdays = entry.weekdays; date = Calendar.current.date(bySettingHour: entry.hour, minute: entry.minute, second: 0, of: Date()) ?? Date() }
@@ -179,7 +179,7 @@ struct SolarSettingsView: View {
             }
         }
         .padding(20)
-        .frame(minWidth: 320, idealWidth: 400)
+        .sheetFrame(minWidth: 320, idealWidth: 400)
         .background(LumenBackground(glow: false))
         .onAppear {
             sunriseHour   = manager.sunriseHour

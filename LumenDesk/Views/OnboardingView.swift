@@ -56,7 +56,7 @@ struct OnboardingView: View {
             .padding(28)
             .frame(maxWidth: 760)
         }
-        .frame(minWidth: 560, minHeight: 480)
+        .sheetFrame(minWidth: 560, minHeight: 480)
     }
 
     // MARK: - Top bar (progress + skip)
@@ -149,7 +149,7 @@ struct OnboardingView: View {
                 Image(systemName: "hand.raised.fill")
                     .foregroundStyle(Lumen.gold)
                     .accessibilityHidden(true)
-                Text("macOS will ask for permission to find devices on your local network. Please choose **Allow** — it's required for discovery.")
+                Text("Your device will ask for permission to find devices on your local network. Please choose **Allow** — it's required for discovery.")
                     .font(.callout)
                     .foregroundStyle(Lumen.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)

@@ -1,4 +1,9 @@
 import SwiftUI
+#if os(macOS)
+import AppKit
+#else
+import UIKit
+#endif
 
 // MARK: - LumenDesk design system — "Aurora Noir"
 //
@@ -217,5 +222,57 @@ struct LumenWordmark: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("LumenDesk")
+    }
+}
+
+// MARK: - Platform compatibility
+
+/// Shims that let the shared SwiftUI code compile on both macOS and iOS.
+extension View {
+    /// Desktop windows and sheets get generous minimum sizes; on iPhone the
+    /// sheet should simply fill the available screen, so this is a no-op there.
+    func sheetFrame(minWidth: CGFloat? = nil,
+                    idealWidth: CGFloat? = nil,
+                    minHeight: CGFloat? = nil,
+                    idealHeight: CGFloat? = nil) -> some View {
+        #if os(macOS)
+        return frame(minWidth: minWidth, idealWidth: idealWidth,
+                     minHeight: minHeight, idealHeight: idealHeight)
+        #else
+        return self
+        #endif
+    }
+
+    /// `.focusable` predates iOS 17, so only apply it on macOS.
+    func focusableCompat() -> some View {
+        #if os(macOS)
+        return focusable(true)
+        #else
+        return self
+        #endif
+    }
+
+    /// Escape-key handling only exists on macOS.
+    func onExitCommandCompat(perform action: @escaping () -> Void) -> some View {
+        #if os(macOS)
+        return onExitCommand(perform: action)
+        #else
+        return self
+        #endif
+    }
+}
+
+enum PlatformOpener {
+    /// Opens the most specific privacy/settings pane the platform allows.
+    /// macOS can deep-link System Settings panes; iOS can only open the
+    /// app's own settings page (which hosts Local Network and Microphone).
+    static func openSettings(macPane: String) {
+        #if os(macOS)
+        if let url = URL(string: macPane) { NSWorkspace.shared.open(url) }
+        #else
+        if let url = URL(string: UIApplication.openSettingsURLString) {
+            UIApplication.shared.open(url)
+        }
+        #endif
     }
 }

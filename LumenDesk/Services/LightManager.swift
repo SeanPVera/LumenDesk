@@ -1,6 +1,10 @@
 import Foundation
 import SwiftUI
+#if os(macOS)
 import AppKit
+#else
+import UIKit
+#endif
 
 enum NapPhase: Equatable {
     case inactive
@@ -665,6 +669,9 @@ final class LightManager: ObservableObject {
     }
 
     func setAllPower(on: Bool) {
+        // Cautious confirmation uses a blocking modal, which only exists on
+        // macOS; on iOS the change runs immediately and remains undoable.
+        #if os(macOS)
         if UserDefaults.standard.string(forKey: AppPreferenceKey.confirmationPolicy) == ConfirmationPolicy.cautious.rawValue,
            devices.count > 3 {
             let alert = NSAlert()
@@ -675,6 +682,7 @@ final class LightManager: ObservableObject {
             alert.addButton(withTitle: "Cancel")
             guard alert.runModal() == .alertFirstButtonReturn else { return }
         }
+        #endif
         let staleCount = devices.filter { $0.isStale }.count
         if staleCount > 0 {
             publishError("\(staleCount) light\(staleCount == 1 ? "" : "s") may be offline.")
@@ -1847,16 +1855,24 @@ extension LightManager {
 
 extension Color {
     var hsbComponents: (h: Double, s: Double, b: Double) {
-        guard let ns = NSColor(self).usingColorSpace(.sRGB) else { return (0, 0, 1) }
         var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        #if os(macOS)
+        guard let ns = NSColor(self).usingColorSpace(.sRGB) else { return (0, 0, 1) }
         ns.getHue(&h, saturation: &s, brightness: &b, alpha: &a)
+        #else
+        guard UIColor(self).getHue(&h, saturation: &s, brightness: &b, alpha: &a) else { return (0, 0, 1) }
+        #endif
         return (Double(h), Double(s), Double(b))
     }
 
     var rgbComponents: (r: Double, g: Double, b: Double) {
-        guard let ns = NSColor(self).usingColorSpace(.sRGB) else { return (1, 1, 1) }
         var r: CGFloat = 0, g: CGFloat = 0, bb: CGFloat = 0, a: CGFloat = 0
+        #if os(macOS)
+        guard let ns = NSColor(self).usingColorSpace(.sRGB) else { return (1, 1, 1) }
         ns.getRed(&r, green: &g, blue: &bb, alpha: &a)
+        #else
+        guard UIColor(self).getRed(&r, green: &g, blue: &bb, alpha: &a) else { return (1, 1, 1) }
+        #endif
         return (Double(r), Double(g), Double(bb))
     }
 }

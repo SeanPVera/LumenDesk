@@ -77,6 +77,7 @@ final class LightManager: ObservableObject {
     private var demoLiveDevices: [LightDevice] = []
     private var demoLiveRooms: [Room] = []
     private var rehearsalSnapshot: [DeviceState] = []
+    private var expectedStates: [String: ExpectedDeviceState] = [:]
 
     // Custom display names keyed by device id, persisted across sessions.
     private var customNames: [String: String] = [:]
@@ -124,6 +125,12 @@ final class LightManager: ObservableObject {
         let brightness: Double
         let color: Color
         let kelvin: Int
+    }
+    private struct ExpectedDeviceState {
+        var isOn: Bool?
+        var brightness: Double?
+        var color: (red: Double, green: Double, blue: Double)?
+        var kelvin: Int?
     }
     /// One animated effect running against one scope. Several runs can be
     /// active at once as long as their device sets don't overlap (e.g. a
@@ -268,33 +275,40 @@ final class LightManager: ObservableObject {
         let nowKey    = String(format: "%02d:%02d", nowHour, nowMinute)
 
         for room in rooms {
-            for entry in room.schedules where entry.isEnabled && entry.runsToday {
+            for entry in room.schedules where entry.isEnabled {
                 if scheduleFiredThisMinute[entry.id] == nowKey { continue }
-                guard schedule(entry, shouldFireBetween: previous, and: now) else { continue }
+                let occurrences = scheduledOccurrences(for: entry, after: previous, through: now)
+                guard !occurrences.isEmpty else { continue }
 
-                if let override = activeAutomationOverride(for: room.id) {
-                    if override.skipNextSchedule { resumeAutomation(for: room.id) }
-                    logActivity(.schedule, title: "Automation skipped", detail: "\(room.name): manual override was active")
-                    continue
-                }
-                if now.timeIntervalSince(previous) > 120,
-                   let scheduledAt = scheduledOccurrenceToday(for: entry, relativeTo: now) {
-                    missedAutomations.append(MissedAutomation(roomID: room.id, roomName: room.name, entry: entry, scheduledAt: scheduledAt))
-                    logActivity(.schedule, title: "Automation needs review", detail: "\(room.name): \(entry.action.displayName) was missed while LumenDesk was unavailable")
-                    continue
-                }
+                for scheduledAt in occurrences {
+                    if let override = activeAutomationOverride(for: room.id) {
+                        if override.skipNextSchedule { resumeAutomation(for: room.id) }
+                        logActivity(.schedule, title: "Automation skipped", detail: "\(room.name): manual override was active")
+                        continue
+                    }
+                    if now.timeIntervalSince(previous) > 120 {
+                        let duplicate = missedAutomations.contains {
+                            $0.entry.id == entry.id && abs($0.scheduledAt.timeIntervalSince(scheduledAt)) < 1
+                        }
+                        if !duplicate {
+                            missedAutomations.append(MissedAutomation(roomID: room.id, roomName: room.name, entry: entry, scheduledAt: scheduledAt))
+                            logActivity(.schedule, title: "Automation needs review", detail: "\(room.name): \(entry.action.displayName) was missed while LumenDesk was unavailable")
+                        }
+                        continue
+                    }
 
-                scheduleFiredThisMinute[entry.id] = nowKey
-                logActivity(.schedule, title: "Automation ran", detail: "\(room.name): \(entry.action.displayName) at \(entry.timeString)")
-                let lights = devices(in: room)
-                switch entry.action {
-                case .turnOn, .atSunrise:
-                    for d in lights { d.isOn = true; markPending(d.id); sendPower(d, on: true) }
-                case .turnOff, .atSunset:
-                    for d in lights { d.isOn = false; markPending(d.id); sendPower(d, on: false) }
-                default:
-                    if let brightness = entry.action.brightnessValue {
-                        for d in lights { d.brightness = brightness; markPending(d.id); sendBrightness(d, value: brightness) }
+                    scheduleFiredThisMinute[entry.id] = nowKey
+                    logActivity(.schedule, title: "Automation ran", detail: "\(room.name): \(entry.action.displayName) at \(entry.timeString)")
+                    let lights = devices(in: room)
+                    switch entry.action {
+                    case .turnOn, .atSunrise:
+                        for d in lights { d.isOn = true; markPending(d.id); sendPower(d, on: true) }
+                    case .turnOff, .atSunset:
+                        for d in lights { d.isOn = false; markPending(d.id); sendPower(d, on: false) }
+                    default:
+                        if let brightness = entry.action.brightnessValue {
+                            for d in lights { d.brightness = brightness; markPending(d.id); sendBrightness(d, value: brightness) }
+                        }
                     }
                 }
             }
@@ -342,9 +356,24 @@ final class LightManager: ObservableObject {
 
     func skipMissedAutomation(_ missed: MissedAutomation) { missedAutomations.removeAll { $0.id == missed.id } }
 
-    private func schedule(_ entry: ScheduleEntry, shouldFireBetween previous: Date, and now: Date) -> Bool {
-        guard let target = scheduledOccurrenceToday(for: entry, relativeTo: now) else { return false }
-        return target > previous && target <= now
+    private func scheduledOccurrences(for entry: ScheduleEntry, after previous: Date, through now: Date) -> [Date] {
+        guard previous < now else { return [] }
+        let calendar = Calendar.current
+        var day = calendar.startOfDay(for: previous)
+        let finalDay = calendar.startOfDay(for: now)
+        var occurrences: [Date] = []
+        while day <= finalDay {
+            let weekday = calendar.component(.weekday, from: day)
+            if entry.weekdays.isEmpty || entry.weekdays.contains(weekday),
+               let occurrence = scheduledOccurrenceToday(for: entry, relativeTo: day),
+               occurrence > previous,
+               occurrence <= now {
+                occurrences.append(occurrence)
+            }
+            guard let nextDay = calendar.date(byAdding: .day, value: 1, to: day) else { break }
+            day = nextDay
+        }
+        return occurrences
     }
 
     fileprivate func scheduledOccurrenceToday(for entry: ScheduleEntry, relativeTo date: Date) -> Date? {
@@ -375,25 +404,71 @@ final class LightManager: ObservableObject {
         }
     }
 
-    private func markSeen(_ device: LightDevice) {
+    private func markSeen(_ device: LightDevice, confirmsPendingCommand: Bool = false) {
         let wasStale = device.isStale
         device.lastSeen = Date()
         device.isStale = false
-        // Note: queued outgoing commands in `commandTasks` must survive this —
-        // a status report only confirms past state and must not cancel sends
-        // that are still waiting out their debounce window.
-        commandTimeoutTasks[device.id]?.cancel(); commandTimeoutTasks[device.id] = nil
-        commandPendingIDs.remove(device.id)
-        let rgb = device.color.rgbComponents
-        let hex = String(format: "#%02X%02X%02X", Int(rgb.r * 255), Int(rgb.g * 255), Int(rgb.b * 255))
-        confirmedStates[device.id] = ConfirmedDeviceState(isOn: device.isOn, brightness: device.brightness, colorHex: hex, kelvin: device.kelvin, confirmedAt: Date())
-        commandStates[device.id] = DeviceCommandState(phase: .applied, summary: "Confirmed by light", updatedAt: Date())
+        if confirmsPendingCommand {
+            commandTimeoutTasks[device.id]?.cancel(); commandTimeoutTasks[device.id] = nil
+            commandPendingIDs.remove(device.id)
+            expectedStates.removeValue(forKey: device.id)
+        }
+        if confirmsPendingCommand || !commandPendingIDs.contains(device.id) {
+            let rgb = device.color.rgbComponents
+            let hex = String(format: "#%02X%02X%02X", Int(rgb.r * 255), Int(rgb.g * 255), Int(rgb.b * 255))
+            confirmedStates[device.id] = ConfirmedDeviceState(isOn: device.isOn, brightness: device.brightness, colorHex: hex, kelvin: device.kelvin, confirmedAt: Date())
+            commandStates[device.id] = DeviceCommandState(phase: confirmsPendingCommand ? .applied : .idle, summary: confirmsPendingCommand ? "Confirmed by light" : "Confirmed", updatedAt: Date())
+        }
         if wasStale { appendDiscoveryChange(device, kind: .backOnline, detail: "Responded again") }
+        guard confirmsPendingCommand else { return }
         Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 1_200_000_000)
             guard self?.commandStates[device.id]?.phase == .applied else { return }
             self?.commandStates[device.id] = DeviceCommandState(phase: .idle, summary: "Confirmed", updatedAt: Date())
         }
+    }
+
+    private func reportedStateMatchesExpectation(
+        deviceID: String,
+        isOn: Bool,
+        brightness: Double,
+        red: Double,
+        green: Double,
+        blue: Double,
+        kelvin: Int
+    ) -> Bool {
+        guard let expected = expectedStates[deviceID] else { return false }
+        if let value = expected.isOn, value != isOn { return false }
+        if let value = expected.brightness, abs(value - brightness) > 0.03 { return false }
+        if let value = expected.kelvin, abs(value - kelvin) > 100 { return false }
+        if let value = expected.color {
+            let distance = max(abs(value.red - red), max(abs(value.green - green), abs(value.blue - blue)))
+            if distance > 0.06 { return false }
+        }
+        return true
+    }
+
+    private func expectPower(_ device: LightDevice, on: Bool) {
+        guard !isDemoMode else { return }
+        expectedStates[device.id, default: ExpectedDeviceState()].isOn = on
+    }
+
+    private func expectBrightness(_ device: LightDevice, value: Double) {
+        guard !isDemoMode else { return }
+        expectedStates[device.id, default: ExpectedDeviceState()].brightness = max(0, min(1, value))
+    }
+
+    private func expectColor(_ device: LightDevice, color: Color) {
+        guard !isDemoMode else { return }
+        let rgb = color.rgbComponents
+        expectedStates[device.id, default: ExpectedDeviceState()].color = (rgb.r, rgb.g, rgb.b)
+        expectedStates[device.id]?.kelvin = nil
+    }
+
+    private func expectKelvin(_ device: LightDevice, kelvin: Int) {
+        guard !isDemoMode else { return }
+        expectedStates[device.id, default: ExpectedDeviceState()].kelvin = kelvin
+        expectedStates[device.id]?.color = nil
     }
 
     private func refresh(_ device: LightDevice) {
@@ -567,6 +642,7 @@ final class LightManager: ObservableObject {
             guard !Task.isCancelled, let self, let device,
                   self.commandStates[device.id]?.phase == .sending else { return }
             self.commandPendingIDs.remove(device.id)
+            self.expectedStates.removeValue(forKey: device.id)
             self.commandStates[device.id] = DeviceCommandState(phase: .failed, summary: "No confirmation: \(summary)", updatedAt: Date(), retryCount: (self.commandStates[device.id]?.retryCount ?? 0) + 1)
             self.publishError("\(device.label) did not confirm the change. Keep trying or rescan.")
         }
@@ -578,6 +654,7 @@ final class LightManager: ObservableObject {
             for key in commandTasks.keys.filter({ $0.hasPrefix("\(id)|") }) { commandTasks[key]?.cancel(); commandTasks[key] = nil }
             commandTimeoutTasks[id]?.cancel(); commandTimeoutTasks[id] = nil
             commandPendingIDs.remove(id)
+            expectedStates.removeValue(forKey: id)
             commandStates[id] = DeviceCommandState(phase: .idle, summary: "Cancelled", updatedAt: Date())
         }
         lastActionSummary = "Cancelled \(ids.count) queued command\(ids.count == 1 ? "" : "s")"
@@ -959,6 +1036,7 @@ final class LightManager: ObservableObject {
     // MARK: - Vendor send helpers
 
     private func sendPower(_ device: LightDevice, on: Bool) {
+        expectPower(device, on: on)
         enqueueCommand(for: device, coalescingKey: "power", summary: on ? "Turning on" : "Turning off") { [weak self, weak device] in
             guard let self, let device else { return }
             switch device.brand {
@@ -969,6 +1047,7 @@ final class LightManager: ObservableObject {
     }
 
     private func sendBrightness(_ device: LightDevice, value: Double) {
+        expectBrightness(device, value: value)
         enqueueCommand(for: device, coalescingKey: "brightness", summary: "Brightness \(Int(value * 100)) percent") { [weak self, weak device] in
             guard let self, let device else { return }
             switch device.brand {
@@ -983,6 +1062,7 @@ final class LightManager: ObservableObject {
     }
 
     private func sendColor(_ device: LightDevice, color: Color) {
+        expectColor(device, color: color)
         enqueueCommand(for: device, coalescingKey: "color", summary: "Changing color") { [weak self, weak device] in
             guard let self, let device else { return }
             switch device.brand {
@@ -998,6 +1078,7 @@ final class LightManager: ObservableObject {
     }
 
     private func sendColorTemperature(_ device: LightDevice, kelvin: Int) {
+        expectKelvin(device, kelvin: kelvin)
         enqueueCommand(for: device, coalescingKey: "kelvin", summary: "Color temperature \(kelvin) kelvin") { [weak self, weak device] in
             guard let self, let device else { return }
             switch device.brand {
@@ -1134,23 +1215,32 @@ extension LightManager: LIFXClientDelegate {
         Task { @MainActor in
             let id = "lifx:\(macHex)"
             guard let device = self.device(withID: id) else { return }
+            if self.isScanning { self.scanResponseCount += 1 }
             if !label.isEmpty && label != device.name {
                 device.name = label
                 self.sortDevices()
             }
-            // A report that raced our own outgoing commands (or arrived while
-            // an effect is animating this light) reflects state from before
-            // them; adopting it would snap the UI back and corrupt the
-            // brightness/kelvin we embed in subsequent sends.
-            if !self.isEffectAnimating(id) && !self.commandPendingIDs.contains(id) {
+            let h = Double(color.hue) / 65535.0
+            let s = Double(color.saturation) / 65535.0
+            let reportedColor = Color(hue: h, saturation: s, brightness: 1.0)
+            let rgb = reportedColor.rgbComponents
+            let brightness = Double(color.brightness) / 65535.0
+            let matches = self.reportedStateMatchesExpectation(
+                deviceID: id,
+                isOn: isOn,
+                brightness: brightness,
+                red: rgb.r,
+                green: rgb.g,
+                blue: rgb.b,
+                kelvin: Int(color.kelvin)
+            )
+            if !self.isEffectAnimating(id) && (!self.commandPendingIDs.contains(id) || matches) {
                 device.isOn = isOn
-                device.brightness = Double(color.brightness) / 65535.0
+                device.brightness = brightness
                 device.kelvin = Int(color.kelvin)
-                let h = Double(color.hue) / 65535.0
-                let s = Double(color.saturation) / 65535.0
-                device.color = Color(hue: h, saturation: s, brightness: 1.0)
+                device.color = reportedColor
             }
-            self.markSeen(device)
+            self.markSeen(device, confirmsPendingCommand: matches)
         }
     }
 
@@ -1158,6 +1248,7 @@ extension LightManager: LIFXClientDelegate {
         Task { @MainActor in
             for device in self.devices where device.brand == .lifx && self.commandPendingIDs.contains(device.id) {
                 self.commandPendingIDs.remove(device.id)
+                self.expectedStates.removeValue(forKey: device.id)
                 self.commandStates[device.id] = DeviceCommandState(phase: .failed, summary: "LIFX rejected the command", updatedAt: Date())
             }
             self.publishError("LIFX command failed: \(error)")
@@ -1192,18 +1283,27 @@ extension LightManager: GoveeClientDelegate {
         Task { @MainActor in
             let id = "govee:\(deviceID)"
             guard let device = self.device(withID: id) else { return }
-            // Govee lights can report pre-command state for a few seconds after
-            // a change; don't let that clobber optimistic local state while
-            // commands are pending or an effect is animating this light.
-            if !self.isEffectAnimating(id) && !self.commandPendingIDs.contains(id) {
+            if self.isScanning { self.scanResponseCount += 1 }
+            let normalizedBrightness = Double(brightness) / 100.0
+            let red = Double(r) / 255.0
+            let green = Double(g) / 255.0
+            let blue = Double(b) / 255.0
+            let matches = self.reportedStateMatchesExpectation(
+                deviceID: id,
+                isOn: isOn,
+                brightness: normalizedBrightness,
+                red: red,
+                green: green,
+                blue: blue,
+                kelvin: kelvin
+            )
+            if !self.isEffectAnimating(id) && (!self.commandPendingIDs.contains(id) || matches) {
                 device.isOn = isOn
-                device.brightness = Double(brightness) / 100.0
+                device.brightness = normalizedBrightness
                 device.kelvin = kelvin > 0 ? kelvin : device.kelvin
-                device.color = Color(red: Double(r) / 255.0,
-                                     green: Double(g) / 255.0,
-                                     blue: Double(b) / 255.0)
+                device.color = Color(red: red, green: green, blue: blue)
             }
-            self.markSeen(device)
+            self.markSeen(device, confirmsPendingCommand: matches)
         }
     }
 
@@ -1211,6 +1311,7 @@ extension LightManager: GoveeClientDelegate {
         Task { @MainActor in
             for device in self.devices where device.brand == .govee && self.commandPendingIDs.contains(device.id) {
                 self.commandPendingIDs.remove(device.id)
+                self.expectedStates.removeValue(forKey: device.id)
                 self.commandStates[device.id] = DeviceCommandState(phase: .failed, summary: "Govee rejected the command", updatedAt: Date())
             }
             self.publishError("Govee command failed: \(error)")
@@ -1364,6 +1465,11 @@ extension LightManager {
             sunsetHour = config.sunsetHour
             sunsetMinute = config.sunsetMinute
             customBrightnessPresets = sanitizedPresets(config.brightnessPresets)
+            for device in devices {
+                device.customName = customNames[device.id]
+            }
+            sortDevices()
+            reconcileFavoriteOrder()
             persistAllConfiguration()
             reportImportMatchStatus(roomCount: rooms.count)
             return true
@@ -1677,8 +1783,22 @@ extension LightManager {
     }
 
     func nextRunDescription(for entry: ScheduleEntry) -> String {
-        guard let today = scheduledOccurrenceToday(for: entry, relativeTo: Date()) else { return "No next run" }
-        let next = today > Date() ? today : Calendar.current.date(byAdding: .day, value: 1, to: today) ?? today
+        let now = Date()
+        let calendar = Calendar.current
+        var day = calendar.startOfDay(for: now)
+        var next: Date?
+        for _ in 0..<8 {
+            let weekday = calendar.component(.weekday, from: day)
+            if entry.weekdays.isEmpty || entry.weekdays.contains(weekday),
+               let occurrence = scheduledOccurrenceToday(for: entry, relativeTo: day),
+               occurrence > now {
+                next = occurrence
+                break
+            }
+            guard let followingDay = calendar.date(byAdding: .day, value: 1, to: day) else { break }
+            day = followingDay
+        }
+        guard let next else { return "No next run" }
         return "Next runs \(next.formatted(.relative(presentation: .named))) at \(next.formatted(date: .omitted, time: .shortened))"
     }
 

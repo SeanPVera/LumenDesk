@@ -149,6 +149,7 @@ final class LightManager: ObservableObject {
     }
     private var effectRuns: [LightScope: EffectRun] = [:]
     private var audioLevel: Double = 0
+    private var audioSnapshot = AudioReactiveSnapshot()
     private let audioLevelMonitor = AudioLevelMonitor()
     private var undoStack: [[DeviceState]] = []
     private var redoStack: [[DeviceState]] = []
@@ -867,7 +868,10 @@ final class LightManager: ObservableObject {
         }
 
         if effect.isAudioReactive {
-            audioLevelMonitor.onLevel = { [weak self] level in self?.audioLevel = level }
+            audioLevelMonitor.onSnapshot = { [weak self] snapshot in
+                self?.audioLevel = snapshot.level
+                self?.audioSnapshot = snapshot
+            }
             audioLevelMonitor.requestAccessAndStart { [weak self] started in
                 guard let self else { return }
                 if started {
@@ -925,7 +929,9 @@ final class LightManager: ObservableObject {
         guard !effectRuns.values.contains(where: { $0.effect.isAudioReactive }) else { return }
         audioLevelMonitor.stop()
         audioLevelMonitor.onLevel = nil
+        audioLevelMonitor.onSnapshot = nil
         audioLevel = 0
+        audioSnapshot = AudioReactiveSnapshot()
     }
 
     /// True when the device belongs to a currently animating effect run.
@@ -969,8 +975,21 @@ final class LightManager: ObservableObject {
                 color = (spark ? palette[0] : palette[(index % max(1, palette.count - 1)) + 1]).color
                 brightness = spark ? Double.random(in: 0.72...1) : Double.random(in: 0.16...0.34)
             case .musicPulse:
-                color = palette[(index + Int(effectPhase * 4)) % palette.count].color
-                brightness = 0.16 + pow(audioLevel, 0.62) * 0.84
+                let audio = audioSnapshot
+                let paletteOffset = Int(effectPhase * (3 + audio.energy * 7) + audio.beat * 5)
+                let base = palette[(index + paletteOffset) % palette.count].color
+                let hue = (audio.mood * 0.18 + Double(index) / Double(max(1, targets.count)) + effectPhase * 0.025).truncatingRemainder(dividingBy: 1)
+                if audio.kick > 0.35 {
+                    color = palette[0].color
+                } else if audio.snare > 0.28 {
+                    color = Color(hue: hue, saturation: 0.55 + audio.highs * 0.35, brightness: 1)
+                } else if audio.percussion > 0.25 {
+                    color = palette[min(palette.count - 1, 2)].color
+                } else {
+                    color = base
+                }
+                let shimmer = sin(effectPhase * 8 + Double(index) * 1.7) * audio.highs * 0.12
+                brightness = 0.10 + pow(max(audioLevel, audio.energy), 0.58) * 0.58 + audio.beat * 0.22 + audio.kick * 0.16 + audio.percussion * 0.10 + shimmer
             case .prismShuffle:
                 color = palette.randomElement()?.color ?? color
                 brightness = Double.random(in: 0.62...0.92)

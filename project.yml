@@ -23,7 +23,8 @@ targets:
         CFBundleVersion: "1"
         LSMinimumSystemVersion: "13.0"
         NSLocalNetworkUsageDescription: LumenDesk discovers and controls LIFX and Govee smart bulbs on your local network.
-        NSMicrophoneUsageDescription: LumenDesk listens to audio levels to animate music-reactive lighting effects.
+        NSMicrophoneUsageDescription: LumenDesk analyzes music and room audio levels locally to animate music-reactive lighting effects.
+        NSScreenCaptureUsageDescription: LumenDesk can capture system audio from music apps locally to drive music-reactive lightshows.
         NSBonjourServices:
           - _lifx._udp
           - _hap._tcp

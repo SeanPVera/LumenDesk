@@ -368,7 +368,7 @@ struct LumenDeskSettingsView: View {
             }.padding(20).tabItem { Label("Advanced", systemImage: "slider.horizontal.3") }
 
             Form {
-                Label("Audio-reactive effects process live level measurements locally. LumenDesk does not record or retain microphone audio.", systemImage: "mic.badge.plus")
+                Label("Audio-reactive effects analyze Apple Music/system audio and microphone calibration measurements locally. LumenDesk does not record or retain audio.", systemImage: "mic.badge.plus")
                 Toggle("I understand the microphone behavior", isOn: $audioAcknowledged)
                 Button("Open Microphone Privacy Settings") {
                     PlatformOpener.openSettings(macPane: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")

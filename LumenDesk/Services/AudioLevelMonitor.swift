@@ -22,6 +22,10 @@ struct AudioReactiveSnapshot {
 final class AudioLevelMonitor {
     private let engine = AVAudioEngine()
     private var analyzer = MusicFeatureAnalyzer(sourceDescription: "Microphone calibration")
+    // Mic taps deliver on the AVAudioEngine render thread while system-audio
+    // taps deliver on their own capture queue; serialize both onto this queue
+    // before touching the analyzer's mutable state.
+    private let analysisQueue = DispatchQueue(label: "LumenDesk.audioAnalysis")
     var onLevel: ((Double) -> Void)?
     var onSnapshot: ((AudioReactiveSnapshot) -> Void)?
 
@@ -94,10 +98,12 @@ final class AudioLevelMonitor {
     }
 
     private func consume(_ buffer: AVAudioPCMBuffer) {
-        guard let snapshot = analyzer.analyze(buffer) else { return }
-        DispatchQueue.main.async { [weak self] in
-            self?.onLevel?(snapshot.level)
-            self?.onSnapshot?(snapshot)
+        analysisQueue.async { [weak self] in
+            guard let self, let snapshot = self.analyzer.analyze(buffer) else { return }
+            DispatchQueue.main.async { [weak self] in
+                self?.onLevel?(snapshot.level)
+                self?.onSnapshot?(snapshot)
+            }
         }
     }
 

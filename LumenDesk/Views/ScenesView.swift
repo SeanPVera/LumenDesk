@@ -72,7 +72,7 @@ struct ScenesView: View {
                 pendingAudioEffect = nil
             }
         } message: {
-            Text("LumenDesk requests microphone access to measure live audio levels locally. Audio is never recorded or retained, and the active effect remains visible with a one-click Stop control.")
+            Text("LumenDesk analyzes Apple Music/system audio when available and uses the microphone for room calibration. Audio is processed locally, never recorded or retained, and the active effect remains visible with a one-click Stop control.")
         }
         .onChange(of: section) { _ in
             searchText = ""

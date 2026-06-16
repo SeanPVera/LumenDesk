@@ -25,7 +25,9 @@
     <key>NSHumanReadableCopyright</key>
     <string>LumenDesk</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>LumenDesk listens to audio levels to animate music-reactive lighting effects.</string>
+    <string>LumenDesk analyzes music and room audio levels locally to animate music-reactive lighting effects.</string>
+    <key>NSScreenCaptureUsageDescription</key>
+    <string>LumenDesk can capture system audio from music apps locally to drive music-reactive lightshows.</string>
     <key>NSLocalNetworkUsageDescription</key>
     <string>LumenDesk discovers and controls LIFX and Govee smart bulbs on your local network.</string>
     <key>NSBonjourServices</key>

@@ -20,4 +20,4 @@ jobs:
 
     - name: Build using xcodebuild
       run: |
-        xcodebuild -scheme "YourSchemeName" -sdk iphonesimulator build
+        xcodebuild -scheme "LumenDesk" -sdk iphonesimulator build

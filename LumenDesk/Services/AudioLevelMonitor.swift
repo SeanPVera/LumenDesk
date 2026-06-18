@@ -1,6 +1,7 @@
 import AVFoundation
 import Accelerate
 #if os(macOS)
+import CoreGraphics
 import ScreenCaptureKit
 #endif
 
@@ -202,10 +203,30 @@ private final class SystemAudioCapture: NSObject, SCStreamOutput {
     private var stream: SCStream?
     private let onBuffer: (AVAudioPCMBuffer) -> Void
 
+    // Set once we've shown the Screen Recording prompt this launch. macOS only
+    // grants a fresh permission to the process after the app relaunches, so
+    // within a session we prompt at most once and otherwise fall back to
+    // mic-only calibration instead of re-prompting on every Soundcheck start.
+    private static var didRequestScreenAccess = false
+
     init(onBuffer: @escaping (AVAudioPCMBuffer) -> Void) { self.onBuffer = onBuffer }
 
     func start(completion: @escaping (Bool) -> Void) {
         guard #available(macOS 13.0, *) else { completion(false); return }
+        // System-audio capture goes through ScreenCaptureKit, which requires
+        // Screen Recording permission. Querying SCShareableContent while that
+        // access is missing is what re-triggers the system prompt on every
+        // start, so gate it behind a non-prompting preflight. When access isn't
+        // granted yet, request it a single time and fall back to mic-only; the
+        // grant takes effect on the next launch, where preflight will pass.
+        guard CGPreflightScreenCaptureAccess() else {
+            if !Self.didRequestScreenAccess {
+                Self.didRequestScreenAccess = true
+                DispatchQueue.global(qos: .userInitiated).async { _ = CGRequestScreenCaptureAccess() }
+            }
+            completion(false)
+            return
+        }
         Task {
             do {
                 let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)

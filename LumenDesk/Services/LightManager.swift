@@ -861,7 +861,7 @@ final class LightManager: ObservableObject {
         let begin: () -> Void = { [weak self] in
             guard let self, self.effectRuns[scope] === run else { return }
             self.runEffectFrame(run)
-            run.timer = Timer.scheduledTimer(withTimeInterval: 0.22, repeats: true) { [weak self, weak run] _ in
+            run.timer = Timer.scheduledTimer(withTimeInterval: effect.frameInterval, repeats: true) { [weak self, weak run] _ in
                 Task { @MainActor in
                     guard let self, let run else { return }
                     self.runEffectFrame(run)

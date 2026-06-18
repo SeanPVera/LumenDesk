@@ -521,8 +521,8 @@ struct SceneEditorView: View {
     }
 
     private func snapshotBinding(_ id: String) -> Binding<DeviceSnapshot>? {
-        guard draft.snapshots[id] != nil else { return nil }
-        return Binding(get: { draft.snapshots[id]! }, set: { draft.snapshots[id] = $0 })
+        guard let initial = draft.snapshots[id] else { return nil }
+        return Binding(get: { draft.snapshots[id] ?? initial }, set: { draft.snapshots[id] = $0 })
     }
     private func diffText(id: String, value: DeviceSnapshot) -> String {
         guard let before = original.snapshots[id] else { return "New light" }

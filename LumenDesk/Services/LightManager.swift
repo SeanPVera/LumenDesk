@@ -382,12 +382,14 @@ final class LightManager: ObservableObject {
         let totalMinutes: Int
         switch entry.action {
         case .atSunrise:
-            totalMinutes = max(0, min(1439, sunriseHour * 60 + sunriseMinute + entry.offsetMinutes))
+            totalMinutes = sunriseHour * 60 + sunriseMinute + entry.offsetMinutes
         case .atSunset:
-            totalMinutes = max(0, min(1439, sunsetHour * 60 + sunsetMinute + entry.offsetMinutes))
+            totalMinutes = sunsetHour * 60 + sunsetMinute + entry.offsetMinutes
         default:
             totalMinutes = max(0, min(1439, entry.hour * 60 + entry.minute))
         }
+        // Solar-relative offsets can push past midnight in either direction;
+        // let Calendar roll the date rather than clamping into the wrong hour.
         return cal.date(byAdding: .minute, value: totalMinutes, to: cal.startOfDay(for: date))
     }
 
@@ -972,7 +974,7 @@ final class LightManager: ObservableObject {
                 brightness = Double.random(in: 0.38...0.76)
             case .twinkle:
                 let spark = Double.random(in: 0...1) > 0.78
-                color = (spark ? palette[0] : palette[(index % max(1, palette.count - 1)) + 1]).color
+                color = (spark ? palette[0] : palette[(index + 1) % palette.count]).color
                 brightness = spark ? Double.random(in: 0.72...1) : Double.random(in: 0.16...0.34)
             case .musicPulse:
                 let audio = audioSnapshot

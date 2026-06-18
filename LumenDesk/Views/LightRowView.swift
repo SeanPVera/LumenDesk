@@ -145,7 +145,7 @@ struct LightRowView: View {
             metadataRow
             Text(lastSeenText)
                 .font(.caption2)
-                .foregroundStyle(device.isStale ? Lumen.warning : .tertiary)
+                .foregroundStyle(device.isStale ? AnyShapeStyle(Lumen.warning) : AnyShapeStyle(.tertiary))
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(deviceInfoAccessibilityLabel)

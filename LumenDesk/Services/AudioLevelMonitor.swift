@@ -241,14 +241,15 @@ private final class SystemAudioCapture: NSObject, SCStreamOutput {
 
 private extension CMSampleBuffer {
     func asPCMBuffer() throws -> AVAudioPCMBuffer? {
-        guard let formatDescription, let format = AVAudioFormat(cmAudioFormatDescription: formatDescription) else { return nil }
+        guard let formatDescription else { return nil }
+        let format = AVAudioFormat(cmAudioFormatDescription: formatDescription)
         return try withAudioBufferList { audioBufferList, _ in
             guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(numSamples)) else { return nil }
             buffer.frameLength = buffer.frameCapacity
             let source = audioBufferList.unsafePointer.pointee.mBuffers
             guard let sourceData = source.mData, let destinationData = buffer.floatChannelData?[0] else { return nil }
             let sourcePointer = sourceData.assumingMemoryBound(to: Float.self)
-            destinationData.assign(from: sourcePointer, count: Int(buffer.frameLength))
+            destinationData.update(from: sourcePointer, count: Int(buffer.frameLength))
             return buffer
         }
     }

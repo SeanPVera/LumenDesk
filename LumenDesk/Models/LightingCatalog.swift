@@ -46,6 +46,23 @@ struct LightingEffect: Identifiable, Hashable {
     let speed: Double
     let isAudioReactive: Bool
     let isHighEnergy: Bool
+
+    /// How often the animation timer fires for this effect, in seconds.
+    ///
+    /// `speed` only advances the animation *phase* per frame; it does not set
+    /// how often a new frame is actually pushed to the lights. Most effects
+    /// read best at a calm cadence, but the audio-reactive and party effects
+    /// need a much faster tick so beats and color shuffles feel snappy instead
+    /// of sluggish. The floor stays above the 80 ms command debounce in
+    /// `LightManager.enqueueCommand` so frames aren't coalesced away before
+    /// they reach the lights.
+    var frameInterval: TimeInterval {
+        switch style {
+        case .musicPulse: return 0.10   // Soundcheck: track beats closely
+        case .prismShuffle: return 0.12 // Prism Shuffle: instant party energy
+        default: return 0.22
+        }
+    }
 }
 
 enum LightingCatalog {

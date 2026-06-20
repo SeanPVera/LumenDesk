@@ -141,6 +141,9 @@ final class LightManager: ObservableObject {
         var phase: Double = 0
         var snapshot: [DeviceState]
         var timer: Timer?
+        // Last time this run pushed a frame. Audio-reactive runs render off the
+        // live audio stream and use this to throttle to the effect's cadence.
+        var lastRender: Date = .distantPast
         init(effect: LightingEffect, scope: LightScope, snapshot: [DeviceState]) {
             self.effect = effect
             self.scope = scope
@@ -597,7 +600,7 @@ final class LightManager: ObservableObject {
         commandStates[deviceID] = DeviceCommandState(phase: .queued, summary: summary, updatedAt: Date())
     }
 
-    private func enqueueCommand(for device: LightDevice, coalescingKey: String, summary: String, operation: @escaping @MainActor () -> Void) {
+    private func enqueueCommand(for device: LightDevice, coalescingKey: String, summary: String, debounce: TimeInterval = 0.08, operation: @escaping @MainActor () -> Void) {
         if isDemoMode {
             markPending(device.id, summary: summary)
             let demoKey = "\(device.id)|\(coalescingKey)"
@@ -615,7 +618,9 @@ final class LightManager: ObservableObject {
         let taskKey = "\(device.id)|\(coalescingKey)"
         commandTasks[taskKey]?.cancel()
         commandTasks[taskKey] = Task { @MainActor [weak self, weak device] in
-            try? await Task.sleep(nanoseconds: 80_000_000)
+            // Effect frames pass debounce 0 so beat-synced colors land with no
+            // added latency; interactive commands keep the coalescing window.
+            if debounce > 0 { try? await Task.sleep(nanoseconds: UInt64(debounce * 1_000_000_000)) }
             guard !Task.isCancelled, let self, let device else { return }
             self.commandStates[device.id] = DeviceCommandState(phase: .sending, summary: summary, updatedAt: Date())
             operation()
@@ -858,7 +863,8 @@ final class LightManager: ObservableObject {
             if device.brand == .govee { sendBrightness(device, value: 1.0) }
         }
 
-        let begin: () -> Void = { [weak self] in
+        // Non-audio effects animate on a fixed timer at the effect's cadence.
+        let startTimer: () -> Void = { [weak self] in
             guard let self, self.effectRuns[scope] === run else { return }
             self.runEffectFrame(run)
             run.timer = Timer.scheduledTimer(withTimeInterval: effect.frameInterval, repeats: true) { [weak self, weak run] _ in
@@ -870,14 +876,28 @@ final class LightManager: ObservableObject {
         }
 
         if effect.isAudioReactive {
+            // Audio-reactive effects render directly off each incoming audio
+            // snapshot (~50 Hz) rather than polling a timer, so beats reach the
+            // lights as they happen instead of being missed between ticks. Each
+            // active audio run is throttled to its own frameInterval so the
+            // analysis stream can't flood the bulbs. State is updated every
+            // snapshot so a throttled frame still renders the latest audio.
             audioLevelMonitor.onSnapshot = { [weak self] snapshot in
-                self?.audioLevel = snapshot.level
-                self?.audioSnapshot = snapshot
+                guard let self else { return }
+                self.audioLevel = snapshot.level
+                self.audioSnapshot = snapshot
+                let now = Date()
+                for audioRun in self.effectRuns.values where audioRun.effect.isAudioReactive {
+                    guard now.timeIntervalSince(audioRun.lastRender) >= audioRun.effect.frameInterval else { continue }
+                    audioRun.lastRender = now
+                    self.runEffectFrame(audioRun)
+                }
             }
             audioLevelMonitor.requestAccessAndStart { [weak self] started in
                 guard let self else { return }
                 if started {
-                    begin()
+                    // Prime one frame now; the rest are driven by onSnapshot.
+                    if self.effectRuns[scope] === run { self.runEffectFrame(run) }
                 } else {
                     if self.effectRuns[scope] === run {
                         self.effectRuns[scope] = nil
@@ -888,7 +908,7 @@ final class LightManager: ObservableObject {
                 }
             }
         } else {
-            begin()
+            startTimer()
         }
     }
 
@@ -1014,7 +1034,7 @@ final class LightManager: ObservableObject {
             device.brightness = max(0.05, min(1, brightness))
             switch device.brand {
             case .lifx:
-                sendColor(device, color: color) // brightness rides inside the HSBK packet
+                sendColor(device, color: color, debounce: 0) // brightness rides inside the HSBK packet; effect frames send immediately
             case .govee:
                 sendGoveeEffectFrame(device, color: color, brightness: device.brightness)
             }
@@ -1028,7 +1048,7 @@ final class LightManager: ObservableObject {
     /// the frame brightness so each frame is a single atomic command; the
     /// device's own brightness is set to 100% in `startEffect`.
     private func sendGoveeEffectFrame(_ device: LightDevice, color: Color, brightness: Double) {
-        enqueueCommand(for: device, coalescingKey: "color", summary: "Effect frame") { [weak self, weak device] in
+        enqueueCommand(for: device, coalescingKey: "color", summary: "Effect frame", debounce: 0) { [weak self, weak device] in
             guard let self, let device else { return }
             let rgb = color.rgbComponents
             let scale = max(0, min(1, brightness))
@@ -1082,9 +1102,9 @@ final class LightManager: ObservableObject {
         }
     }
 
-    private func sendColor(_ device: LightDevice, color: Color) {
+    private func sendColor(_ device: LightDevice, color: Color, debounce: TimeInterval = 0.08) {
         expectColor(device, color: color)
-        enqueueCommand(for: device, coalescingKey: "color", summary: "Changing color") { [weak self, weak device] in
+        enqueueCommand(for: device, coalescingKey: "color", summary: "Changing color", debounce: debounce) { [weak self, weak device] in
             guard let self, let device else { return }
             switch device.brand {
             case .lifx:

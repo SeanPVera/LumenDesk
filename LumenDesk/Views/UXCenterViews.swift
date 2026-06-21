@@ -317,7 +317,20 @@ struct ScenePreviewView: View {
             Toggle("Allow this scene to turn lights off", isOn: $allowTurningOff)
             if !preview.unreachable.isEmpty { Label("Offline lights will be attempted and listed for targeted retry.", systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(Lumen.warning) }
             List(preview.affected) { device in
-                HStack { Circle().fill(device.color).frame(width: 14, height: 14); Text(device.label); Spacer(); if preview.unchanged.contains(where: { $0.id == device.id }) { Text("Unchanged").foregroundStyle(.secondary) }; if device.isStale { Text("Offline").foregroundStyle(Lumen.warning) } }
+                HStack {
+                    Circle().fill(device.color).frame(width: 14, height: 14)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(device.label)
+                        if let snap = scene.snapshots[device.id] {
+                            Text("\(device.isOn ? "On" : "Off") \(Int(device.brightness * 100))% → \(snap.isOn ? "On" : "Off") \(Int(snap.brightness * 100))% · \(snap.kelvin)K")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Spacer()
+                    if preview.unchanged.contains(where: { $0.id == device.id }) { Text("Unchanged").foregroundStyle(.secondary) }
+                    if device.isStale { Text("Offline").foregroundStyle(Lumen.warning) }
+                }
             }.listStyle(.inset).frame(minHeight: 180)
             if let result = manager.lastSceneResult, result.sceneName == scene.name, !result.failedIDs.isEmpty {
                 HStack { Label("\(result.failedIDs.count) light(s) need retry", systemImage: "wifi.slash").foregroundStyle(Lumen.warning); Spacer(); Button("Retry Failed Lights") { manager.retryLastSceneFailures() } }

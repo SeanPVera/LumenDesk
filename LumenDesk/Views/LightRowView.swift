@@ -146,6 +146,15 @@ struct LightRowView: View {
             Text(lastSeenText)
                 .font(.caption2)
                 .foregroundStyle(device.isStale ? AnyShapeStyle(Lumen.warning) : AnyShapeStyle(.tertiary))
+            if let recent = manager.recentActivitySummary(for: device) {
+                Label(recent, systemImage: "clock.arrow.circlepath")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
+            if device.isStale {
+                staleRecoveryRow
+            }
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(deviceInfoAccessibilityLabel)
@@ -214,6 +223,23 @@ struct LightRowView: View {
     private var lastSeenText: String {
         let relative = device.lastSeen.formatted(.relative(presentation: .named))
         return device.isStale ? "Last seen \(relative)" : "Confirmed \(relative)"
+    }
+
+    private var staleRecoveryRow: some View {
+        HStack(spacing: 6) {
+            Button("Troubleshoot") { showingInspector = true }
+                .controlSize(.mini)
+            Button("Retry") { manager.retry(device) }
+                .controlSize(.mini)
+            Button("Rescan") { manager.scan() }
+                .controlSize(.mini)
+            Text(device.brand == .govee ? "Check LAN Control, bulb power, and Wi‑Fi." : "Check bulb power and same Wi‑Fi/subnet.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Troubleshoot \(device.label). Retry, rescan, or check power and network.")
     }
 
     private var deviceInfoAccessibilityLabel: String {

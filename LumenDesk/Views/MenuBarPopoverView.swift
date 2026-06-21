@@ -27,6 +27,11 @@ struct MenuBarPopoverView: View {
             Divider()
             ScrollView {
                 VStack(spacing: 0) {
+                    emergencyRow
+                    if !manager.favoriteScenes.isEmpty {
+                        favoriteScenesRow
+                        Divider().padding(.horizontal, 12)
+                    }
                     globalRow
                     if !manager.rooms.isEmpty || !manager.unassignedDevices.isEmpty {
                         Divider().padding(.horizontal, 12)
@@ -44,6 +49,43 @@ struct MenuBarPopoverView: View {
         }
         .frame(width: 280)
         .background(LumenBackground(glow: false))
+    }
+
+    private var emergencyRow: some View {
+        HStack(spacing: 8) {
+            Button {
+                manager.setAllPower(on: false)
+            } label: {
+                Label("All Off", systemImage: "power")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.red)
+            .disabled(manager.devices.isEmpty)
+            ForEach([0.1, 0.3, 0.6, 1.0], id: \.self) { value in
+                Button("\(Int(value * 100))%") { manager.setAllBrightness(value) }
+                    .controlSize(.mini)
+                    .disabled(manager.devices.isEmpty)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+    }
+
+    private var favoriteScenesRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Favorite Scenes").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(manager.favoriteScenes) { scene in
+                        Button(scene.name) { manager.applyScene(scene) }
+                            .controlSize(.small)
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
     }
 
     private var menuBarHeader: some View {

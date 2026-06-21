@@ -19,6 +19,7 @@ struct ContentView: View {
     @State private var showingCompliance = false
     @State private var showingDiscoveryInbox = false
     @State private var showingMissedAutomations = false
+    @State private var showingIdentifyMode = false
     @AppStorage(AppPreferenceKey.quietInterface) private var quietInterface = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -51,6 +52,10 @@ struct ContentView: View {
                 } else if searchScope == .scenes {
                     sceneSearchResults
                 } else {
+                    NowAutomationDashboard(showingMissedAutomations: $showingMissedAutomations)
+                        .padding(.horizontal, 16)
+                        .padding(.top, density == .compact ? 6 : 10)
+
                     FavoritesStripView()
                         .padding(.horizontal, 16)
                         .padding(.top, density == .compact ? 6 : 12)
@@ -74,6 +79,7 @@ struct ContentView: View {
             .sheet(isPresented: $showingCompliance) { ComplianceSuiteView().environmentObject(manager) }
             .sheet(isPresented: $showingDiscoveryInbox) { DiscoveryInboxView().environmentObject(manager) }
             .sheet(isPresented: $showingMissedAutomations) { MissedAutomationsView().environmentObject(manager) }
+            .sheet(isPresented: $showingIdentifyMode) { IdentifyLightsView().environmentObject(manager) }
 
             if selectionMode && !selectedIDs.isEmpty {
                 VStack(spacing: 6) {
@@ -170,12 +176,6 @@ struct ContentView: View {
                     ProgressView().controlSize(.small)
                         .help(manager.scanPhase)
                 }
-                Toggle(isOn: $auroraFireflies) {
-                    Image(systemName: "sparkles")
-                }
-                .toggleStyle(.button)
-                .controlSize(.small)
-                .help("Aurora Firefly Mode — whimsical ambient glow")
                 Button {
                     if manager.napPhase != .inactive { manager.cancelNapMode() } else { manager.startNapMode() }
                 } label: {
@@ -204,10 +204,6 @@ struct ContentView: View {
                             .disabled(selectedIDs.isEmpty)
                     }
                 }
-                Button { showingShortcuts = true } label: {
-                    Label("Shortcuts", systemImage: "keyboard")
-                }
-                .help("Show keyboard shortcuts")
                 Button { showingScenes = true } label: {
                     Label("Library", systemImage: "wand.and.stars")
                 }
@@ -224,11 +220,12 @@ struct ContentView: View {
                     Label("Scan", systemImage: "arrow.clockwise")
                 }
                 .keyboardShortcut("r", modifiers: .command)
-                Button { showingScenes = true } label: { Label("Scenes", systemImage: "wand.and.stars") }
-                    .keyboardShortcut("s", modifiers: [.command, .shift])
                 Menu {
                     Button { newRoomName = ""; showingNewRoom = true } label: { Label("New Room", systemImage: "rectangle.stack.badge.plus") }
                     Button { selectionMode.toggle(); if !selectionMode { selectedIDs.removeAll() } } label: { Label(selectionMode ? "Finish Selection" : "Select Lights", systemImage: "checkmark.circle") }
+                    Button { showingIdentifyMode = true } label: { Label("Identify Lights", systemImage: "lightbulb.2") }
+                        .disabled(manager.devices.isEmpty)
+                    Button { showingShortcuts = true } label: { Label("Keyboard Shortcuts", systemImage: "keyboard") }
                     Divider()
                     Picker("Layout", selection: $layoutRaw) { ForEach(WorkspaceLayout.allCases) { Text($0.title).tag($0.rawValue) } }
                     Picker("Density", selection: $densityRaw) { ForEach(InterfaceDensity.allCases) { Text($0.title).tag($0.rawValue) } }
@@ -241,11 +238,13 @@ struct ContentView: View {
                     if !manager.missedAutomations.isEmpty { Button { showingMissedAutomations = true } label: { Label("Missed Automations (\(manager.missedAutomations.count))", systemImage: "clock.badge.exclamationmark") } }
                     if !manager.commandPendingIDs.isEmpty { Button("Cancel Queued Commands") { manager.cancelQueuedCommands() } }
                     Button { showingActivity = true } label: { Label("Activity Log", systemImage: "clock.arrow.circlepath") }
-                    Button { showingShortcuts = true } label: { Label("Keyboard Shortcuts", systemImage: "keyboard") }
                     Divider()
-                    Button { showingParliament = true } label: { Label("Lighting Parliament", systemImage: "building.columns") }
-                    Button { showingEcosystem = true } label: { Label("Firefly Conservatory", systemImage: "ladybug") }
-                    Button { showingCompliance = true } label: { Label("Lumens Compliance", systemImage: "checkmark.seal") }
+                    Menu("Labs") {
+                        Toggle("Aurora Fireflies", isOn: $auroraFireflies)
+                        Button { showingParliament = true } label: { Label("Lighting Parliament", systemImage: "building.columns") }
+                        Button { showingEcosystem = true } label: { Label("Firefly Conservatory", systemImage: "ladybug") }
+                        Button { showingCompliance = true } label: { Label("Lumens Compliance", systemImage: "checkmark.seal") }
+                    }
                 } label: { Label("More", systemImage: "ellipsis.circle") }
                 .menuStyle(.borderlessButton)
             }
@@ -283,6 +282,9 @@ struct ContentView: View {
                 searchBar
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
+                searchSummary
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 8)
             }
         }
         .background(.regularMaterial)
@@ -365,6 +367,25 @@ struct ContentView: View {
                     .controlSize(.small)
             }
         }
+    }
+
+    private var searchSummary: some View {
+        let hidden = max(0, manager.devices.count - visibleDeviceIDs.count)
+        let hiddenSelected = selectedIDs.subtracting(visibleDeviceIDs).count
+        return HStack(spacing: 8) {
+            Label("Showing \(visibleDeviceIDs.count) of \(manager.devices.count) lights", systemImage: "line.3.horizontal.decrease.circle")
+            if !visibleRooms.isEmpty { Text("· \(visibleRooms.count) room\(visibleRooms.count == 1 ? "" : "s")") }
+            if hidden > 0 { Text("· \(hidden) hidden") }
+            if hiddenSelected > 0 { Text("· \(hiddenSelected) selected hidden").foregroundStyle(Lumen.warning) }
+            Spacer()
+            if !searchText.isEmpty || showOnlyOn || showOfflineOnly || vendorFilter != nil {
+                Button("Reset view") { searchText = ""; showOnlyOn = false; showOfflineOnly = false; vendorFilter = nil }
+                    .controlSize(.small)
+            }
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .accessibilityElement(children: .combine)
     }
 
     // MARK: - Layout
@@ -667,6 +688,104 @@ struct ContentView: View {
     }
 }
 
+struct NowAutomationDashboard: View {
+    @EnvironmentObject var manager: LightManager
+    @Binding var showingMissedAutomations: Bool
+
+    private var enabledSchedules: [(Room, ScheduleEntry)] {
+        manager.rooms.flatMap { room in manager.schedules(for: room.id).filter(\.isEnabled).map { (room, $0) } }
+    }
+
+    private var nextSummary: String {
+        if let missed = manager.missedAutomations.first { return "Missed: \(missed.roomName) at \(missed.scheduledAt.formatted(date: .omitted, time: .shortened))" }
+        guard let next = enabledSchedules.sorted(by: { lhs, rhs in
+            lhs.1.hour == rhs.1.hour ? lhs.1.minute < rhs.1.minute : lhs.1.hour < rhs.1.hour
+        }).first else { return "No automations scheduled today" }
+        return "Next: \(next.0.name) · \(next.1.timeString) \(next.1.action.displayName)"
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Label(nextSummary, systemImage: manager.missedAutomations.isEmpty ? "clock" : "clock.badge.exclamationmark")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(manager.missedAutomations.isEmpty ? AnyShapeStyle(.secondary) : AnyShapeStyle(Lumen.warning))
+                .lineLimit(1)
+            Spacer()
+            Text("\(enabledSchedules.count) active")
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.secondary)
+            if !manager.missedAutomations.isEmpty {
+                Button("Review") { showingMissedAutomations = true }
+                    .controlSize(.small)
+            }
+            Button("Pause all") {
+                for room in manager.rooms { manager.setAutomationOverride(for: room.id, duration: .untilResumed) }
+            }
+            .controlSize(.small)
+            .disabled(enabledSchedules.isEmpty)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Lumen.surfaceRaised))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Lumen.hairline, lineWidth: 1))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Automation dashboard. \(nextSummary). \(enabledSchedules.count) active schedules.")
+    }
+}
+
+struct IdentifyLightsView: View {
+    @EnvironmentObject var manager: LightManager
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Label("Identify Lights", systemImage: "lightbulb.2").font(.title3.weight(.semibold))
+                Spacer()
+                Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
+            }
+            Text("Flash each bulb, then rename or assign it while the physical light is obvious.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            ScrollView {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 12)], spacing: 12) {
+                    ForEach(Array(manager.devices.enumerated()), id: \.element.id) { index, device in
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack {
+                                Text("\(index + 1)").font(.title2.bold()).foregroundStyle(Lumen.gold)
+                                VStack(alignment: .leading) {
+                                    Text(device.label).font(.headline).lineLimit(1)
+                                    Text("\(device.brand.displayName) · \(device.address)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                }
+                                Spacer()
+                            }
+                            HStack {
+                                Button("Flash") { manager.identify(device) }.buttonStyle(.borderedProminent)
+                                Button("Retry") { manager.retry(device) }
+                                Menu("Move") {
+                                    Button("Unassigned") { manager.assign(lightID: device.id, toRoom: nil) }
+                                    ForEach(manager.rooms) { room in Button(room.name) { manager.assign(lightID: device.id, toRoom: room.id) } }
+                                }
+                            }
+                            if device.isStale {
+                                Label("Not responding recently", systemImage: "wifi.slash")
+                                    .font(.caption)
+                                    .foregroundStyle(Lumen.warning)
+                            }
+                        }
+                        .padding(12)
+                        .lumenCard(radius: 10)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+        }
+        .padding(20)
+        .sheetFrame(minWidth: 560, idealWidth: 760, minHeight: 440, idealHeight: 620)
+        .background(LumenBackground(glow: false))
+    }
+}
+
 // MARK: - Toast
 
 struct CommandToastView: View {
@@ -714,6 +833,25 @@ struct BulkActionBar: View {
     @EnvironmentObject var manager: LightManager
     @Binding var selectedIDs: Set<String>
     @Binding var selectionMode: Bool
+    @State private var pendingAction: PendingBulkAction?
+
+    private enum PendingBulkAction: Identifiable {
+        case power(Bool), brightness(Double), move(UUID?)
+        var id: String {
+            switch self {
+            case .power(let on): return "power-\(on)"
+            case .brightness(let value): return "brightness-\(value)"
+            case .move(let id): return "move-\(id?.uuidString ?? "none")"
+            }
+        }
+        var title: String {
+            switch self {
+            case .power(let on): return on ? "Turn selected lights on?" : "Turn selected lights off?"
+            case .brightness(let value): return "Set selected brightness to \(Int(value * 100))%?"
+            case .move: return "Move selected lights?"
+            }
+        }
+    }
 
     var body: some View {
         HStack(spacing: 10) {
@@ -723,22 +861,20 @@ struct BulkActionBar: View {
 
             Divider().frame(height: 16).accessibilityHidden(true)
 
-            Button("Turn On") { manager.setPower(deviceIDs: selectedIDs, on: true) }
+            Button("Turn On") { pendingAction = .power(true) }
                 .accessibilityHint("Turns on \(selectedIDs.count) selected light\(selectedIDs.count == 1 ? "" : "s")")
-            Button("Turn Off") { manager.setPower(deviceIDs: selectedIDs, on: false) }
+            Button("Turn Off") { pendingAction = .power(false) }
                 .accessibilityHint("Turns off \(selectedIDs.count) selected light\(selectedIDs.count == 1 ? "" : "s")")
 
             Menu("Move to\u{2026}") {
                 Button("Unassigned") {
-                    manager.assign(lightIDs: selectedIDs, toRoom: nil)
-                    exitSelection()
+                    pendingAction = .move(nil)
                 }
                 if !manager.rooms.isEmpty {
                     Divider()
                     ForEach(manager.rooms) { room in
                         Button(room.name) {
-                            manager.assign(lightIDs: selectedIDs, toRoom: room.id)
-                            exitSelection()
+                            pendingAction = .move(room.id)
                         }
                     }
                 }
@@ -746,15 +882,15 @@ struct BulkActionBar: View {
             .fixedSize()
 
             Menu("Brightness") {
-                Button("100%") { manager.setBrightness(deviceIDs: selectedIDs, value: 1.0) }
-                Button("75%")  { manager.setBrightness(deviceIDs: selectedIDs, value: 0.75) }
-                Button("50%")  { manager.setBrightness(deviceIDs: selectedIDs, value: 0.5) }
-                Button("25%")  { manager.setBrightness(deviceIDs: selectedIDs, value: 0.25) }
-                Button("10%")  { manager.setBrightness(deviceIDs: selectedIDs, value: 0.1) }
+                Button("100%") { pendingAction = .brightness(1.0) }
+                Button("75%")  { pendingAction = .brightness(0.75) }
+                Button("50%")  { pendingAction = .brightness(0.5) }
+                Button("25%")  { pendingAction = .brightness(0.25) }
+                Button("10%")  { pendingAction = .brightness(0.1) }
                 if !manager.customBrightnessPresets.isEmpty {
                     Divider()
                     ForEach(manager.customBrightnessPresets, id: \.self) { value in
-                        Button("Preset \(Int(value * 100))%") { manager.setBrightness(deviceIDs: selectedIDs, value: value) }
+                        Button("Preset \(Int(value * 100))%") { pendingAction = .brightness(value) }
                     }
                 }
                 Divider()
@@ -776,6 +912,12 @@ struct BulkActionBar: View {
         )
         .shadow(color: .black.opacity(0.4), radius: 12, y: 6)
         .frame(maxWidth: 640)
+        .confirmationDialog(pendingAction?.title ?? "Apply bulk action?", item: $pendingAction) { action in
+            Button("Apply to \(selectedIDs.count) selected lights") { apply(action, onlyVisible: false) }
+            Button("Cancel", role: .cancel) {}
+        } message: { action in
+            Text(bulkPreviewMessage(for: action))
+        }
     }
 
     private var currentAverageBrightness: Double {
@@ -787,6 +929,24 @@ struct BulkActionBar: View {
     private func exitSelection() {
         selectedIDs.removeAll()
         selectionMode = false
+    }
+
+    private func bulkPreviewMessage(for action: PendingBulkAction) -> String {
+        let selected = manager.devices.filter { selectedIDs.contains($0.id) }
+        let stale = selected.filter(\.isStale).count
+        let rooms = Dictionary(grouping: selected) { device in manager.rooms.first(where: { $0.lightIDs.contains(device.id) })?.name ?? "Unassigned" }
+            .map { "\($0.key): \($0.value.count)" }
+            .sorted()
+            .joined(separator: " · ")
+        return "\(rooms). \(stale) may be offline. This action is undoable for light state changes."
+    }
+
+    private func apply(_ action: PendingBulkAction, onlyVisible: Bool) {
+        switch action {
+        case .power(let on): manager.setPower(deviceIDs: selectedIDs, on: on)
+        case .brightness(let value): manager.setBrightness(deviceIDs: selectedIDs, value: value)
+        case .move(let roomID): manager.assign(lightIDs: selectedIDs, toRoom: roomID); exitSelection()
+        }
     }
 }
 

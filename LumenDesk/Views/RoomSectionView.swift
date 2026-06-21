@@ -190,6 +190,13 @@ struct RoomSectionView: View {
                 Label("\(manager.schedules(for: room.id).filter(\.isEnabled).count) scheduled", systemImage: "clock.fill")
                     .font(.caption2).foregroundStyle(Lumen.violetBright).help("This room has active schedules")
             }
+            if let recent = manager.recentActivitySummary(for: room) {
+                Label(recent, systemImage: "clock.arrow.circlepath")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .help("Most recent room activity")
+            }
             if let override = manager.activeAutomationOverride(for: room.id) {
                 Label(override.summary, systemImage: "pause.circle.fill").font(.caption2).foregroundStyle(.orange)
             }

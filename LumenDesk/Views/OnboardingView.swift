@@ -21,6 +21,8 @@ struct OnboardingView: View {
     @State private var step: Step = .welcome
     @State private var activeRoomID: UUID? = nil
     @State private var newRoomName: String = ""
+    @AppStorage(AppPreferenceKey.quietInterface) private var quietInterface = false
+    @AppStorage("LumenDesk.auroraFireflies.v1") private var auroraFireflies = true
     @FocusState private var roomFieldFocused: Bool
 
     var body: some View {
@@ -104,6 +106,21 @@ struct OnboardingView: View {
                          "Set it and forget it", "Schedule lights to follow your day, sunrise to bedtime.")
             }
             .padding(.top, 4)
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Choose your interface energy").font(.headline)
+                HStack {
+                    Button("Calm") { quietInterface = true; auroraFireflies = false }
+                    Button("Expressive") { quietInterface = false; auroraFireflies = true }
+                    Button("Minimal") { quietInterface = true; auroraFireflies = false }
+                }
+                .buttonStyle(.bordered)
+                Text("You can change this later in Settings. Calm and Minimal reduce ornamental motion and late-night visual noise.")
+                    .font(.caption)
+                    .foregroundStyle(Lumen.textSecondary)
+            }
+            .padding(14)
+            .lumenCard(fill: Lumen.surfaceRaised)
             Spacer(minLength: 12)
         }
     }

@@ -2047,6 +2047,16 @@ extension LightManager {
         }.joined(separator: "\n")
     }
 
+    func recentActivitySummary(for device: LightDevice) -> String? {
+        activityEvents.first { $0.detail.localizedCaseInsensitiveContains(device.label) || $0.detail.localizedCaseInsensitiveContains(device.id) }
+            .map { "\($0.title) · \($0.date.formatted(.relative(presentation: .named)))" }
+    }
+
+    func recentActivitySummary(for room: Room) -> String? {
+        activityEvents.first { $0.detail.localizedCaseInsensitiveContains(room.name) || $0.title.localizedCaseInsensitiveContains(room.name) }
+            .map { "\($0.title) · \($0.date.formatted(.relative(presentation: .named)))" }
+    }
+
     func aggregatePowerState(for lights: [LightDevice]) -> AggregatePowerState {
         let on = lights.filter(\.isOn).count
         if on == 0 { return .off }

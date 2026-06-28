@@ -912,7 +912,14 @@ struct BulkActionBar: View {
         )
         .shadow(color: .black.opacity(0.4), radius: 12, y: 6)
         .frame(maxWidth: 640)
-        .confirmationDialog(pendingAction?.title ?? "Apply bulk action?", item: $pendingAction) { action in
+        .confirmationDialog(
+            pendingAction?.title ?? "Apply bulk action?",
+            isPresented: Binding(
+                get: { pendingAction != nil },
+                set: { if !$0 { pendingAction = nil } }
+            ),
+            presenting: pendingAction
+        ) { action in
             Button("Apply to \(selectedIDs.count) selected lights") { apply(action, onlyVisible: false) }
             Button("Cancel", role: .cancel) {}
         } message: { action in

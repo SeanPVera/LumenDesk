@@ -187,7 +187,7 @@ private final class MusicFeatureAnalyzer {
         // short refractory window so a single hit isn't counted repeatedly.
         let novelty = max(kick, snare * 0.85, percussion * 0.7)
         noveltyBaseline = noveltyBaseline * 0.95 + novelty * 0.05
-        let isBeat = novelty > max(0.18, noveltyBaseline * 1.6) && beatCooldown == 0
+        let isBeat = novelty > max(0.12, noveltyBaseline * 1.4) && beatCooldown == 0
         let beat: Double
         if isBeat {
             beat = novelty
@@ -251,30 +251,17 @@ private final class SystemAudioCapture: NSObject, SCStreamOutput {
     private var stream: SCStream?
     private let onBuffer: (AVAudioPCMBuffer) -> Void
 
-    // Set once we've shown the Screen Recording prompt this launch. macOS only
-    // grants a fresh permission to the process after the app relaunches, so
-    // within a session we prompt at most once and otherwise fall back to
-    // mic-only calibration instead of re-prompting on every Soundcheck start.
-    private static var didRequestScreenAccess = false
-
     init(onBuffer: @escaping (AVAudioPCMBuffer) -> Void) { self.onBuffer = onBuffer }
 
     func start(completion: @escaping (Bool) -> Void) {
         guard #available(macOS 13.0, *) else { completion(false); return }
-        // System-audio capture goes through ScreenCaptureKit, which requires
-        // Screen Recording permission. Querying SCShareableContent while that
-        // access is missing is what re-triggers the system prompt on every
-        // start, so gate it behind a non-prompting preflight. When access isn't
-        // granted yet, request it a single time and fall back to mic-only; the
-        // grant takes effect on the next launch, where preflight will pass.
-        guard CGPreflightScreenCaptureAccess() else {
-            if !Self.didRequestScreenAccess {
-                Self.didRequestScreenAccess = true
-                DispatchQueue.global(qos: .userInitiated).async { _ = CGRequestScreenCaptureAccess() }
-            }
-            completion(false)
-            return
-        }
+        // System-audio capture goes through ScreenCaptureKit, which requires the
+        // Screen Recording permission. We never prompt for it: Soundcheck works
+        // fully on the microphone, and the ScreenCaptureKit permission flow is
+        // what nagged users repeatedly (the grant also doesn't persist for an
+        // unsigned/ad-hoc build). Only use system audio when the user has
+        // ALREADY granted Screen Recording, detected here without prompting.
+        guard CGPreflightScreenCaptureAccess() else { completion(false); return }
         Task {
             do {
                 let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)

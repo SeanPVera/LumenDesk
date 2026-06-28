@@ -141,9 +141,6 @@ final class LightManager: ObservableObject {
         var phase: Double = 0
         var snapshot: [DeviceState]
         var timer: Timer?
-        // Last time this run pushed a frame. Audio-reactive runs render off the
-        // live audio stream and use this to throttle to the effect's cadence.
-        var lastRender: Date = .distantPast
         // Music-reactive show state.
         var lastBeatCount: Int = 0  // beats already consumed for color stepping
         var colorIndex: Int = 0     // palette rotation; advances on each beat
@@ -867,7 +864,9 @@ final class LightManager: ObservableObject {
             if device.brand == .govee { sendBrightness(device, value: 1.0) }
         }
 
-        // Non-audio effects animate on a fixed timer at the effect's cadence.
+        // Effects animate on a fixed timer at the effect's cadence. The timer
+        // guarantees the lights keep moving; audio-reactive effects feed the
+        // latest analysis into `audioSnapshot` (below) for the timer to sample.
         let startTimer: () -> Void = { [weak self] in
             guard let self, self.effectRuns[scope] === run else { return }
             self.runEffectFrame(run)
@@ -880,28 +879,19 @@ final class LightManager: ObservableObject {
         }
 
         if effect.isAudioReactive {
-            // Audio-reactive effects render directly off each incoming audio
-            // snapshot (~50 Hz) rather than polling a timer, so beats reach the
-            // lights as they happen instead of being missed between ticks. Each
-            // active audio run is throttled to its own frameInterval so the
-            // analysis stream can't flood the bulbs. State is updated every
-            // snapshot so a throttled frame still renders the latest audio.
+            // Keep the latest audio snapshot fresh for the render timer to read.
+            // Rendering stays on the timer (rather than driven off the audio
+            // stream) so the lights always animate even if audio delivery
+            // stalls; the analyzer's decaying `pulse` envelope and monotonic
+            // `beatCount` keep the timer-sampled output beat-reactive.
             audioLevelMonitor.onSnapshot = { [weak self] snapshot in
-                guard let self else { return }
-                self.audioLevel = snapshot.level
-                self.audioSnapshot = snapshot
-                let now = Date()
-                for audioRun in self.effectRuns.values where audioRun.effect.isAudioReactive {
-                    guard now.timeIntervalSince(audioRun.lastRender) >= audioRun.effect.frameInterval else { continue }
-                    audioRun.lastRender = now
-                    self.runEffectFrame(audioRun)
-                }
+                self?.audioLevel = snapshot.level
+                self?.audioSnapshot = snapshot
             }
             audioLevelMonitor.requestAccessAndStart { [weak self] started in
                 guard let self else { return }
                 if started {
-                    // Prime one frame now; the rest are driven by onSnapshot.
-                    if self.effectRuns[scope] === run { self.runEffectFrame(run) }
+                    startTimer()
                 } else {
                     if self.effectRuns[scope] === run {
                         self.effectRuns[scope] = nil
@@ -1049,11 +1039,13 @@ final class LightManager: ObservableObject {
                     let moodHue = (hsb.h + (audio.mood - 0.5) * 0.12 + 1).truncatingRemainder(dividingBy: 1)
                     let beatColor = Color(hue: moodHue, saturation: max(0.55, hsb.s), brightness: 1)
                     // Flash to the role accent on a strong hit, else hold the beat color.
-                    color = onset > 0.45 ? accent : beatColor
-                    // Brightness pulses on every beat (shared envelope) plus this
-                    // fixture's own onset, over an energy-driven floor. Peaks clip
-                    // to full for punch; troughs fall back so each hit reads.
-                    brightness = 0.07 + audio.pulse * 0.6 + onset * 0.3 + audio.energy * 0.12
+                    color = onset > 0.4 ? accent : beatColor
+                    // Brightness tracks loudness (compressed so even quiet or
+                    // mic-captured audio clearly lifts the lights) and punches up
+                    // on the shared beat pulse and this fixture's own onset, so
+                    // it always visibly reacts to any audio.
+                    let drive = pow(max(audio.level, audio.energy), 0.55)
+                    brightness = 0.08 + drive * 0.5 + audio.pulse * 0.4 + onset * 0.2
                 }
             case .prismShuffle:
                 color = palette.randomElement()?.color ?? color

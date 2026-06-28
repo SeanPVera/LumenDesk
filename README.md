@@ -556,12 +556,12 @@ If LumenDesk reports a bind failure for Govee, another app may already be listen
 - Confirm system audio is loud enough for the input being monitored.
 - Stop and restart the effect after changing microphone permissions.
 
-### Soundcheck keeps asking for screen recording permission
+### Soundcheck and system audio (Screen Recording)
 
-Soundcheck captures system audio (Apple Music and other apps) through ScreenCaptureKit, which macOS gates behind the **Screen Recording** permission. This is optional — without it, Soundcheck still runs on microphone calibration alone.
+By default Soundcheck reacts to the **microphone**, so it never asks for Screen Recording permission. Optionally, it can analyze **system audio** (Apple Music and other apps) through ScreenCaptureKit, which macOS gates behind the **Screen Recording** permission:
 
-- Grant Screen Recording to LumenDesk in System Settings → Privacy & Security → Screen Recording, then **quit and reopen LumenDesk**. macOS only applies the grant to a freshly launched app, so until you relaunch, Soundcheck falls back to microphone calibration.
-- LumenDesk requests this permission at most once per launch, so it won't keep prompting while you use the app.
+- To enable it, grant Screen Recording to LumenDesk in System Settings → Privacy & Security → Screen Recording, then **quit and reopen LumenDesk**. macOS only applies the grant to a freshly launched app.
+- LumenDesk **never prompts** for this permission and never repeats a request. If it isn't already granted, Soundcheck simply stays on microphone calibration.
 
 ## Protocol references
 

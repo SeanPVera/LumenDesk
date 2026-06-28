@@ -888,17 +888,20 @@ final class LightManager: ObservableObject {
                 self?.audioLevel = snapshot.level
                 self?.audioSnapshot = snapshot
             }
-            audioLevelMonitor.requestAccessAndStart { [weak self] started in
+            audioLevelMonitor.requestAccessAndStart { [weak self] result in
                 guard let self else { return }
-                if started {
+                switch result {
+                case .started:
                     startTimer()
-                } else {
+                case .needsScreenRecording, .unavailable:
+                    // Tear the run down so the lights don't freeze on a started
+                    // effect that has no audio to react to.
                     if self.effectRuns[scope] === run {
                         self.effectRuns[scope] = nil
                         self.activeEffects[scope] = nil
                     }
                     self.stopAudioMonitorIfIdle()
-                    self.publishError("Soundcheck needs microphone access. Enable it in System Settings → Privacy & Security → Microphone.")
+                    self.publishError(self.soundcheckFailureMessage(for: result))
                 }
             }
         } else {
@@ -948,6 +951,21 @@ final class LightManager: ObservableObject {
         audioLevelMonitor.onSnapshot = nil
         audioLevel = 0
         audioSnapshot = AudioReactiveSnapshot()
+    }
+
+    /// User-facing message when Soundcheck can't start its audio source.
+    /// macOS uses system audio (Screen Recording); iOS uses the microphone.
+    private func soundcheckFailureMessage(for result: AudioLevelMonitor.AudioStartResult) -> String {
+        #if os(macOS)
+        switch result {
+        case .needsScreenRecording:
+            return "Soundcheck needs Screen Recording to read Apple Music — grant it in System Settings › Privacy & Security › Screen Recording, then relaunch LumenDesk."
+        case .unavailable, .started:
+            return "Soundcheck couldn't read system audio. Make sure Apple Music (or another app) is playing, then try again."
+        }
+        #else
+        return "Soundcheck needs microphone access. Enable it in System Settings › Privacy & Security › Microphone."
+        #endif
     }
 
     /// True when the device belongs to a currently animating effect run.

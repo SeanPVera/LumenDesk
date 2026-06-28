@@ -17,6 +17,15 @@ struct AudioReactiveSnapshot {
     var energy: Double = 0
     var mood: Double = 0.5
     var confidence: Double = 0
+    // Fast-attack / slow-decay envelope that spikes on every onset — the
+    // "heartbeat" the light show pulses brightness to.
+    var pulse: Double = 0
+    // 0…1 strength of a sustained high-intensity section (a drop/chorus); the
+    // show strobes while this is high.
+    var drop: Double = 0
+    // Monotonic count of detected beats. The renderer steps colors by the
+    // delta so no beat is dropped even when frames are throttled.
+    var beatCount: Int = 0
     var sourceDescription: String = "Microphone calibration"
 }
 
@@ -125,8 +134,18 @@ private final class MusicFeatureAnalyzer {
     private var noiseFloor: Double = 0.01
     private var previousBass: Double = 0
     private var previousHighs: Double = 0
+    private var previousMids: Double = 0
     private var previousEnergy: Double = 0
     private var beatCooldown = 0
+    // Slowly-decaying peak for automatic gain: keeps the show looking the same
+    // whether the music is quiet or cranked.
+    private var peakLevel: Double = 0.02
+    // Adaptive onset threshold and persistent show envelopes / counters.
+    private var noveltyBaseline: Double = 0
+    private var energyBaseline: Double = 0
+    private var pulseEnv: Double = 0
+    private var dropEnv: Double = 0
+    private var beatCount: Int = 0
 
     init(sourceDescription: String) { self.sourceDescription = sourceDescription }
 
@@ -145,32 +164,61 @@ private final class MusicFeatureAnalyzer {
         var meanSquare: Float = 0
         vDSP_measqv(mono, 1, &meanSquare, vDSP_Length(frameCount))
         let rms = Double(sqrt(meanSquare))
-        noiseFloor = noiseFloor * 0.995 + min(rms, noiseFloor + 0.002) * 0.005
-        let level = clamp((rms - noiseFloor) * 9)
-
         let sampleRate = buffer.format.sampleRate
+        let dt = Double(frameCount) / max(1, sampleRate)
+
+        // Track the quiet floor and a slowly-decaying loud peak, then normalize
+        // between them so loudness reads 0…1 regardless of system volume (AGC).
+        noiseFloor = noiseFloor * 0.995 + min(rms, noiseFloor + 0.002) * 0.005
+        peakLevel = max(peakLevel * 0.9992, rms)
+        let level = clamp((rms - noiseFloor) / max(0.015, peakLevel - noiseFloor))
+
         let bass = bandEnergy(samples: mono, sampleRate: sampleRate, low: 45, high: 160)
         let mids = bandEnergy(samples: mono, sampleRate: sampleRate, low: 350, high: 2200)
         let highs = bandEnergy(samples: mono, sampleRate: sampleRate, low: 3200, high: 12000)
-        let kick = clamp((bass - previousBass * 0.78) * 7)
-        let percussion = clamp((highs - previousHighs * 0.74) * 8)
-        let snare = clamp((mids * 0.55 + highs * 0.45 - previousEnergy * 0.35) * 3.5)
-        let energy = clamp(level * 0.45 + bass * 0.28 + mids * 0.14 + highs * 0.13)
-        let novelty = max(kick, percussion * 0.85, snare * 0.7)
+        // Onsets are rectified jumps in each band (spectral flux), so they fire
+        // on transients — the actual hits — rather than on sustained tones.
+        let kick = clamp((bass - previousBass) * 6)
+        let snare = clamp((mids - previousMids) * 5 + (highs - previousHighs) * 3)
+        let percussion = clamp((highs - previousHighs) * 7)
+        let energy = clamp(level * 0.4 + bass * 0.3 + mids * 0.16 + highs * 0.14)
+
+        // Beat = a novelty spike above an adaptive threshold, rate-limited by a
+        // short refractory window so a single hit isn't counted repeatedly.
+        let novelty = max(kick, snare * 0.85, percussion * 0.7)
+        noveltyBaseline = noveltyBaseline * 0.95 + novelty * 0.05
+        let isBeat = novelty > max(0.18, noveltyBaseline * 1.6) && beatCooldown == 0
         let beat: Double
-        if novelty > 0.33 && beatCooldown == 0 {
+        if isBeat {
             beat = novelty
             beatCooldown = 2
+            beatCount += 1
         } else {
             beat = 0
             beatCooldown = max(0, beatCooldown - 1)
         }
-        let mood = clamp(0.48 + highs * 0.26 + mids * 0.08 - bass * 0.16)
+
+        // Pulse: snap up on any onset (and guarantee a strong flash on a counted
+        // beat), then decay smoothly so each hit reads as a discrete pulse.
+        let onset = max(novelty, beat)
+        pulseEnv = max(pulseEnv * exp(-dt / 0.16), onset)
+        if isBeat { pulseEnv = max(pulseEnv, 0.85) }
+        let pulse = clamp(pulseEnv)
+
+        // Drop: sustained high energy above the running baseline → strobe fuel.
+        energyBaseline = energyBaseline * 0.985 + energy * 0.015
+        let intensity = clamp((energy - 0.5) * 2.4) * clamp((energy - energyBaseline) * 4 + 0.3)
+        dropEnv = max(dropEnv * exp(-dt / 0.3), intensity)
+        let drop = clamp(dropEnv)
+
+        // Mood: treble-leaning reads bright/airy (→1), bass-leaning dark/heavy (→0).
+        let mood = clamp(0.5 + (highs - bass) * 0.6 + mids * 0.05)
 
         previousBass = bass
+        previousMids = mids
         previousHighs = highs
         previousEnergy = energy
-        return AudioReactiveSnapshot(level: level, beat: beat, kick: kick, snare: snare, percussion: percussion, bass: bass, mids: mids, highs: highs, energy: energy, mood: mood, confidence: min(1, level * 1.8), sourceDescription: sourceDescription)
+        return AudioReactiveSnapshot(level: level, beat: beat, kick: kick, snare: snare, percussion: percussion, bass: bass, mids: mids, highs: highs, energy: energy, mood: mood, confidence: clamp(level * 1.8), pulse: pulse, drop: drop, beatCount: beatCount, sourceDescription: sourceDescription)
     }
 
     private func bandEnergy(samples: [Float], sampleRate: Double, low: Double, high: Double) -> Double {

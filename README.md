@@ -551,17 +551,23 @@ If LumenDesk reports a bind failure for Govee, another app may already be listen
 
 ### Music-reactive effects do not respond
 
-- Grant microphone permission when prompted.
+- On **macOS**, Soundcheck reacts to **system audio** (Apple Music and other apps). Make sure something is actually playing — Soundcheck has nothing to react to in silence.
+- Grant **Screen Recording** to LumenDesk (macOS) or **microphone** access (iOS) when prompted.
 - Make sure the selected effect is Soundcheck.
-- Confirm system audio is loud enough for the input being monitored.
-- Stop and restart the effect after changing microphone permissions.
+- Confirm the audio is loud enough for the input being monitored.
+- Stop and restart the effect after changing permissions.
 
-### Soundcheck and system audio (Screen Recording)
+### Soundcheck and system audio (Screen Recording, macOS)
 
-By default Soundcheck reacts to the **microphone**, so it never asks for Screen Recording permission. Optionally, it can analyze **system audio** (Apple Music and other apps) through ScreenCaptureKit, which macOS gates behind the **Screen Recording** permission:
+On macOS, Soundcheck analyzes **system audio** — Apple Music and any other app — as its **only** source. It does not use the microphone, so room noise never mixes into the music analysis. System audio is captured through ScreenCaptureKit, which macOS gates behind the **Screen Recording** permission:
 
-- To enable it, grant Screen Recording to LumenDesk in System Settings → Privacy & Security → Screen Recording, then **quit and reopen LumenDesk**. macOS only applies the grant to a freshly launched app.
-- LumenDesk **never prompts** for this permission and never repeats a request. If it isn't already granted, Soundcheck simply stays on microphone calibration.
+- The first time you start Soundcheck without the permission, macOS shows the Screen Recording prompt. Turn on **LumenDesk**, then **quit and reopen LumenDesk** — macOS only applies the grant to a freshly launched app.
+- If it is still off, LumenDesk shows a message pointing you to **System Settings → Privacy & Security → Screen Recording**. Enable LumenDesk there and relaunch.
+- LumenDesk asks at most once per launch and **never** silently falls back to the microphone on macOS — if it can't read system audio, it tells you why instead of reacting to room noise.
+
+> **Note (developer builds):** A Screen Recording grant is tied to the app's code signature. An unsigned or ad-hoc-signed build (the default when no development team is set) gets a new identity on every rebuild, so macOS drops the grant and re-prompts each build cycle. With a stable signing identity (set `DEVELOPMENT_TEAM` in `project.yml`) the grant persists.
+
+On **iOS**, Soundcheck uses the **microphone** (there is no system-audio capture on iOS); grant microphone access when prompted.
 
 ## Protocol references
 

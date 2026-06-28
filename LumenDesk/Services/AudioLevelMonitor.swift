@@ -43,30 +43,62 @@ final class AudioLevelMonitor {
     private var systemAudioCapture: SystemAudioCapture?
     #endif
 
-    func requestAccessAndStart(completion: @escaping (Bool) -> Void) {
+    /// Outcome of starting the analysis source, so the caller can show the
+    /// precise message. On macOS the source is system audio (ScreenCaptureKit);
+    /// on iOS it is the microphone.
+    enum AudioStartResult {
+        /// Capture is running and feeding the analyzer.
+        case started
+        /// macOS only: Screen Recording is not granted. We requested it once this
+        /// launch (if it hadn't been asked before); the user must grant it in
+        /// System Settings and relaunch. Never falls back to the microphone.
+        case needsScreenRecording
+        /// Source could not start for a non-permission reason (mic denied on iOS,
+        /// no display, OS too old, or a capture error).
+        case unavailable
+    }
+
+    func requestAccessAndStart(completion: @escaping (AudioStartResult) -> Void) {
         analyzer = MusicFeatureAnalyzer(sourceDescription: preferredSourceDescription)
         #if os(macOS)
-        systemAudioCapture = SystemAudioCapture { [weak self] buffer in
+        // macOS: system audio (Apple Music / other apps) is the SOLE source.
+        // The microphone is never started here, so room noise can't pollute the
+        // music analysis, and there is no silent mic fallback.
+        let capture = SystemAudioCapture { [weak self] buffer in
             self?.consume(buffer)
         }
-        systemAudioCapture?.start { [weak self] started in
+        systemAudioCapture = capture
+        capture.start { [weak self] result in
             guard let self else { return }
-            self.analyzer.sourceDescription = started ? "Apple Music / system audio with microphone calibration" : "Microphone calibration"
-            self.startMicrophone(completion: completion)
+            switch result {
+            case .started:
+                self.analyzer.sourceDescription = "Apple Music / system audio"
+                completion(.started)
+            case .needsScreenRecording:
+                self.analyzer.sourceDescription = "System audio unavailable — Screen Recording off"
+                self.systemAudioCapture = nil
+                completion(.needsScreenRecording)
+            case .unavailable:
+                self.analyzer.sourceDescription = "System audio unavailable"
+                self.systemAudioCapture = nil
+                completion(.unavailable)
+            }
         }
         #else
-        startMicrophone(completion: completion)
+        // iOS: microphone is the only available source (no ScreenCaptureKit).
+        startMicrophone { started in completion(started ? .started : .unavailable) }
         #endif
     }
 
     private var preferredSourceDescription: String {
         #if os(macOS)
-        "Apple Music / system audio with microphone calibration"
+        "Apple Music / system audio"
         #else
         "Microphone calibration"
         #endif
     }
 
+    #if os(iOS)
     private func startMicrophone(completion: @escaping (Bool) -> Void) {
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .authorized:
@@ -85,11 +117,9 @@ final class AudioLevelMonitor {
     @discardableResult
     private func start() -> Bool {
         guard !engine.isRunning else { return true }
-        #if os(iOS)
         let session = AVAudioSession.sharedInstance()
         try? session.setCategory(.playAndRecord, options: [.mixWithOthers, .defaultToSpeaker])
         try? session.setActive(true)
-        #endif
         let input = engine.inputNode
         let format = input.outputFormat(forBus: 0)
         guard format.channelCount > 0 else { return false }
@@ -106,6 +136,7 @@ final class AudioLevelMonitor {
             return false
         }
     }
+    #endif
 
     private func consume(_ buffer: AVAudioPCMBuffer) {
         analysisQueue.async { [weak self] in
@@ -118,10 +149,12 @@ final class AudioLevelMonitor {
     }
 
     func stop() {
+        #if os(iOS)
         if engine.isRunning {
             engine.inputNode.removeTap(onBus: 0)
             engine.stop()
         }
+        #endif
         #if os(macOS)
         systemAudioCapture?.stop()
         systemAudioCapture = nil
@@ -247,38 +280,86 @@ private final class MusicFeatureAnalyzer {
 }
 
 #if os(macOS)
+/// Result of attempting to start ScreenCaptureKit system-audio capture.
+private enum SystemAudioStartResult {
+    case started
+    case needsScreenRecording   // not granted; we requested once this launch
+    case unavailable            // OS too old / no display / capture error
+}
+
+/// Screen Recording (TCC) permission, scoped to ScreenCaptureKit.
+///
+/// macOS only applies a fresh grant to a *freshly launched* app, so the model
+/// is: preflight → if granted, capture; if not, request once and ask the user
+/// to grant + relaunch. We request at most once per launch (the in-memory flag)
+/// so we never nag repeatedly within a session.
+private enum ScreenRecordingPermission {
+    /// True if THIS process currently holds Screen Recording (valid for SCStream).
+    static var isGranted: Bool { CGPreflightScreenCaptureAccess() }
+
+    private static var didRequestThisLaunch = false
+
+    /// Shows the system prompt at most once per launch when ungranted. The grant
+    /// does not take effect for ScreenCaptureKit until the app relaunches, so the
+    /// caller must not start the stream on the strength of this call.
+    static func requestOnceThisLaunch() {
+        guard !didRequestThisLaunch else { return }
+        didRequestThisLaunch = true
+        // Triggers the OS prompt if (and only if) not already granted.
+        _ = CGRequestScreenCaptureAccess()
+    }
+}
+
 private final class SystemAudioCapture: NSObject, SCStreamOutput {
     private var stream: SCStream?
     private let onBuffer: (AVAudioPCMBuffer) -> Void
 
     init(onBuffer: @escaping (AVAudioPCMBuffer) -> Void) { self.onBuffer = onBuffer }
 
-    func start(completion: @escaping (Bool) -> Void) {
-        guard #available(macOS 13.0, *) else { completion(false); return }
-        // System-audio capture goes through ScreenCaptureKit, which requires the
-        // Screen Recording permission. We never prompt for it: Soundcheck works
-        // fully on the microphone, and the ScreenCaptureKit permission flow is
-        // what nagged users repeatedly (the grant also doesn't persist for an
-        // unsigned/ad-hoc build). Only use system audio when the user has
-        // ALREADY granted Screen Recording, detected here without prompting.
-        guard CGPreflightScreenCaptureAccess() else { completion(false); return }
+    func start(completion: @escaping (SystemAudioStartResult) -> Void) {
+        guard #available(macOS 13.0, *) else { completion(.unavailable); return }
+
+        // System-audio capture goes through ScreenCaptureKit, gated by the
+        // Screen Recording permission. If we already hold it, capture now.
+        guard ScreenRecordingPermission.isGranted else {
+            // Not granted: ask once this launch, then tell the caller to surface
+            // the grant + relaunch instructions. We never start the microphone
+            // as a fallback — system audio is the required source on macOS.
+            ScreenRecordingPermission.requestOnceThisLaunch()
+            completion(.needsScreenRecording)
+            return
+        }
+
         Task {
             do {
                 let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-                guard let display = content.displays.first else { await MainActor.run { completion(false) }; return }
+                guard let display = content.displays.first else {
+                    await MainActor.run { completion(.unavailable) }
+                    return
+                }
                 let filter = SCContentFilter(display: display, excludingWindows: [])
                 let configuration = SCStreamConfiguration()
                 configuration.capturesAudio = true
                 configuration.excludesCurrentProcessAudio = true
+                configuration.sampleRate = 48_000
+                configuration.channelCount = 2
+                // Minimal, throttled video path (SCK requires a display filter
+                // even for audio-only capture).
                 configuration.width = 2
                 configuration.height = 2
+                configuration.minimumFrameInterval = CMTime(value: 1, timescale: 1)
+                configuration.queueDepth = 5
+                configuration.showsCursor = false
                 let stream = SCStream(filter: filter, configuration: configuration, delegate: nil)
                 try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: DispatchQueue(label: "LumenDesk.systemAudio"))
                 try await stream.startCapture()
                 self.stream = stream
-                await MainActor.run { completion(true) }
+                await MainActor.run { completion(.started) }
             } catch {
-                await MainActor.run { completion(false) }
+                // A throw while still ungranted means the permission isn't live
+                // for this process yet (needs relaunch); otherwise a real error.
+                let result: SystemAudioStartResult = ScreenRecordingPermission.isGranted ? .unavailable : .needsScreenRecording
+                await MainActor.run { completion(result) }
             }
         }
     }
@@ -290,23 +371,58 @@ private final class SystemAudioCapture: NSObject, SCStreamOutput {
     }
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
-        guard type == .audio, let buffer = try? sampleBuffer.asPCMBuffer() else { return }
+        guard type == .audio, let buffer = try? sampleBuffer.asMonoPCMBuffer() else { return }
         onBuffer(buffer)
     }
 }
 
 private extension CMSampleBuffer {
-    func asPCMBuffer() throws -> AVAudioPCMBuffer? {
-        guard let formatDescription else { return nil }
-        let format = AVAudioFormat(cmAudioFormatDescription: formatDescription)
-        return try withAudioBufferList { audioBufferList, _ in
-            guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(numSamples)) else { return nil }
-            buffer.frameLength = buffer.frameCapacity
-            let source = audioBufferList.unsafePointer.pointee.mBuffers
-            guard let sourceData = source.mData, let destinationData = buffer.floatChannelData?[0] else { return nil }
-            let sourcePointer = sourceData.assumingMemoryBound(to: Float.self)
-            destinationData.update(from: sourcePointer, count: Int(buffer.frameLength))
-            return buffer
+    /// Copies ScreenCaptureKit's Float32 audio into an OWNED mono buffer by
+    /// averaging all channels. Owning the memory makes it safe to hand to the
+    /// analysis queue (the no-copy bufferList is only valid during this call),
+    /// and iterating every AudioBuffer/channel is the fix for the old code that
+    /// read only `mBuffers[0]` and dropped the right channel. Divides by the
+    /// number of channels actually summed so loudness is consistent.
+    func asMonoPCMBuffer() throws -> AVAudioPCMBuffer? {
+        guard let asbd = formatDescription?.audioStreamBasicDescription else { return nil }
+        let frames = AVAudioFrameCount(numSamples)
+        guard frames > 0,
+              let monoFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32,
+                                             sampleRate: asbd.mSampleRate,
+                                             channels: 1,
+                                             interleaved: false) else { return nil }
+        let n = Int(frames)
+        return try withAudioBufferList { abl, _ -> AVAudioPCMBuffer? in
+            guard let out = AVAudioPCMBuffer(pcmFormat: monoFormat, frameCapacity: frames),
+                  let dst = out.floatChannelData?[0] else { return nil }
+            out.frameLength = frames
+            var summedChannels = 0
+            // Planar audio: one AudioBuffer per channel (mNumberChannels == 1).
+            // Interleaved: one buffer with mNumberChannels samples per frame.
+            // Handle both so the right channel is never lost.
+            for ab in abl {
+                guard let mData = ab.mData else { continue }
+                let src = mData.assumingMemoryBound(to: Float.self)
+                let ch = Int(ab.mNumberChannels)
+                let totalFloats = Int(ab.mDataByteSize) / MemoryLayout<Float>.size
+                if ch <= 1 {
+                    let count = min(n, totalFloats)
+                    for i in 0..<count { dst[i] += src[i] }
+                    summedChannels += 1
+                } else {
+                    let count = min(n, totalFloats / ch)
+                    for i in 0..<count {
+                        var acc: Float = 0
+                        for c in 0..<ch { acc += src[i * ch + c] }
+                        dst[i] += acc
+                    }
+                    summedChannels += ch
+                }
+            }
+            guard summedChannels > 0 else { return nil }
+            var divisor = Float(summedChannels)
+            vDSP_vsdiv(dst, 1, &divisor, dst, 1, vDSP_Length(n))
+            return out
         }
     }
 }

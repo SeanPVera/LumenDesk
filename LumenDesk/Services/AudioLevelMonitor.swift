@@ -179,8 +179,22 @@ private final class MusicFeatureAnalyzer {
     private var pulseEnv: Double = 0
     private var dropEnv: Double = 0
     private var beatCount: Int = 0
+    // Cached DFT twiddle factors (cos/sin), rebuilt only when the window size
+    // changes. Lets bandEnergy index a table instead of calling cos/sin per
+    // sample — identical result, far less CPU. Touched only on the analysis
+    // queue, so no synchronization is needed.
+    private var twiddleN = 0
+    private var twiddleCos: [Float] = []
+    private var twiddleSin: [Float] = []
 
     init(sourceDescription: String) { self.sourceDescription = sourceDescription }
+
+    private func ensureTwiddles(_ n: Int) {
+        guard n != twiddleN else { return }
+        twiddleN = n
+        twiddleCos = (0..<n).map { Float(cos(-2 * Double.pi * Double($0) / Double(n))) }
+        twiddleSin = (0..<n).map { Float(sin(-2 * Double.pi * Double($0) / Double(n))) }
+    }
 
     func analyze(_ buffer: AVAudioPCMBuffer) -> AudioReactiveSnapshot? {
         guard let channelData = buffer.floatChannelData else { return nil }
@@ -257,6 +271,7 @@ private final class MusicFeatureAnalyzer {
     private func bandEnergy(samples: [Float], sampleRate: Double, low: Double, high: Double) -> Double {
         let n = min(samples.count, 1024)
         guard n > 8 else { return 0 }
+        ensureTwiddles(n)
         var real = [Float](repeating: 0, count: n)
         var imag = [Float](repeating: 0, count: n)
         for k in 0..<n {
@@ -264,9 +279,10 @@ private final class MusicFeatureAnalyzer {
             guard frequency >= low && frequency <= high else { continue }
             var r: Float = 0, i: Float = 0
             for t in stride(from: 0, to: n, by: 4) {
-                let angle = -2 * Double.pi * Double(k * t) / Double(n)
-                r += samples[t] * Float(cos(angle))
-                i += samples[t] * Float(sin(angle))
+                // cos(-2π·k·t/n) == twiddleCos[(k·t) mod n]; same value, no trig.
+                let idx = (k * t) % n
+                r += samples[t] * twiddleCos[idx]
+                i += samples[t] * twiddleSin[idx]
             }
             real[k] = r; imag[k] = i
         }
@@ -352,6 +368,12 @@ private final class SystemAudioCapture: NSObject, SCStreamOutput {
                 configuration.showsCursor = false
                 let stream = SCStream(filter: filter, configuration: configuration, delegate: nil)
                 try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: DispatchQueue(label: "LumenDesk.systemAudio"))
+                // A display stream always produces video frames. Register a
+                // (no-op) screen output too — the delegate ignores non-audio —
+                // so the frames are consumed instead of spamming "stream output
+                // NOT found / Dropping frame" and churning CPU on the capture
+                // pipeline and the log flood.
+                try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: DispatchQueue(label: "LumenDesk.systemVideo"))
                 try await stream.startCapture()
                 self.stream = stream
                 await MainActor.run { completion(.started) }

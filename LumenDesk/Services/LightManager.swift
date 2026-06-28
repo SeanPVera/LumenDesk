@@ -144,6 +144,10 @@ final class LightManager: ObservableObject {
         // Last time this run pushed a frame. Audio-reactive runs render off the
         // live audio stream and use this to throttle to the effect's cadence.
         var lastRender: Date = .distantPast
+        // Music-reactive show state.
+        var lastBeatCount: Int = 0  // beats already consumed for color stepping
+        var colorIndex: Int = 0     // palette rotation; advances on each beat
+        var strobeOn: Bool = false  // toggled per frame while a drop strobes
         init(effect: LightingEffect, scope: LightScope, snapshot: [DeviceState]) {
             self.effect = effect
             self.scope = scope
@@ -972,6 +976,20 @@ final class LightManager: ObservableObject {
         let palette = effect.colors
         let targets = devices(in: run.scope)
 
+        // Advance the music show's per-frame state once (not per device): step
+        // the palette by however many beats landed since the last frame so the
+        // color snaps on the beat, and flip the strobe phase so an active drop
+        // alternates light and dark.
+        if effect.style == .musicPulse {
+            let beats = audioSnapshot.beatCount
+            if beats < run.lastBeatCount { run.lastBeatCount = beats } // analyzer restarted
+            if beats > run.lastBeatCount {
+                run.colorIndex += beats - run.lastBeatCount
+                run.lastBeatCount = beats
+            }
+            run.strobeOn.toggle()
+        }
+
         for (index, device) in targets.enumerated() {
             var color = palette[(index + Int(effectPhase)) % palette.count].color
             var brightness = 0.72
@@ -998,20 +1016,45 @@ final class LightManager: ObservableObject {
                 brightness = spark ? Double.random(in: 0.72...1) : Double.random(in: 0.16...0.34)
             case .musicPulse:
                 let audio = audioSnapshot
-                let paletteOffset = Int(effectPhase * (3 + audio.energy * 7) + audio.beat * 5)
-                let base = palette[(index + paletteOffset) % palette.count].color
-                let hue = (audio.mood * 0.18 + Double(index) / Double(max(1, targets.count)) + effectPhase * 0.025).truncatingRemainder(dividingBy: 1)
-                if audio.kick > 0.35 {
-                    color = palette[0].color
-                } else if audio.snare > 0.28 {
-                    color = Color(hue: hue, saturation: 0.55 + audio.highs * 0.35, brightness: 1)
-                } else if audio.percussion > 0.25 {
-                    color = palette[min(palette.count - 1, 2)].color
-                } else {
-                    color = base
+                let p = palette.count
+                // Each fixture takes an instrument role so the rig reads as a
+                // coordinated show: some lights thump with the kick, others pop
+                // on snares/claps, others shimmer with the hi-hats. Every light
+                // also rides the shared `pulse` envelope, so even a single bulb
+                // clearly flashes on the beat.
+                let onset: Double
+                let accent: Color
+                switch index % 3 {
+                case 0:
+                    onset = audio.kick
+                    accent = palette[0].color                            // bass → lead palette color
+                case 1:
+                    onset = audio.snare
+                    accent = Color(hue: 0, saturation: 0, brightness: 1) // snare/clap → white pop
+                default:
+                    onset = audio.percussion
+                    accent = palette[min(p - 1, 2)].color                // hi-hats → bright accent
                 }
-                let shimmer = sin(effectPhase * 8 + Double(index) * 1.7) * audio.highs * 0.12
-                brightness = 0.10 + pow(max(audioLevel, audio.energy), 0.58) * 0.58 + audio.beat * 0.22 + audio.kick * 0.16 + audio.percussion * 0.10 + shimmer
+
+                if audio.drop > 0.5 {
+                    // Drop: hard strobe across the whole rig, white on / dim off.
+                    color = run.strobeOn ? Color(hue: 0, saturation: 0, brightness: 1)
+                                         : palette[(index + run.colorIndex) % p].color
+                    brightness = run.strobeOn ? 1.0 : 0.05
+                } else {
+                    // Color steps on the beat and holds between; mood nudges the
+                    // hue (heavier/bass cooler, airier/treble warmer).
+                    let stepped = palette[(index + run.colorIndex) % p].color
+                    let hsb = stepped.hsbComponents
+                    let moodHue = (hsb.h + (audio.mood - 0.5) * 0.12 + 1).truncatingRemainder(dividingBy: 1)
+                    let beatColor = Color(hue: moodHue, saturation: max(0.55, hsb.s), brightness: 1)
+                    // Flash to the role accent on a strong hit, else hold the beat color.
+                    color = onset > 0.45 ? accent : beatColor
+                    // Brightness pulses on every beat (shared envelope) plus this
+                    // fixture's own onset, over an energy-driven floor. Peaks clip
+                    // to full for punch; troughs fall back so each hit reads.
+                    brightness = 0.07 + audio.pulse * 0.6 + onset * 0.3 + audio.energy * 0.12
+                }
             case .prismShuffle:
                 color = palette.randomElement()?.color ?? color
                 brightness = Double.random(in: 0.62...0.92)

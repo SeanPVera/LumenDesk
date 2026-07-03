@@ -222,7 +222,7 @@ The Lighting Library includes 10 animated effects:
 
 Effects can run against all lights or a specific room. Multiple effects may run at the same time as long as their device scopes do not overlap. Effects can be stopped individually or all at once, and LumenDesk can restore previous light states when stopping effects.
 
-The Soundcheck effect is audio-reactive and requests microphone permission so it can measure live audio levels locally.
+The Soundcheck effect is audio-reactive. On macOS it reads Apple Music/system audio through ScreenCaptureKit (Screen Recording permission); on iOS it measures live audio levels through the microphone (microphone permission). All analysis happens locally.
 
 ### Schedules and automation
 
@@ -561,9 +561,9 @@ If LumenDesk reports a bind failure for Govee, another app may already be listen
 
 On macOS, Soundcheck analyzes **system audio** — Apple Music and any other app — as its **only** source. It does not use the microphone, so room noise never mixes into the music analysis. System audio is captured through ScreenCaptureKit, which macOS gates behind the **Screen Recording** permission:
 
-- The first time you start Soundcheck without the permission, macOS shows the Screen Recording prompt. Turn on **LumenDesk**, then **quit and reopen LumenDesk** — macOS only applies the grant to a freshly launched app.
-- If it is still off, LumenDesk shows a message pointing you to **System Settings → Privacy & Security → Screen Recording**. Enable LumenDesk there and relaunch.
-- LumenDesk asks at most once per launch and **never** silently falls back to the microphone on macOS — if it can't read system audio, it tells you why instead of reacting to room noise.
+- The first time you start Soundcheck without the permission, macOS shows the Screen Recording prompt. Turn on **LumenDesk** in System Settings, then just **start Soundcheck again** — LumenDesk re-checks the permission live on every start, so the grant is picked up without relaunching. (If macOS hasn't applied the grant to the running app yet — some versions only apply it at launch — relaunch LumenDesk once.)
+- If the permission is still off, LumenDesk shows a message pointing you to **System Settings → Privacy & Security → Screen & System Audio Recording** (called **Screen Recording** before macOS 15). Enable LumenDesk there and start Soundcheck again.
+- macOS shows the permission prompt only the first time; after that LumenDesk points you to System Settings instead. LumenDesk **never** silently falls back to the microphone on macOS — if it can't read system audio, it tells you why instead of reacting to room noise.
 
 > **Note (developer builds):** A Screen Recording grant is tied to the app's code signature. An unsigned or ad-hoc-signed build (the default when no development team is set) gets a new identity on every rebuild, so macOS drops the grant and re-prompts each build cycle. With a stable signing identity (set `DEVELOPMENT_TEAM` in `project.yml`) the grant persists.
 

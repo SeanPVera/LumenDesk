@@ -225,7 +225,7 @@ struct RoomSectionView: View {
                     }
                     Menu("Start Effect") {
                         // Audio-reactive effects stay in the Lighting Library,
-                        // where the microphone-privacy explainer lives.
+                        // where the audio-privacy explainer lives.
                         ForEach(LightingCatalog.effects.filter { !$0.isAudioReactive }) { effect in
                             Button(effect.name) { manager.startEffect(effect, scope: .room(room.id)) }
                         }

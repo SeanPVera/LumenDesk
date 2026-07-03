@@ -959,7 +959,7 @@ final class LightManager: ObservableObject {
         #if os(macOS)
         switch result {
         case .needsScreenRecording:
-            return "Soundcheck needs Screen Recording to read Apple Music — grant it in System Settings › Privacy & Security › Screen Recording, then relaunch LumenDesk."
+            return "Soundcheck needs Screen Recording to read Apple Music — turn on LumenDesk in System Settings › Privacy & Security › Screen & System Audio Recording (Screen Recording on older macOS), then start Soundcheck again. If it still can't connect, relaunch LumenDesk."
         case .unavailable, .started:
             return "Soundcheck couldn't read system audio. Make sure Apple Music (or another app) is playing, then try again."
         }

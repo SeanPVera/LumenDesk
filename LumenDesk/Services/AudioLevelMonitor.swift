@@ -1,7 +1,6 @@
 import AVFoundation
 import Accelerate
 #if os(macOS)
-import CoreGraphics
 import ScreenCaptureKit
 #endif
 
@@ -49,9 +48,10 @@ final class AudioLevelMonitor {
     enum AudioStartResult {
         /// Capture is running and feeding the analyzer.
         case started
-        /// macOS only: Screen Recording is not granted. We requested it once this
-        /// launch (if it hadn't been asked before); the user must grant it in
-        /// System Settings and relaunch. Never falls back to the microphone.
+        /// macOS only: Screen Recording is not granted. macOS shows its prompt
+        /// on the first-ever attempt; after granting, starting Soundcheck again
+        /// picks the grant up — permission is re-checked live on every start.
+        /// Never falls back to the microphone.
         case needsScreenRecording
         /// Source could not start for a non-permission reason (mic denied on iOS,
         /// no display, OS too old, or a capture error).
@@ -299,31 +299,8 @@ private final class MusicFeatureAnalyzer {
 /// Result of attempting to start ScreenCaptureKit system-audio capture.
 private enum SystemAudioStartResult {
     case started
-    case needsScreenRecording   // not granted; we requested once this launch
+    case needsScreenRecording   // Screen Recording not granted (macOS prompts on the first-ever ask)
     case unavailable            // OS too old / no display / capture error
-}
-
-/// Screen Recording (TCC) permission, scoped to ScreenCaptureKit.
-///
-/// macOS only applies a fresh grant to a *freshly launched* app, so the model
-/// is: preflight → if granted, capture; if not, request once and ask the user
-/// to grant + relaunch. We request at most once per launch (the in-memory flag)
-/// so we never nag repeatedly within a session.
-private enum ScreenRecordingPermission {
-    /// True if THIS process currently holds Screen Recording (valid for SCStream).
-    static var isGranted: Bool { CGPreflightScreenCaptureAccess() }
-
-    private static var didRequestThisLaunch = false
-
-    /// Shows the system prompt at most once per launch when ungranted. The grant
-    /// does not take effect for ScreenCaptureKit until the app relaunches, so the
-    /// caller must not start the stream on the strength of this call.
-    static func requestOnceThisLaunch() {
-        guard !didRequestThisLaunch else { return }
-        didRequestThisLaunch = true
-        // Triggers the OS prompt if (and only if) not already granted.
-        _ = CGRequestScreenCaptureAccess()
-    }
 }
 
 private final class SystemAudioCapture: NSObject, SCStreamOutput {
@@ -335,19 +312,16 @@ private final class SystemAudioCapture: NSObject, SCStreamOutput {
     func start(completion: @escaping (SystemAudioStartResult) -> Void) {
         guard #available(macOS 13.0, *) else { completion(.unavailable); return }
 
-        // System-audio capture goes through ScreenCaptureKit, gated by the
-        // Screen Recording permission. If we already hold it, capture now.
-        guard ScreenRecordingPermission.isGranted else {
-            // Not granted: ask once this launch, then tell the caller to surface
-            // the grant + relaunch instructions. We never start the microphone
-            // as a fallback — system audio is the required source on macOS.
-            ScreenRecordingPermission.requestOnceThisLaunch()
-            completion(.needsScreenRecording)
-            return
-        }
-
         Task {
             do {
+                // Ask ScreenCaptureKit itself whether capture is allowed instead
+                // of pre-gating on CGPreflightScreenCaptureAccess(): the preflight
+                // only reflects the TCC state from process launch, so it kept
+                // answering "denied" after the user granted Screen Recording and
+                // Soundcheck never noticed the grant. SCShareableContent consults
+                // the live TCC state on every call — and shows the system
+                // permission prompt on the first-ever request — so each start
+                // sees the user's current answer.
                 let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
                 guard let display = content.displays.first else {
                     await MainActor.run { completion(.unavailable) }
@@ -378,10 +352,10 @@ private final class SystemAudioCapture: NSObject, SCStreamOutput {
                 self.stream = stream
                 await MainActor.run { completion(.started) }
             } catch {
-                // A throw while still ungranted means the permission isn't live
-                // for this process yet (needs relaunch); otherwise a real error.
-                let result: SystemAudioStartResult = ScreenRecordingPermission.isGranted ? .unavailable : .needsScreenRecording
-                await MainActor.run { completion(result) }
+                // ScreenCaptureKit surfaces a missing Screen Recording grant as
+                // .userDeclined; anything else is a genuine capture failure.
+                let denied = (error as? SCStreamError)?.code == .userDeclined
+                await MainActor.run { completion(denied ? .needsScreenRecording : .unavailable) }
             }
         }
     }

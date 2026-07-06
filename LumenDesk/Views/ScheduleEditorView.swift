@@ -111,7 +111,11 @@ private struct ScheduleFormView: View {
             if action.isRelativeToSun {
                 Picker("Offset", selection: $offset) { ForEach([-120,-90,-60,-30,-15,0,15,30,60,90,120], id: \.self) { Text($0 == 0 ? "Exactly" : "\($0 > 0 ? "+" : "")\($0) minutes").tag($0) } }
             } else {
+                #if os(macOS)
                 DatePicker("Time", selection: $date, displayedComponents: .hourAndMinute).datePickerStyle(.field)
+                #else
+                DatePicker("Time", selection: $date, displayedComponents: .hourAndMinute).datePickerStyle(.compact)
+                #endif
             }
             VStack(alignment: .leading, spacing: 6) {
                 Text("Days").font(.caption.weight(.semibold)).foregroundStyle(.secondary)

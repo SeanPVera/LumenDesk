@@ -173,6 +173,10 @@ private final class MusicFeatureAnalyzer {
     // Slowly-decaying peak for automatic gain: keeps the show looking the same
     // whether the music is quiet or cranked.
     private var peakLevel: Double = 0.02
+    // Slowly-decaying peak of the loudest frequency band; bass/mids/highs are
+    // normalized against it (spectral AGC) so the beat/onset detectors see the
+    // same 0…1 dynamics at any source volume.
+    private var spectralPeak: Double = 0.05
     // Adaptive onset threshold and persistent show envelopes / counters.
     private var noveltyBaseline: Double = 0
     private var energyBaseline: Double = 0
@@ -220,9 +224,19 @@ private final class MusicFeatureAnalyzer {
         peakLevel = max(peakLevel * 0.9992, rms)
         let level = clamp((rms - noiseFloor) / max(0.015, peakLevel - noiseFloor))
 
-        let bass = bandEnergy(samples: mono, sampleRate: sampleRate, low: 45, high: 160)
-        let mids = bandEnergy(samples: mono, sampleRate: sampleRate, low: 350, high: 2200)
-        let highs = bandEnergy(samples: mono, sampleRate: sampleRate, low: 3200, high: 12000)
+        // Auto-gain the bands the same way `level` is auto-gained: normalize
+        // against a slowly decaying peak of the loudest band so kicks, snares,
+        // and hats swing across 0…1 whether the source is quiet background
+        // music or a cranked mix. Rising instantly and decaying slowly keeps
+        // the scale steady within a song.
+        let bassRaw = bandEnergy(samples: mono, sampleRate: sampleRate, low: 45, high: 160)
+        let midsRaw = bandEnergy(samples: mono, sampleRate: sampleRate, low: 350, high: 2200)
+        let highsRaw = bandEnergy(samples: mono, sampleRate: sampleRate, low: 3200, high: 12000)
+        spectralPeak = max(spectralPeak * 0.9992, bassRaw, midsRaw, highsRaw)
+        let bandScale = 0.9 / max(0.001, spectralPeak)
+        let bass = clamp(bassRaw * bandScale)
+        let mids = clamp(midsRaw * bandScale)
+        let highs = clamp(highsRaw * bandScale)
         // Onsets are rectified jumps in each band (spectral flux), so they fire
         // on transients — the actual hits — rather than on sustained tones.
         let kick = clamp((bass - previousBass) * 6)
@@ -268,28 +282,39 @@ private final class MusicFeatureAnalyzer {
         return AudioReactiveSnapshot(level: level, beat: beat, kick: kick, snare: snare, percussion: percussion, bass: bass, mids: mids, highs: highs, energy: energy, mood: mood, confidence: clamp(level * 1.8), pulse: pulse, drop: drop, beatCount: beatCount, sourceDescription: sourceDescription)
     }
 
+    /// Mean DFT-bin magnitude inside [low, high] Hz, normalized per bin
+    /// (|X|/n, so a full-scale sine centered on a bin reads ~0.5) and averaged
+    /// over ONLY the band's own bins — averaging across the whole spectrum
+    /// dilutes a narrow band like bass (~3 bins of 1024) to ~1e-3, which
+    /// starves every downstream onset detector and leaves the show reacting
+    /// to nothing but loudness. Every sample feeds the sum: decimating the
+    /// input aliases the highs band and shrinks magnitudes further, and the
+    /// twiddle table keeps the full loop cheap. Returns the raw mean;
+    /// `analyze` applies the spectral AGC.
     private func bandEnergy(samples: [Float], sampleRate: Double, low: Double, high: Double) -> Double {
         let n = min(samples.count, 1024)
         guard n > 8 else { return 0 }
         ensureTwiddles(n)
-        var real = [Float](repeating: 0, count: n)
-        var imag = [Float](repeating: 0, count: n)
+        var sum: Float = 0
+        var bins = 0
         for k in 0..<n {
             let frequency = Double(k) * sampleRate / Double(n)
             guard frequency >= low && frequency <= high else { continue }
             var r: Float = 0, i: Float = 0
-            for t in stride(from: 0, to: n, by: 4) {
-                // cos(-2π·k·t/n) == twiddleCos[(k·t) mod n]; same value, no trig.
-                let idx = (k * t) % n
+            // idx walks (k·t) mod n without a modulo: it advances by k < n
+            // each sample, so a single subtraction wraps it.
+            var idx = 0
+            for t in 0..<n {
                 r += samples[t] * twiddleCos[idx]
                 i += samples[t] * twiddleSin[idx]
+                idx += k
+                if idx >= n { idx -= n }
             }
-            real[k] = r; imag[k] = i
+            sum += sqrt(r * r + i * i) / Float(n)
+            bins += 1
         }
-        var mags = zip(real, imag).map { sqrt($0 * $0 + $1 * $1) / Float(n) }
-        var mean: Float = 0
-        vDSP_meanv(&mags, 1, &mean, vDSP_Length(mags.count))
-        return clamp(Double(mean) * 18)
+        guard bins > 0 else { return 0 }
+        return Double(sum) / Double(bins)
     }
 
     private func clamp(_ value: Double) -> Double { max(0, min(1, value)) }

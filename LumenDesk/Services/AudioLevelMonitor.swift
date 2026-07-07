@@ -169,7 +169,15 @@ private final class MusicFeatureAnalyzer {
     private var previousHighs: Double = 0
     private var previousMids: Double = 0
     private var previousEnergy: Double = 0
-    private var beatCooldown = 0
+    // Refractory period, in seconds, before another beat can be counted.
+    // Measured in time (via `dt`) rather than a fixed number of analyze()
+    // calls: the OS's audio buffer size (and therefore how often analyze()
+    // runs) isn't under this code's control, and a buffer-count cooldown let
+    // one drum transient's multi-frame decay re-cross the onset threshold
+    // and get counted as several beats — the show would then cut colors and
+    // flash several times per real hit instead of once, reading as
+    // indiscriminately fast rather than on the beat.
+    private var beatCooldownRemaining: Double = 0
     // Slowly-decaying peak for automatic gain: keeps the show looking the same
     // whether the music is quiet or cranked.
     private var peakLevel: Double = 0.02
@@ -257,17 +265,21 @@ private final class MusicFeatureAnalyzer {
 
         // Beat = a novelty spike above an adaptive threshold, rate-limited by a
         // short refractory window so a single hit isn't counted repeatedly.
+        // 120ms allows over 8 individual hits/sec (fast even for a 16th-note
+        // hi-hat run) while comfortably outlasting one transient's decay, so
+        // the same kick or snare can't cross the threshold twice on its way
+        // down.
         let novelty = max(kick, snare * 0.85, percussion * 0.7)
         noveltyBaseline = noveltyBaseline * 0.95 + novelty * 0.05
-        let isBeat = novelty > max(0.12, noveltyBaseline * 1.4) && beatCooldown == 0
+        let isBeat = novelty > max(0.12, noveltyBaseline * 1.4) && beatCooldownRemaining <= 0
         let beat: Double
         if isBeat {
             beat = novelty
-            beatCooldown = 2
+            beatCooldownRemaining = 0.12
             beatCount += 1
         } else {
             beat = 0
-            beatCooldown = max(0, beatCooldown - 1)
+            beatCooldownRemaining = max(0, beatCooldownRemaining - dt)
         }
 
         // Pulse: snap up on any onset (and guarantee a strong flash on a counted

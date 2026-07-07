@@ -183,21 +183,22 @@ private final class MusicFeatureAnalyzer {
     private var pulseEnv: Double = 0
     private var dropEnv: Double = 0
     private var beatCount: Int = 0
-    // Cached DFT twiddle factors (cos/sin), rebuilt only when the window size
-    // changes. Lets bandEnergy index a table instead of calling cos/sin per
+    // Cached DFT twiddle factors (cos/sin) per analysis window size, built once
+    // and reused. Lets bandEnergy index a table instead of calling cos/sin per
     // sample — identical result, far less CPU. Touched only on the analysis
     // queue, so no synchronization is needed.
-    private var twiddleN = 0
-    private var twiddleCos: [Float] = []
-    private var twiddleSin: [Float] = []
+    private var twiddleTables: [Int: (cos: [Float], sin: [Float])] = [:]
 
     init(sourceDescription: String) { self.sourceDescription = sourceDescription }
 
-    private func ensureTwiddles(_ n: Int) {
-        guard n != twiddleN else { return }
-        twiddleN = n
-        twiddleCos = (0..<n).map { Float(cos(-2 * Double.pi * Double($0) / Double(n))) }
-        twiddleSin = (0..<n).map { Float(sin(-2 * Double.pi * Double($0) / Double(n))) }
+    private func twiddles(for n: Int) -> (cos: [Float], sin: [Float]) {
+        if let cached = twiddleTables[n] { return cached }
+        let tables: (cos: [Float], sin: [Float]) = (
+            (0..<n).map { Float(cos(-2 * Double.pi * Double($0) / Double(n))) },
+            (0..<n).map { Float(sin(-2 * Double.pi * Double($0) / Double(n))) }
+        )
+        twiddleTables[n] = tables
+        return tables
     }
 
     func analyze(_ buffer: AVAudioPCMBuffer) -> AudioReactiveSnapshot? {
@@ -229,9 +230,19 @@ private final class MusicFeatureAnalyzer {
         // and hats swing across 0…1 whether the source is quiet background
         // music or a cranked mix. Rising instantly and decaying slowly keeps
         // the scale steady within a song.
-        let bassRaw = bandEnergy(samples: mono, sampleRate: sampleRate, low: 45, high: 160)
-        let midsRaw = bandEnergy(samples: mono, sampleRate: sampleRate, low: 350, high: 2200)
-        let highsRaw = bandEnergy(samples: mono, sampleRate: sampleRate, low: 3200, high: 12000)
+        //
+        // Each band uses its own analysis window rather than a shared 1024
+        // samples: bass is only ~3 bins wide even at full resolution (its
+        // 45-160Hz range is narrow in absolute Hz), so it needs the long
+        // window to have any bins at all. Mids and highs span far more Hz, so
+        // a shorter window (fewer bins, and far fewer samples summed per bin)
+        // still leaves them plenty of bins — at roughly a tenth of the CPU
+        // cost of running all three bands at 1024. This shortens frequency
+        // resolution, not the per-sample rate, so it does not reintroduce the
+        // decimation aliasing bandEnergy's doc comment warns about.
+        let bassRaw = bandEnergy(samples: mono, sampleRate: sampleRate, low: 45, high: 160, window: 1024)
+        let midsRaw = bandEnergy(samples: mono, sampleRate: sampleRate, low: 350, high: 2200, window: 512)
+        let highsRaw = bandEnergy(samples: mono, sampleRate: sampleRate, low: 3200, high: 12000, window: 256)
         spectralPeak = max(spectralPeak * 0.9992, bassRaw, midsRaw, highsRaw)
         let bandScale = 0.9 / max(0.001, spectralPeak)
         let bass = clamp(bassRaw * bandScale)
@@ -288,13 +299,19 @@ private final class MusicFeatureAnalyzer {
     /// dilutes a narrow band like bass (~3 bins of 1024) to ~1e-3, which
     /// starves every downstream onset detector and leaves the show reacting
     /// to nothing but loudness. Every sample feeds the sum: decimating the
-    /// input aliases the highs band and shrinks magnitudes further, and the
-    /// twiddle table keeps the full loop cheap. Returns the raw mean;
-    /// `analyze` applies the spectral AGC.
-    private func bandEnergy(samples: [Float], sampleRate: Double, low: Double, high: Double) -> Double {
-        let n = min(samples.count, 1024)
+    /// input aliases the highs band and shrinks magnitudes further. Returns
+    /// the raw mean; `analyze` applies the spectral AGC.
+    ///
+    /// `window` caps the number of samples the DFT covers, independent of the
+    /// sample rate — it trades frequency resolution for CPU, not aliasing
+    /// safety (every sample within the window is still used). Bands that
+    /// span many Hz keep plenty of bins even at a short window, so `analyze`
+    /// passes a much smaller window for mids/highs than for bass, which
+    /// needs its full resolution just to have any bins at all.
+    private func bandEnergy(samples: [Float], sampleRate: Double, low: Double, high: Double, window: Int) -> Double {
+        let n = min(samples.count, window)
         guard n > 8 else { return 0 }
-        ensureTwiddles(n)
+        let (cosTable, sinTable) = twiddles(for: n)
         var sum: Float = 0
         var bins = 0
         for k in 0..<n {
@@ -305,8 +322,8 @@ private final class MusicFeatureAnalyzer {
             // each sample, so a single subtraction wraps it.
             var idx = 0
             for t in 0..<n {
-                r += samples[t] * twiddleCos[idx]
-                i += samples[t] * twiddleSin[idx]
+                r += samples[t] * cosTable[idx]
+                i += samples[t] * sinTable[idx]
                 idx += k
                 if idx >= n { idx -= n }
             }

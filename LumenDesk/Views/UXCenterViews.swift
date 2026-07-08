@@ -739,7 +739,7 @@ struct ExperienceCenterView: View {
                 let lights = manager.devices(in: room)
                 VStack(alignment: .leading, spacing: 8) {
                     HStack { Label(room.name, systemImage: "square.grid.2x2.fill"); Spacer(); Text("\(lights.filter(\.isOn).count)/\(lights.count)").monospacedDigit().foregroundStyle(.secondary) }
-                    HStack(spacing: 6) { ForEach(lights.prefix(10)) { light in Circle().fill(light.isStale ? Lumen.warning : (light.isOn ? light.color : Lumen.textTertiary)).frame(width: 18, height: 18).help("\(light.label): \(explain(light))") } }
+                    HStack(spacing: 6) { ForEach(Array(lights.prefix(10)), id: \.id) { light in Circle().fill(light.isStale ? Lumen.warning : (light.isOn ? light.color : Lumen.textTertiary)).frame(width: 18, height: 18).help("\(light.label): \(explain(light))") } }
                     HStack { Button("On") { manager.setPower(in: room, on: true) }; Button("Off") { manager.setPower(in: room, on: false) }; Spacer(); Button("Explain") { manager.commandError = "\(room.name): \(lights.filter(\.isStale).count) stale · \(lights.filter(\.isOn).count) on · automation \(manager.automationOverrides[room.id] == nil ? "active" : "paused")" } }
                 }.padding(12).lumenCard(radius: 12)
             }
@@ -748,7 +748,7 @@ struct ExperienceCenterView: View {
 
     private var sceneConfidence: some View {
         LazyVGrid(columns: columns, spacing: 12) {
-            ForEach(manager.scenes.prefix(6)) { scene in
+            ForEach(Array(manager.scenes.prefix(6)), id: \.id) { scene in
                 let missing = scene.snapshots.filter { snap in !manager.devices.contains(where: { $0.id == snap.deviceID }) }.count
                 let stale = scene.snapshots.filter { snap in manager.devices.first(where: { $0.id == snap.deviceID })?.isStale == true }.count
                 VStack(alignment: .leading, spacing: 8) {
@@ -763,7 +763,7 @@ struct ExperienceCenterView: View {
 
     private var commandTracker: some View {
         LazyVGrid(columns: columns, spacing: 10) {
-            ForEach(manager.devices.prefix(12)) { device in
+            ForEach(Array(manager.devices.prefix(12)), id: \.id) { device in
                 let state = manager.commandState(for: device.id)
                 HStack { Image(systemName: state.phase.symbol).foregroundStyle(state.phase == .failed ? Lumen.danger : state.phase == .idle ? .green : Lumen.gold); VStack(alignment: .leading) { Text(device.label).lineLimit(1); Text(state.summary).font(.caption).foregroundStyle(.secondary).lineLimit(1) }; Spacer(); if state.phase == .failed { Button("Retry") { manager.retryCommand(for: device) } } }
                     .padding(10).lumenCard(radius: 10)
@@ -790,7 +790,7 @@ struct ExperienceCenterView: View {
 
     private var diary: some View {
         VStack(spacing: 8) {
-            ForEach(manager.activityEvents.prefix(8)) { event in
+            ForEach(Array(manager.activityEvents.prefix(8)), id: \.id) { event in
                 HStack { Image(systemName: event.isFailure ? "exclamationmark.triangle.fill" : "checkmark.circle").foregroundStyle(event.isFailure ? Lumen.warning : .green); VStack(alignment: .leading) { Text(event.title); Text("\(event.date.formatted(date: .omitted, time: .shortened)) · \(event.detail)").font(.caption).foregroundStyle(.secondary).lineLimit(1) }; Spacer() }
                     .padding(10).lumenCard(radius: 10)
             }

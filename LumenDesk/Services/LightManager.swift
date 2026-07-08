@@ -56,6 +56,10 @@ final class LightManager: ObservableObject {
     @Published private(set) var isDemoMode = false
     @Published private(set) var lastActionSummary: String?
     @Published private(set) var rehearsalSceneID: UUID?
+    // Per-device Govee segment layouts (COB strips, string lights, neon ropes)
+    // and reusable multi-color paint jobs, both persisted across sessions.
+    @Published private(set) var goveeSegmentStates: [String: GoveeSegmentState] = [:]
+    @Published private(set) var goveeSegmentPresets: [GoveeSegmentPreset] = []
 
     private var errorClearTask: Task<Void, Never>?
     private var lifx: LIFXClient?
@@ -78,6 +82,8 @@ final class LightManager: ObservableObject {
     private var demoLiveRooms: [Room] = []
     private var rehearsalSnapshot: [DeviceState] = []
     private var expectedStates: [String: ExpectedDeviceState] = [:]
+    // Devices currently streaming a razer-mode segment preview.
+    private var razerActiveIDs: Set<String> = []
 
     // Custom display names keyed by device id, persisted across sessions.
     private var customNames: [String: String] = [:]
@@ -116,6 +122,8 @@ final class LightManager: ObservableObject {
     private let automationOverridesKey = "LumenDesk.automationOverrides.v1"
     private let sceneRevisionsKey = "LumenDesk.sceneRevisions.v1"
     private let sceneDraftsKey = "LumenDesk.sceneDrafts.v1"
+    private let goveeSegmentsKey = "LumenDesk.goveeSegments.v1"
+    private let segmentPresetsKey = "LumenDesk.segmentPresets.v1"
 
     // MARK: - Undo / redo state
 
@@ -125,6 +133,10 @@ final class LightManager: ObservableObject {
         let brightness: Double
         let color: Color
         let kelvin: Int
+        /// Set when the device was showing a Govee segment layout, so undo,
+        /// effect stops, and rehearsals restore the multi-color paint job
+        /// rather than collapsing it to a single color.
+        let segments: GoveeSegmentState?
     }
     private struct ExpectedDeviceState {
         var isOn: Bool?
@@ -184,6 +196,8 @@ final class LightManager: ObservableObject {
         automationOverrides = loadValue([UUID: RoomAutomationOverride].self, key: automationOverridesKey) ?? [:]
         sceneRevisions = loadValue([SceneRevision].self, key: sceneRevisionsKey) ?? []
         sceneDrafts = loadValue([UUID: LightingScene].self, key: sceneDraftsKey) ?? [:]
+        goveeSegmentStates = loadValue([String: GoveeSegmentState].self, key: goveeSegmentsKey) ?? [:]
+        goveeSegmentPresets = loadValue([GoveeSegmentPreset].self, key: segmentPresetsKey) ?? []
     }
 
     func start() {
@@ -1103,6 +1117,7 @@ final class LightManager: ObservableObject {
     private func sendGoveeEffectFrame(_ device: LightDevice, color: Color, brightness: Double) {
         enqueueCommand(for: device, coalescingKey: "color", summary: "Effect frame", debounce: 0) { [weak self, weak device] in
             guard let self, let device else { return }
+            self.markSegmentsInactive(device)
             let rgb = color.rgbComponents
             let scale = max(0, min(1, brightness))
             self.govee?.setColor(deviceID: device.backendID,
@@ -1120,9 +1135,14 @@ final class LightManager: ObservableObject {
             device.brightness = state.brightness
             device.color = state.color
             device.kelvin = state.kelvin
-            markPending(device.id)
-            sendColor(device, color: state.color)
-            if device.brand == .govee { sendBrightness(device, value: state.brightness) }
+            if let segments = state.segments, device.brand == .govee {
+                applySegments(device, state: segments, recordUndo: false, turnOn: false, announce: false)
+                sendBrightness(device, value: state.brightness)
+            } else {
+                markPending(device.id)
+                sendColor(device, color: state.color)
+                if device.brand == .govee { sendBrightness(device, value: state.brightness) }
+            }
             sendPower(device, on: state.isOn)
         }
     }
@@ -1165,6 +1185,7 @@ final class LightManager: ObservableObject {
                 let lifxColor = LIFXHSBK(hue: UInt16(hsb.h * 65535), saturation: UInt16(hsb.s * 65535), brightness: UInt16(device.brightness * 65535), kelvin: UInt16(device.kelvin))
                 self.lifx?.setColor(macHex: device.backendID, color: lifxColor)
             case .govee:
+                self.markSegmentsInactive(device)
                 let rgb = color.rgbComponents
                 self.govee?.setColor(deviceID: device.backendID, r: Int(rgb.r * 255), g: Int(rgb.g * 255), b: Int(rgb.b * 255), kelvin: 0)
             }
@@ -1180,6 +1201,7 @@ final class LightManager: ObservableObject {
                 let hsb = device.color.hsbComponents
                 self.lifx?.setColor(macHex: device.backendID, color: LIFXHSBK(hue: UInt16(hsb.h * 65535), saturation: 0, brightness: UInt16(device.brightness * 65535), kelvin: UInt16(kelvin)))
             case .govee:
+                self.markSegmentsInactive(device)
                 self.govee?.setColor(deviceID: device.backendID, r: 255, g: 255, b: 255, kelvin: kelvin)
             }
         }
@@ -1189,7 +1211,8 @@ final class LightManager: ObservableObject {
 
     private func snapshot(_ device: LightDevice) -> DeviceState {
         DeviceState(deviceID: device.id, isOn: device.isOn,
-                    brightness: device.brightness, color: device.color, kelvin: device.kelvin)
+                    brightness: device.brightness, color: device.color, kelvin: device.kelvin,
+                    segments: activeSegmentState(for: device.id))
     }
 
     private func recordChange(_ devices: [LightDevice]) {
@@ -1241,9 +1264,14 @@ final class LightManager: ObservableObject {
             d.brightness = snap.brightness
             d.color = snap.color
             d.kelvin = snap.kelvin
-            sendColor(d, color: snap.color)
-            // Govee needs an explicit brightness call; LIFX brightness is embedded in setColor.
-            if d.brand == .govee { sendBrightness(d, value: snap.brightness) }
+            if let segments = snap.segments, d.brand == .govee {
+                applySegments(d, state: segments, recordUndo: false, turnOn: false, announce: false)
+                sendBrightness(d, value: snap.brightness)
+            } else {
+                sendColor(d, color: snap.color)
+                // Govee needs an explicit brightness call; LIFX brightness is embedded in setColor.
+                if d.brand == .govee { sendBrightness(d, value: snap.brightness) }
+            }
             sendPower(d, on: snap.isOn)
         }
     }
@@ -1360,13 +1388,14 @@ extension LightManager: GoveeClientDelegate {
                 self.scanResponseCount += 1
                 let oldAddress = existing.address
                 existing.address = address
+                if let sku, existing.sku != sku { existing.sku = sku }
                 if oldAddress != address { self.appendDiscoveryChange(existing, kind: .changed, detail: "Address changed from \(oldAddress) to \(address)") }
                 self.markSeen(existing)
             } else {
                 let suffix = deviceID.split(separator: ":").suffix(2).joined(separator: "")
                 let display = sku.map { "\($0) \(suffix)" } ?? "Govee \(suffix)"
                 let device = LightDevice(id: id, brand: .govee, backendID: deviceID,
-                                         name: display, address: address)
+                                         name: display, address: address, sku: sku)
                 self.upsert(device)
             }
         }
@@ -1410,6 +1439,176 @@ extension LightManager: GoveeClientDelegate {
             }
             self.publishError("Govee command failed: \(error)")
         }
+    }
+}
+
+// MARK: - Govee Segment Studio (per-segment control for COB strips, string lights, neon ropes)
+
+extension LightManager {
+    /// Capability detected from the discovery SKU; nil for non-Govee devices
+    /// and Govee models the catalog doesn't recognize.
+    func segmentProfile(for device: LightDevice) -> GoveeSegmentProfile? {
+        guard device.brand == .govee else { return nil }
+        return GoveeSegmentProfile.detect(sku: device.sku)
+    }
+
+    /// Profile the Segment Studio runs with. Any Govee light may open the
+    /// studio — unrecognized SKUs get the generic profile (the studio labels
+    /// them as unrecognized; devices without RGBIC hardware simply ignore
+    /// segment packets).
+    func segmentStudioProfile(for device: LightDevice) -> GoveeSegmentProfile? {
+        guard device.brand == .govee else { return nil }
+        return segmentProfile(for: device) ?? .generic
+    }
+
+    /// The device's saved layout, or a fresh one seeded from its current color.
+    func segmentState(for device: LightDevice) -> GoveeSegmentState {
+        if let saved = goveeSegmentStates[device.id] { return saved }
+        let profile = segmentStudioProfile(for: device) ?? .generic
+        return .seed(count: profile.defaultSegmentCount,
+                     color: device.color,
+                     gradient: false)
+    }
+
+    /// The saved layout only when it is what the light is currently showing.
+    func activeSegmentState(for deviceID: String) -> GoveeSegmentState? {
+        guard let state = goveeSegmentStates[deviceID], state.isActive else { return nil }
+        return state
+    }
+
+    /// Streams the draft layout in real time over razer mode while the studio
+    /// is editing. The overlay is volatile: `endSegmentPreview` returns the
+    /// light to its last static state, which makes "close without applying"
+    /// a true cancel.
+    func previewSegments(_ device: LightDevice, state: GoveeSegmentState) {
+        guard device.brand == .govee, !isDemoMode else { return }
+        if !razerActiveIDs.contains(device.id) {
+            razerActiveIDs.insert(device.id)
+            govee?.setRazerMode(deviceID: device.backendID, on: true)
+        }
+        let colors = state.colors.map { segment -> (r: Int, g: Int, b: Int) in
+            // Razer frames carry no brightness channel, so fold each
+            // segment's own brightness into its RGB values.
+            let rgb = segment.rgb255
+            let scale = segment.brightness
+            return (r: Int((Double(rgb.r) * scale).rounded()),
+                    g: Int((Double(rgb.g) * scale).rounded()),
+                    b: Int((Double(rgb.b) * scale).rounded()))
+        }
+        govee?.sendRazerFrame(deviceID: device.backendID, colors: colors, blend: state.gradient)
+    }
+
+    /// Ends live streaming; the device falls back to its last static state.
+    func endSegmentPreview(_ device: LightDevice) {
+        guard razerActiveIDs.contains(device.id) else { return }
+        razerActiveIDs.remove(device.id)
+        govee?.setRazerMode(deviceID: device.backendID, on: false)
+    }
+
+    /// Saves the studio's draft without commanding the light, so a half
+    /// finished paint job survives closing the sheet. The layout only keeps
+    /// its "showing on the light" status while it still matches what was
+    /// applied — an edited-but-unapplied draft must not masquerade as live
+    /// state to scenes and undo.
+    func storeSegmentState(_ state: GoveeSegmentState, for device: LightDevice) {
+        let previous = goveeSegmentStates[device.id]
+        var stored = state
+        stored.isActive = previous?.isActive == true
+            && previous?.colors == state.colors
+            && previous?.gradient == state.gradient
+        goveeSegmentStates[device.id] = stored
+        persistValue(goveeSegmentStates, key: goveeSegmentsKey)
+    }
+
+    /// Durably applies a layout using the same Bluetooth-format commands the
+    /// Govee Home app writes, relayed over the LAN `ptReal` command, so the
+    /// paint job survives power cycles and preview teardown.
+    func applySegments(_ device: LightDevice, state: GoveeSegmentState,
+                       recordUndo: Bool = true, turnOn: Bool = true, announce: Bool = true) {
+        guard device.brand == .govee else { return }
+        if recordUndo {
+            if device.isStale {
+                publishError("\u{201C}\(device.label)\u{201D} may be offline — command sent anyway.")
+            }
+            recordChange([device])
+        }
+        var next = state
+        next.isActive = true
+        goveeSegmentStates[device.id] = next
+        persistValue(goveeSegmentStates, key: goveeSegmentsKey)
+        device.color = next.blendedColor
+        if turnOn, !device.isOn {
+            device.isOn = true
+            sendPower(device, on: true)
+        }
+        noteSegmentCommand(device, summary: "Applying \(next.segmentCount)-segment layout")
+        if !isDemoMode {
+            sendSegmentPackets(device, state: next)
+        }
+        if announce {
+            logActivity(.command, title: "Segment layout applied",
+                        detail: "\(device.label): \(next.segmentCount) segments\(next.gradient ? ", blended" : "")")
+            lastActionSummary = "Painted \(next.segmentCount) segments on \(device.label)"
+        }
+    }
+
+    func addSegmentPreset(name: String, stops: [GoveeSegmentColor], fill: GoveeSegmentPreset.Fill = .smooth) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !stops.isEmpty else { return }
+        goveeSegmentPresets.append(GoveeSegmentPreset(name: trimmed, stops: stops, fill: fill))
+        persistValue(goveeSegmentPresets, key: segmentPresetsKey)
+        lastActionSummary = "Saved segment preset \u{201C}\(trimmed)\u{201D}"
+    }
+
+    func deleteSegmentPreset(_ presetID: UUID) {
+        goveeSegmentPresets.removeAll { $0.id == presetID }
+        persistValue(goveeSegmentPresets, key: segmentPresetsKey)
+    }
+
+    /// Translates a layout into the packet batch the firmware expects: one
+    /// gradient toggle, one color packet per distinct color, and per-segment
+    /// brightness packets only when the layout actually dims something.
+    private func sendSegmentPackets(_ device: LightDevice, state: GoveeSegmentState) {
+        var packets: [[UInt8]] = []
+        if segmentStudioProfile(for: device)?.supportsGradient == true {
+            packets.append(GoveeProtocol.gradientPacket(on: state.gradient))
+        }
+        for group in state.colorGroups {
+            let rgb = group.color.rgb255
+            packets.append(GoveeProtocol.segmentColorPacket(r: rgb.r, g: rgb.g, b: rgb.b, segments: group.segments))
+        }
+        let brightnessGroups = state.brightnessGroups
+        if brightnessGroups.contains(where: { $0.percent < 100 }) {
+            for group in brightnessGroups {
+                packets.append(GoveeProtocol.segmentBrightnessPacket(percent: group.percent, segments: group.segments))
+            }
+        }
+        govee?.applySegments(deviceID: device.backendID, packets: packets)
+    }
+
+    /// Segment layouts aren't echoed back by `devStatus`, so they can't ride
+    /// the expectation-matching confirmation pipeline — that would end every
+    /// apply with a false "did not confirm" error. Show a lightweight
+    /// sending → applied badge instead.
+    private func noteSegmentCommand(_ device: LightDevice, summary: String) {
+        commandStates[device.id] = DeviceCommandState(phase: .sending, summary: summary, updatedAt: Date())
+        Task { @MainActor [weak self, weak device] in
+            try? await Task.sleep(nanoseconds: 900_000_000)
+            guard let self, let device, self.commandStates[device.id]?.phase == .sending else { return }
+            self.commandStates[device.id] = DeviceCommandState(phase: .applied, summary: summary, updatedAt: Date())
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            guard self.commandStates[device.id]?.phase == .applied else { return }
+            self.commandStates[device.id] = DeviceCommandState(phase: .idle, summary: "Sent", updatedAt: Date())
+        }
+    }
+
+    /// Called whenever a solid color or white command goes to a Govee device,
+    /// so scenes and undo stop treating the stored layout as what is on
+    /// display. The layout itself is kept for one-tap re-apply.
+    fileprivate func markSegmentsInactive(_ device: LightDevice) {
+        guard goveeSegmentStates[device.id]?.isActive == true else { return }
+        goveeSegmentStates[device.id]?.isActive = false
+        persistValue(goveeSegmentStates, key: goveeSegmentsKey)
     }
 }
 
@@ -1520,6 +1719,9 @@ extension LightManager {
         var sunsetHour: Int
         var sunsetMinute: Int
         var brightnessPresets: [Double]
+        // Optional so configurations exported by earlier versions still import.
+        var goveeSegmentStates: [String: GoveeSegmentState]?
+        var goveeSegmentPresets: [GoveeSegmentPreset]?
     }
 
     func exportRoomsData() -> Data? { exportConfigurationData() }
@@ -1537,7 +1739,9 @@ extension LightManager {
             sunriseMinute: sunriseMinute,
             sunsetHour: sunsetHour,
             sunsetMinute: sunsetMinute,
-            brightnessPresets: customBrightnessPresets
+            brightnessPresets: customBrightnessPresets,
+            goveeSegmentStates: goveeSegmentStates,
+            goveeSegmentPresets: goveeSegmentPresets
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -1559,6 +1763,9 @@ extension LightManager {
             sunsetHour = config.sunsetHour
             sunsetMinute = config.sunsetMinute
             customBrightnessPresets = sanitizedPresets(config.brightnessPresets)
+            // Older exports have no segment data; keep what this install knows.
+            if let segmentStates = config.goveeSegmentStates { goveeSegmentStates = segmentStates }
+            if let segmentPresets = config.goveeSegmentPresets { goveeSegmentPresets = segmentPresets }
             for device in devices {
                 device.customName = customNames[device.id]
             }
@@ -1600,6 +1807,8 @@ extension LightManager {
         persistUUIDSet(favoriteSceneIDs, forKey: sceneFavoritesDefaultsKey)
         persistBrightnessPresets()
         persistWhiteMode()
+        persistValue(goveeSegmentStates, key: goveeSegmentsKey)
+        persistValue(goveeSegmentPresets, key: segmentPresetsKey)
     }
 
     fileprivate func persistRooms() {
@@ -1721,7 +1930,8 @@ extension LightManager {
                 brightness: d.brightness,
                 hue: hsb.h,
                 saturation: hsb.s,
-                kelvin: d.kelvin
+                kelvin: d.kelvin,
+                segments: activeSegmentState(for: d.id)
             )
         }
         scenes.append(LightingScene(name: trimmed, snapshots: snapshots))
@@ -2168,6 +2378,7 @@ extension LightManager {
         let originalPower = device.isOn
         let originalColor = device.color
         let originalBrightness = device.brightness
+        let originalSegments = activeSegmentState(for: device.id)
         device.isOn = true
         device.color = .cyan
         device.brightness = 1
@@ -2177,7 +2388,12 @@ extension LightManager {
             try? await Task.sleep(for: .seconds(2))
             guard let self, let device else { return }
             device.color = originalColor; device.brightness = originalBrightness; device.isOn = originalPower
-            self.sendColor(device, color: originalColor); self.sendBrightness(device, value: originalBrightness); self.sendPower(device, on: originalPower)
+            if let originalSegments {
+                self.applySegments(device, state: originalSegments, recordUndo: false, turnOn: false, announce: false)
+            } else {
+                self.sendColor(device, color: originalColor)
+            }
+            self.sendBrightness(device, value: originalBrightness); self.sendPower(device, on: originalPower)
         }
     }
 
@@ -2193,6 +2409,10 @@ extension LightManager {
     func diagnostics(for device: LightDevice) -> [ScanDiagnostic] {
         [
             ScanDiagnostic(title: "Vendor", value: device.brand.displayName, status: .neutral),
+            ScanDiagnostic(title: "Model", value: device.sku ?? "Not reported", status: .neutral),
+            ScanDiagnostic(title: "Segment control",
+                           value: segmentProfile(for: device).map { "\($0.layout.displayName) · \(segmentState(for: device).segmentCount) segments" } ?? "Not detected",
+                           status: .neutral),
             ScanDiagnostic(title: "Address", value: device.address, status: .neutral),
             ScanDiagnostic(title: "Last seen", value: device.lastSeen.formatted(date: .abbreviated, time: .standard), status: device.isStale ? .warning : .good),
             ScanDiagnostic(title: "Reachability", value: device.isStale ? "Not seen recently" : "Responding", status: device.isStale ? .warning : .good),
@@ -2262,10 +2482,16 @@ extension LightManager {
             guard let snap = scene.snapshots[device.id] else { continue }
             if !allowTurningOff && !snap.isOn { skipped.append(device.id); continue }
             if device.isStale { failed.append(device.id) } else { succeeded.append(device.id) }
-            let color = Color(hue: snap.hue, saturation: snap.saturation, brightness: 1)
-            device.color = color; device.brightness = snap.brightness; device.kelvin = snap.kelvin; device.isOn = snap.isOn
-            markPending(device.id); sendColor(device, color: color)
-            if device.brand == .govee { sendBrightness(device, value: snap.brightness) }
+            device.brightness = snap.brightness; device.kelvin = snap.kelvin; device.isOn = snap.isOn
+            if let segments = snap.segments, device.brand == .govee {
+                applySegments(device, state: segments, recordUndo: false, turnOn: false, announce: false)
+                sendBrightness(device, value: snap.brightness)
+            } else {
+                let color = Color(hue: snap.hue, saturation: snap.saturation, brightness: 1)
+                device.color = color
+                markPending(device.id); sendColor(device, color: color)
+                if device.brand == .govee { sendBrightness(device, value: snap.brightness) }
+            }
             sendPower(device, on: snap.isOn)
         }
         lastSceneResult = SceneApplicationResult(sceneName: scene.name, succeededIDs: succeeded, failedIDs: failed, skippedOffIDs: skipped)
@@ -2398,10 +2624,14 @@ extension LightManager {
         demoLiveDevices = devices
         demoLiveRooms = rooms
         let palette: [Color] = [.orange, .cyan, .purple, .mint, .pink, .yellow]
+        let names = ["Desk Glow", "Desk COB Strip", "Window Wash", "Shelf String Lights", "Floor Lamp", "Ceiling"]
+        // Segmented SKUs on the Govee simulations so the Segment Studio can
+        // be explored safely in demo mode.
+        let skus: [String?] = [nil, "H619A", nil, "H70C1", nil, nil]
         devices = (0..<6).map { index in
             let device = LightDevice(id: "demo:\(index)", brand: index.isMultiple(of: 2) ? .lifx : .govee,
-                                     backendID: "SIM-\(index)", name: ["Desk Glow", "Reading Lamp", "Window Wash", "Shelf Light", "Floor Lamp", "Ceiling"][index],
-                                     address: "Simulation", isOn: index != 4, brightness: 0.35 + Double(index) * 0.1,
+                                     backendID: "SIM-\(index)", name: names[index],
+                                     address: "Simulation", sku: skus[index], isOn: index != 4, brightness: 0.35 + Double(index) * 0.1,
                                      color: palette[index], kelvin: 2700 + index * 500)
             if index == 4 { device.isStale = true; device.lastSeen = Date().addingTimeInterval(-600) }
             return device

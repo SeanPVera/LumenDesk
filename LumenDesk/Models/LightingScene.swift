@@ -23,19 +23,23 @@ struct DeviceSnapshot: Equatable {
     var hue: Double
     var saturation: Double
     var kelvin: Int
+    /// Govee segment layout that was active when the scene was captured.
+    /// Nil for solid-color devices and for scenes saved by older versions.
+    var segments: GoveeSegmentState?
 
-    init(isOn: Bool, brightness: Double, hue: Double, saturation: Double, kelvin: Int = 3500) {
+    init(isOn: Bool, brightness: Double, hue: Double, saturation: Double, kelvin: Int = 3500, segments: GoveeSegmentState? = nil) {
         self.isOn = isOn
         self.brightness = brightness
         self.hue = hue
         self.saturation = saturation
         self.kelvin = kelvin
+        self.segments = segments
     }
 }
 
 extension DeviceSnapshot: Codable {
     enum CodingKeys: String, CodingKey {
-        case isOn, brightness, hue, saturation, kelvin
+        case isOn, brightness, hue, saturation, kelvin, segments
     }
 
     init(from decoder: Decoder) throws {
@@ -45,5 +49,6 @@ extension DeviceSnapshot: Codable {
         hue = try c.decode(Double.self, forKey: .hue)
         saturation = try c.decode(Double.self, forKey: .saturation)
         kelvin = (try? c.decode(Int.self, forKey: .kelvin)) ?? 3500
+        segments = try? c.decodeIfPresent(GoveeSegmentState.self, forKey: .segments)
     }
 }

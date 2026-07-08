@@ -75,6 +75,46 @@ final class GoveeClient {
         enqueue(deviceID: deviceID, kind: "colorwc", payload: GoveeProtocol.colorRequest(r: r, g: g, b: b, kelvin: kelvin))
     }
 
+    // MARK: - Segment control
+
+    func setRazerMode(deviceID: String, on: Bool) {
+        enqueue(deviceID: deviceID, kind: "razer-mode", payload: GoveeProtocol.razerModeRequest(on: on))
+    }
+
+    /// Streams one razer frame. Frames coalesce to the newest payload, so
+    /// scrubbing a color or brightness control can emit freely without
+    /// backing up the per-device queue.
+    func sendRazerFrame(deviceID: String, colors: [(r: Int, g: Int, b: Int)], blend: Bool) {
+        enqueue(deviceID: deviceID, kind: "razer-frame", payload: GoveeProtocol.razerFrameRequest(colors: colors, blend: blend))
+    }
+
+    /// Sends the Bluetooth-format packets that make a segment layout durable.
+    /// Packets are chunked across datagrams to stay far below the UDP MTU,
+    /// and queueing is exclusive: a rapid second apply replaces any unsent
+    /// chunks from the first instead of interleaving with them.
+    func applySegments(deviceID: String, packets: [[UInt8]]) {
+        guard !packets.isEmpty else { return }
+        let chunkSize = 12
+        let chunks = stride(from: 0, to: packets.count, by: chunkSize).map { start in
+            GoveeProtocol.ptRealRequest(packets: Array(packets[start..<min(start + chunkSize, packets.count)]))
+        }
+        queue.async { [weak self] in
+            guard let self, self.addressByDevice[deviceID] != nil else { return }
+            var order = self.queuedOrder[deviceID, default: []]
+            order.removeAll { $0.hasPrefix("segments-") }
+            var payloads = self.queuedPayloads[deviceID, default: [:]]
+                .filter { !$0.key.hasPrefix("segments-") }
+            for (index, chunk) in chunks.enumerated() {
+                let kind = "segments-\(index)"
+                payloads[kind] = chunk
+                order.append(kind)
+            }
+            self.queuedOrder[deviceID] = order
+            self.queuedPayloads[deviceID] = payloads
+            self.scheduleDrain(deviceID)
+        }
+    }
+
     // MARK: - Paced per-device send queue
 
     private func enqueue(deviceID: String, kind: String, payload: Data) {

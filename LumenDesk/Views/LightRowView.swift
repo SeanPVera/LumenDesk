@@ -13,6 +13,7 @@ struct LightRowView: View {
     @FocusState private var nameFocused: Bool
     @State private var showingInspector = false
     @State private var showingPreciseColor = false
+    @State private var showingSegmentStudio = false
 
     private enum LightColorMode: String, CaseIterable {
         case color = "Color"
@@ -94,6 +95,7 @@ struct LightRowView: View {
         }
         .sheet(isPresented: $showingInspector) { DeviceInspectorView(device: device).environmentObject(manager) }
         .sheet(isPresented: $showingPreciseColor) { PreciseColorEditorView(device: device).environmentObject(manager) }
+        .sheet(isPresented: $showingSegmentStudio) { GoveeSegmentEditorView(device: device).environmentObject(manager) }
         .contextMenu { if !selectionMode { roomMenuContents } }
     }
 
@@ -270,7 +272,47 @@ struct LightRowView: View {
             if colorModeBinding.wrappedValue == .white {
                 kelvinRow
             }
+            if manager.segmentProfile(for: device) != nil {
+                segmentStudioRow
+            }
         }
+    }
+
+    // Per-segment control entry for recognized Govee RGBIC devices (COB
+    // strips, string lights, neon ropes). Other Govee models can still reach
+    // the studio from the context menu.
+    private var segmentStudioRow: some View {
+        Button {
+            showingSegmentStudio = true
+        } label: {
+            HStack(spacing: 8) {
+                SegmentMiniStripView(colors: segmentPreviewColors)
+                    .frame(width: 64, height: 12)
+                Text(segmentRowTitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Image(systemName: "paintpalette")
+                    .font(.caption)
+                    .foregroundStyle(Lumen.coral)
+                    .accessibilityHidden(true)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(selectionMode)
+        .help("Open Segment Studio — paint each segment individually")
+        .accessibilityLabel("Segment Studio for \(device.label)")
+    }
+
+    private var segmentPreviewColors: [Color] {
+        manager.segmentState(for: device).colors.map(\.litColor)
+    }
+
+    private var segmentRowTitle: String {
+        let state = manager.segmentState(for: device)
+        let showing = manager.activeSegmentState(for: device.id) != nil
+        return "Segments · \(state.segmentCount)\(showing ? " · showing" : "")"
     }
 
     private var modePicker: some View {
@@ -442,6 +484,9 @@ struct LightRowView: View {
         Button("Identify Light") { manager.identify(device) }
         Button("Device Inspector\u{2026}") { showingInspector = true }
         Button("Precise Color\u{2026}") { showingPreciseColor = true }
+        if device.brand == .govee {
+            Button("Segment Studio\u{2026}") { showingSegmentStudio = true }
+        }
         if device.isStale { Button("Retry Connection") { manager.retry(device) } }
         if manager.commandState(for: device.id).phase == .failed { Button("Keep Trying") { manager.retryCommand(for: device) } }
         if manager.commandPendingIDs.contains(device.id) { Button("Cancel Queued Command") { manager.cancelQueuedCommands(deviceIDs: [device.id]) } }

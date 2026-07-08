@@ -415,7 +415,7 @@ struct GoveeSegmentEditorView: View {
         VStack(alignment: .leading, spacing: 8) {
             Divider()
             HStack {
-                Text("Live preview is temporary. Apply writes the layout to the light so it survives power cycles.")
+                Text("Live preview is temporary. Apply pauses the preview and writes the layout to the light so it survives power cycles; editing again resumes the preview.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)

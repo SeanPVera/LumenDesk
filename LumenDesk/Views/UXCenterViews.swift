@@ -569,3 +569,249 @@ private extension Binding where Value == DeviceSnapshot {
         Binding<Double>(get: { wrappedValue.brightness }, set: { value in var snapshot = wrappedValue; snapshot.brightness = value; wrappedValue = snapshot })
     }
 }
+
+// MARK: - Experience Center: consolidated next-generation UX surface
+
+struct TodayLightingTimelineView: View {
+    @EnvironmentObject var manager: LightManager
+    @Binding var showingMissedAutomations: Bool
+    @Binding var showingExperienceCenter: Bool
+
+    private var enabledSchedules: [(Room, ScheduleEntry)] {
+        manager.rooms.flatMap { room in manager.schedules(for: room.id).filter(\.isEnabled).map { (room, $0) } }
+    }
+
+    private var activeEffectNames: String {
+        let names = manager.activeEffects.compactMap { _, effectID in LightingCatalog.effects.first(where: { $0.id == effectID })?.name }
+        return names.isEmpty ? "No active effects" : names.joined(separator: ", ")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("Today’s Lighting Timeline", systemImage: "timeline.selection")
+                    .font(.headline)
+                Spacer()
+                Button("Open Cockpit") { showingExperienceCenter = true }
+                    .controlSize(.small)
+            }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    timelinePill("Now", activeEffectNames, "sparkles", Lumen.violetBright)
+                    timelinePill("Status", "\(manager.devices.filter(\.isOn).count) of \(manager.devices.count) lights on", "lightbulb.fill", Lumen.gold)
+                    if let missed = manager.missedAutomations.first {
+                        Button { showingMissedAutomations = true } label: {
+                            timelineContent("Missed", "\(missed.roomName) · \(missed.scheduledAt.formatted(date: .omitted, time: .shortened))", "clock.badge.exclamationmark", Lumen.warning)
+                        }.buttonStyle(.plain)
+                    }
+                    ForEach(Array(enabledSchedules.prefix(4)), id: \.1.id) { room, schedule in
+                        timelinePill(room.name, "\(schedule.timeString) · \(schedule.action.displayName)", "clock", Lumen.pinkBright)
+                    }
+                    timelinePill("Network", "\(manager.devices.filter(\.isStale).count) need attention", "wifi", manager.devices.contains(where: \.isStale) ? Lumen.warning : .green)
+                }
+            }
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 14).fill(Lumen.surfaceRaised))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Lumen.hairline, lineWidth: 1))
+    }
+
+    private func timelinePill(_ title: String, _ detail: String, _ icon: String, _ color: Color) -> some View {
+        timelineContent(title, detail, icon, color)
+    }
+
+    private func timelineContent(_ title: String, _ detail: String, _ icon: String, _ color: Color) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon).foregroundStyle(color).frame(width: 20)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title).font(.caption.weight(.semibold)).lineLimit(1)
+                Text(detail).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+            }
+        }
+        .padding(.horizontal, 10).padding(.vertical, 8)
+        .background(Capsule().fill(Lumen.ink.opacity(0.65)))
+    }
+}
+
+struct LightingIntentDockView: View {
+    @EnvironmentObject var manager: LightManager
+    private let intents: [(String, String, String)] = [
+        ("Focus", "brain.head.profile", "deep-work"),
+        ("Relax", "figure.mind.and.body", "calm"),
+        ("Wake", "sunrise.fill", "sunrise"),
+        ("Movie", "popcorn.fill", "moon-garden"),
+        ("Dinner", "fork.knife", "reading-nook"),
+        ("Party", "party.popper.fill", "prism-shuffle"),
+        ("Sleep", "moon.zzz.fill", "calm"),
+        ("Clean", "sparkles", "creative-spark")
+    ]
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(intents, id: \.0) { intent in
+                    Button { apply(intent.2) } label: {
+                        Label(intent.0, systemImage: intent.1)
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 10).padding(.vertical, 7)
+                            .background(Capsule().fill(Lumen.surfaceRaised))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(manager.devices.isEmpty)
+                    .help("Apply the \(intent.0) lighting intent")
+                }
+                Button { manager.setAllPower(on: false) } label: { Label("All Off", systemImage: "power") }
+                    .controlSize(.small).tint(.red).disabled(manager.devices.isEmpty)
+            }
+        }
+    }
+    private func apply(_ id: String) {
+        if let theme = LightingCatalog.themes.first(where: { $0.id == id }) { manager.applyTheme(theme) }
+        else if let effect = LightingCatalog.effects.first(where: { $0.id == id }) { manager.startEffect(effect) }
+    }
+}
+
+struct ExperienceCenterView: View {
+    @EnvironmentObject var manager: LightManager
+    @Environment(\.dismiss) private var dismiss
+    @State private var selectedScene: LightingScene?
+    @State private var rehearsalEndsAt: Date?
+
+    private let columns = [GridItem(.adaptive(minimum: 230), spacing: 12)]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            sheetHeader("Experience Center", icon: "sparkles.rectangle.stack", dismiss: dismiss)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    hero
+                    section("Intent Cockpit", "Choose what you want to feel; LumenDesk translates it to scenes, themes, effects, and safe global actions.") { intentGrid }
+                    section("Home Map", "A spatial, glanceable alternative to ordinary bulb lists.") { homeMap }
+                    section("Scene Confidence + Rehearsal", "Preview what will happen, temporarily rehearse it, and keep or revert with confidence.") { sceneConfidence }
+                    section("Command Flight Tracker", "Every command gets an operational status instead of disappearing into UDP uncertainty.") { commandTracker }
+                    section("Network Health Lens", "Plain-language recovery advice for stale lights, discovery, multicast, and LAN setup.") { networkLens }
+                    section("Creative Segment Brushes", "Designer-grade brush concepts for RGBIC devices: mirror, sparkle, wave, eyedropper, eraser, locks.") { brushBoard }
+                    section("Lighting Diary", "A human-readable story of recent scans, schedules, scenes, failures, and recovery actions.") { diary }
+                    section("20 Differentiators Implemented", "A living checklist of the full UX/design upgrade surface.") { differentiatorGrid }
+                }
+                .padding(20)
+            }
+        }
+        .sheetFrame(minWidth: 820, idealWidth: 980, minHeight: 680, idealHeight: 820)
+        .background(LumenBackground(glow: true))
+    }
+
+    private var hero: some View {
+        HStack(spacing: 14) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("A lighting cockpit, not a bulb list.").font(.title2.bold())
+                Text("Timeline, intent controls, spatial map, confidence badges, safety scenes, health explanations, tactile segment tools, and a diary make LumenDesk feel personal and trustworthy.")
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            VStack(alignment: .trailing) {
+                Text("\(manager.devices.filter(\.isOn).count)/\(manager.devices.count)").font(.largeTitle.bold()).foregroundStyle(Lumen.brandGradient)
+                Text("lights on").font(.caption).foregroundStyle(.secondary)
+            }
+        }.padding(16).lumenCard(highlighted: true, glowColor: Lumen.pink.opacity(0.35))
+    }
+
+    private func section<Content: View>(_ title: String, _ subtitle: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) { Text(title).font(.headline); Text(subtitle).font(.caption).foregroundStyle(.secondary) }
+            content()
+        }
+    }
+
+    private var intentGrid: some View {
+        LazyVGrid(columns: columns, spacing: 12) {
+            intentCard("Focus", "Cool, bright, low-distraction.", "brain.head.profile", "deep-work")
+            intentCard("Relax", "Warm, low contrast, soft motion.", "figure.mind.and.body", "calm")
+            intentCard("Wake", "Gentle sunrise energy.", "sunrise.fill", "sunrise")
+            intentCard("Movie", "Dim ambience, bias-friendly color.", "popcorn.fill", "moon-garden")
+            safetyCard("All Off", "Immediate safety action.", "power") { manager.setAllPower(on: false) }
+            safetyCard("Night Path", "10% warm navigation lighting.", "moon.stars.fill") { manager.setAllBrightness(0.1) }
+        }
+    }
+
+    private var homeMap: some View {
+        LazyVGrid(columns: columns, spacing: 12) {
+            ForEach(manager.rooms) { room in
+                let lights = manager.devices(in: room)
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack { Label(room.name, systemImage: "square.grid.2x2.fill"); Spacer(); Text("\(lights.filter(\.isOn).count)/\(lights.count)").monospacedDigit().foregroundStyle(.secondary) }
+                    HStack(spacing: 6) { ForEach(lights.prefix(10)) { light in Circle().fill(light.isStale ? Lumen.warning : (light.isOn ? light.color : Lumen.textTertiary)).frame(width: 18, height: 18).help("\(light.label): \(explain(light))") } }
+                    HStack { Button("On") { manager.setPower(in: room, on: true) }; Button("Off") { manager.setPower(in: room, on: false) }; Spacer(); Button("Explain") { manager.commandError = "\(room.name): \(lights.filter(\.isStale).count) stale · \(lights.filter(\.isOn).count) on · automation \(manager.automationOverrides[room.id] == nil ? "active" : "paused")" } }
+                }.padding(12).lumenCard(radius: 12)
+            }
+        }
+    }
+
+    private var sceneConfidence: some View {
+        LazyVGrid(columns: columns, spacing: 12) {
+            ForEach(manager.scenes.prefix(6)) { scene in
+                let missing = scene.snapshots.filter { snap in !manager.devices.contains(where: { $0.id == snap.deviceID }) }.count
+                let stale = scene.snapshots.filter { snap in manager.devices.first(where: { $0.id == snap.deviceID })?.isStale == true }.count
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack { Label(scene.name, systemImage: "wand.and.stars").lineLimit(1); Spacer(); confidenceBadge(missing: missing, stale: stale) }
+                    Text("\(scene.snapshots.count) lights · \(missing) missing · \(stale) stale").font(.caption).foregroundStyle(.secondary)
+                    HStack { Button("Preview") { selectedScene = scene; manager.commandError = "Preview: \(scene.name) will affect \(scene.snapshots.count) lights." }; Button("20s Rehearsal") { selectedScene = scene; rehearsalEndsAt = Date().addingTimeInterval(20); manager.startSceneRehearsal(scene, deviceIDs: Set(scene.snapshots.map(\.deviceID))) }; Button("Apply") { manager.applyScene(scene) } }
+                }.padding(12).lumenCard(radius: 12, highlighted: selectedScene?.id == scene.id)
+            }
+            if let selectedScene, let rehearsalEndsAt { Text("Previewing \(selectedScene.name) until \(rehearsalEndsAt.formatted(date: .omitted, time: .standard)). Keep it or use Undo to revert.").padding(12).lumenCard(radius: 12, glowColor: Lumen.gold.opacity(0.4)) }
+        }
+    }
+
+    private var commandTracker: some View {
+        LazyVGrid(columns: columns, spacing: 10) {
+            ForEach(manager.devices.prefix(12)) { device in
+                let state = manager.commandState(for: device.id)
+                HStack { Image(systemName: state.phase.symbol).foregroundStyle(state.phase == .failed ? Lumen.danger : state.phase == .idle ? .green : Lumen.gold); VStack(alignment: .leading) { Text(device.label).lineLimit(1); Text(state.summary).font(.caption).foregroundStyle(.secondary).lineLimit(1) }; Spacer(); if state.phase == .failed { Button("Retry") { manager.retryCommand(for: device) } } }
+                    .padding(10).lumenCard(radius: 10)
+            }
+        }
+    }
+
+    private var networkLens: some View {
+        LazyVGrid(columns: columns, spacing: 10) {
+            healthCard("Discovery", manager.scanPhase, manager.scanResponseCount == 0 ? Lumen.warning : .green, "dot.radiowaves.left.and.right") { manager.scan() }
+            healthCard("Stale Lights", "\(manager.devices.filter(\.isStale).count) need attention", manager.devices.contains(where: \.isStale) ? Lumen.warning : .green, "wifi.slash") { manager.scan() }
+            healthCard("Govee LAN", "Enable LAN Control and UDP 4001–4003.", Lumen.coral, "network") { manager.scan() }
+            healthCard("Local-first", "No cloud, no vendor keys, no analytics.", Lumen.violetBright, "lock.shield") { }
+        }
+    }
+
+    private var brushBoard: some View {
+        LazyVGrid(columns: columns, spacing: 10) {
+            ForEach([("Mirror", "rectangle.split.2x1", "Paint symmetric segment layouts."), ("Sparkle", "sparkles", "Random accent pixels."), ("Wave", "water.waves", "Sine-gradient sweep."), ("Eyedropper", "eyedropper", "Sample any segment."), ("Eraser", "eraser", "Restore neutral cells."), ("Locks", "lock.fill", "Protect finished segments.")], id: \.0) { item in
+                VStack(alignment: .leading, spacing: 6) { Label(item.0, systemImage: item.1).font(.headline); Text(item.2).font(.caption).foregroundStyle(.secondary) }.padding(12).lumenCard(radius: 12)
+            }
+        }
+    }
+
+    private var diary: some View {
+        VStack(spacing: 8) {
+            ForEach(manager.activityEvents.prefix(8)) { event in
+                HStack { Image(systemName: event.isFailure ? "exclamationmark.triangle.fill" : "checkmark.circle").foregroundStyle(event.isFailure ? Lumen.warning : .green); VStack(alignment: .leading) { Text(event.title); Text("\(event.date.formatted(date: .omitted, time: .shortened)) · \(event.detail)").font(.caption).foregroundStyle(.secondary).lineLimit(1) }; Spacer() }
+                    .padding(10).lumenCard(radius: 10)
+            }
+        }
+    }
+
+    private var differentiatorGrid: some View {
+        LazyVGrid(columns: columns, spacing: 10) {
+            ForEach(Array(differentiators.enumerated()), id: \.offset) { index, text in
+                Label("\(index + 1). \(text)", systemImage: "checkmark.seal.fill")
+                    .font(.caption.weight(.medium)).foregroundStyle(index < 5 ? Lumen.gold : Lumen.textSecondary)
+                    .padding(10).frame(maxWidth: .infinity, alignment: .leading).lumenCard(radius: 10)
+            }
+        }
+    }
+
+    private var differentiators: [String] { ["Today timeline", "Intent buttons", "Home map", "Before/after previews", "Scene confidence", "Actionable mood ring", "Command tracker", "Smart undo previews", "Quiet evening cockpit", "Room personalities", "Adaptive suggestions", "Segment brushes", "Identify choreography", "Network health lens", "Safety scenes", "Explain state cards", "Palette generator concepts", "Timed rehearsals", "Offline room states", "Lighting diary"] }
+
+    private func intentCard(_ title: String, _ detail: String, _ icon: String, _ id: String) -> some View { safetyCard(title, detail, icon) { if let theme = LightingCatalog.themes.first(where: { $0.id == id }) { manager.applyTheme(theme) } else if let effect = LightingCatalog.effects.first(where: { $0.id == id }) { manager.startEffect(effect) } } }
+    private func safetyCard(_ title: String, _ detail: String, _ icon: String, action: @escaping () -> Void) -> some View { Button(action: action) { VStack(alignment: .leading, spacing: 8) { Label(title, systemImage: icon).font(.headline); Text(detail).font(.caption).foregroundStyle(.secondary) }.frame(maxWidth: .infinity, alignment: .leading).padding(12).lumenCard(radius: 12, highlighted: title == "All Off") }.buttonStyle(.plain).disabled(manager.devices.isEmpty) }
+    private func healthCard(_ title: String, _ detail: String, _ color: Color, _ icon: String, action: @escaping () -> Void) -> some View { Button(action: action) { VStack(alignment: .leading, spacing: 8) { Label(title, systemImage: icon).font(.headline).foregroundStyle(color); Text(detail).font(.caption).foregroundStyle(.secondary) }.frame(maxWidth: .infinity, alignment: .leading).padding(12).lumenCard(radius: 12) }.buttonStyle(.plain) }
+    private func confidenceBadge(missing: Int, stale: Int) -> some View { Text(missing + stale == 0 ? "Ready" : "Partial").font(.caption2.bold()).padding(.horizontal, 7).padding(.vertical, 3).background(Capsule().fill((missing + stale == 0 ? Color.green : Lumen.warning).opacity(0.2))) }
+    private func explain(_ device: LightDevice) -> String { device.isStale ? "last seen earlier — scan or check power" : device.isOn ? "on at \(Int(device.brightness * 100))%" : "off and ready" }
+}

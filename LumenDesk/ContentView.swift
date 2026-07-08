@@ -20,6 +20,7 @@ struct ContentView: View {
     @State private var showingDiscoveryInbox = false
     @State private var showingMissedAutomations = false
     @State private var showingIdentifyMode = false
+    @State private var showingExperienceCenter = false
     @AppStorage(AppPreferenceKey.quietInterface) private var quietInterface = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -52,7 +53,11 @@ struct ContentView: View {
                 } else if searchScope == .scenes {
                     sceneSearchResults
                 } else {
-                    NowAutomationDashboard(showingMissedAutomations: $showingMissedAutomations)
+                    TodayLightingTimelineView(showingMissedAutomations: $showingMissedAutomations, showingExperienceCenter: $showingExperienceCenter)
+                        .padding(.horizontal, 16)
+                        .padding(.top, density == .compact ? 6 : 10)
+
+                    LightingIntentDockView()
                         .padding(.horizontal, 16)
                         .padding(.top, density == .compact ? 6 : 10)
 
@@ -80,6 +85,7 @@ struct ContentView: View {
             .sheet(isPresented: $showingDiscoveryInbox) { DiscoveryInboxView().environmentObject(manager) }
             .sheet(isPresented: $showingMissedAutomations) { MissedAutomationsView().environmentObject(manager) }
             .sheet(isPresented: $showingIdentifyMode) { IdentifyLightsView().environmentObject(manager) }
+            .sheet(isPresented: $showingExperienceCenter) { ExperienceCenterView().environmentObject(manager) }
 
             if selectionMode && !selectedIDs.isEmpty {
                 VStack(spacing: 6) {
@@ -204,6 +210,10 @@ struct ContentView: View {
                             .disabled(selectedIDs.isEmpty)
                     }
                 }
+                Button { showingExperienceCenter = true } label: {
+                    Label("Experience", systemImage: "sparkles.rectangle.stack")
+                }
+                .help("Open the differentiated UX cockpit: timeline, map, safety, scene confidence, diary, and creative tools")
                 Button { showingScenes = true } label: {
                     Label("Library", systemImage: "wand.and.stars")
                 }
@@ -223,6 +233,7 @@ struct ContentView: View {
                 Menu {
                     Button { newRoomName = ""; showingNewRoom = true } label: { Label("New Room", systemImage: "rectangle.stack.badge.plus") }
                     Button { selectionMode.toggle(); if !selectionMode { selectedIDs.removeAll() } } label: { Label(selectionMode ? "Finish Selection" : "Select Lights", systemImage: "checkmark.circle") }
+                    Button { showingExperienceCenter = true } label: { Label("Experience Center", systemImage: "sparkles.rectangle.stack") }
                     Button { showingIdentifyMode = true } label: { Label("Identify Lights", systemImage: "lightbulb.2") }
                         .disabled(manager.devices.isEmpty)
                     Button { showingShortcuts = true } label: { Label("Keyboard Shortcuts", systemImage: "keyboard") }

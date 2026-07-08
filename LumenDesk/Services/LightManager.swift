@@ -1554,6 +1554,10 @@ extension LightManager {
         razerActiveIDs.remove(device.id)
         noteSegmentCommand(device, summary: "Applying \(next.segmentCount)-segment layout")
         if !isDemoMode {
+            // Durable `ptReal` packets must be sent after leaving volatile
+            // Razer preview mode. Otherwise curtain lights can show the draft
+            // during editing but fail to retain it when Segment Studio closes.
+            endSegmentPreview(device)
             sendSegmentPackets(device, state: next)
         }
         if announce {

@@ -78,7 +78,11 @@ final class GoveeClient {
     // MARK: - Segment control
 
     func setRazerMode(deviceID: String, on: Bool) {
-        enqueue(deviceID: deviceID, kind: "razer-mode", payload: GoveeProtocol.razerModeRequest(on: on))
+        if on {
+            enqueue(deviceID: deviceID, kind: "razer-mode", payload: GoveeProtocol.razerModeRequest(on: true))
+        } else {
+            enqueueRazerModeOff(deviceID: deviceID)
+        }
     }
 
     /// Streams one razer frame. Frames coalesce to the newest payload, so
@@ -136,6 +140,24 @@ final class GoveeClient {
             guard let self, self.addressByDevice[deviceID] != nil else { return }
             if self.queuedPayloads[deviceID, default: [:]].updateValue(payload, forKey: kind) == nil {
                 self.queuedOrder[deviceID, default: []].append(kind)
+            }
+            self.scheduleDrain(deviceID)
+        }
+    }
+
+    /// Leaves volatile Razer preview mode before sending durable `ptReal`
+    /// segment packets. Curtain lights are especially sensitive here: if a
+    /// stale preview frame remains queued, or if `ptReal` lands while preview
+    /// mode is still active, the app appears to apply the layout but the device
+    /// falls back to the old color scheme when preview ends.
+    private func enqueueRazerModeOff(deviceID: String) {
+        queue.async { [weak self] in
+            guard let self, self.addressByDevice[deviceID] != nil else { return }
+            self.queuedOrder[deviceID, default: []].removeAll { $0 == "razer-frame" }
+            self.queuedPayloads[deviceID, default: [:]].removeValue(forKey: "razer-frame")
+            let payload = GoveeProtocol.razerModeRequest(on: false)
+            if self.queuedPayloads[deviceID, default: [:]].updateValue(payload, forKey: "razer-mode") == nil {
+                self.queuedOrder[deviceID, default: []].append("razer-mode")
             }
             self.scheduleDrain(deviceID)
         }

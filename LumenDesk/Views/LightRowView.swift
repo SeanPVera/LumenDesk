@@ -64,19 +64,26 @@ struct LightRowView: View {
         .accessibilityAction(named: "Toggle Power") { if !selectionMode { manager.setPower(device, on: !device.isOn) } }
         .accessibilityAction(named: "Open Inspector") { if !selectionMode { showingInspector = true } }
         .focusableCompat()
-        .padding(12)
+        .padding(16)
         .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(Lumen.surface)
+            RoundedRectangle(cornerRadius: Lumen.cardRadius, style: .continuous)
+                .fill(device.isOn ? Lumen.surfaceRaised : Lumen.surface)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 10)
+            RoundedRectangle(cornerRadius: Lumen.cardRadius, style: .continuous)
                 .stroke(borderColor, lineWidth: borderWidth)
         )
-        .shadow(color: device.isOn ? device.color.opacity(0.18) : .clear, radius: 8)
+        .overlay(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 3, style: .continuous)
+                .fill(device.isOn ? device.color : Lumen.textTertiary.opacity(0.35))
+                .frame(width: 5)
+                .padding(.vertical, 14)
+                .shadow(color: device.color.opacity(device.isOn ? 0.8 : 0), radius: 10)
+        }
+        .shadow(color: device.isOn ? device.color.opacity(0.28) : .black.opacity(0.24), radius: device.isOn ? 18 : 10, y: 8)
         .overlay {
             if manager.newlyDiscoveredIDs.contains(device.id) {
-                RoundedRectangle(cornerRadius: 10)
+                RoundedRectangle(cornerRadius: Lumen.cardRadius, style: .continuous)
                     .stroke(Color.accentColor, lineWidth: 2)
                     .transition(.opacity.animation(.easeOut(duration: 1.5)))
             }
@@ -115,15 +122,15 @@ struct LightRowView: View {
 
     private var selectionIndicator: some View {
         Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-            .font(.title3)
-            .foregroundStyle(selected ? Color.accentColor : Color.secondary)
+            .font(.title2.weight(.black))
+            .foregroundStyle(selected ? Lumen.acid : Color.secondary)
             .accessibilityHidden(true)
     }
 
     private var statusCircle: some View {
         Circle()
             .fill(device.isOn ? device.color : Color.gray.opacity(0.35))
-            .frame(width: 28, height: 28)
+            .frame(width: Lumen.iconBubble, height: Lumen.iconBubble)
             .overlay(Circle().stroke(.secondary.opacity(0.4), lineWidth: 1))
             .overlay(alignment: .bottomTrailing) {
                 if device.isStale {
@@ -174,7 +181,7 @@ struct LightRowView: View {
                 renameField
             } else {
                 Text(device.label)
-                    .font(.headline)
+                    .font(.system(size: 19, weight: .black, design: .rounded))
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .help(device.label)
@@ -204,7 +211,7 @@ struct LightRowView: View {
     private var metadataRow: some View {
         HStack(spacing: 6) {
             Text(device.brand.displayName)
-                .font(.caption2.weight(.semibold))
+                .font(.caption.weight(.black))
                 .padding(.horizontal, 6).padding(.vertical, 2)
                 .background(device.brand.tint.opacity(0.18))
                 .foregroundStyle(device.brand.tint)
@@ -444,13 +451,13 @@ struct LightRowView: View {
         } label: {
             Circle()
                 .fill(swatch.color)
-                .frame(width: 18, height: 18)
+                .frame(width: 24, height: 24)
                 .overlay(Circle().stroke(active ? Color.white.opacity(0.9) : Color.primary.opacity(0.25),
                                          lineWidth: active ? 1.5 : 0.5))
                 .overlay(alignment: .center) {
                     if active {
                         Image(systemName: "checkmark")
-                            .font(.system(size: 8, weight: .bold))
+                            .font(.system(size: 10, weight: .black))
                             .foregroundStyle(.white)
                     }
                 }

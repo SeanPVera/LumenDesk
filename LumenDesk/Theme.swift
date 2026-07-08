@@ -17,13 +17,15 @@ enum Lumen {
     // MARK: Surfaces (never flat black — a violet undertone adds depth)
 
     /// Window background.
-    static let ink           = Color(hex: 0x0D0B14)
+    static let ink           = Color(hex: 0x070A12)
     /// Deepest tone, used for the backdrop gradient base / vignette.
-    static let inkDeep       = Color(hex: 0x080610)
+    static let inkDeep       = Color(hex: 0x03040A)
     /// Cards & rows.
-    static let surface       = Color(hex: 0x17141F)
+    static let surface       = Color(hex: 0x101827)
     /// Sheets, popovers, hovered/raised surfaces.
-    static let surfaceRaised = Color(hex: 0x211C2E)
+    static let surfaceRaised = Color(hex: 0x18243A)
+    /// High-contrast cockpit panels used for oversized controls.
+    static let surfaceLoud   = Color(hex: 0x1E2F4A)
 
     // MARK: Hairlines & separators
 
@@ -32,15 +34,17 @@ enum Lumen {
 
     // MARK: Accents
 
-    static let violet       = Color(hex: 0x7C5CFF)
-    static let violetBright = Color(hex: 0x9D7BFF)
-    static let pink         = Color(hex: 0xFF4D9D)
-    static let pinkBright   = Color(hex: 0xFF6FB5)
+    static let violet       = Color(hex: 0x6D5BFF)
+    static let violetBright = Color(hex: 0x9B5CFF)
+    static let cyan         = Color(hex: 0x00E5FF)
+    static let acid         = Color(hex: 0xC8FF2E)
+    static let pink         = Color(hex: 0xFF2D95)
+    static let pinkBright   = Color(hex: 0xFF5ACD)
     /// Used sparingly — favorites, key dividers, premium emphasis.
-    static let gold         = Color(hex: 0xE0B250)
-    static let goldBright   = Color(hex: 0xF0C56B)
-    /// Govee brand accent, tuned to harmonize with the gold/pink palette.
-    static let coral        = Color(hex: 0xFF6F61)
+    static let gold         = Color(hex: 0xFFD23F)
+    static let goldBright   = Color(hex: 0xFFE66D)
+    /// Govee brand accent, tuned to harmonize with the saturated palette.
+    static let coral        = Color(hex: 0xFF6A3D)
 
     // MARK: Text
 
@@ -58,22 +62,23 @@ enum Lumen {
     /// Primary brand gradient — violet → neon pink. Used for the wordmark,
     /// primary CTAs, and key emphasis.
     static let brandGradient = LinearGradient(
-        colors: [violetBright, pink],
+        colors: [cyan, violetBright, pink],
         startPoint: .topLeading,
         endPoint: .bottomTrailing
     )
 
     /// A soft wash used behind the whole app.
     static let backdropGradient = LinearGradient(
-        colors: [Color(hex: 0x141022), inkDeep],
+        colors: [Color(hex: 0x061A26), Color(hex: 0x160827), inkDeep],
         startPoint: .top,
         endPoint: .bottom
     )
 
     // MARK: Metrics
 
-    static let cardRadius: CGFloat = 14
-    static let tileRadius: CGFloat = 10
+    static let cardRadius: CGFloat = 22
+    static let tileRadius: CGFloat = 16
+    static let iconBubble: CGFloat = 46
 }
 
 // MARK: - Hex color initializer
@@ -106,11 +111,11 @@ struct LumenBackground: View {
             if reduceTransparency || quietInterface { Lumen.inkDeep } else { Lumen.backdropGradient }
             if glow && !quietInterface && !reduceTransparency {
                 RadialGradient(
-                    colors: [Lumen.violet.opacity(0.22), .clear],
+                    colors: [Lumen.cyan.opacity(0.24), .clear],
                     center: .topLeading, startRadius: 0, endRadius: 440
                 )
                 RadialGradient(
-                    colors: [Lumen.pink.opacity(0.15), .clear],
+                    colors: [Lumen.pink.opacity(0.22), .clear],
                     center: .bottomTrailing, startRadius: 0, endRadius: 480
                 )
                 .blendMode(.screen)

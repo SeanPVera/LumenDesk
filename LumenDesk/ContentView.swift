@@ -165,17 +165,32 @@ struct ContentView: View {
 
     private var header: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                Image(systemName: "lightbulb.fill")
-                    .font(.title2)
-                    .foregroundStyle(moodColor)
-                    .shadow(color: moodColor.opacity(0.6), radius: moodGlowRadius)
-                    .animation(.easeInOut(duration: 0.6), value: moodColor)
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("LumenDesk").font(.title3.weight(.semibold))
-                    Text(headerSubtitle)
-                        .font(.caption).foregroundStyle(.secondary)
+            HStack(spacing: 16) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(Lumen.brandGradient)
+                        .frame(width: 58, height: 58)
+                        .shadow(color: moodColor.opacity(0.75), radius: 22)
+                    Image(systemName: "lightbulb.max.fill")
+                        .font(.system(size: 31, weight: .black))
+                        .foregroundStyle(.black.opacity(0.82))
+                }
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .stroke(Color.white.opacity(0.28), lineWidth: 1)
+                )
+                .animation(.easeInOut(duration: 0.6), value: moodColor)
+                .accessibilityHidden(true)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("LumenDesk")
+                        .font(.system(size: 36, weight: .black, design: .rounded))
+                        .kerning(-1.2)
+                        .foregroundStyle(Lumen.brandGradient)
+                    Text(headerSubtitle.uppercased())
+                        .font(.system(size: 11, weight: .heavy, design: .rounded))
+                        .kerning(1.5)
+                        .foregroundStyle(Lumen.acid)
                 }
                 Spacer()
                 if manager.isScanning {
@@ -259,8 +274,8 @@ struct ContentView: View {
                 } label: { Label("More", systemImage: "ellipsis.circle") }
                 .menuStyle(.borderlessButton)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 18)
 
             if !manager.devices.isEmpty {
                 Divider()
@@ -298,8 +313,18 @@ struct ContentView: View {
                     .padding(.bottom, 8)
             }
         }
-        .background(.regularMaterial)
-        .overlay(Divider(), alignment: .bottom)
+        .background(
+            ZStack {
+                Lumen.ink.opacity(0.92)
+                LinearGradient(colors: [Lumen.surfaceLoud.opacity(0.95), Lumen.ink.opacity(0.78)], startPoint: .topLeading, endPoint: .bottomTrailing)
+            }
+        )
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Lumen.brandGradient)
+                .frame(height: 3)
+                .shadow(color: Lumen.cyan.opacity(0.55), radius: 8)
+        }
     }
 
     private var headerSubtitle: String {
@@ -339,14 +364,14 @@ struct ContentView: View {
                     .accessibilityLabel("Clear search")
                 }
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
             .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(Lumen.surfaceRaised)
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Lumen.surfaceLoud)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 6)
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .stroke(searchFocused ? Color.accentColor : Lumen.hairline,
                             lineWidth: searchFocused ? 1.5 : 1)
             )
@@ -536,12 +561,12 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Text(manager.rooms.isEmpty ? "All Lights" : "Unassigned")
-                    .font(.headline)
+                    .font(.title2.weight(.black))
                 Text("\(visibleUnassigned.count)")
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 6).padding(.vertical, 1)
-                    .background(Capsule().fill(Color.secondary.opacity(0.15)))
+                    .background(Capsule().fill(Lumen.cyan.opacity(0.20)))
                 Spacer()
             }
             VStack(spacing: 10) {
@@ -655,7 +680,7 @@ struct ContentView: View {
             .lumenCard()
 
             Button("Scan Now") { manager.scan() }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(LumenPrimaryButtonStyle())
                 .keyboardShortcut(.defaultAction)
             Spacer()
         }

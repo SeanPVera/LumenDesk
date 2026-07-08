@@ -46,7 +46,7 @@ struct RoomSectionView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 12) {
             header
             if isExpanded {
                 if visibleLights.isEmpty {
@@ -84,6 +84,8 @@ struct RoomSectionView: View {
             for id in ids { manager.assign(lightID: id, toRoom: room.id) }
             return !ids.isEmpty
         }
+        .padding(18)
+        .lumenCard(radius: 26, fill: Lumen.surface.opacity(0.88), highlighted: manager.isFavoriteRoom(room.id), glowColor: allLights.contains(where: \.isOn) ? dominantRoomColor.opacity(0.6) : nil)
         .sheet(isPresented: $showingSchedules) {
             ScheduleEditorView(room: room)
                 .environmentObject(manager)
@@ -131,7 +133,7 @@ struct RoomSectionView: View {
                 }
             } else {
                 Text(room.name)
-                    .font(.headline)
+                    .font(.system(size: 24, weight: .black, design: .rounded))
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .help(room.name)
@@ -139,10 +141,10 @@ struct RoomSectionView: View {
 
             // Total count badge
             Text("\(allLights.count)")
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 6).padding(.vertical, 1)
-                .background(Capsule().fill(Color.secondary.opacity(0.15)))
+                .font(.caption.monospacedDigit().weight(.black))
+                .foregroundStyle(Lumen.inkDeep)
+                .padding(.horizontal, 9).padding(.vertical, 3)
+                .background(Capsule().fill(Lumen.acid))
                 .accessibilityLabel("\(allLights.count) light\(allLights.count == 1 ? "" : "s")")
 
             // "X on" count (only when at least one is on)
@@ -366,7 +368,7 @@ struct RoomSectionView: View {
                 } label: {
                     Circle()
                         .fill(swatch.color)
-                        .frame(width: 16, height: 16)
+                        .frame(width: 24, height: 24)
                         .overlay(Circle().stroke(Color.primary.opacity(0.25), lineWidth: 0.5))
                 }
                 .buttonStyle(.plain)

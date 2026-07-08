@@ -44,52 +44,70 @@ struct GoveeSegmentProfile {
     /// Known segmented families. Exact SKUs first, then prefix families.
     /// Sources: Govee Home app segment editors and the community LAN/BLE
     /// protocol work (govee2mqtt, OpenRGB, homebridge-govee).
+    ///
+    /// Built imperatively (one `add` call per row) rather than as a single
+    /// large dictionary/array literal of `.init(...)` calls: Swift's type
+    /// checker solves a collection literal as one expression, and a few
+    /// dozen struct-initializer elements in one literal can blow up into
+    /// minutes of compile time and tens of gigabytes of RAM. Independent
+    /// statements are each checked in isolation and stay fast regardless of
+    /// how many rows the catalog grows to.
     static func detect(sku: String?) -> GoveeSegmentProfile? {
         guard let sku = sku?.uppercased(), sku.hasPrefix("H") else { return nil }
-
-        let exact: [String: GoveeSegmentProfile] = [
-            // RGBIC / COB interior strips
-            "H619A": .init(layout: .cobStrip, defaultSegmentCount: 15, supportsGradient: true, recognized: true),
-            "H619B": .init(layout: .cobStrip, defaultSegmentCount: 15, supportsGradient: true, recognized: true),
-            "H619C": .init(layout: .cobStrip, defaultSegmentCount: 15, supportsGradient: true, recognized: true),
-            "H619D": .init(layout: .cobStrip, defaultSegmentCount: 15, supportsGradient: true, recognized: true),
-            "H619E": .init(layout: .cobStrip, defaultSegmentCount: 15, supportsGradient: true, recognized: true),
-            "H619Z": .init(layout: .cobStrip, defaultSegmentCount: 15, supportsGradient: true, recognized: true),
-            "H61C2": .init(layout: .cobStrip, defaultSegmentCount: 15, supportsGradient: true, recognized: true),
-            "H61C3": .init(layout: .cobStrip, defaultSegmentCount: 15, supportsGradient: true, recognized: true),
-            "H61C5": .init(layout: .cobStrip, defaultSegmentCount: 15, supportsGradient: true, recognized: true),
-            "H61E1": .init(layout: .cobStrip, defaultSegmentCount: 15, supportsGradient: true, recognized: true),
-            "H6172": .init(layout: .cobStrip, defaultSegmentCount: 15, supportsGradient: true, recognized: true),
-            // Neon ropes
-            "H61A0": .init(layout: .neonRope, defaultSegmentCount: 20, supportsGradient: true, recognized: true),
-            "H61A1": .init(layout: .neonRope, defaultSegmentCount: 20, supportsGradient: true, recognized: true),
-            "H61A2": .init(layout: .neonRope, defaultSegmentCount: 20, supportsGradient: true, recognized: true),
-            "H61A3": .init(layout: .neonRope, defaultSegmentCount: 20, supportsGradient: true, recognized: true),
-            "H61A5": .init(layout: .neonRope, defaultSegmentCount: 20, supportsGradient: true, recognized: true),
-            "H61D0": .init(layout: .neonRope, defaultSegmentCount: 20, supportsGradient: true, recognized: true),
-            // String / curtain lights
-            "H70C1": .init(layout: .stringLights, defaultSegmentCount: 20, supportsGradient: false, recognized: true),
-            "H70C2": .init(layout: .stringLights, defaultSegmentCount: 20, supportsGradient: false, recognized: true),
-            "H70C4": .init(layout: .stringLights, defaultSegmentCount: 20, supportsGradient: false, recognized: true),
-            "H70B1": .init(layout: .stringLights, defaultSegmentCount: 20, supportsGradient: false, recognized: true),
-            "H7021": .init(layout: .stringLights, defaultSegmentCount: 12, supportsGradient: false, recognized: true),
-            "H7028": .init(layout: .stringLights, defaultSegmentCount: 12, supportsGradient: false, recognized: true)
-        ]
-        if let profile = exact[sku] { return profile }
-
-        let prefixes: [(String, GoveeSegmentProfile)] = [
-            ("H619", .init(layout: .cobStrip, defaultSegmentCount: 15, supportsGradient: true, recognized: true)),
-            ("H61C", .init(layout: .cobStrip, defaultSegmentCount: 15, supportsGradient: true, recognized: true)),
-            ("H61E", .init(layout: .cobStrip, defaultSegmentCount: 15, supportsGradient: true, recognized: true)),
-            ("H61A", .init(layout: .neonRope, defaultSegmentCount: 20, supportsGradient: true, recognized: true)),
-            ("H61B", .init(layout: .neonRope, defaultSegmentCount: 20, supportsGradient: true, recognized: true)),
-            ("H61D", .init(layout: .neonRope, defaultSegmentCount: 20, supportsGradient: true, recognized: true)),
-            ("H70C", .init(layout: .stringLights, defaultSegmentCount: 20, supportsGradient: false, recognized: true)),
-            ("H70B", .init(layout: .stringLights, defaultSegmentCount: 20, supportsGradient: false, recognized: true)),
-            ("H702", .init(layout: .stringLights, defaultSegmentCount: 12, supportsGradient: false, recognized: true))
-        ]
-        return prefixes.first { sku.hasPrefix($0.0) }?.1
+        if let profile = exactMatches[sku] { return profile }
+        return prefixMatches.first { sku.hasPrefix($0.prefix) }?.profile
     }
+
+    private static let exactMatches: [String: GoveeSegmentProfile] = {
+        var rows: [String: GoveeSegmentProfile] = [:]
+        func add(_ sku: String, _ layout: GoveeSegmentLayout, _ count: Int, _ gradient: Bool) {
+            rows[sku] = GoveeSegmentProfile(layout: layout, defaultSegmentCount: count, supportsGradient: gradient, recognized: true)
+        }
+        // RGBIC / COB interior strips
+        add("H619A", .cobStrip, 15, true)
+        add("H619B", .cobStrip, 15, true)
+        add("H619C", .cobStrip, 15, true)
+        add("H619D", .cobStrip, 15, true)
+        add("H619E", .cobStrip, 15, true)
+        add("H619Z", .cobStrip, 15, true)
+        add("H61C2", .cobStrip, 15, true)
+        add("H61C3", .cobStrip, 15, true)
+        add("H61C5", .cobStrip, 15, true)
+        add("H61E1", .cobStrip, 15, true)
+        add("H6172", .cobStrip, 15, true)
+        // Neon ropes
+        add("H61A0", .neonRope, 20, true)
+        add("H61A1", .neonRope, 20, true)
+        add("H61A2", .neonRope, 20, true)
+        add("H61A3", .neonRope, 20, true)
+        add("H61A5", .neonRope, 20, true)
+        add("H61D0", .neonRope, 20, true)
+        // String / curtain lights
+        add("H70C1", .stringLights, 20, false)
+        add("H70C2", .stringLights, 20, false)
+        add("H70C4", .stringLights, 20, false)
+        add("H70B1", .stringLights, 20, false)
+        add("H7021", .stringLights, 12, false)
+        add("H7028", .stringLights, 12, false)
+        return rows
+    }()
+
+    private static let prefixMatches: [(prefix: String, profile: GoveeSegmentProfile)] = {
+        var rows: [(prefix: String, profile: GoveeSegmentProfile)] = []
+        func add(_ prefix: String, _ layout: GoveeSegmentLayout, _ count: Int, _ gradient: Bool) {
+            rows.append((prefix, GoveeSegmentProfile(layout: layout, defaultSegmentCount: count, supportsGradient: gradient, recognized: true)))
+        }
+        add("H619", .cobStrip, 15, true)
+        add("H61C", .cobStrip, 15, true)
+        add("H61E", .cobStrip, 15, true)
+        add("H61A", .neonRope, 20, true)
+        add("H61B", .neonRope, 20, true)
+        add("H61D", .neonRope, 20, true)
+        add("H70C", .stringLights, 20, false)
+        add("H70B", .stringLights, 20, false)
+        add("H702", .stringLights, 12, false)
+        return rows
+    }()
 
     /// Fallback shown when the user opens the studio for an unrecognized SKU.
     static let generic = GoveeSegmentProfile(layout: .generic, defaultSegmentCount: 15, supportsGradient: true, recognized: false)

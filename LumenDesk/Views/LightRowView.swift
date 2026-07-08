@@ -493,31 +493,16 @@ struct LightRowView: View {
 
         Divider()
 
-        Menu("Move to Room") {
-            Button {
-                manager.assign(lightID: device.id, toRoom: nil)
-            } label: {
-                if currentRoom == nil {
-                    Label("Unassigned", systemImage: "checkmark")
-                } else {
-                    Text("Unassigned")
-                }
-            }
-            if !manager.rooms.isEmpty {
-                Divider()
-                ForEach(manager.rooms) { room in
-                    Button {
-                        manager.assign(lightID: device.id, toRoom: room.id)
-                    } label: {
-                        if currentRoom?.id == room.id {
-                            Label(room.name, systemImage: "checkmark")
-                        } else {
-                            Text(room.name)
-                        }
-                    }
-                }
+        Picker("Move to Room", selection: Binding<UUID?>(
+            get: { currentRoom?.id },
+            set: { manager.assign(lightID: device.id, toRoom: $0) }
+        )) {
+            Text("Unassigned").tag(Optional<UUID>.none)
+            ForEach(manager.rooms) { room in
+                Text(room.name).tag(Optional(room.id))
             }
         }
+        .pickerStyle(.inline)
 
         if let room = currentRoom {
             let roomLights = manager.devices(in: room)

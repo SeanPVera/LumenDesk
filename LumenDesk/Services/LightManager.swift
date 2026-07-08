@@ -1543,6 +1543,15 @@ extension LightManager {
             device.isOn = true
             sendPower(device, on: true)
         }
+        // The razer overlay must come down BEFORE the static write. Firmware
+        // restores its pre-razer state when the overlay is disabled, so a
+        // layout written while streaming is still active gets wiped the
+        // moment the studio closes — the light "forgets" the apply. The
+        // razer-off is bundled into the apply's own packet batch (see
+        // GoveeClient.applySegments) so no re-enable can slip in between;
+        // here we only drop the bookkeeping so the studio's next edit knows
+        // to open a fresh streaming session.
+        razerActiveIDs.remove(device.id)
         noteSegmentCommand(device, summary: "Applying \(next.segmentCount)-segment layout")
         if !isDemoMode {
             sendSegmentPackets(device, state: next)

@@ -92,21 +92,35 @@ final class GoveeClient {
     /// Packets are chunked across datagrams to stay far below the UDP MTU,
     /// and queueing is exclusive: a rapid second apply replaces any unsent
     /// chunks from the first instead of interleaving with them.
+    ///
+    /// The batch always leads with a razer-off. Disabling the streaming
+    /// overlay restores the device's pre-razer state, so a static layout
+    /// written while the overlay is up gets discarded when the overlay later
+    /// comes down — the write must land after the overlay is gone. Bundling
+    /// the razer-off into the same exclusive batch (its own kind, not the
+    /// shared "razer-mode" kind) also means a preview re-enable arriving
+    /// mid-apply queues after these packets instead of replacing the off.
     func applySegments(deviceID: String, packets: [[UInt8]]) {
         guard !packets.isEmpty else { return }
-        let chunkSize = 12
-        let chunks = stride(from: 0, to: packets.count, by: chunkSize).map { start in
-            GoveeProtocol.ptRealRequest(packets: Array(packets[start..<min(start + chunkSize, packets.count)]))
-        }
+        // Each relayed packet is a full mode command the device's MCU has to
+        // execute; string and curtain lights (the slowest firmware, see
+        // `commandGap`) fall behind when too many arrive in one datagram.
+        // Small chunks + the paced queue keep every command inside the
+        // firmware's budget.
+        let chunkSize = 6
+        let batch = [GoveeProtocol.razerModeRequest(on: false)]
+            + stride(from: 0, to: packets.count, by: chunkSize).map { start in
+                GoveeProtocol.ptRealRequest(packets: Array(packets[start..<min(start + chunkSize, packets.count)]))
+            }
         queue.async { [weak self] in
             guard let self, self.addressByDevice[deviceID] != nil else { return }
             var order = self.queuedOrder[deviceID, default: []]
             order.removeAll { $0.hasPrefix("segments-") }
             var payloads = self.queuedPayloads[deviceID, default: [:]]
                 .filter { !$0.key.hasPrefix("segments-") }
-            for (index, chunk) in chunks.enumerated() {
+            for (index, payload) in batch.enumerated() {
                 let kind = "segments-\(index)"
-                payloads[kind] = chunk
+                payloads[kind] = payload
                 order.append(kind)
             }
             self.queuedOrder[deviceID] = order

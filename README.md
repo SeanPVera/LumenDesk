@@ -9,6 +9,7 @@ The app is designed for day-to-day lighting control as well as richer home-light
 - Discovers supported LIFX and Govee lights on the same LAN.
 - Controls individual bulbs, rooms, selected groups, or every light at once.
 - Supports power, brightness, full-color RGB control, and white color temperature control.
+- Paints individual segments on Govee RGBIC devices (COB strips, string lights, neon ropes) with per-segment color and brightness, gradient blending, and live preview — the same specificity as the Govee Home app, without the cloud.
 - Groups lights into vendor-agnostic rooms, so LIFX and Govee bulbs can live in the same room.
 - Saves and recalls scenes captured from your current lighting state.
 - Applies curated static lighting themes and animated effects.
@@ -47,6 +48,11 @@ LumenDesk speaks the Govee LAN API directly:
 - Govee devices reply on UDP `4002`.
 - Commands are sent on UDP `4003`.
 - Each Govee bulb must have **LAN Control** enabled in the Govee Home app.
+
+For segmented RGBIC devices, LumenDesk additionally speaks two community-documented LAN extensions:
+
+- `razer` — the real-time streaming mode used by Razer Chroma sync ("DreamView"), for live per-segment preview while editing.
+- `ptReal` — relays the same 20-byte Bluetooth-format commands the Govee Home app writes (segment color, per-segment brightness, gradient toggle), so applied layouts persist on the device.
 
 Not every Govee device supports the LAN API. If a device does not expose LAN Control in the Govee Home app, LumenDesk cannot control it locally.
 
@@ -109,8 +115,30 @@ Each light row supports:
 - Command status feedback.
 - Offline/stale indicators.
 - Recent colors and useful presets where available.
+- A Segment Studio row on recognized Govee RGBIC devices, with a live mini-preview of the saved layout.
 
 LumenDesk keeps a brand-agnostic device model while still sending the correct vendor-specific packets behind the scenes.
+
+### Segment Studio (Govee COB strips, string lights, neon ropes)
+
+Govee RGBIC devices are individually addressable in zones, and the Govee Home app lets you color each zone separately. LumenDesk's **Segment Studio** brings that same specificity to the LAN:
+
+- A visual strip editor drawn to match the hardware: contiguous cells for COB strips and neon ropes, bulbs on a wire for string lights.
+- Tap or drag across segments to select them; paint the selection with swatches, recent colors, or the system color picker. With nothing selected, painting fills the whole strip.
+- Selection tools: All, None, Invert, Every Other, and shift-left/right to rotate the layout along the strip.
+- **Per-segment brightness** — dim any selection independently of the rest of the strip.
+- **Blend Across Selection** — fade from one color to another across the selected segments.
+- **Gradient blending** toggle on COB hardware, matching the Govee app's gradient switch.
+- **Live preview** streams edits to the light in real time (razer mode). The preview is volatile, so closing the studio without applying is a true cancel.
+- **Apply to Light** writes the layout with the app-native commands so it survives power cycles.
+- 12 built-in segment presets (Rainbow Flow, Sunset Glow, Candy Cane, Fairy Dust, …) plus your own saved presets, automatically re-rendered to each device's segment count.
+- A per-device segment-count stepper for models the catalog doesn't recognize — set it to whatever the Govee Home app shows.
+
+Known SKU families (H619x/H61Cx COB strips, H61Ax/H61Dx neon ropes, H70Cx/H70Bx/H702x string and curtain lights, and more) are detected from discovery and get the right layout and defaults automatically. Any other Govee light can still open the studio from its context menu.
+
+Segment layouts are captured into scenes, restored by undo/redo, re-applied after Identify flashes, and survive stopping an animated effect. The demo workspace includes a simulated COB strip and string lights so the studio can be explored without hardware.
+
+Open the studio from the segment row on a light, or right-click → **Segment Studio…**.
 
 ### Rooms
 
@@ -177,6 +205,7 @@ A scene is a saved lighting snapshot. Scenes include named per-device states suc
 - Brightness.
 - Hue and saturation.
 - White color temperature.
+- Govee segment layouts (per-segment colors, per-segment brightness, gradient), when one is showing.
 
 Scene features include:
 
@@ -477,6 +506,7 @@ LumenDesk/
 ├── Info.plist                      # Local network and platform privacy metadata
 ├── LumenDesk.entitlements          # Sandbox and network entitlements
 ├── Models/
+│   ├── GoveeSegments.swift         # Segment capability catalog, layouts, and presets for Govee RGBIC devices
 │   ├── LightDevice.swift           # Brand-agnostic light model
 │   ├── LightingCatalog.swift       # Built-in themes and animated effects
 │   ├── LightingScene.swift         # Saved scene model
@@ -495,6 +525,7 @@ LumenDesk/
 │       └── GoveeProtocol.swift     # Govee LAN JSON messages
 └── Views/
     ├── FavoritesStripView.swift    # Favorite lights, rooms, and scenes
+    ├── GoveeSegmentEditorView.swift # Segment Studio: per-segment painting for Govee RGBIC devices
     ├── LightRowView.swift          # Per-light controls
     ├── MenuBarPopoverView.swift    # macOS menu bar UI
     ├── OnboardingView.swift        # First-run guided setup
@@ -549,6 +580,14 @@ If LumenDesk reports a bind failure for Govee, another app may already be listen
 - Review Missed Automations for skipped entries.
 - Verify configured sunrise and sunset times if using solar-style actions.
 
+### Segment colors do not change
+
+- Confirm the device is a segmented RGBIC model (COB strip, string lights, neon rope, curtain). Single-zone bulbs and plain RGB strips ignore segment commands.
+- Make sure **LAN Control** is enabled and normal color changes from LumenDesk already work.
+- If the strip's zones don't line up with the editor, adjust the segment-count stepper in the Segment Studio to match what the Govee Home app shows for the device.
+- Live preview and applied layouts are separate: preview uses a volatile streaming mode, while **Apply to Light** writes the durable state. If a layout disappears when the studio closes, it was previewed but never applied.
+- A firmware update in the Govee Home app can help on devices that predate LAN segment support.
+
 ### Music-reactive effects do not respond
 
 - On **macOS**, Soundcheck reacts to **system audio** (Apple Music and other apps). Make sure something is actually playing — Soundcheck has nothing to react to in silence.
@@ -573,6 +612,8 @@ On **iOS**, Soundcheck uses the **microphone** (there is no system-audio capture
 
 - LIFX LAN protocol: <https://lan.developer.lifx.com/docs>
 - Govee LAN API: <https://app-h5.govee.com/user-manual/wlan-guide>
+- Govee `razer` streaming packets (community-documented, used for live segment preview): OpenRGB's Govee controller, <https://gitlab.com/CalcProgrammer1/OpenRGB>
+- Govee `ptReal` Bluetooth-format command relay (community-documented, used for durable segment layouts): govee2mqtt, <https://github.com/wez/govee2mqtt>
 
 ## Development notes
 

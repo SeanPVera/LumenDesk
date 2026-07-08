@@ -11,6 +11,9 @@ final class LightDevice: ObservableObject, Identifiable {
     @Published var name: String
     /// User-set override displayed in place of the vendor label. Persisted by LightManager.
     @Published var customName: String?
+    /// Vendor model code (e.g. Govee "H619A"), when discovery reports one.
+    /// Drives capability detection such as the Segment Studio defaults.
+    @Published var sku: String?
     @Published var address: String
     @Published var isOn: Bool
     @Published var brightness: Double   // 0…1
@@ -23,11 +26,12 @@ final class LightDevice: ObservableObject, Identifiable {
     var label: String { customName ?? name }
 
     init(id: String, brand: Brand, backendID: String, name: String, address: String,
-         isOn: Bool = false, brightness: Double = 1.0, color: Color = .white, kelvin: Int = 3500) {
+         sku: String? = nil, isOn: Bool = false, brightness: Double = 1.0, color: Color = .white, kelvin: Int = 3500) {
         self.id = id
         self.brand = brand
         self.backendID = backendID
         self.name = name
+        self.sku = sku
         self.address = address
         self.isOn = isOn
         self.brightness = brightness

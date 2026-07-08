@@ -32,7 +32,9 @@
 		B10000000000000000001A /* LightingCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000001A /* LightingCatalog.swift */; };
 		B10000000000000000001B /* AudioLevelMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000001B /* AudioLevelMonitor.swift */; };
 		B10000000000000000001C /* UXEnhancements.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000001C /* UXEnhancements.swift */; };
-		B10000000000000000001D /* UXCenterViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000001D /* UXCenterViews.swift */; };/* End PBXBuildFile section */
+		B10000000000000000001D /* UXCenterViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000001D /* UXCenterViews.swift */; };
+		B10000000000000000001E /* GoveeSegments.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000001E /* GoveeSegments.swift */; };
+		B10000000000000000001F /* GoveeSegmentEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000001F /* GoveeSegmentEditorView.swift */; };/* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		A100000000000000000001 /* LumenDeskApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LumenDeskApp.swift; sourceTree = "<group>"; };
@@ -63,6 +65,8 @@
     A10000000000000000001B /* AudioLevelMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioLevelMonitor.swift; sourceTree = "<group>"; };
     A10000000000000000001C /* UXEnhancements.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UXEnhancements.swift; sourceTree = "<group>"; };
     A10000000000000000001D /* UXCenterViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UXCenterViews.swift; sourceTree = "<group>"; };
+    A10000000000000000001E /* GoveeSegments.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoveeSegments.swift; sourceTree = "<group>"; };
+    A10000000000000000001F /* GoveeSegmentEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoveeSegmentEditorView.swift; sourceTree = "<group>"; };
 		A100000000000000000099 /* LumenDesk.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LumenDesk.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -111,6 +115,7 @@
 				A100000000000000000015 /* ScheduleEntry.swift */,
 				A10000000000000000001A /* LightingCatalog.swift */,
 				A10000000000000000001C /* UXEnhancements.swift */,
+				A10000000000000000001E /* GoveeSegments.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -156,6 +161,7 @@
 				A100000000000000000017 /* ScheduleEditorView.swift */,
 				A100000000000000000019 /* OnboardingView.swift */,
 				A10000000000000000001D /* UXCenterViews.swift */,
+				A10000000000000000001F /* GoveeSegmentEditorView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -270,6 +276,8 @@ B10000000000000000001A /* LightingCatalog.swift in Sources */,
 B10000000000000000001B /* AudioLevelMonitor.swift in Sources */,
 B10000000000000000001C /* UXEnhancements.swift in Sources */,
 B10000000000000000001D /* UXCenterViews.swift in Sources */,
+B10000000000000000001E /* GoveeSegments.swift in Sources */,
+B10000000000000000001F /* GoveeSegmentEditorView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

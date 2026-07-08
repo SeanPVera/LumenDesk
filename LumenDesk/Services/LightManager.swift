@@ -148,6 +148,7 @@ final class LightManager: ObservableObject {
     /// active at once as long as their device sets don't overlap (e.g. a
     /// different effect per room).
     private final class EffectRun {
+        let id = UUID()
         let effect: LightingEffect
         let scope: LightScope
         var phase: Double = 0
@@ -881,13 +882,14 @@ final class LightManager: ObservableObject {
         // Effects animate on a fixed timer at the effect's cadence. The timer
         // guarantees the lights keep moving; audio-reactive effects feed the
         // latest analysis into `audioSnapshot` (below) for the timer to sample.
+        let runID = run.id
         let startTimer: () -> Void = { [weak self] in
-            guard let self, self.effectRuns[scope] === run else { return }
+            guard let self, self.effectRuns[scope]?.id == runID else { return }
             self.runEffectFrame(run)
-            run.timer = Timer.scheduledTimer(withTimeInterval: effect.frameInterval, repeats: true) { [weak self, weak run] _ in
+            run.timer = Timer.scheduledTimer(withTimeInterval: effect.frameInterval, repeats: true) { [weak self] _ in
                 Task { @MainActor in
-                    guard let self, let run else { return }
-                    self.runEffectFrame(run)
+                    guard let self, let activeRun = self.effectRuns[scope], activeRun.id == runID else { return }
+                    self.runEffectFrame(activeRun)
                 }
             }
         }

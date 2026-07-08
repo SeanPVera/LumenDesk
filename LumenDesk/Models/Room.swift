@@ -2,7 +2,7 @@ import Foundation
 
 /// A target for bulk lighting actions — themes, effects, colors — covering
 /// either every discovered light or just the lights assigned to one room.
-enum LightScope: Hashable {
+enum LightScope: Hashable, Sendable {
     case all
     case room(UUID)
 }

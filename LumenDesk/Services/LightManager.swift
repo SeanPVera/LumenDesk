@@ -421,7 +421,12 @@ final class LightManager: ObservableObject {
             }
             switch d.brand {
             case .lifx:  lifx?.refresh(macHex: d.backendID)
-            case .govee: govee?.refresh(deviceID: d.backendID)
+            case .govee:
+                govee?.refresh(deviceID: d.backendID)
+                // Doubles as the stream-hold keepalive: held layouts are
+                // re-pushed every tick so power cycles, reboots, and razer
+                // inactivity timeouts heal within one refresh interval.
+                reassertStreamHoldIfNeeded(d)
             }
         }
     }
@@ -441,7 +446,12 @@ final class LightManager: ObservableObject {
             confirmedStates[device.id] = ConfirmedDeviceState(isOn: device.isOn, brightness: device.brightness, colorHex: hex, kelvin: device.kelvin, confirmedAt: Date())
             commandStates[device.id] = DeviceCommandState(phase: confirmsPendingCommand ? .applied : .idle, summary: confirmsPendingCommand ? "Confirmed by light" : "Confirmed", updatedAt: Date())
         }
-        if wasStale { appendDiscoveryChange(device, kind: .backOnline, detail: "Responded again") }
+        if wasStale {
+            appendDiscoveryChange(device, kind: .backOnline, detail: "Responded again")
+            // A light that dropped off and came back likely power-cycled,
+            // which clears the razer overlay stream-hold layouts live in.
+            reassertStreamHoldIfNeeded(device)
+        }
         guard confirmsPendingCommand else { return }
         Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 1_200_000_000)
@@ -704,6 +714,9 @@ final class LightManager: ObservableObject {
         device.isOn = on
         markPending(device.id)
         sendPower(device, on: on)
+        // Powering a stream-hold device back on restores its held segment
+        // layout immediately instead of waiting for the next refresh tick.
+        if on { reassertStreamHoldIfNeeded(device) }
     }
 
     func setBrightness(_ device: LightDevice, value: Double) {
@@ -1393,12 +1406,17 @@ extension LightManager: GoveeClientDelegate {
                 if let sku, existing.sku != sku { existing.sku = sku }
                 if oldAddress != address { self.appendDiscoveryChange(existing, kind: .changed, detail: "Address changed from \(oldAddress) to \(address)") }
                 self.markSeen(existing)
+                // Fresh discovery is the earliest moment after an app launch
+                // or a device reboot to restore a held layout.
+                self.reassertStreamHoldIfNeeded(existing)
             } else {
                 let suffix = deviceID.split(separator: ":").suffix(2).joined(separator: "")
                 let display = sku.map { "\($0) \(suffix)" } ?? "Govee \(suffix)"
                 let device = LightDevice(id: id, brand: .govee, backendID: deviceID,
                                          name: display, address: address, sku: sku)
                 self.upsert(device)
+                // First sighting after an app launch: restore any held layout.
+                self.reassertStreamHoldIfNeeded(device)
             }
         }
     }
@@ -1479,18 +1497,37 @@ extension LightManager {
     }
 
     /// Streams the draft layout in real time over razer mode while the studio
-    /// is editing. The overlay is volatile: `endSegmentPreview` returns the
-    /// light to its last static state, which makes "close without applying"
-    /// a true cancel.
+    /// is editing. The overlay is volatile, so ending the preview without
+    /// applying is a true cancel: the light falls back to its last static
+    /// state (or, on stream-hold families, snaps back to the applied layout).
     func previewSegments(_ device: LightDevice, state: GoveeSegmentState) {
         guard device.brand == .govee, !isDemoMode else { return }
         if !razerActiveIDs.contains(device.id) {
             razerActiveIDs.insert(device.id)
             govee?.setRazerMode(deviceID: device.backendID, on: true)
         }
+        sendRazerLayout(device, state: state)
+    }
+
+    /// Ends a studio editing session's live stream. Static-write devices
+    /// drop the overlay so the light falls back to its stored state;
+    /// stream-hold devices keep the overlay up and snap it back to the
+    /// applied layout, because the overlay IS their persistence.
+    func endSegmentPreview(_ device: LightDevice) {
+        guard razerActiveIDs.contains(device.id) else { return }
+        if segmentStudioProfile(for: device)?.appliesViaStream == true,
+           let held = activeSegmentState(for: device.id) {
+            sendRazerLayout(device, state: held)
+        } else {
+            razerActiveIDs.remove(device.id)
+            govee?.setRazerMode(deviceID: device.backendID, on: false)
+        }
+    }
+
+    /// One razer frame carrying a whole layout. Frames have no brightness
+    /// channel, so each segment's own brightness is folded into its RGB.
+    private func sendRazerLayout(_ device: LightDevice, state: GoveeSegmentState) {
         let colors = state.colors.map { segment -> (r: Int, g: Int, b: Int) in
-            // Razer frames carry no brightness channel, so fold each
-            // segment's own brightness into its RGB values.
             let rgb = segment.rgb255
             let scale = segment.brightness
             return (r: Int((Double(rgb.r) * scale).rounded()),
@@ -1500,11 +1537,27 @@ extension LightManager {
         govee?.sendRazerFrame(deviceID: device.backendID, colors: colors, blend: state.gradient)
     }
 
-    /// Ends live streaming; the device falls back to its last static state.
-    func endSegmentPreview(_ device: LightDevice) {
-        guard razerActiveIDs.contains(device.id) else { return }
-        razerActiveIDs.remove(device.id)
-        govee?.setRazerMode(deviceID: device.backendID, on: false)
+    /// Puts a stream-hold device's applied layout on the light and leaves
+    /// the overlay up. Razer-on is sent unconditionally so this also repairs
+    /// an overlay the firmware dropped (power cycle, timeout, reboot).
+    private func assertStreamHold(_ device: LightDevice, state: GoveeSegmentState) {
+        guard !isDemoMode else { return }
+        razerActiveIDs.insert(device.id)
+        govee?.setRazerMode(deviceID: device.backendID, on: true)
+        sendRazerLayout(device, state: state)
+    }
+
+    /// Stream-hold layouts live only in the razer overlay, which a power
+    /// cycle or firmware timeout clears. Called from the 30-second refresh
+    /// tick, discovery, stale-recovery, and power-on so held layouts come
+    /// back on their own while LumenDesk is running. Skipped while the light
+    /// is off — pushing a frame must never light up a light the user
+    /// switched off.
+    func reassertStreamHoldIfNeeded(_ device: LightDevice) {
+        guard device.brand == .govee, device.isOn, !isDemoMode,
+              segmentStudioProfile(for: device)?.appliesViaStream == true,
+              let held = activeSegmentState(for: device.id) else { return }
+        assertStreamHold(device, state: held)
     }
 
     /// Saves the studio's draft without commanding the light, so a half
@@ -1522,9 +1575,12 @@ extension LightManager {
         persistValue(goveeSegmentStates, key: goveeSegmentsKey)
     }
 
-    /// Durably applies a layout using the same Bluetooth-format commands the
-    /// Govee Home app writes, relayed over the LAN `ptReal` command, so the
-    /// paint job survives power cycles and preview teardown.
+    /// Applies a layout durably. Strip-family firmware stores the layout via
+    /// the same Bluetooth-format commands the Govee Home app writes, relayed
+    /// over the LAN `ptReal` command. String/curtain-family firmware has no
+    /// static segment write at all (Govee's own API exposes none for them),
+    /// so their layouts are held on the light through the razer streaming
+    /// overlay and re-asserted automatically while LumenDesk runs.
     func applySegments(_ device: LightDevice, state: GoveeSegmentState,
                        recordUndo: Bool = true, turnOn: Bool = true, announce: Bool = true) {
         guard device.brand == .govee else { return }
@@ -1543,22 +1599,24 @@ extension LightManager {
             device.isOn = true
             sendPower(device, on: true)
         }
-        // The razer overlay must come down BEFORE the static write. Firmware
-        // restores its pre-razer state when the overlay is disabled, so a
-        // layout written while streaming is still active gets wiped the
-        // moment the studio closes — the light "forgets" the apply. The
-        // razer-off is bundled into the apply's own packet batch (see
-        // GoveeClient.applySegments) so no re-enable can slip in between;
-        // here we only drop the bookkeeping so the studio's next edit knows
-        // to open a fresh streaming session.
-        razerActiveIDs.remove(device.id)
         noteSegmentCommand(device, summary: "Applying \(next.segmentCount)-segment layout")
         if !isDemoMode {
-            // Durable `ptReal` packets must be sent after leaving volatile
-            // Razer preview mode. Otherwise curtain lights can show the draft
-            // during editing but fail to retain it when Segment Studio closes.
-            endSegmentPreview(device)
-            sendSegmentPackets(device, state: next)
+            if segmentStudioProfile(for: device)?.appliesViaStream == true {
+                // The overlay is the persistence: push the layout as a frame
+                // and deliberately leave razer mode up.
+                assertStreamHold(device, state: next)
+            } else {
+                // The razer overlay must come down BEFORE the static write.
+                // Firmware restores its pre-razer state when the overlay is
+                // disabled, so a layout written while streaming is active
+                // gets wiped the moment the studio closes. The razer-off is
+                // bundled into the apply's own packet batch (see
+                // GoveeClient.applySegments) so no re-enable can slip in
+                // between; here we only drop the bookkeeping so the studio's
+                // next edit knows to open a fresh streaming session.
+                razerActiveIDs.remove(device.id)
+                sendSegmentPackets(device, state: next)
+            }
         }
         if announce {
             logActivity(.command, title: "Segment layout applied",
@@ -1621,6 +1679,13 @@ extension LightManager {
     /// so scenes and undo stop treating the stored layout as what is on
     /// display. The layout itself is kept for one-tap re-apply.
     fileprivate func markSegmentsInactive(_ device: LightDevice) {
+        // A live razer overlay — studio preview or stream-hold — shadows
+        // every static command; bring it down ahead of the solid color,
+        // white, or effect frame that triggered this call.
+        if razerActiveIDs.contains(device.id) {
+            razerActiveIDs.remove(device.id)
+            govee?.setRazerMode(deviceID: device.backendID, on: false)
+        }
         guard goveeSegmentStates[device.id]?.isActive == true else { return }
         goveeSegmentStates[device.id]?.isActive = false
         persistValue(goveeSegmentStates, key: goveeSegmentsKey)

@@ -130,7 +130,7 @@ Govee RGBIC devices are individually addressable in zones, and the Govee Home ap
 - **Blend Across Selection** — fade from one color to another across the selected segments.
 - **Gradient blending** toggle on COB hardware, matching the Govee app's gradient switch.
 - **Live preview** streams edits to the light in real time (razer mode). The preview is volatile, so closing the studio without applying is a true cancel.
-- **Apply to Light** writes the layout with the app-native commands so it survives power cycles.
+- **Apply to Light** makes the layout durable. COB strips and neon ropes store it in their own firmware (via the app-native Bluetooth-format commands relayed over the LAN), so it survives power cycles on its own. String, curtain, and permanent-outdoor lights have **no firmware-side segment storage at all** — Govee's own API exposes none for these families — so LumenDesk holds their layout through the live streaming channel and re-applies it automatically every 30 seconds, when a light reconnects, when it's powered back on, and at app launch. Held layouts persist as long as LumenDesk is running.
 - 12 built-in segment presets (Rainbow Flow, Sunset Glow, Candy Cane, Fairy Dust, …) plus your own saved presets, automatically re-rendered to each device's segment count.
 - A per-device segment-count stepper for models the catalog doesn't recognize — set it to whatever the Govee Home app shows.
 
@@ -586,6 +586,7 @@ If LumenDesk reports a bind failure for Govee, another app may already be listen
 - Make sure **LAN Control** is enabled and normal color changes from LumenDesk already work.
 - If the strip's zones don't line up with the editor, adjust the segment-count stepper in the Segment Studio to match what the Govee Home app shows for the device.
 - Live preview and applied layouts are separate: preview uses a volatile streaming mode, while **Apply to Light** writes the durable state. If a layout disappears when the studio closes, it was previewed but never applied.
+- On string, curtain, and permanent-outdoor lights (H70Cx, H70Bx, H702x, H705x), applied layouts are **held by LumenDesk**, not stored in the light — their firmware has no segment memory. The layout re-applies automatically while LumenDesk runs; if LumenDesk quits, the lights fall back to their built-in state until it next launches.
 - A firmware update in the Govee Home app can help on devices that predate LAN segment support.
 
 ### Music-reactive effects do not respond

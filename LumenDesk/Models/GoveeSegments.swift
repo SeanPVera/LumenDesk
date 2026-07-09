@@ -40,6 +40,13 @@ struct GoveeSegmentProfile {
     let supportsGradient: Bool
     /// True when the SKU matched the catalog, false for the generic fallback.
     let recognized: Bool
+    /// Families whose firmware ignores the static Bluetooth-format segment
+    /// write — Govee's own platform API reports no segment capability for
+    /// them (string, curtain, and permanent-outdoor lights). Their layouts
+    /// are held on the light through the razer streaming overlay instead,
+    /// and LumenDesk re-asserts the held frame on refresh ticks and device
+    /// recovery.
+    var appliesViaStream: Bool = false
 
     /// Known segmented families. Exact SKUs first, then prefix families.
     /// Sources: Govee Home app segment editors and the community LAN/BLE
@@ -60,8 +67,8 @@ struct GoveeSegmentProfile {
 
     private static let exactMatches: [String: GoveeSegmentProfile] = {
         var rows: [String: GoveeSegmentProfile] = [:]
-        func add(_ sku: String, _ layout: GoveeSegmentLayout, _ count: Int, _ gradient: Bool) {
-            rows[sku] = GoveeSegmentProfile(layout: layout, defaultSegmentCount: count, supportsGradient: gradient, recognized: true)
+        func add(_ sku: String, _ layout: GoveeSegmentLayout, _ count: Int, _ gradient: Bool, stream: Bool = false) {
+            rows[sku] = GoveeSegmentProfile(layout: layout, defaultSegmentCount: count, supportsGradient: gradient, recognized: true, appliesViaStream: stream)
         }
         // RGBIC / COB interior strips
         add("H619A", .cobStrip, 15, true)
@@ -82,20 +89,21 @@ struct GoveeSegmentProfile {
         add("H61A3", .neonRope, 20, true)
         add("H61A5", .neonRope, 20, true)
         add("H61D0", .neonRope, 20, true)
-        // String / curtain lights
-        add("H70C1", .stringLights, 20, false)
-        add("H70C2", .stringLights, 20, false)
-        add("H70C4", .stringLights, 20, false)
-        add("H70B1", .stringLights, 20, false)
-        add("H7021", .stringLights, 12, false)
-        add("H7028", .stringLights, 12, false)
+        // String / curtain lights: no static segment write in firmware,
+        // layouts are held via the razer stream.
+        add("H70C1", .stringLights, 20, false, stream: true)
+        add("H70C2", .stringLights, 20, false, stream: true)
+        add("H70C4", .stringLights, 20, false, stream: true)
+        add("H70B1", .stringLights, 20, false, stream: true)
+        add("H7021", .stringLights, 12, false, stream: true)
+        add("H7028", .stringLights, 12, false, stream: true)
         return rows
     }()
 
     private static let prefixMatches: [(prefix: String, profile: GoveeSegmentProfile)] = {
         var rows: [(prefix: String, profile: GoveeSegmentProfile)] = []
-        func add(_ prefix: String, _ layout: GoveeSegmentLayout, _ count: Int, _ gradient: Bool) {
-            rows.append((prefix, GoveeSegmentProfile(layout: layout, defaultSegmentCount: count, supportsGradient: gradient, recognized: true)))
+        func add(_ prefix: String, _ layout: GoveeSegmentLayout, _ count: Int, _ gradient: Bool, stream: Bool = false) {
+            rows.append((prefix, GoveeSegmentProfile(layout: layout, defaultSegmentCount: count, supportsGradient: gradient, recognized: true, appliesViaStream: stream)))
         }
         add("H619", .cobStrip, 15, true)
         add("H61C", .cobStrip, 15, true)
@@ -103,9 +111,10 @@ struct GoveeSegmentProfile {
         add("H61A", .neonRope, 20, true)
         add("H61B", .neonRope, 20, true)
         add("H61D", .neonRope, 20, true)
-        add("H70C", .stringLights, 20, false)
-        add("H70B", .stringLights, 20, false)
-        add("H702", .stringLights, 12, false)
+        add("H70C", .stringLights, 20, false, stream: true)
+        add("H70B", .stringLights, 20, false, stream: true)
+        add("H702", .stringLights, 12, false, stream: true)
+        add("H705", .stringLights, 15, false, stream: true) // permanent outdoor lights
         return rows
     }()
 

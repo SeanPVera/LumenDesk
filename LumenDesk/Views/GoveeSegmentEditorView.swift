@@ -415,7 +415,9 @@ struct GoveeSegmentEditorView: View {
         VStack(alignment: .leading, spacing: 8) {
             Divider()
             HStack {
-                Text("Live preview is temporary. Apply pauses the preview and writes the layout to the light so it survives power cycles; editing again resumes the preview.")
+                Text(profile.appliesViaStream
+                     ? "This light family can't store segment layouts in its own firmware, so Apply holds the layout from LumenDesk and re-applies it automatically — every 30 seconds and whenever the lights reconnect — while LumenDesk is running."
+                     : "Live preview is temporary. Apply pauses the preview and writes the layout to the light so it survives power cycles; editing again resumes the preview.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)

@@ -533,15 +533,11 @@ final class LightManager: ObservableObject {
     }
 
     fileprivate func persistCustomNames() {
-        if let data = try? JSONEncoder().encode(customNames) {
-            UserDefaults.standard.set(data, forKey: customNamesDefaultsKey)
-        }
+        persistValue(customNames, key: customNamesDefaultsKey)
     }
 
     private func loadCustomNames() -> [String: String] {
-        guard let data = UserDefaults.standard.data(forKey: customNamesDefaultsKey),
-              let dict = try? JSONDecoder().decode([String: String].self, from: data) else { return [:] }
-        return dict
+        loadValue([String: String].self, key: customNamesDefaultsKey) ?? [:]
     }
 
     // MARK: - Solar preferences
@@ -583,15 +579,11 @@ final class LightManager: ObservableObject {
     func isRoomExpanded(_ roomID: UUID) -> Bool { !collapsedRooms.contains(roomID) }
 
     fileprivate func persistCollapsedRooms() {
-        if let data = try? JSONEncoder().encode(Array(collapsedRooms)) {
-            UserDefaults.standard.set(data, forKey: collapsedRoomsKey)
-        }
+        persistSet(collapsedRooms, key: collapsedRoomsKey)
     }
 
     private func loadCollapsedRooms() -> Set<UUID> {
-        guard let data = UserDefaults.standard.data(forKey: collapsedRoomsKey),
-              let arr = try? JSONDecoder().decode([UUID].self, from: data) else { return [] }
-        return Set(arr)
+        loadSet(UUID.self, key: collapsedRoomsKey)
     }
 
     // MARK: - Error / toast
@@ -1892,14 +1884,11 @@ extension LightManager {
     }
 
     fileprivate func persistRooms() {
-        guard let data = try? JSONEncoder().encode(rooms) else { return }
-        UserDefaults.standard.set(data, forKey: roomsDefaultsKey)
+        persistValue(rooms, key: roomsDefaultsKey)
     }
 
     private func loadRooms() -> [Room] {
-        guard let data = UserDefaults.standard.data(forKey: roomsDefaultsKey),
-              let decoded = try? JSONDecoder().decode([Room].self, from: data) else { return [] }
-        return decoded
+        loadValue([Room].self, key: roomsDefaultsKey) ?? []
     }
 }
 
@@ -1924,15 +1913,11 @@ extension LightManager {
     }
 
     fileprivate func persistFavorites() {
-        if let data = try? JSONEncoder().encode(Array(favoriteIDs)) {
-            UserDefaults.standard.set(data, forKey: favoritesDefaultsKey)
-        }
+        persistSet(favoriteIDs, key: favoritesDefaultsKey)
     }
 
     fileprivate func loadFavorites() -> Set<String> {
-        guard let data = UserDefaults.standard.data(forKey: favoritesDefaultsKey),
-              let arr = try? JSONDecoder().decode([String].self, from: data) else { return [] }
-        return Set(arr)
+        loadSet(String.self, key: favoritesDefaultsKey)
     }
 
 
@@ -1954,13 +1939,11 @@ extension LightManager {
     var favoriteScenes: [LightingScene] { scenes.filter { favoriteSceneIDs.contains($0.id) } }
 
     fileprivate func persistUUIDSet(_ values: Set<UUID>, forKey key: String) {
-        if let data = try? JSONEncoder().encode(Array(values)) { UserDefaults.standard.set(data, forKey: key) }
+        persistSet(values, key: key)
     }
 
     fileprivate func loadUUIDSet(forKey key: String) -> Set<UUID> {
-        guard let data = UserDefaults.standard.data(forKey: key),
-              let arr = try? JSONDecoder().decode([UUID].self, from: data) else { return [] }
-        return Set(arr)
+        loadSet(UUID.self, key: key)
     }
 
     func addBrightnessPreset(_ value: Double) {
@@ -1986,13 +1969,11 @@ extension LightManager {
     }
 
     fileprivate func persistBrightnessPresets() {
-        if let data = try? JSONEncoder().encode(customBrightnessPresets) { UserDefaults.standard.set(data, forKey: brightnessPresetsKey) }
+        persistValue(customBrightnessPresets, key: brightnessPresetsKey)
     }
 
     fileprivate func loadBrightnessPresets() -> [Double] {
-        guard let data = UserDefaults.standard.data(forKey: brightnessPresetsKey),
-              let decoded = try? JSONDecoder().decode([Double].self, from: data) else { return [] }
-        return sanitizedPresets(decoded)
+        sanitizedPresets(loadValue([Double].self, key: brightnessPresetsKey) ?? [])
     }
 }
 
@@ -2119,15 +2100,11 @@ extension LightManager {
     }
 
     fileprivate func persistScenes() {
-        if let data = try? JSONEncoder().encode(scenes) {
-            UserDefaults.standard.set(data, forKey: scenesDefaultsKey)
-        }
+        persistValue(scenes, key: scenesDefaultsKey)
     }
 
     fileprivate func loadScenes() -> [LightingScene] {
-        guard let data = UserDefaults.standard.data(forKey: scenesDefaultsKey),
-              let decoded = try? JSONDecoder().decode([LightingScene].self, from: data) else { return [] }
-        return decoded
+        loadValue([LightingScene].self, key: scenesDefaultsKey) ?? []
     }
 }
 
@@ -2258,15 +2235,11 @@ extension LightManager {
     }
 
     fileprivate func persistWhiteMode() {
-        if let data = try? JSONEncoder().encode(Array(whiteModeDeviceIDs)) {
-            UserDefaults.standard.set(data, forKey: whiteModeKey)
-        }
+        persistSet(whiteModeDeviceIDs, key: whiteModeKey)
     }
 
     private func loadWhiteMode() -> Set<String> {
-        guard let data = UserDefaults.standard.data(forKey: whiteModeKey),
-              let arr = try? JSONDecoder().decode([String].self, from: data) else { return [] }
-        return Set(arr)
+        loadSet(String.self, key: whiteModeKey)
     }
 }
 
@@ -2385,12 +2358,22 @@ extension Color {
 
 extension LightManager {
     private func persistValue<T: Encodable>(_ value: T, key: String) {
-        if let data = try? JSONEncoder().encode(value) { UserDefaults.standard.set(data, forKey: key) }
+        guard let data = try? JSONEncoder().encode(value) else { return }
+        UserDefaults.standard.set(data, forKey: key)
     }
 
     private func loadValue<T: Decodable>(_ type: T.Type, key: String) -> T? {
         guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
         return try? JSONDecoder().decode(type, from: data)
+    }
+
+    private func persistSet<T: Encodable & Hashable>(_ values: Set<T>, key: String) {
+        persistValue(Array(values), key: key)
+    }
+
+    private func loadSet<T: Decodable & Hashable>(_ type: T.Type, key: String) -> Set<T> {
+        guard let values = loadValue([T].self, key: key) else { return [] }
+        return Set(values)
     }
 
     func logActivity(_ kind: ActivityEvent.Kind, title: String, detail: String = "", isFailure: Bool = false) {

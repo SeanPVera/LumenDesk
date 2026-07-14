@@ -8,6 +8,7 @@ struct MenuBarPopoverView: View {
     @EnvironmentObject var manager: LightManager
     @AppStorage(AppPreferenceKey.menuBarScope) private var scopeRaw = MenuBarScope.activeRooms.rawValue
     @AppStorage(AppPreferenceKey.showMenuBarUrgentOnly) private var urgentOnly = false
+    @State private var previewScene: LightingScene?
 
     private var visibleRooms: [Room] {
         let scope = MenuBarScope(rawValue: scopeRaw) ?? .activeRooms
@@ -49,6 +50,10 @@ struct MenuBarPopoverView: View {
         }
         .frame(width: 280)
         .background(LumenBackground(glow: false))
+        .sheet(item: $previewScene) { scene in
+            ScenePreviewView(scene: scene).environmentObject(manager)
+        }
+        .managedActionConfirmations(manager)
     }
 
     private var emergencyRow: some View {
@@ -78,8 +83,12 @@ struct MenuBarPopoverView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
                     ForEach(manager.favoriteScenes) { scene in
-                        Button(scene.name) { manager.applyScene(scene) }
+                        Button(scene.name) { previewScene = scene }
                             .controlSize(.small)
+                            .disabled(manager.availableDeviceIDs(for: scene).isEmpty)
+                            .help(manager.availableDeviceIDs(for: scene).isEmpty
+                                  ? "No lights from this scene are currently available"
+                                  : "Preview and rehearse \(scene.name)")
                     }
                 }
             }

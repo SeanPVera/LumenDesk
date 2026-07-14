@@ -120,17 +120,7 @@ struct LumenDeskApp: App {
               let url = panel.url,
               let data = try? Data(contentsOf: url) else { return }
 
-        // UX 5: Warn before silently overwriting existing configuration.
-        let alert = NSAlert()
-        alert.messageText = "Replace Current Configuration?"
-        let roomWord = manager.rooms.count == 1 ? "room" : "rooms"
-        let sceneWord = manager.scenes.count == 1 ? "scene" : "scenes"
-        alert.informativeText = "Importing \"\(url.lastPathComponent)\" will overwrite \(manager.rooms.count) \(roomWord) and \(manager.scenes.count) \(sceneWord), along with all favorites and custom names. This cannot be undone."
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "Import")
-        alert.addButton(withTitle: "Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        manager.importRoomsData(data)
+        manager.requestConfigurationImport(data, fileName: url.lastPathComponent)
     }
     #endif
 }
@@ -155,5 +145,32 @@ struct RootView: View {
             }
         }
         .animation(.easeInOut(duration: 0.4), value: hasOnboarded)
+        .managedActionConfirmations(manager)
+    }
+}
+
+private struct ManagedActionConfirmationModifier: ViewModifier {
+    @ObservedObject var manager: LightManager
+
+    func body(content: Content) -> some View {
+        content.alert(item: Binding(
+            get: { manager.pendingConfirmation },
+            set: { if $0 == nil { manager.cancelPendingAction() } }
+        )) { request in
+            Alert(
+                title: Text(request.title),
+                message: Text(request.message),
+                primaryButton: request.isDestructive
+                    ? .destructive(Text(request.confirmTitle), action: manager.confirmPendingAction)
+                    : .default(Text(request.confirmTitle), action: manager.confirmPendingAction),
+                secondaryButton: .cancel(manager.cancelPendingAction)
+            )
+        }
+    }
+}
+
+extension View {
+    func managedActionConfirmations(_ manager: LightManager) -> some View {
+        modifier(ManagedActionConfirmationModifier(manager: manager))
     }
 }

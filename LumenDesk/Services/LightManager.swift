@@ -13,6 +13,15 @@ enum NapPhase: Equatable {
     case brightening(endsAt: Date)
 }
 
+struct ManagedActionConfirmation: Identifiable {
+    let id = UUID()
+    let title: String
+    let message: String
+    let confirmTitle: String
+    let isDestructive: Bool
+    let action: @MainActor () -> Void
+}
+
 @MainActor
 final class LightManager: ObservableObject {
     @Published private(set) var devices: [LightDevice] = []
@@ -56,6 +65,7 @@ final class LightManager: ObservableObject {
     @Published private(set) var isDemoMode = false
     @Published private(set) var lastActionSummary: String?
     @Published private(set) var rehearsalSceneID: UUID?
+    @Published private(set) var pendingConfirmation: ManagedActionConfirmation?
     // Per-device Govee segment layouts (COB strips, string lights, neon ropes)
     // and reusable multi-color paint jobs, both persisted across sessions.
     @Published private(set) var goveeSegmentStates: [String: GoveeSegmentState] = [:]
@@ -78,8 +88,7 @@ final class LightManager: ObservableObject {
     private var confirmationRefreshTasks: [String: Task<Void, Never>] = [:]
     private var scanStartingIDs: Set<String> = []
     private var scanStartingAddresses: [String: String] = [:]
-    private var demoLiveDevices: [LightDevice] = []
-    private var demoLiveRooms: [Room] = []
+    private var demoLiveSnapshot: DemoLiveSnapshot?
     private var rehearsalSnapshot: [DeviceState] = []
     private var expectedStates: [String: ExpectedDeviceState] = [:]
     // Devices currently streaming a razer-mode segment preview.
@@ -144,6 +153,60 @@ final class LightManager: ObservableObject {
         var color: (red: Double, green: Double, blue: Double)?
         var kelvin: Int?
     }
+    private struct DemoLiveSnapshot {
+        let devices: [LightDevice]
+        let rooms: [Room]
+        let favoriteIDs: Set<String>
+        let scenes: [LightingScene]
+        let scanPhase: String
+        let lastScanDate: Date?
+        let scanResponseCount: Int
+        let statusMessage: String
+        let commandError: String?
+        let commandErrorUndo: (() -> Void)?
+        let commandPendingIDs: Set<String>
+        let collapsedRooms: Set<UUID>
+        let lastDeletedRoom: (room: Room, index: Int)?
+        let lastDeletedScene: (scene: LightingScene, index: Int)?
+        let stalenessGeneration: Int
+        let newlyDiscoveredIDs: Set<String>
+        let whiteModeDeviceIDs: Set<String>
+        let napPhase: NapPhase
+        let napSnapshotBrightness: [String: Double]
+        let activeEffects: [LightScope: String]
+        let activityEvents: [ActivityEvent]
+        let lastSceneResult: SceneApplicationResult?
+        let favoriteOrder: [FavoriteReference]
+        let parliamentMembers: [ParliamentMember]
+        let parliamentSessions: [ParliamentSession]
+        let fireflyCitizens: [FireflyCitizen]
+        let sceneCertifications: [SceneCertification]
+        let recentColors: [RecentColor]
+        let commandStates: [String: DeviceCommandState]
+        let confirmedStates: [String: ConfirmedDeviceState]
+        let discoveryChanges: [DiscoveryChange]
+        let automationOverrides: [UUID: RoomAutomationOverride]
+        let missedAutomations: [MissedAutomation]
+        let sceneRevisions: [SceneRevision]
+        let sceneDrafts: [UUID: LightingScene]
+        let lastActionSummary: String?
+        let goveeSegmentStates: [String: GoveeSegmentState]
+        let goveeSegmentPresets: [GoveeSegmentPreset]
+        let customNames: [String: String]
+        let favoriteRoomIDs: Set<UUID>
+        let favoriteSceneIDs: Set<UUID>
+        let customBrightnessPresets: [Double]
+        let sunriseHour: Int
+        let sunriseMinute: Int
+        let sunsetHour: Int
+        let sunsetMinute: Int
+        let scheduleFiredThisMinute: [UUID: String]
+        let undoStack: [[DeviceState]]
+        let redoStack: [[DeviceState]]
+        let lastChangeTime: [String: Date]
+        let expectedStates: [String: ExpectedDeviceState]
+        let razerActiveIDs: Set<String>
+    }
     /// One animated effect running against one scope. Several runs can be
     /// active at once as long as their device sets don't overlap (e.g. a
     /// different effect per room).
@@ -201,6 +264,41 @@ final class LightManager: ObservableObject {
         goveeSegmentPresets = loadValue([GoveeSegmentPreset].self, key: segmentPresetsKey) ?? []
     }
 
+    private var usesCautiousConfirmations: Bool {
+        UserDefaults.standard.string(forKey: AppPreferenceKey.confirmationPolicy) == ConfirmationPolicy.cautious.rawValue
+    }
+
+    private func performManagedAction(
+        title: String,
+        message: String,
+        confirmTitle: String,
+        isDestructive: Bool = false,
+        alwaysConfirm: Bool = false,
+        action: @escaping @MainActor () -> Void
+    ) {
+        guard alwaysConfirm || usesCautiousConfirmations else {
+            action()
+            return
+        }
+        pendingConfirmation = ManagedActionConfirmation(
+            title: title,
+            message: message,
+            confirmTitle: confirmTitle,
+            isDestructive: isDestructive,
+            action: action
+        )
+    }
+
+    func confirmPendingAction() {
+        guard let request = pendingConfirmation else { return }
+        pendingConfirmation = nil
+        request.action()
+    }
+
+    func cancelPendingAction() {
+        pendingConfirmation = nil
+    }
+
     func start() {
         guard !hasStarted else {
             scan()
@@ -229,6 +327,24 @@ final class LightManager: ObservableObject {
     }
 
     func scan() {
+        if isDemoMode {
+            isScanning = true
+            scanPhase = "Scanning simulated lights"
+            lastScanDate = Date()
+            scanResponseCount = 0
+            scanGeneration += 1
+            let generation = scanGeneration
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+                Task { @MainActor in
+                    guard let self, self.isDemoMode, self.scanGeneration == generation else { return }
+                    self.scanResponseCount = self.devices.filter { !$0.isStale }.count
+                    self.isScanning = false
+                    self.scanPhase = "Demo scan complete: \(self.scanResponseCount) simulated responses"
+                    self.logActivity(.scan, title: "Demo scan completed", detail: self.scanPhase)
+                }
+            }
+            return
+        }
         logActivity(.scan, title: "Discovery scan started", detail: "Broadcasting to LIFX and Govee devices.")
         isScanning = true
         discoveryChanges = []
@@ -413,6 +529,7 @@ final class LightManager: ObservableObject {
     }
 
     private func refreshAll() {
+        guard !isDemoMode else { return }
         let now = Date()
         for d in devices {
             if now.timeIntervalSince(d.lastSeen) > 75, !d.isStale {
@@ -550,6 +667,7 @@ final class LightManager: ObservableObject {
     }
 
     fileprivate func persistSolarPrefs() {
+        guard !isDemoMode else { return }
         let d: [String: Int] = [
             "sunriseHour": sunriseHour, "sunriseMinute": sunriseMinute,
             "sunsetHour": sunsetHour,   "sunsetMinute": sunsetMinute
@@ -740,6 +858,26 @@ final class LightManager: ObservableObject {
 
     func setPower(in room: Room, on: Bool) {
         let lights = devices(in: room)
+        guard !lights.isEmpty else {
+            publishError("“\(room.name)” has no lights to control.")
+            return
+        }
+        if lights.count > 1 {
+            let verb = on ? "Turn On" : "Turn Off"
+            performManagedAction(
+                title: "\(verb) \(room.name)?",
+                message: "This will change all \(lights.count) lights in the room. You can undo the change afterward.",
+                confirmTitle: verb,
+                action: { [weak self] in self?.performSetPower(in: room, on: on) }
+            )
+            return
+        }
+        performSetPower(in: room, on: on)
+    }
+
+    private func performSetPower(in room: Room, on: Bool) {
+        let lights = devices(in: room)
+        guard !lights.isEmpty else { return }
         let staleCount = lights.filter { $0.isStale }.count
         if staleCount > 0 {
             publishError("\(staleCount) light\(staleCount == 1 ? "" : "s") in \u{201C}\(room.name)\u{201D} may be offline.")
@@ -751,8 +889,13 @@ final class LightManager: ObservableObject {
 
     func setBrightness(in room: Room, value: Double) {
         let lights = devices(in: room)
+        guard !lights.isEmpty else {
+            publishError("“\(room.name)” has no lights to control.")
+            return
+        }
         recordChange(lights)
-        for d in lights { previewBrightness(d, value: value) }
+        let clamped = min(1, max(0, value))
+        for d in lights { previewBrightness(d, value: clamped) }
     }
 
     func setColor(in room: Room, color: Color) {
@@ -775,20 +918,20 @@ final class LightManager: ObservableObject {
     }
 
     func setAllPower(on: Bool) {
-        // Cautious confirmation uses a blocking modal, which only exists on
-        // macOS; on iOS the change runs immediately and remains undoable.
-        #if os(macOS)
-        if UserDefaults.standard.string(forKey: AppPreferenceKey.confirmationPolicy) == ConfirmationPolicy.cautious.rawValue,
-           devices.count > 3 {
-            let alert = NSAlert()
-            alert.messageText = on ? "Turn On All Lights?" : "Turn Off All Lights?"
-            alert.informativeText = "This will physically change \(devices.count) lights. Reversible changes normally run immediately; cautious confirmation is enabled in Settings."
-            alert.alertStyle = .warning
-            alert.addButton(withTitle: on ? "Turn On" : "Turn Off")
-            alert.addButton(withTitle: "Cancel")
-            guard alert.runModal() == .alertFirstButtonReturn else { return }
+        guard !devices.isEmpty else {
+            publishError("No lights are available to control.")
+            return
         }
-        #endif
+        let verb = on ? "Turn On" : "Turn Off"
+        performManagedAction(
+            title: "\(verb) All Lights?",
+            message: "This will change \(devices.count) light\(devices.count == 1 ? "" : "s"). You can undo the change afterward.",
+            confirmTitle: verb,
+            action: { [weak self] in self?.performSetAllPower(on: on) }
+        )
+    }
+
+    private func performSetAllPower(on: Bool) {
         let staleCount = devices.filter { $0.isStale }.count
         if staleCount > 0 {
             publishError("\(staleCount) light\(staleCount == 1 ? "" : "s") may be offline.")
@@ -799,8 +942,13 @@ final class LightManager: ObservableObject {
     }
 
     func setAllBrightness(_ value: Double) {
+        guard !devices.isEmpty else {
+            publishError("No lights are available to control.")
+            return
+        }
         recordChange(devices)
-        for d in devices { previewBrightness(d, value: value) }
+        let clamped = min(1, max(0, value))
+        for d in devices { previewBrightness(d, value: clamped) }
     }
 
     func setPower(deviceIDs: Set<String>, on: Bool) {
@@ -1325,6 +1473,7 @@ final class LightManager: ObservableObject {
 extension LightManager: LIFXClientDelegate {
     nonisolated func lifxDiscovered(macHex: String, address: String) {
         Task { @MainActor in
+            guard !self.isDemoMode else { return }
             let id = "lifx:\(macHex)"
             if let existing = self.device(withID: id) {
                 self.scanResponseCount += 1
@@ -1342,6 +1491,7 @@ extension LightManager: LIFXClientDelegate {
 
     nonisolated func lifxDidUpdate(macHex: String, label: String, color: LIFXHSBK, isOn: Bool) {
         Task { @MainActor in
+            guard !self.isDemoMode else { return }
             let id = "lifx:\(macHex)"
             guard let device = self.device(withID: id) else { return }
             if self.isScanning { self.scanResponseCount += 1 }
@@ -1375,6 +1525,7 @@ extension LightManager: LIFXClientDelegate {
 
     nonisolated func lifxCommandFailed(_ error: Error) {
         Task { @MainActor in
+            guard !self.isDemoMode else { return }
             for device in self.devices where device.brand == .lifx && self.commandPendingIDs.contains(device.id) {
                 self.commandPendingIDs.remove(device.id)
                 self.expectedStates.removeValue(forKey: device.id)
@@ -1390,6 +1541,7 @@ extension LightManager: LIFXClientDelegate {
 extension LightManager: GoveeClientDelegate {
     nonisolated func goveeDiscovered(deviceID: String, address: String, sku: String?) {
         Task { @MainActor in
+            guard !self.isDemoMode else { return }
             let id = "govee:\(deviceID)"
             if let existing = self.device(withID: id) {
                 self.scanResponseCount += 1
@@ -1416,6 +1568,7 @@ extension LightManager: GoveeClientDelegate {
     nonisolated func goveeDidUpdate(deviceID: String, isOn: Bool, brightness: Int,
                                     r: Int, g: Int, b: Int, kelvin: Int) {
         Task { @MainActor in
+            guard !self.isDemoMode else { return }
             let id = "govee:\(deviceID)"
             guard let device = self.device(withID: id) else { return }
             if self.isScanning { self.scanResponseCount += 1 }
@@ -1444,6 +1597,7 @@ extension LightManager: GoveeClientDelegate {
 
     nonisolated func goveeCommandFailed(_ error: Error) {
         Task { @MainActor in
+            guard !self.isDemoMode else { return }
             for device in self.devices where device.brand == .govee && self.commandPendingIDs.contains(device.id) {
                 self.commandPendingIDs.remove(device.id)
                 self.expectedStates.removeValue(forKey: device.id)
@@ -1715,6 +1869,18 @@ extension LightManager {
 
     func deleteRoom(_ roomID: UUID) {
         guard let idx = rooms.firstIndex(where: { $0.id == roomID }) else { return }
+        let room = rooms[idx]
+        performManagedAction(
+            title: "Delete “\(room.name)”?",
+            message: "The room will be removed, but its lights will remain available and the deletion can be undone.",
+            confirmTitle: "Delete Room",
+            isDestructive: true,
+            action: { [weak self] in self?.performDeleteRoom(roomID) }
+        )
+    }
+
+    private func performDeleteRoom(_ roomID: UUID) {
+        guard let idx = rooms.firstIndex(where: { $0.id == roomID }) else { return }
         stopEffect(scope: .room(roomID))
         let deleted = rooms[idx]
         lastDeletedRoom = (room: deleted, index: idx)
@@ -1855,6 +2021,19 @@ extension LightManager {
         persistRooms()
         reportImportMatchStatus(roomCount: decoded.count)
         return true
+    }
+
+    func requestConfigurationImport(_ data: Data, fileName: String) {
+        let roomWord = rooms.count == 1 ? "room" : "rooms"
+        let sceneWord = scenes.count == 1 ? "scene" : "scenes"
+        performManagedAction(
+            title: "Replace Current Configuration?",
+            message: "Importing “\(fileName)” will overwrite \(rooms.count) \(roomWord) and \(scenes.count) \(sceneWord), along with favorites, custom names, and saved segment layouts. This cannot be undone.",
+            confirmTitle: "Import Configuration",
+            isDestructive: true,
+            alwaysConfirm: true,
+            action: { [weak self] in _ = self?.importRoomsData(data) }
+        )
     }
 
     private func reportImportMatchStatus(roomCount: Int) {
@@ -2001,10 +2180,22 @@ extension LightManager {
     }
 
     func applyScene(_ scene: LightingScene) {
-        applyScene(scene, allowTurningOff: true)
+        applyScene(scene, allowTurningOff: true, reviewed: false)
     }
 
     func deleteScene(_ sceneID: UUID) {
+        guard let idx = scenes.firstIndex(where: { $0.id == sceneID }) else { return }
+        let scene = scenes[idx]
+        performManagedAction(
+            title: "Delete “\(scene.name)”?",
+            message: "The scene will be removed from the library and favorites. You can undo the deletion afterward.",
+            confirmTitle: "Delete Scene",
+            isDestructive: true,
+            action: { [weak self] in self?.performDeleteScene(sceneID) }
+        )
+    }
+
+    private func performDeleteScene(_ sceneID: UUID) {
         guard let idx = scenes.firstIndex(where: { $0.id == sceneID }) else { return }
         let deleted = scenes[idx]
         lastDeletedScene = (scene: deleted, index: idx)
@@ -2066,7 +2257,11 @@ extension LightManager {
 
     func startSceneRehearsal(_ scene: LightingScene, deviceIDs: Set<String>) {
         stopSceneRehearsal(restore: true)
-        let targets = devices.filter { deviceIDs.contains($0.id) && scene.snapshots[$0.id] != nil }
+        let targets = devices.filter { deviceIDs.contains($0.id) && scene.snapshots[$0.id] != nil && !$0.isStale }
+        guard !targets.isEmpty else {
+            publishError("“\(scene.name)” has no currently available lights to preview.")
+            return
+        }
         rehearsalSnapshot = targets.map(snapshot)
         rehearsalSceneID = scene.id
         for device in targets {
@@ -2250,6 +2445,10 @@ extension LightManager {
         guard napPhase == .inactive else { cancelNapMode(); return }
         napSnapshotBrightness = Dictionary(uniqueKeysWithValues: devices.map { ($0.id, $0.brightness) })
         napPhase = .dimming(endsAt: Date().addingTimeInterval(20 * 60))
+        scheduleNapTimer()
+    }
+
+    private func scheduleNapTimer() {
         napTimer?.invalidate()
         napTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tickNapMode() }
@@ -2358,6 +2557,7 @@ extension Color {
 
 extension LightManager {
     private func persistValue<T: Encodable>(_ value: T, key: String) {
+        guard !isDemoMode else { return }
         guard let data = try? JSONEncoder().encode(value) else { return }
         UserDefaults.standard.set(data, forKey: key)
     }
@@ -2535,9 +2735,27 @@ extension LightManager {
         return SceneApplicationPreview(scene: scene, affected: affected, unreachable: unreachable, missingIDs: missing, unchanged: unchanged)
     }
 
-    func applyScene(_ scene: LightingScene, allowTurningOff: Bool) {
+    func availableDeviceIDs(for scene: LightingScene) -> Set<String> {
+        Set(devices.lazy.filter { scene.snapshots[$0.id] != nil && !$0.isStale }.map(\.id))
+    }
+
+    func applyScene(_ scene: LightingScene, allowTurningOff: Bool, reviewed: Bool = false) {
         let preview = scenePreview(scene)
         guard !preview.affected.isEmpty else { publishError("“\(scene.name)” has no discovered lights to change."); return }
+        let availableCount = preview.affected.count - preview.unreachable.count
+        guard availableCount > 0 else {
+            publishError("“\(scene.name)” has no currently available lights to change.")
+            return
+        }
+        if !reviewed {
+            performManagedAction(
+                title: "Apply “\(scene.name)”?",
+                message: "This scene will change \(availableCount) available light\(availableCount == 1 ? "" : "s")\(preview.unreachable.isEmpty ? "." : "; \(preview.unreachable.count) offline light\(preview.unreachable.count == 1 ? "" : "s") may need retry.") You can undo the change afterward.",
+                confirmTitle: "Apply Scene",
+                action: { [weak self] in self?.applyScene(scene, allowTurningOff: allowTurningOff, reviewed: true) }
+            )
+            return
+        }
         stopEffects(touching: Set(preview.affected.map(\.id)))
         recordChange(preview.affected)
         var succeeded: [String] = [], failed: [String] = [], skipped: [String] = []
@@ -2565,7 +2783,7 @@ extension LightManager {
         guard let result = lastSceneResult, let scene = scenes.first(where: { $0.name == result.sceneName }) else { return }
         let failed = devices.filter { result.failedIDs.contains($0.id) }
         for device in failed { retry(device) }
-        applyScene(scene, allowTurningOff: true)
+        applyScene(scene, allowTurningOff: true, reviewed: true)
     }
 
     func reconcileFavoriteOrder() {
@@ -2684,8 +2902,72 @@ extension LightManager {
 extension LightManager {
     func enterDemoMode() {
         guard !isDemoMode else { return }
-        demoLiveDevices = devices
-        demoLiveRooms = rooms
+        if rehearsalSceneID != nil { stopSceneRehearsal(restore: true) }
+        let liveEffects = activeEffects
+        stopAllEffects(restore: true)
+        demoLiveSnapshot = DemoLiveSnapshot(
+            devices: devices,
+            rooms: rooms,
+            favoriteIDs: favoriteIDs,
+            scenes: scenes,
+            scanPhase: scanPhase,
+            lastScanDate: lastScanDate,
+            scanResponseCount: scanResponseCount,
+            statusMessage: statusMessage,
+            commandError: commandError,
+            commandErrorUndo: commandErrorUndo,
+            commandPendingIDs: commandPendingIDs,
+            collapsedRooms: collapsedRooms,
+            lastDeletedRoom: lastDeletedRoom,
+            lastDeletedScene: lastDeletedScene,
+            stalenessGeneration: stalenessGeneration,
+            newlyDiscoveredIDs: newlyDiscoveredIDs,
+            whiteModeDeviceIDs: whiteModeDeviceIDs,
+            napPhase: napPhase,
+            napSnapshotBrightness: napSnapshotBrightness,
+            activeEffects: liveEffects,
+            activityEvents: activityEvents,
+            lastSceneResult: lastSceneResult,
+            favoriteOrder: favoriteOrder,
+            parliamentMembers: parliamentMembers,
+            parliamentSessions: parliamentSessions,
+            fireflyCitizens: fireflyCitizens,
+            sceneCertifications: sceneCertifications,
+            recentColors: recentColors,
+            commandStates: commandStates,
+            confirmedStates: confirmedStates,
+            discoveryChanges: discoveryChanges,
+            automationOverrides: automationOverrides,
+            missedAutomations: missedAutomations,
+            sceneRevisions: sceneRevisions,
+            sceneDrafts: sceneDrafts,
+            lastActionSummary: lastActionSummary,
+            goveeSegmentStates: goveeSegmentStates,
+            goveeSegmentPresets: goveeSegmentPresets,
+            customNames: customNames,
+            favoriteRoomIDs: favoriteRoomIDs,
+            favoriteSceneIDs: favoriteSceneIDs,
+            customBrightnessPresets: customBrightnessPresets,
+            sunriseHour: sunriseHour,
+            sunriseMinute: sunriseMinute,
+            sunsetHour: sunsetHour,
+            sunsetMinute: sunsetMinute,
+            scheduleFiredThisMinute: scheduleFiredThisMinute,
+            undoStack: undoStack,
+            redoStack: redoStack,
+            lastChangeTime: lastChangeTime,
+            expectedStates: expectedStates,
+            razerActiveIDs: razerActiveIDs
+        )
+        cancelWorkspaceTasks()
+        napTimer?.invalidate()
+        napTimer = nil
+        pendingConfirmation = nil
+        isDemoMode = true
+        loadFreshDemoWorkspace()
+    }
+
+    private func loadFreshDemoWorkspace() {
         let palette: [Color] = [.orange, .cyan, .purple, .mint, .pink, .yellow]
         let names = ["Desk Glow", "Desk COB Strip", "Window Wash", "Shelf String Lights", "Floor Lamp", "Ceiling"]
         // Segmented SKUs on the Govee simulations so the Segment Studio can
@@ -2702,25 +2984,184 @@ extension LightManager {
         let office = Room(name: "Demo Office", lightIDs: Array(devices.prefix(3).map(\.id)), schedules: [ScheduleEntry(hour: 9, minute: 0, action: .turnOn)])
         let lounge = Room(name: "Demo Lounge", lightIDs: Array(devices.suffix(3).map(\.id)), schedules: [ScheduleEntry(hour: 22, minute: 30, action: .turnOff)])
         rooms = [office, lounge]
-        isDemoMode = true
-        commandStates = [:]; confirmedStates = [:]
-        for device in devices { markSeen(device) }
+        let snapshots = Dictionary(uniqueKeysWithValues: devices.map { device in
+            let hsb = device.color.hsbComponents
+            return (device.id, DeviceSnapshot(isOn: device.isOn, brightness: device.brightness,
+                                               hue: hsb.h, saturation: hsb.s, kelvin: device.kelvin,
+                                               segments: nil))
+        })
+        scenes = [LightingScene(name: "Demo Focus", snapshots: snapshots)]
+        favoriteIDs = [devices[0].id, devices[3].id]
+        favoriteRoomIDs = [office.id]
+        favoriteSceneIDs = Set(scenes.map(\.id))
+        favoriteOrder = []
+        customNames = [:]
+        collapsedRooms = []
+        whiteModeDeviceIDs = []
+        customBrightnessPresets = [0.1, 0.35, 0.7]
+        goveeSegmentStates = [:]
+        goveeSegmentPresets = []
+        activityEvents = []
+        parliamentMembers = []
+        parliamentSessions = []
+        fireflyCitizens = []
+        sceneCertifications = []
+        recentColors = []
+        automationOverrides = [:]
+        missedAutomations = []
+        sceneRevisions = []
+        sceneDrafts = [:]
+        lastDeletedRoom = nil
+        lastDeletedScene = nil
+        lastSceneResult = nil
+        lastActionSummary = nil
+        rehearsalSnapshot = []
+        rehearsalSceneID = nil
+        commandPendingIDs = []
+        commandStates = [:]
+        confirmedStates = [:]
+        expectedStates = [:]
+        discoveryChanges = []
+        newlyDiscoveredIDs = []
+        activeEffects = [:]
+        effectRuns = [:]
+        napPhase = .inactive
+        napSnapshotBrightness = [:]
+        undoStack = []
+        redoStack = []
+        canUndo = false
+        canRedo = false
+        lastChangeTime = [:]
+        scheduleFiredThisMinute = [:]
+        razerActiveIDs = []
+        isScanning = false
+        scanPhase = "Demo workspace"
+        lastScanDate = nil
+        scanResponseCount = 0
+        statusMessage = "Demo workspace is active"
+        commandError = nil
+        commandErrorUndo = nil
+        for device in devices where !device.isStale { markSeen(device) }
+        reconcileFavoriteOrder()
         publishError("Demo workspace is active. No physical lights will be changed.")
         logActivity(.system, title: "Demo mode entered", detail: "Using isolated simulated lights and rooms.")
     }
 
     func exitDemoMode() {
-        guard isDemoMode else { return }
-        devices = demoLiveDevices
-        rooms = demoLiveRooms
-        demoLiveDevices = []; demoLiveRooms = []
+        guard isDemoMode, let snapshot = demoLiveSnapshot else { return }
+        if rehearsalSceneID != nil { stopSceneRehearsal(restore: false) }
+        stopAllEffects(restore: false)
+        napTimer?.invalidate()
+        napTimer = nil
+        cancelWorkspaceTasks()
+        errorClearTask?.cancel()
+        errorClearTask = nil
+
+        devices = snapshot.devices
+        rooms = snapshot.rooms
+        favoriteIDs = snapshot.favoriteIDs
+        scenes = snapshot.scenes
+        scanPhase = snapshot.scanPhase
+        lastScanDate = snapshot.lastScanDate
+        scanResponseCount = snapshot.scanResponseCount
+        statusMessage = snapshot.statusMessage
+        commandError = snapshot.commandError
+        commandErrorUndo = snapshot.commandErrorUndo
+        commandPendingIDs = snapshot.commandPendingIDs
+        collapsedRooms = snapshot.collapsedRooms
+        lastDeletedRoom = snapshot.lastDeletedRoom
+        lastDeletedScene = snapshot.lastDeletedScene
+        stalenessGeneration = snapshot.stalenessGeneration
+        newlyDiscoveredIDs = snapshot.newlyDiscoveredIDs
+        whiteModeDeviceIDs = snapshot.whiteModeDeviceIDs
+        napPhase = snapshot.napPhase
+        napSnapshotBrightness = snapshot.napSnapshotBrightness
+        activityEvents = snapshot.activityEvents
+        lastSceneResult = snapshot.lastSceneResult
+        favoriteOrder = snapshot.favoriteOrder
+        parliamentMembers = snapshot.parliamentMembers
+        parliamentSessions = snapshot.parliamentSessions
+        fireflyCitizens = snapshot.fireflyCitizens
+        sceneCertifications = snapshot.sceneCertifications
+        recentColors = snapshot.recentColors
+        commandStates = snapshot.commandStates
+        confirmedStates = snapshot.confirmedStates
+        discoveryChanges = snapshot.discoveryChanges
+        automationOverrides = snapshot.automationOverrides
+        missedAutomations = snapshot.missedAutomations
+        sceneRevisions = snapshot.sceneRevisions
+        sceneDrafts = snapshot.sceneDrafts
+        lastActionSummary = snapshot.lastActionSummary
+        goveeSegmentStates = snapshot.goveeSegmentStates
+        goveeSegmentPresets = snapshot.goveeSegmentPresets
+        customNames = snapshot.customNames
+        favoriteRoomIDs = snapshot.favoriteRoomIDs
+        favoriteSceneIDs = snapshot.favoriteSceneIDs
+        customBrightnessPresets = snapshot.customBrightnessPresets
+        sunriseHour = snapshot.sunriseHour
+        sunriseMinute = snapshot.sunriseMinute
+        sunsetHour = snapshot.sunsetHour
+        sunsetMinute = snapshot.sunsetMinute
+        scheduleFiredThisMinute = snapshot.scheduleFiredThisMinute
+        undoStack = snapshot.undoStack
+        redoStack = snapshot.redoStack
+        canUndo = !undoStack.isEmpty
+        canRedo = !redoStack.isEmpty
+        lastChangeTime = snapshot.lastChangeTime
+        expectedStates = snapshot.expectedStates
+        razerActiveIDs = snapshot.razerActiveIDs
+        activeEffects = [:]
+        effectRuns = [:]
+        rehearsalSnapshot = []
+        rehearsalSceneID = nil
+        isScanning = false
+        pendingConfirmation = nil
         isDemoMode = false
-        commandStates = [:]; confirmedStates = [:]
-        publishError("Returned to live lights.")
+        demoLiveSnapshot = nil
+
+        if napPhase != .inactive { scheduleNapTimer() }
+        for (scope, effectID) in snapshot.activeEffects {
+            if let effect = LightingCatalog.effects.first(where: { $0.id == effectID }) {
+                startEffect(effect, scope: scope)
+            }
+        }
+        // Restarting a previously active effect must not manufacture a new
+        // user-visible undo step merely because Demo Mode was exited.
+        undoStack = snapshot.undoStack
+        redoStack = snapshot.redoStack
+        canUndo = !undoStack.isEmpty
+        canRedo = !redoStack.isEmpty
+        lastChangeTime = snapshot.lastChangeTime
+        lastActionSummary = snapshot.lastActionSummary
+        for id in commandPendingIDs {
+            if let device = device(withID: id) {
+                scheduleConfirmationRefresh(for: device)
+                startCommandTimeout(for: device, summary: "restored pending command")
+            }
+        }
     }
 
     func resetDemoMode() {
         guard isDemoMode else { return }
-        exitDemoMode(); enterDemoMode()
+        if rehearsalSceneID != nil { stopSceneRehearsal(restore: false) }
+        stopAllEffects(restore: false)
+        napTimer?.invalidate()
+        napTimer = nil
+        cancelWorkspaceTasks()
+        loadFreshDemoWorkspace()
+    }
+
+    private func cancelWorkspaceTasks() {
+        scanGeneration += 1
+        brightnessTasks.values.forEach { $0.cancel() }
+        brightnessTasks = [:]
+        commandTasks.values.forEach { $0.cancel() }
+        commandTasks = [:]
+        commandTimeoutTasks.values.forEach { $0.cancel() }
+        commandTimeoutTasks = [:]
+        confirmationRefreshTasks.values.forEach { $0.cancel() }
+        confirmationRefreshTasks = [:]
+        commandPendingIDs = []
+        expectedStates = [:]
     }
 }

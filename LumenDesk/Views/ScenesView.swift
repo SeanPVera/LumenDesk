@@ -383,11 +383,15 @@ struct ScenesView: View {
 
             Button("Preview & Apply") { previewScene = scene }
                 .buttonStyle(.bordered)
-                .accessibilityLabel("Apply \(scene.name)")
-                .accessibilityHint("Restores \(scene.snapshots.count) light\(scene.snapshots.count == 1 ? "" : "s") to the saved state")
+                .disabled(manager.availableDeviceIDs(for: scene).isEmpty)
+                .accessibilityLabel("Preview and apply \(scene.name)")
+                .accessibilityHint(manager.availableDeviceIDs(for: scene).isEmpty
+                                   ? "No lights from this scene are currently available"
+                                   : "Review and temporarily rehearse the saved state before applying it")
 
             Menu {
                 Button("Preview & Apply…") { previewScene = scene }
+                    .disabled(manager.availableDeviceIDs(for: scene).isEmpty)
                 Button("Edit Draft…") { editingScene = scene }
                 if !manager.revisions(for: scene.id).isEmpty { Button("Version History…") { editingScene = scene } }
                 Button("Certify with Bureau of Lumens") { _ = manager.certify(scene) }

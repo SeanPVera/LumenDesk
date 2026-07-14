@@ -306,15 +306,23 @@ struct ScenePreviewView: View {
     @Environment(\.dismiss) private var dismiss
     let scene: LightingScene
     @State private var allowTurningOff = true
+    @State private var rehearsalTask: Task<Void, Never>?
 
     private var preview: SceneApplicationPreview { manager.scenePreview(scene) }
+    private var availableIDs: Set<String> { manager.availableDeviceIDs(for: scene) }
+    private var isRehearsing: Bool { manager.rehearsalSceneID == scene.id }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             sheetHeader("Preview — \(scene.name)", icon: "eye", dismiss: dismiss)
-            Text("Review the exact scope before LumenDesk changes the room.").font(.callout).foregroundStyle(.secondary)
-            HStack { previewMetric("Affected", preview.affected.count, .blue); previewMetric("Unchanged", preview.unchanged.count, .secondary); previewMetric("Offline", preview.unreachable.count, Lumen.warning); previewMetric("Missing", preview.missingIDs.count, .red) }
+            Text("Review the exact scope, then preview it temporarily before applying.").font(.callout).foregroundStyle(.secondary)
+            HStack { previewMetric("Available", availableIDs.count, .blue); previewMetric("Unchanged", preview.unchanged.count, .secondary); previewMetric("Offline", preview.unreachable.count, Lumen.warning); previewMetric("Missing", preview.missingIDs.count, .red) }
             Toggle("Allow this scene to turn lights off", isOn: $allowTurningOff)
+                .disabled(availableIDs.isEmpty)
+            if availableIDs.isEmpty {
+                Label("None of this scene’s lights are currently available. Reconnect a light or scan again before previewing or applying.", systemImage: "wifi.slash")
+                    .font(.caption).foregroundStyle(Lumen.warning)
+            }
             if !preview.unreachable.isEmpty { Label("Offline lights will be attempted and listed for targeted retry.", systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(Lumen.warning) }
             List(preview.affected) { device in
                 HStack {
@@ -335,10 +343,49 @@ struct ScenePreviewView: View {
             if let result = manager.lastSceneResult, result.sceneName == scene.name, !result.failedIDs.isEmpty {
                 HStack { Label("\(result.failedIDs.count) light(s) need retry", systemImage: "wifi.slash").foregroundStyle(Lumen.warning); Spacer(); Button("Retry Failed Lights") { manager.retryLastSceneFailures() } }
             }
-            HStack { Spacer(); Button("Cancel") { dismiss() }; Button("Apply Scene") { manager.applyScene(scene, allowTurningOff: allowTurningOff); dismiss() }.buttonStyle(.borderedProminent) }
-        }.padding(20).sheetFrame(minWidth: 520, idealWidth: 620, minHeight: 420, idealHeight: 560).background(LumenBackground(glow: false))
+            HStack {
+                Button(isRehearsing ? "Stop Preview & Restore" : "Preview for 20 Seconds") {
+                    isRehearsing ? stopRehearsal(restore: true) : startRehearsal()
+                }
+                .disabled(availableIDs.isEmpty)
+                Spacer()
+                Button("Cancel") { stopRehearsal(restore: true); dismiss() }
+                Button("Apply Scene") {
+                    stopRehearsal(restore: false)
+                    manager.applyScene(scene, allowTurningOff: allowTurningOff, reviewed: true)
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(availableIDs.isEmpty)
+            }
+        }
+        .padding(20)
+        .sheetFrame(minWidth: 520, idealWidth: 620, minHeight: 420, idealHeight: 560)
+        .background(LumenBackground(glow: false))
+        .onDisappear { stopRehearsal(restore: true) }
     }
     private func previewMetric(_ title: String, _ value: Int, _ color: Color) -> some View { VStack { Text("\(value)").font(.title2.bold()).foregroundStyle(color); Text(title).font(.caption) }.frame(maxWidth: .infinity).padding(8).lumenCard(radius: 8) }
+
+    private func startRehearsal() {
+        guard !availableIDs.isEmpty else { return }
+        rehearsalTask?.cancel()
+        manager.startSceneRehearsal(scene, deviceIDs: availableIDs)
+        rehearsalTask = Task { @MainActor in
+            do { try await Task.sleep(nanoseconds: 20_000_000_000) }
+            catch { return }
+            guard !Task.isCancelled, manager.rehearsalSceneID == scene.id else { return }
+            manager.stopSceneRehearsal(restore: true)
+            rehearsalTask = nil
+        }
+    }
+
+    private func stopRehearsal(restore: Bool) {
+        rehearsalTask?.cancel()
+        rehearsalTask = nil
+        if manager.rehearsalSceneID == scene.id {
+            manager.stopSceneRehearsal(restore: restore)
+        }
+    }
 }
 
 struct LumenDeskSettingsView: View {
@@ -358,7 +405,7 @@ struct LumenDeskSettingsView: View {
                 Picker("Workspace layout", selection: $layout) { ForEach(WorkspaceLayout.allCases) { Text($0.title).tag($0.rawValue) } }
                 Picker("Interface density", selection: $density) { ForEach(InterfaceDensity.allCases) { Text($0.title).tag($0.rawValue) } }
                 Picker("Confirmation policy", selection: $confirmationPolicy) { ForEach(ConfirmationPolicy.allCases) { Text($0.title).tag($0.rawValue) } }
-                Text("Reversible changes run immediately and offer Undo. Destructive imports and broad disruptive actions retain confirmation.").font(.caption).foregroundStyle(.secondary)
+                Text("Balanced runs reversible actions immediately with Undo; imports always confirm. Cautious also confirms broad, scene, and delete actions.").font(.caption).foregroundStyle(.secondary)
             }.padding(20).tabItem { Label("General", systemImage: "gear") }
 
             Form {
@@ -494,6 +541,9 @@ struct SceneEditorView: View {
 
     init(scene: LightingScene) { original = scene; _draft = State(initialValue: scene) }
     private var dirty: Bool { draft != original }
+    private var availableRehearsalIDs: Set<String> {
+        selectedForRehearsal.intersection(manager.availableDeviceIDs(for: draft))
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -515,8 +565,8 @@ struct SceneEditorView: View {
                         HStack {
                             Toggle("", isOn: Binding(get: { selectedForRehearsal.contains(id) }, set: { selected in
                                 if selected { selectedForRehearsal.insert(id) } else { selectedForRehearsal.remove(id) }
-                            })).labelsHidden()
-                            VStack(alignment: .leading) { Text(device.label); Text(diffText(id: id, value: binding.wrappedValue)).font(.caption2).foregroundStyle(.secondary) }
+                            })).labelsHidden().disabled(device.isStale)
+                            VStack(alignment: .leading) { Text(device.label); Text(device.isStale ? "Offline · unavailable for rehearsal" : diffText(id: id, value: binding.wrappedValue)).font(.caption2).foregroundStyle(device.isStale ? Lumen.warning : .secondary) }
                             Spacer(); Toggle("On", isOn: binding.isOn).labelsHidden(); Slider(value: binding.brightness, in: 0.01...1).frame(width: 130); Text("\(Int(binding.wrappedValue.brightness * 100))%").monospacedDigit().frame(width: 38)
                         }
                     }
@@ -524,7 +574,7 @@ struct SceneEditorView: View {
             }
             HStack {
                 if manager.rehearsalSceneID == draft.id { Button("End & Restore") { manager.stopSceneRehearsal() }.tint(.orange) }
-                else { Button("Rehearse Selected") { manager.startSceneRehearsal(draft, deviceIDs: selectedForRehearsal) }.disabled(selectedForRehearsal.isEmpty) }
+                else { Button("Rehearse Selected") { manager.startSceneRehearsal(draft, deviceIDs: availableRehearsalIDs) }.disabled(availableRehearsalIDs.isEmpty) }
                 Spacer(); Button("Discard") { showingDiscard = true }.disabled(!dirty); Button("Save Draft") { manager.updateScene(draft, revisionLabel: restorePointLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Before edit" : restorePointLabel); dismiss() }.buttonStyle(.borderedProminent).disabled(!dirty || draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
@@ -674,7 +724,7 @@ struct ExperienceCenterView: View {
     @EnvironmentObject var manager: LightManager
     @Environment(\.dismiss) private var dismiss
     @State private var selectedScene: LightingScene?
-    @State private var rehearsalEndsAt: Date?
+    @State private var previewScene: LightingScene?
 
     private let columns = [GridItem(.adaptive(minimum: 230), spacing: 12)]
 
@@ -698,6 +748,9 @@ struct ExperienceCenterView: View {
         }
         .sheetFrame(minWidth: 820, idealWidth: 980, minHeight: 680, idealHeight: 820)
         .background(LumenBackground(glow: true))
+        .sheet(item: $previewScene) { scene in
+            ScenePreviewView(scene: scene).environmentObject(manager)
+        }
     }
 
     private var hero: some View {
@@ -740,7 +793,12 @@ struct ExperienceCenterView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack { Label(room.name, systemImage: "square.grid.2x2.fill"); Spacer(); Text("\(lights.filter(\.isOn).count)/\(lights.count)").monospacedDigit().foregroundStyle(.secondary) }
                     HStack(spacing: 6) { ForEach(Array(lights.prefix(10)), id: \.id) { light in Circle().fill(light.isStale ? Lumen.warning : (light.isOn ? light.color : Lumen.textTertiary)).frame(width: 18, height: 18).help("\(light.label): \(explain(light))") } }
-                    HStack { Button("On") { manager.setPower(in: room, on: true) }; Button("Off") { manager.setPower(in: room, on: false) }; Spacer(); Button("Explain") { manager.commandError = "\(room.name): \(lights.filter(\.isStale).count) stale · \(lights.filter(\.isOn).count) on · automation \(manager.automationOverrides[room.id] == nil ? "active" : "paused")" } }
+                    HStack {
+                        Button("On") { manager.setPower(in: room, on: true) }.disabled(lights.isEmpty)
+                        Button("Off") { manager.setPower(in: room, on: false) }.disabled(lights.isEmpty)
+                        Spacer()
+                        Button("Explain") { manager.commandError = lights.isEmpty ? "\(room.name) has no assigned lights." : "\(room.name): \(lights.filter(\.isStale).count) stale · \(lights.filter(\.isOn).count) on · automation \(manager.automationOverrides[room.id] == nil ? "active" : "paused")" }
+                    }
                 }.padding(12).lumenCard(radius: 12)
             }
         }
@@ -758,10 +816,13 @@ struct ExperienceCenterView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack { Label(scene.name, systemImage: "wand.and.stars").lineLimit(1); Spacer(); confidenceBadge(missing: missing, stale: stale) }
                     Text("\(scene.snapshots.count) lights · \(missing) missing · \(stale) stale").font(.caption).foregroundStyle(.secondary)
-                    HStack { Button("Preview") { selectedScene = scene; manager.commandError = "Preview: \(scene.name) will affect \(scene.snapshots.count) lights." }; Button("20s Rehearsal") { selectedScene = scene; rehearsalEndsAt = Date().addingTimeInterval(20); manager.startSceneRehearsal(scene, deviceIDs: Set(scene.snapshots.keys)) }; Button("Apply") { manager.applyScene(scene) } }
+                    Button("Preview & Apply") {
+                        selectedScene = scene
+                        previewScene = scene
+                    }
+                    .disabled(manager.availableDeviceIDs(for: scene).isEmpty)
                 }.padding(12).lumenCard(radius: 12, highlighted: selectedScene?.id == scene.id)
             }
-            if let selectedScene, let rehearsalEndsAt { Text("Previewing \(selectedScene.name) until \(rehearsalEndsAt.formatted(date: .omitted, time: .standard)). Keep it or use Undo to revert.").padding(12).lumenCard(radius: 12, glowColor: Lumen.gold.opacity(0.4)) }
         }
     }
 

@@ -86,11 +86,12 @@ enum LIFXProtocol {
     static func parse(_ data: Data) -> ParsedHeader? {
         guard data.count >= headerSize else { return nil }
         let size: UInt16 = data.readLE(at: 0)
+        guard size >= headerSize, Int(size) == data.count else { return nil }
         let source: UInt32 = data.readLE(at: 4)
         let target = data.subdata(in: (data.startIndex + 8)..<(data.startIndex + 14))
         let sequence = data[data.startIndex + 23]
         let type: UInt16 = data.readLE(at: 32)
-        let payload = data.subdata(in: (data.startIndex + headerSize)..<data.endIndex)
+        let payload = data.subdata(in: (data.startIndex + headerSize)..<(data.startIndex + Int(size)))
         return ParsedHeader(size: size, source: source, target: target,
                             sequence: sequence, type: type, payload: payload)
     }

@@ -104,3 +104,72 @@ extension ScheduleEntry: Codable {
         weekdays = (try? c.decode(Set<Int>.self, forKey: .weekdays)) ?? Set(1...7)
     }
 }
+
+/// Deterministic schedule matching and duplicate-fire bookkeeping shared by
+/// the automation loop and its unit tests.
+enum ScheduleEvaluator {
+    static func occurrences(
+        for entry: ScheduleEntry,
+        after previous: Date,
+        through now: Date,
+        sunriseMinutes: Int,
+        sunsetMinutes: Int,
+        calendar: Calendar = .current
+    ) -> [Date] {
+        guard previous < now else { return [] }
+        var day = calendar.startOfDay(for: previous)
+        let finalDay = calendar.startOfDay(for: now)
+        var matches: [Date] = []
+        while day <= finalDay {
+            let weekday = calendar.component(.weekday, from: day)
+            if entry.weekdays.isEmpty || entry.weekdays.contains(weekday),
+               let occurrence = occurrence(
+                    for: entry,
+                    relativeTo: day,
+                    sunriseMinutes: sunriseMinutes,
+                    sunsetMinutes: sunsetMinutes,
+                    calendar: calendar
+               ),
+               occurrence > previous,
+               occurrence <= now {
+                matches.append(occurrence)
+            }
+            guard let nextDay = calendar.date(byAdding: .day, value: 1, to: day) else { break }
+            day = nextDay
+        }
+        return matches
+    }
+
+    static func occurrence(
+        for entry: ScheduleEntry,
+        relativeTo date: Date,
+        sunriseMinutes: Int,
+        sunsetMinutes: Int,
+        calendar: Calendar = .current
+    ) -> Date? {
+        let totalMinutes: Int
+        switch entry.action {
+        case .atSunrise:
+            totalMinutes = sunriseMinutes + entry.offsetMinutes
+        case .atSunset:
+            totalMinutes = sunsetMinutes + entry.offsetMinutes
+        default:
+            totalMinutes = max(0, min(1439, entry.hour * 60 + entry.minute))
+        }
+        return calendar.date(byAdding: .minute, value: totalMinutes, to: calendar.startOfDay(for: date))
+    }
+
+    static func minuteKey(for date: Date, calendar: Calendar = .current) -> String {
+        String(format: "%02d:%02d", calendar.component(.hour, from: date), calendar.component(.minute, from: date))
+    }
+
+    /// Claims an entry for the date's clock-minute. The second claim returns
+    /// false, preventing timer drift from firing the same automation twice.
+    @discardableResult
+    static func claim(_ entryID: UUID, at date: Date, fired: inout [UUID: String], calendar: Calendar = .current) -> Bool {
+        let key = minuteKey(for: date, calendar: calendar)
+        guard fired[entryID] != key else { return false }
+        fired[entryID] = key
+        return true
+    }
+}

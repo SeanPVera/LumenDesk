@@ -135,6 +135,21 @@ final class UDPSocket {
 /// active interface with a unicast discovery packet. Replies are ordinary
 /// unicast datagrams, which need no entitlement.
 enum LocalSubnet {
+    static func ipv4Address(from string: String) -> UInt32? {
+        let octets = string.split(separator: ".", omittingEmptySubsequences: false)
+        guard octets.count == 4 else { return nil }
+        var address: UInt32 = 0
+        for octet in octets {
+            guard let value = UInt8(octet) else { return nil }
+            address = (address << 8) | UInt32(value)
+        }
+        return address
+    }
+
+    static func ipv4String(from address: UInt32) -> String {
+        "\((address >> 24) & 255).\((address >> 16) & 255).\((address >> 8) & 255).\(address & 255)"
+    }
+
     /// Our own IPv4 addresses on active, non-loopback interfaces.
     static func localIPv4Addresses() -> [UInt32] {
         var addresses: [UInt32] = []
@@ -152,7 +167,7 @@ enum LocalSubnet {
             }
             addresses.append(ip)
         }
-        return addresses
+        return Array(Set(addresses)).sorted()
     }
 
     /// Dotted-quad strings for every other host on the /24 containing each
@@ -160,14 +175,22 @@ enum LocalSubnet {
     /// Capping at /24 bounds the sweep to 253 probes per interface even on
     /// networks with a wider netmask.
     static func probeHosts() -> [String] {
+        probeHosts(localAddresses: localIPv4Addresses())
+    }
+
+    /// Pure form used by discovery and tests. Duplicate interfaces are folded
+    /// together, and every local address is excluded even when two interfaces
+    /// share the same /24.
+    static func probeHosts(localAddresses: [UInt32]) -> [String] {
+        let localSet = Set(localAddresses)
         var seen = Set<UInt32>()
         var hosts: [String] = []
-        for ip in localIPv4Addresses() {
+        for ip in localSet.sorted() {
             let base = ip & 0xFFFF_FF00
             for low in UInt32(1)...254 {
                 let candidate = base | low
-                guard candidate != ip, seen.insert(candidate).inserted else { continue }
-                hosts.append("\((candidate >> 24) & 255).\((candidate >> 16) & 255).\((candidate >> 8) & 255).\(candidate & 255)")
+                guard !localSet.contains(candidate), seen.insert(candidate).inserted else { continue }
+                hosts.append(ipv4String(from: candidate))
             }
         }
         return hosts

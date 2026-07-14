@@ -29,6 +29,7 @@ final class DemoWorkspaceControllerTests: XCTestCase {
         manager.addBrightnessPreset(0.42)
         manager.setSunriseTime(hour: 7, minute: 15)
         manager.setSunsetTime(hour: 19, minute: 45)
+        manager.setAutomationOverride(for: liveRoom.id, duration: .untilResumed)
         manager.reconcileFavoriteOrder()
 
         let liveRooms = manager.rooms
@@ -40,18 +41,21 @@ final class DemoWorkspaceControllerTests: XCTestCase {
         let liveActivity = manager.activityEvents
         let livePresets = manager.customBrightnessPresets
         let liveSegmentStates = manager.goveeSegmentStates
+        let liveAutomationOverrides = manager.automationOverrides
 
         manager.enterDemoMode()
         XCTAssertTrue(manager.isDemoMode)
         XCTAssertEqual(manager.devices.count, 6)
         XCTAssertTrue(manager.devices.allSatisfy { $0.id.hasPrefix("demo:") })
         XCTAssertEqual(manager.rooms.map(\.name), ["Demo Office", "Demo Lounge"])
+        XCTAssertTrue(manager.automationOverrides.isEmpty)
 
         manager.renameRoom(manager.rooms[0].id, to: "Changed Demo Room")
         manager.setCustomName(manager.devices[0].id, name: "Changed Demo Light")
         manager.captureScene(name: "Demo-only Scene")
         manager.setSunriseTime(hour: 1, minute: 2)
         manager.addBrightnessPreset(0.91)
+        manager.setAutomationOverride(for: manager.rooms[0].id, duration: .nextSchedule)
 
         manager.exitDemoMode()
 
@@ -68,6 +72,7 @@ final class DemoWorkspaceControllerTests: XCTestCase {
         XCTAssertEqual(manager.activityEvents, liveActivity)
         XCTAssertEqual(manager.customBrightnessPresets, livePresets)
         XCTAssertEqual(manager.goveeSegmentStates, liveSegmentStates)
+        XCTAssertEqual(manager.automationOverrides, liveAutomationOverrides)
         XCTAssertEqual(manager.sunriseHour, 7)
         XCTAssertEqual(manager.sunriseMinute, 15)
         XCTAssertEqual(manager.sunsetHour, 19)

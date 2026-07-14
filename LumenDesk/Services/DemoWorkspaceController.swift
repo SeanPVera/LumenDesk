@@ -60,8 +60,7 @@ final class DemoWorkspaceController {
         var commandStates: [String: DeviceCommandState]
         var confirmedStates: [String: ConfirmedDeviceState]
         var discoveryChanges: [DiscoveryChange]
-        var automationOverrides: [UUID: RoomAutomationOverride]
-        var missedAutomations: [MissedAutomation]
+        var scheduleState: ScheduleEngine.State
         var sceneRevisions: [SceneRevision]
         var sceneDrafts: [UUID: LightingScene]
         var lastActionSummary: String?
@@ -77,8 +76,6 @@ final class DemoWorkspaceController {
         var sunriseMinute: Int
         var sunsetHour: Int
         var sunsetMinute: Int
-        var scheduleFiredThisMinute: [UUID: String]
-        var lastScheduleCheck: Date?
         var undoStack: [[LightRuntimeSnapshot]]
         var redoStack: [[LightRuntimeSnapshot]]
         var lastChangeTime: [String: Date]
@@ -239,8 +236,7 @@ final class DemoWorkspaceController {
         workspace.fireflyCitizens = []
         workspace.sceneCertifications = []
         workspace.recentColors = []
-        workspace.automationOverrides = [:]
-        workspace.missedAutomations = []
+        workspace.scheduleState = ScheduleEngine.State()
         workspace.sceneRevisions = []
         workspace.sceneDrafts = [:]
         workspace.lastDeletedRoom = nil
@@ -263,8 +259,6 @@ final class DemoWorkspaceController {
         workspace.canUndo = false
         workspace.canRedo = false
         workspace.lastChangeTime = [:]
-        workspace.scheduleFiredThisMinute = [:]
-        workspace.lastScheduleCheck = nil
         workspace.razerActiveIDs = []
         workspace.scanStartingIDs = []
         workspace.scanStartingAddresses = [:]

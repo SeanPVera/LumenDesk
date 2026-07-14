@@ -13,15 +13,6 @@ enum NapPhase: Equatable {
     case brightening(endsAt: Date)
 }
 
-struct ManagedActionConfirmation: Identifiable {
-    let id = UUID()
-    let title: String
-    let message: String
-    let confirmTitle: String
-    let isDestructive: Bool
-    let action: @MainActor () -> Void
-}
-
 @MainActor
 final class LightManager: ObservableObject {
     @Published private(set) var devices: [LightDevice] = []
@@ -64,7 +55,6 @@ final class LightManager: ObservableObject {
     @Published private(set) var sceneDrafts: [UUID: LightingScene] = [:]
     @Published private(set) var lastActionSummary: String?
     @Published private(set) var rehearsalSceneID: UUID?
-    @Published private(set) var pendingConfirmation: ManagedActionConfirmation?
     // Per-device Govee segment layouts (COB strips, string lights, neon ropes)
     // and reusable multi-color paint jobs, both persisted across sessions.
     @Published private(set) var goveeSegmentStates: [String: GoveeSegmentState] = [:]
@@ -88,6 +78,7 @@ final class LightManager: ObservableObject {
     private var scanStartingIDs: Set<String> = []
     private var scanStartingAddresses: [String: String] = [:]
     private let demoWorkspaceController: DemoWorkspaceController
+    let confirmationCoordinator: ConfirmationCoordinator
     private var rehearsalSnapshot: [LightRuntimeSnapshot] = []
     private var expectedStates: [String: ExpectedDeviceState] = [:]
     // Devices currently streaming a razer-mode segment preview.
@@ -169,10 +160,12 @@ final class LightManager: ObservableObject {
 
     init(
         defaults: UserDefaults = .standard,
-        demoWorkspaceController: DemoWorkspaceController? = nil
+        demoWorkspaceController: DemoWorkspaceController? = nil,
+        confirmationCoordinator: ConfirmationCoordinator? = nil
     ) {
         self.defaults = defaults
         self.demoWorkspaceController = demoWorkspaceController ?? DemoWorkspaceController()
+        self.confirmationCoordinator = confirmationCoordinator ?? ConfirmationCoordinator(defaults: defaults)
         rooms = loadRooms()
         favoriteIDs = loadFavorites()
         scenes = loadScenes()
@@ -198,41 +191,6 @@ final class LightManager: ObservableObject {
     }
 
     var isDemoMode: Bool { demoWorkspaceController.isActive }
-
-    private var usesCautiousConfirmations: Bool {
-        defaults.string(forKey: AppPreferenceKey.confirmationPolicy) == ConfirmationPolicy.cautious.rawValue
-    }
-
-    private func performManagedAction(
-        title: String,
-        message: String,
-        confirmTitle: String,
-        isDestructive: Bool = false,
-        alwaysConfirm: Bool = false,
-        action: @escaping @MainActor () -> Void
-    ) {
-        guard alwaysConfirm || usesCautiousConfirmations else {
-            action()
-            return
-        }
-        pendingConfirmation = ManagedActionConfirmation(
-            title: title,
-            message: message,
-            confirmTitle: confirmTitle,
-            isDestructive: isDestructive,
-            action: action
-        )
-    }
-
-    func confirmPendingAction() {
-        guard let request = pendingConfirmation else { return }
-        pendingConfirmation = nil
-        request.action()
-    }
-
-    func cancelPendingAction() {
-        pendingConfirmation = nil
-    }
 
     func start() {
         guard !hasStarted else {
@@ -782,10 +740,12 @@ final class LightManager: ObservableObject {
         }
         if lights.count > 1 {
             let verb = on ? "Turn On" : "Turn Off"
-            performManagedAction(
-                title: "\(verb) \(room.name)?",
-                message: "This will change all \(lights.count) lights in the room. You can undo the change afterward.",
-                confirmTitle: verb,
+            confirmationCoordinator.request(
+                .init(
+                    title: "\(verb) \(room.name)?",
+                    message: "This will change all \(lights.count) lights in the room. You can undo the change afterward.",
+                    confirmTitle: verb
+                ),
                 action: { [weak self] in self?.performSetPower(in: room, on: on) }
             )
             return
@@ -841,10 +801,12 @@ final class LightManager: ObservableObject {
             return
         }
         let verb = on ? "Turn On" : "Turn Off"
-        performManagedAction(
-            title: "\(verb) All Lights?",
-            message: "This will change \(devices.count) light\(devices.count == 1 ? "" : "s"). You can undo the change afterward.",
-            confirmTitle: verb,
+        confirmationCoordinator.request(
+            .init(
+                title: "\(verb) All Lights?",
+                message: "This will change \(devices.count) light\(devices.count == 1 ? "" : "s"). You can undo the change afterward.",
+                confirmTitle: verb
+            ),
             action: { [weak self] in self?.performSetAllPower(on: on) }
         )
     }
@@ -1790,11 +1752,13 @@ extension LightManager {
     func deleteRoom(_ roomID: UUID) {
         guard let idx = rooms.firstIndex(where: { $0.id == roomID }) else { return }
         let room = rooms[idx]
-        performManagedAction(
-            title: "Delete “\(room.name)”?",
-            message: "The room will be removed, but its lights will remain available and the deletion can be undone.",
-            confirmTitle: "Delete Room",
-            isDestructive: true,
+        confirmationCoordinator.request(
+            .init(
+                title: "Delete “\(room.name)”?",
+                message: "The room will be removed, but its lights will remain available and the deletion can be undone.",
+                confirmTitle: "Delete Room",
+                role: .destructive
+            ),
             action: { [weak self] in self?.performDeleteRoom(roomID) }
         )
     }
@@ -1946,12 +1910,14 @@ extension LightManager {
     func requestConfigurationImport(_ data: Data, fileName: String) {
         let roomWord = rooms.count == 1 ? "room" : "rooms"
         let sceneWord = scenes.count == 1 ? "scene" : "scenes"
-        performManagedAction(
-            title: "Replace Current Configuration?",
-            message: "Importing “\(fileName)” will overwrite \(rooms.count) \(roomWord) and \(scenes.count) \(sceneWord), along with favorites, custom names, and saved segment layouts. This cannot be undone.",
-            confirmTitle: "Import Configuration",
-            isDestructive: true,
-            alwaysConfirm: true,
+        confirmationCoordinator.request(
+            .init(
+                title: "Replace Current Configuration?",
+                message: "Importing “\(fileName)” will overwrite \(rooms.count) \(roomWord) and \(scenes.count) \(sceneWord), along with favorites, custom names, and saved segment layouts. This cannot be undone.",
+                confirmTitle: "Import Configuration",
+                role: .destructive,
+                requirement: .always
+            ),
             action: { [weak self] in _ = self?.importRoomsData(data) }
         )
     }
@@ -2106,11 +2072,13 @@ extension LightManager {
     func deleteScene(_ sceneID: UUID) {
         guard let idx = scenes.firstIndex(where: { $0.id == sceneID }) else { return }
         let scene = scenes[idx]
-        performManagedAction(
-            title: "Delete “\(scene.name)”?",
-            message: "The scene will be removed from the library and favorites. You can undo the deletion afterward.",
-            confirmTitle: "Delete Scene",
-            isDestructive: true,
+        confirmationCoordinator.request(
+            .init(
+                title: "Delete “\(scene.name)”?",
+                message: "The scene will be removed from the library and favorites. You can undo the deletion afterward.",
+                confirmTitle: "Delete Scene",
+                role: .destructive
+            ),
             action: { [weak self] in self?.performDeleteScene(sceneID) }
         )
     }
@@ -2670,10 +2638,12 @@ extension LightManager {
             return
         }
         if !reviewed {
-            performManagedAction(
-                title: "Apply “\(scene.name)”?",
-                message: "This scene will change \(availableCount) available light\(availableCount == 1 ? "" : "s")\(preview.unreachable.isEmpty ? "." : "; \(preview.unreachable.count) offline light\(preview.unreachable.count == 1 ? "" : "s") may need retry.") You can undo the change afterward.",
-                confirmTitle: "Apply Scene",
+            confirmationCoordinator.request(
+                .init(
+                    title: "Apply “\(scene.name)”?",
+                    message: "This scene will change \(availableCount) available light\(availableCount == 1 ? "" : "s")\(preview.unreachable.isEmpty ? "." : "; \(preview.unreachable.count) offline light\(preview.unreachable.count == 1 ? "" : "s") may need retry.") You can undo the change afterward.",
+                    confirmTitle: "Apply Scene"
+                ),
                 action: { [weak self] in self?.applyScene(scene, allowTurningOff: allowTurningOff, reviewed: true) }
             )
             return
@@ -2832,7 +2802,7 @@ extension LightManager {
         cancelWorkspaceTasks()
         napTimer?.invalidate()
         napTimer = nil
-        pendingConfirmation = nil
+        confirmationCoordinator.cancelPendingRequest()
         objectWillChange.send()
         applyWorkspaceState(demoWorkspace)
         effectRuns = [:]
@@ -2841,6 +2811,7 @@ extension LightManager {
 
     func exitDemoMode() {
         guard isDemoMode else { return }
+        confirmationCoordinator.cancelPendingRequest()
         if rehearsalSceneID != nil { stopSceneRehearsal(restore: false) }
         stopAllEffects(restore: false)
         napTimer?.invalidate()
@@ -2877,6 +2848,7 @@ extension LightManager {
 
     func resetDemoMode() {
         guard isDemoMode else { return }
+        confirmationCoordinator.cancelPendingRequest()
         if rehearsalSceneID != nil { stopSceneRehearsal(restore: false) }
         stopAllEffects(restore: false)
         napTimer?.invalidate()
@@ -2949,7 +2921,6 @@ extension LightManager {
             lastActionSummary: lastActionSummary,
             rehearsalSnapshot: rehearsalSnapshot,
             rehearsalSceneID: rehearsalSceneID,
-            pendingConfirmation: pendingConfirmation,
             goveeSegmentStates: goveeSegmentStates,
             goveeSegmentPresets: goveeSegmentPresets,
             customNames: customNames,
@@ -3014,7 +2985,6 @@ extension LightManager {
         lastActionSummary = workspace.lastActionSummary
         rehearsalSnapshot = workspace.rehearsalSnapshot
         rehearsalSceneID = workspace.rehearsalSceneID
-        pendingConfirmation = workspace.pendingConfirmation
         goveeSegmentStates = workspace.goveeSegmentStates
         goveeSegmentPresets = workspace.goveeSegmentPresets
         customNames = workspace.customNames

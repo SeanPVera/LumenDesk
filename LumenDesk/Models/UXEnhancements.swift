@@ -147,45 +147,6 @@ struct RecentColor: Identifiable, Codable, Equatable {
     var hex: String { String(format: "#%02X%02X%02X", Int(red * 255), Int(green * 255), Int(blue * 255)) }
 }
 
-enum DeviceCommandPhase: String, Codable {
-    case idle, queued, sending, applied, failed
-
-    var title: String {
-        switch self {
-        case .idle: return "Confirmed"
-        case .queued: return "Queued"
-        case .sending: return "Sending"
-        case .applied: return "Applied"
-        case .failed: return "Failed"
-        }
-    }
-
-    var symbol: String {
-        switch self {
-        case .idle: return "checkmark.circle"
-        case .queued: return "clock"
-        case .sending: return "arrow.up.circle"
-        case .applied: return "checkmark.circle.fill"
-        case .failed: return "exclamationmark.triangle.fill"
-        }
-    }
-}
-
-struct DeviceCommandState: Equatable {
-    var phase: DeviceCommandPhase = .idle
-    var summary: String = "Confirmed"
-    var updatedAt: Date = Date()
-    var retryCount: Int = 0
-}
-
-struct ConfirmedDeviceState: Equatable {
-    var isOn: Bool
-    var brightness: Double
-    var colorHex: String
-    var kelvin: Int
-    var confirmedAt: Date
-}
-
 struct DiscoveryChange: Identifiable, Equatable {
     enum Kind: String { case new = "New", backOnline = "Back online", changed = "Changed", missing = "Still missing" }
     let id: UUID

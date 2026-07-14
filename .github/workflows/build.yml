@@ -63,7 +63,7 @@ jobs:
             --minimum-deployment-target 13.0 \
             --platform macosx
 
-      - name: Build macOS Debug
+      - name: Test macOS Debug
         run: |
           xcodebuild \
             -project "$PROJECT" \
@@ -73,7 +73,7 @@ jobs:
             -derivedDataPath "$RUNNER_TEMP/DerivedData/macOS" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
-            build
+            test
 
       - name: Build generic iOS device
         run: |

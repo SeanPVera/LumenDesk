@@ -133,6 +133,7 @@ final class LightManager: ObservableObject {
     private let sceneDraftsKey = "LumenDesk.sceneDrafts.v1"
     private let goveeSegmentsKey = "LumenDesk.goveeSegments.v1"
     private let segmentPresetsKey = "LumenDesk.segmentPresets.v1"
+    private let defaults: UserDefaults
 
     // MARK: - Undo / redo state
 
@@ -239,7 +240,8 @@ final class LightManager: ObservableObject {
 
     // MARK: - Init
 
-    init() {
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
         rooms = loadRooms()
         favoriteIDs = loadFavorites()
         scenes = loadScenes()
@@ -265,7 +267,7 @@ final class LightManager: ObservableObject {
     }
 
     private var usesCautiousConfirmations: Bool {
-        UserDefaults.standard.string(forKey: AppPreferenceKey.confirmationPolicy) == ConfirmationPolicy.cautious.rawValue
+        defaults.string(forKey: AppPreferenceKey.confirmationPolicy) == ConfirmationPolicy.cautious.rawValue
     }
 
     private func performManagedAction(
@@ -406,13 +408,10 @@ final class LightManager: ObservableObject {
         let previous = lastScheduleCheck ?? now.addingTimeInterval(-75)
         lastScheduleCheck = now
         let cal = Calendar.current
-        let nowHour   = cal.component(.hour, from: now)
-        let nowMinute = cal.component(.minute, from: now)
-        let nowKey    = String(format: "%02d:%02d", nowHour, nowMinute)
+        let nowKey = ScheduleEvaluator.minuteKey(for: now, calendar: cal)
 
         for room in rooms {
             for entry in room.schedules where entry.isEnabled {
-                if scheduleFiredThisMinute[entry.id] == nowKey { continue }
                 let occurrences = scheduledOccurrences(for: entry, after: previous, through: now)
                 guard !occurrences.isEmpty else { continue }
 
@@ -433,7 +432,7 @@ final class LightManager: ObservableObject {
                         continue
                     }
 
-                    scheduleFiredThisMinute[entry.id] = nowKey
+                    guard ScheduleEvaluator.claim(entry.id, at: now, fired: &scheduleFiredThisMinute, calendar: cal) else { continue }
                     logActivity(.schedule, title: "Automation ran", detail: "\(room.name): \(entry.action.displayName) at \(entry.timeString)")
                     let lights = devices(in: room)
                     switch entry.action {
@@ -493,39 +492,22 @@ final class LightManager: ObservableObject {
     func skipMissedAutomation(_ missed: MissedAutomation) { missedAutomations.removeAll { $0.id == missed.id } }
 
     private func scheduledOccurrences(for entry: ScheduleEntry, after previous: Date, through now: Date) -> [Date] {
-        guard previous < now else { return [] }
-        let calendar = Calendar.current
-        var day = calendar.startOfDay(for: previous)
-        let finalDay = calendar.startOfDay(for: now)
-        var occurrences: [Date] = []
-        while day <= finalDay {
-            let weekday = calendar.component(.weekday, from: day)
-            if entry.weekdays.isEmpty || entry.weekdays.contains(weekday),
-               let occurrence = scheduledOccurrenceToday(for: entry, relativeTo: day),
-               occurrence > previous,
-               occurrence <= now {
-                occurrences.append(occurrence)
-            }
-            guard let nextDay = calendar.date(byAdding: .day, value: 1, to: day) else { break }
-            day = nextDay
-        }
-        return occurrences
+        ScheduleEvaluator.occurrences(
+            for: entry,
+            after: previous,
+            through: now,
+            sunriseMinutes: sunriseHour * 60 + sunriseMinute,
+            sunsetMinutes: sunsetHour * 60 + sunsetMinute
+        )
     }
 
     fileprivate func scheduledOccurrenceToday(for entry: ScheduleEntry, relativeTo date: Date) -> Date? {
-        let cal = Calendar.current
-        let totalMinutes: Int
-        switch entry.action {
-        case .atSunrise:
-            totalMinutes = sunriseHour * 60 + sunriseMinute + entry.offsetMinutes
-        case .atSunset:
-            totalMinutes = sunsetHour * 60 + sunsetMinute + entry.offsetMinutes
-        default:
-            totalMinutes = max(0, min(1439, entry.hour * 60 + entry.minute))
-        }
-        // Solar-relative offsets can push past midnight in either direction;
-        // let Calendar roll the date rather than clamping into the wrong hour.
-        return cal.date(byAdding: .minute, value: totalMinutes, to: cal.startOfDay(for: date))
+        ScheduleEvaluator.occurrence(
+            for: entry,
+            relativeTo: date,
+            sunriseMinutes: sunriseHour * 60 + sunriseMinute,
+            sunsetMinutes: sunsetHour * 60 + sunsetMinute
+        )
     }
 
     private func refreshAll() {
@@ -672,11 +654,11 @@ final class LightManager: ObservableObject {
             "sunriseHour": sunriseHour, "sunriseMinute": sunriseMinute,
             "sunsetHour": sunsetHour,   "sunsetMinute": sunsetMinute
         ]
-        UserDefaults.standard.set(d, forKey: solarKey)
+        defaults.set(d, forKey: solarKey)
     }
 
     private func loadSolarPrefs() {
-        guard let d = UserDefaults.standard.dictionary(forKey: solarKey) else { return }
+        guard let d = defaults.dictionary(forKey: solarKey) else { return }
         sunriseHour   = d["sunriseHour"]   as? Int ?? 6
         sunriseMinute = d["sunriseMinute"] as? Int ?? 30
         sunsetHour    = d["sunsetHour"]    as? Int ?? 20
@@ -2559,11 +2541,11 @@ extension LightManager {
     private func persistValue<T: Encodable>(_ value: T, key: String) {
         guard !isDemoMode else { return }
         guard let data = try? JSONEncoder().encode(value) else { return }
-        UserDefaults.standard.set(data, forKey: key)
+        defaults.set(data, forKey: key)
     }
 
     private func loadValue<T: Decodable>(_ type: T.Type, key: String) -> T? {
-        guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
+        guard let data = defaults.data(forKey: key) else { return nil }
         return try? JSONDecoder().decode(type, from: data)
     }
 

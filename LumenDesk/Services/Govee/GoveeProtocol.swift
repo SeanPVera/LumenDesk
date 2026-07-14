@@ -42,6 +42,18 @@ enum GoveeProtocol {
         }
     }
 
+    static func decodeScanResponse(_ data: Data) -> ScanResponse? {
+        guard let response = try? JSONDecoder().decode(ScanResponse.self, from: data),
+              response.msg.cmd == "scan" else { return nil }
+        return response
+    }
+
+    static func decodeStatusResponse(_ data: Data) -> StatusResponse? {
+        guard let response = try? JSONDecoder().decode(StatusResponse.self, from: data),
+              response.msg.cmd == "devStatus" else { return nil }
+        return response
+    }
+
     static func scanRequest() -> Data {
         Data(#"{"msg":{"cmd":"scan","data":{"account_topic":"reserve"}}}"#.utf8)
     }

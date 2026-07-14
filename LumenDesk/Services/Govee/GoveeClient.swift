@@ -198,8 +198,7 @@ final class GoveeClient {
 
     private func handle(data: Data, from host: String) {
         // Govee occasionally emits truncated/duplicated frames; ignore failures.
-        if let scan = try? JSONDecoder().decode(GoveeProtocol.ScanResponse.self, from: data),
-           scan.msg.cmd == "scan" {
+        if let scan = GoveeProtocol.decodeScanResponse(data) {
             let id = scan.msg.data.device
             if addressByDevice[id] != scan.msg.data.ip {
                 addressByDevice[id] = scan.msg.data.ip
@@ -210,8 +209,7 @@ final class GoveeClient {
             return
         }
 
-        if let status = try? JSONDecoder().decode(GoveeProtocol.StatusResponse.self, from: data),
-           status.msg.cmd == "devStatus" {
+        if let status = GoveeProtocol.decodeStatusResponse(data) {
             // We don't have a device ID in the status payload, so we match by source IP.
             guard let id = addressByDevice.first(where: { $0.value == host })?.key else { return }
             let d = status.msg.data

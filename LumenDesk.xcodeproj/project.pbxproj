@@ -36,7 +36,20 @@
 		B10000000000000000001E /* GoveeSegments.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000001E /* GoveeSegments.swift */; };
 		B10000000000000000001F /* GoveeSegmentEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000001F /* GoveeSegmentEditorView.swift */; };
 		B100000000000000000020 /* ProductShellView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000020 /* ProductShellView.swift */; };
+		B200000000000000000001 /* ProtocolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000001 /* ProtocolTests.swift */; };
+		B200000000000000000002 /* DomainTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000002 /* DomainTests.swift */; };
+		B200000000000000000003 /* NetworkUtilityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000003 /* NetworkUtilityTests.swift */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		I200000000000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = F100000000000000000000 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = E100000000000000000001;
+			remoteInfo = LumenDesk;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		A100000000000000000001 /* LumenDeskApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LumenDeskApp.swift; sourceTree = "<group>"; };
@@ -71,10 +84,21 @@
     A10000000000000000001F /* GoveeSegmentEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoveeSegmentEditorView.swift; sourceTree = "<group>"; };
 		A100000000000000000020 /* ProductShellView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductShellView.swift; sourceTree = "<group>"; };
 		A100000000000000000099 /* LumenDesk.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LumenDesk.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A200000000000000000001 /* ProtocolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolTests.swift; sourceTree = "<group>"; };
+		A200000000000000000002 /* DomainTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DomainTests.swift; sourceTree = "<group>"; };
+		A200000000000000000003 /* NetworkUtilityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkUtilityTests.swift; sourceTree = "<group>"; };
+		A200000000000000000099 /* LumenDeskTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LumenDeskTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		D100000000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D200000000000000000001 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -88,6 +112,7 @@
 			isa = PBXGroup;
 			children = (
 				C100000000000000000002 /* LumenDesk */,
+				C200000000000000000001 /* LumenDeskTests */,
 				C100000000000000000099 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -182,8 +207,19 @@
 			isa = PBXGroup;
 			children = (
 				A100000000000000000099 /* LumenDesk.app */,
+				A200000000000000000099 /* LumenDeskTests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		C200000000000000000001 /* LumenDeskTests */ = {
+			isa = PBXGroup;
+			children = (
+				A200000000000000000001 /* ProtocolTests.swift */,
+				A200000000000000000002 /* DomainTests.swift */,
+				A200000000000000000003 /* NetworkUtilityTests.swift */,
+			);
+			path = LumenDeskTests;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -206,6 +242,23 @@
 			productReference = A100000000000000000099 /* LumenDesk.app */;
 			productType = "com.apple.product-type.application";
 		};
+		E200000000000000000001 /* LumenDeskTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F200000000000000000003 /* Build configuration list for PBXNativeTarget "LumenDeskTests" */;
+			buildPhases = (
+				D200000000000000000002 /* Sources */,
+				D200000000000000000001 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				H200000000000000000001 /* PBXTargetDependency */,
+			);
+			name = LumenDeskTests;
+			productName = LumenDeskTests;
+			productReference = A200000000000000000099 /* LumenDeskTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -218,6 +271,10 @@
 				TargetAttributes = {
 					E100000000000000000001 = {
 						CreatedOnToolsVersion = 15.0;
+					};
+					E200000000000000000001 = {
+						CreatedOnToolsVersion = 15.0;
+						TestTargetID = E100000000000000000001;
 					};
 				};
 			};
@@ -235,6 +292,7 @@
 			projectRoot = "";
 			targets = (
 				E100000000000000000001 /* LumenDesk */,
+				E200000000000000000001 /* LumenDeskTests */,
 			);
 		};
 /* End PBXProject section */
@@ -286,7 +344,25 @@ B10000000000000000001F /* GoveeSegmentEditorView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		D200000000000000000002 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B200000000000000000001 /* ProtocolTests.swift in Sources */,
+				B200000000000000000002 /* DomainTests.swift in Sources */,
+				B200000000000000000003 /* NetworkUtilityTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		H200000000000000000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = E100000000000000000001 /* LumenDesk */;
+			targetProxy = I200000000000000000001 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		G100000000000000000001 /* Debug */ = {
@@ -477,6 +553,38 @@ B10000000000000000001F /* GoveeSegmentEditorView.swift in Sources */,
 			};
 			name = Release;
 		};
+		G200000000000000000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGNING_ALLOWED = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.lumendesk.LumenDeskTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/LumenDesk.app/Contents/MacOS/LumenDesk";
+			};
+			name = Debug;
+		};
+		G200000000000000000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGNING_ALLOWED = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.lumendesk.LumenDeskTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/LumenDesk.app/Contents/MacOS/LumenDesk";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -494,6 +602,15 @@ B10000000000000000001F /* GoveeSegmentEditorView.swift in Sources */,
 			buildConfigurations = (
 				G100000000000000000003 /* Debug */,
 				G100000000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F200000000000000000003 /* Build configuration list for PBXNativeTarget "LumenDeskTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				G200000000000000000003 /* Debug */,
+				G200000000000000000004 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

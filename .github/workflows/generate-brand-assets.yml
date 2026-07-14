@@ -8,6 +8,14 @@ on:
       - BrandAssets/Logo/**
       - scripts/generate_brand_assets.py
       - .github/workflows/generate-brand-assets.yml
+  pull_request:
+    branches:
+      - main
+    paths:
+      - BrandAssets/Logo/**
+      - scripts/generate_brand_assets.py
+      - .github/workflows/generate-brand-assets.yml
+      - LumenDesk/Assets.xcassets/AppIcon.appiconset/**
   workflow_dispatch:
 
 permissions:
@@ -20,7 +28,7 @@ jobs:
       - name: Check out branch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.ref_name }}
+          ref: ${{ github.head_ref || github.ref_name }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -33,7 +41,8 @@ jobs:
       - name: Generate and validate assets
         run: python scripts/generate_brand_assets.py
 
-      - name: Commit generated assets
+      - name: Commit generated assets on branch pushes
+        if: github.event_name != 'pull_request'
         run: |
           if git diff --quiet -- LumenDesk/Assets.xcassets/AppIcon.appiconset BrandAssets/AppIcons BrandAssets/Repository; then
             echo "Generated assets are already current."
@@ -44,3 +53,12 @@ jobs:
           git add LumenDesk/Assets.xcassets/AppIcon.appiconset BrandAssets/AppIcons BrandAssets/Repository
           git commit -m "Generate LumenDesk app icon assets"
           git push
+
+      - name: Verify generated assets are committed in pull requests
+        if: github.event_name == 'pull_request'
+        run: |
+          if ! git diff --quiet -- LumenDesk/Assets.xcassets/AppIcon.appiconset BrandAssets/AppIcons BrandAssets/Repository; then
+            echo "Generated assets are not committed or are stale."
+            git status --short
+            exit 1
+          fi

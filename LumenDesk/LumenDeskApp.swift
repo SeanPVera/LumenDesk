@@ -149,21 +149,21 @@ struct RootView: View {
     }
 }
 
-private struct ManagedActionConfirmationModifier: ViewModifier {
-    @ObservedObject var manager: LightManager
+private struct ConfirmationPresentationModifier: ViewModifier {
+    @ObservedObject var coordinator: ConfirmationCoordinator
 
     func body(content: Content) -> some View {
         content.alert(item: Binding(
-            get: { manager.pendingConfirmation },
-            set: { if $0 == nil { manager.cancelPendingAction() } }
+            get: { coordinator.pendingRequest },
+            set: { if $0 == nil { coordinator.dismissPendingRequest() } }
         )) { request in
             Alert(
                 title: Text(request.title),
                 message: Text(request.message),
                 primaryButton: request.isDestructive
-                    ? .destructive(Text(request.confirmTitle), action: manager.confirmPendingAction)
-                    : .default(Text(request.confirmTitle), action: manager.confirmPendingAction),
-                secondaryButton: .cancel(manager.cancelPendingAction)
+                    ? .destructive(Text(request.confirmTitle), action: coordinator.confirmPendingRequest)
+                    : .default(Text(request.confirmTitle), action: coordinator.confirmPendingRequest),
+                secondaryButton: .cancel(coordinator.cancelPendingRequest)
             )
         }
     }
@@ -171,6 +171,6 @@ private struct ManagedActionConfirmationModifier: ViewModifier {
 
 extension View {
     func managedActionConfirmations(_ manager: LightManager) -> some View {
-        modifier(ManagedActionConfirmationModifier(manager: manager))
+        modifier(ConfirmationPresentationModifier(coordinator: manager.confirmationCoordinator))
     }
 }

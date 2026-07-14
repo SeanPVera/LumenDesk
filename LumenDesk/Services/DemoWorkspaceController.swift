@@ -67,7 +67,6 @@ final class DemoWorkspaceController {
         var lastActionSummary: String?
         var rehearsalSnapshot: [LightRuntimeSnapshot]
         var rehearsalSceneID: UUID?
-        var pendingConfirmation: ManagedActionConfirmation?
         var goveeSegmentStates: [String: GoveeSegmentState]
         var goveeSegmentPresets: [GoveeSegmentPreset]
         var customNames: [String: String]
@@ -138,7 +137,6 @@ final class DemoWorkspaceController {
         restored.isScanning = false
         restored.rehearsalSnapshot = []
         restored.rehearsalSceneID = nil
-        restored.pendingConfirmation = nil
         return restored
     }
 
@@ -251,7 +249,6 @@ final class DemoWorkspaceController {
         workspace.lastActionSummary = nil
         workspace.rehearsalSnapshot = []
         workspace.rehearsalSceneID = nil
-        workspace.pendingConfirmation = nil
         workspace.commandPendingIDs = []
         workspace.commandStates = [:]
         workspace.confirmedStates = [:]

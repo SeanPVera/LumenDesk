@@ -162,15 +162,15 @@ final class DemoWorkspaceControllerTests: XCTestCase {
         manager.startNapMode()
         let liveNapPhase = manager.napPhase
         manager.deleteRoom(roomID)
-        XCTAssertNotNil(manager.pendingConfirmation)
+        XCTAssertNotNil(manager.confirmationCoordinator.pendingRequest)
 
         manager.enterDemoMode()
         XCTAssertEqual(manager.napPhase, .inactive)
-        XCTAssertNil(manager.pendingConfirmation)
+        XCTAssertNil(manager.confirmationCoordinator.pendingRequest)
 
         manager.exitDemoMode()
         XCTAssertEqual(manager.napPhase, liveNapPhase)
-        XCTAssertNil(manager.pendingConfirmation)
+        XCTAssertNil(manager.confirmationCoordinator.pendingRequest)
         XCTAssertEqual(manager.rooms.first?.id, roomID)
         manager.cancelNapMode()
     }

@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="leftGrad" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0%" stop-color="#D84982"/>
+      <stop offset="48%" stop-color="#7357E8"/>
+      <stop offset="100%" stop-color="#A187FF"/>
+    </linearGradient>
+    <linearGradient id="centerGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="25%" stop-color="#FFF0C2"/>
+      <stop offset="100%" stop-color="#F5A33B"/>
+    </linearGradient>
+    <linearGradient id="rightGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#78DEFF"/>
+      <stop offset="48%" stop-color="#3977E8"/>
+      <stop offset="100%" stop-color="#30B9C8"/>
+    </linearGradient>
+    <linearGradient id="baseGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#D84982"/>
+      <stop offset="23%" stop-color="#7357E8"/>
+      <stop offset="50%" stop-color="#FFF0C2"/>
+      <stop offset="77%" stop-color="#3977E8"/>
+      <stop offset="100%" stop-color="#30B9C8"/>
+    </linearGradient>
+  </defs>
+  <polygon points="183,782 424,168 365,782" fill="url(#leftGrad)"/>
+  <polygon points="483,148 541,148 620,704 404,704" fill="url(#centerGrad)"/>
+  <polygon points="841,782 600,168 659,782" fill="url(#rightGrad)"/>
+  <rect x="157" y="764" width="238" height="42" rx="21" fill="url(#baseGrad)"/>
+  <rect x="416" y="764" width="192" height="42" rx="21" fill="url(#baseGrad)"/>
+  <rect x="629" y="764" width="238" height="42" rx="21" fill="url(#baseGrad)"/>
+</svg>

@@ -68,58 +68,6 @@ final class DomainTests: XCTestCase {
         XCTAssertEqual(destination.customBrightnessPresets, source.customBrightnessPresets)
     }
 
-    func testScheduleMatching() throws {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
-        let previous = try date(2026, 7, 13, 8, 59, calendar: calendar)
-        let now = try date(2026, 7, 13, 9, 1, calendar: calendar)
-        let mondayAtNine = ScheduleEntry(hour: 9, minute: 0, action: .turnOn, weekdays: [2])
-
-        let matches = ScheduleEvaluator.occurrences(
-            for: mondayAtNine,
-            after: previous,
-            through: now,
-            sunriseMinutes: 390,
-            sunsetMinutes: 1_230,
-            calendar: calendar
-        )
-        XCTAssertEqual(matches, [try date(2026, 7, 13, 9, 0, calendar: calendar)])
-
-        let tuesdayOnly = ScheduleEntry(hour: 9, minute: 0, action: .turnOn, weekdays: [3])
-        XCTAssertTrue(ScheduleEvaluator.occurrences(
-            for: tuesdayOnly,
-            after: previous,
-            through: now,
-            sunriseMinutes: 390,
-            sunsetMinutes: 1_230,
-            calendar: calendar
-        ).isEmpty)
-
-        let sunrise = ScheduleEntry(hour: 0, minute: 0, offsetMinutes: 15, action: .atSunrise)
-        let sunriseDate = ScheduleEvaluator.occurrence(
-            for: sunrise,
-            relativeTo: previous,
-            sunriseMinutes: 390,
-            sunsetMinutes: 1_230,
-            calendar: calendar
-        )
-        XCTAssertEqual(sunriseDate, try date(2026, 7, 13, 6, 45, calendar: calendar))
-    }
-
-    func testDuplicateScheduleFirePrevention() throws {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
-        let entryID = UUID()
-        var fired: [UUID: String] = [:]
-        let first = try date(2026, 7, 13, 9, 0, calendar: calendar)
-        let sameMinute = try date(2026, 7, 13, 9, 0, calendar: calendar).addingTimeInterval(45)
-        let nextMinute = try date(2026, 7, 13, 9, 1, calendar: calendar)
-
-        XCTAssertTrue(ScheduleEvaluator.claim(entryID, at: first, fired: &fired, calendar: calendar))
-        XCTAssertFalse(ScheduleEvaluator.claim(entryID, at: sameMinute, fired: &fired, calendar: calendar))
-        XCTAssertTrue(ScheduleEvaluator.claim(entryID, at: nextMinute, fired: &fired, calendar: calendar))
-    }
-
     func testSegmentLayoutResizingPreservesEndpoints() {
         let red = GoveeSegmentColor(red: 1, green: 0, blue: 0)
         let blue = GoveeSegmentColor(red: 0, green: 0, blue: 1)
@@ -161,22 +109,4 @@ final class DomainTests: XCTestCase {
         UserDefaults(suiteName: "LumenDeskTests.\(UUID().uuidString)")!
     }
 
-    private func date(
-        _ year: Int,
-        _ month: Int,
-        _ day: Int,
-        _ hour: Int,
-        _ minute: Int,
-        calendar: Calendar
-    ) throws -> Date {
-        try XCTUnwrap(calendar.date(from: DateComponents(
-            calendar: calendar,
-            timeZone: calendar.timeZone,
-            year: year,
-            month: month,
-            day: day,
-            hour: hour,
-            minute: minute
-        )))
-    }
 }

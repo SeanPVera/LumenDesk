@@ -49,8 +49,6 @@ final class LightManager: ObservableObject {
     @Published private(set) var commandStates: [String: DeviceCommandState] = [:]
     @Published private(set) var confirmedStates: [String: ConfirmedDeviceState] = [:]
     @Published private(set) var discoveryChanges: [DiscoveryChange] = []
-    @Published private(set) var automationOverrides: [UUID: RoomAutomationOverride] = [:]
-    @Published private(set) var missedAutomations: [MissedAutomation] = []
     @Published private(set) var sceneRevisions: [SceneRevision] = []
     @Published private(set) var sceneDrafts: [UUID: LightingScene] = [:]
     @Published private(set) var lastActionSummary: String?
@@ -71,7 +69,6 @@ final class LightManager: ObservableObject {
     private var napSnapshotBrightness: [String: Double] = [:]
     private var scanGeneration: Int = 0     // incremented each scan; clears isScanning safely
     private var hasStarted = false
-    private var lastScheduleCheck: Date?
     private var commandTasks: [String: Task<Void, Never>] = [:]
     private var commandTimeoutTasks: [String: Task<Void, Never>] = [:]
     private var confirmationRefreshTasks: [String: Task<Void, Never>] = [:]
@@ -79,6 +76,7 @@ final class LightManager: ObservableObject {
     private var scanStartingAddresses: [String: String] = [:]
     private let demoWorkspaceController: DemoWorkspaceController
     let confirmationCoordinator: ConfirmationCoordinator
+    private let scheduleEngine: ScheduleEngine
     private var rehearsalSnapshot: [LightRuntimeSnapshot] = []
     private var expectedStates: [String: ExpectedDeviceState] = [:]
     // Devices currently streaming a razer-mode segment preview.
@@ -96,10 +94,6 @@ final class LightManager: ObservableObject {
     @Published var sunriseMinute: Int = 30
     @Published var sunsetHour: Int    = 20
     @Published var sunsetMinute: Int  = 30
-
-    // Tracks which schedule entries already fired in the current clock-minute
-    // to prevent double-firing when timer drift straddles two ticks.
-    private var scheduleFiredThisMinute: [UUID: String] = [:]  // entryID → "HH:MM"
 
     private let roomsDefaultsKey        = "LumenDesk.rooms.v1"
     private let favoritesDefaultsKey    = "LumenDesk.favorites.v1"
@@ -161,11 +155,13 @@ final class LightManager: ObservableObject {
     init(
         defaults: UserDefaults = .standard,
         demoWorkspaceController: DemoWorkspaceController? = nil,
-        confirmationCoordinator: ConfirmationCoordinator? = nil
+        confirmationCoordinator: ConfirmationCoordinator? = nil,
+        scheduleEngine: ScheduleEngine? = nil
     ) {
         self.defaults = defaults
         self.demoWorkspaceController = demoWorkspaceController ?? DemoWorkspaceController()
         self.confirmationCoordinator = confirmationCoordinator ?? ConfirmationCoordinator(defaults: defaults)
+        self.scheduleEngine = scheduleEngine ?? ScheduleEngine()
         rooms = loadRooms()
         favoriteIDs = loadFavorites()
         scenes = loadScenes()
@@ -183,7 +179,11 @@ final class LightManager: ObservableObject {
         fireflyCitizens = loadValue([FireflyCitizen].self, key: firefliesKey) ?? []
         sceneCertifications = loadValue([SceneCertification].self, key: certificationsKey) ?? []
         recentColors = loadValue([RecentColor].self, key: recentColorsKey) ?? []
-        automationOverrides = loadValue([UUID: RoomAutomationOverride].self, key: automationOverridesKey) ?? [:]
+        if scheduleEngine == nil {
+            self.scheduleEngine.restoreAutomationOverrides(
+                loadValue([UUID: RoomAutomationOverride].self, key: automationOverridesKey) ?? [:]
+            )
+        }
         sceneRevisions = loadValue([SceneRevision].self, key: sceneRevisionsKey) ?? []
         sceneDrafts = loadValue([UUID: LightingScene].self, key: sceneDraftsKey) ?? [:]
         goveeSegmentStates = loadValue([String: GoveeSegmentState].self, key: goveeSegmentsKey) ?? [:]
@@ -191,6 +191,15 @@ final class LightManager: ObservableObject {
     }
 
     var isDemoMode: Bool { demoWorkspaceController.isActive }
+    var automationOverrides: [UUID: RoomAutomationOverride] { scheduleEngine.automationOverrides }
+    var missedAutomations: [MissedAutomation] { scheduleEngine.missedAutomations }
+
+    private var scheduleSolarTimes: ScheduleEngine.SolarTimes {
+        ScheduleEngine.SolarTimes(
+            sunriseMinutes: sunriseHour * 60 + sunriseMinute,
+            sunsetMinutes: sunsetHour * 60 + sunsetMinute
+        )
+    }
 
     func start() {
         guard !hasStarted else {
@@ -279,8 +288,7 @@ final class LightManager: ObservableObject {
 
     private func startScheduleTimer() {
         scheduleTimer?.invalidate()
-        let seconds = Calendar.current.component(.second, from: Date())
-        let delay = TimeInterval(max(1, 60 - seconds))
+        let delay = scheduleEngine.delayUntilNextMinute
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
@@ -293,75 +301,83 @@ final class LightManager: ObservableObject {
     }
 
     private func checkSchedules() {
-        let now = Date()
-        let previous = lastScheduleCheck ?? now.addingTimeInterval(-75)
-        lastScheduleCheck = now
-        let cal = Calendar.current
-        let nowKey = ScheduleEvaluator.minuteKey(for: now, calendar: cal)
+        let evaluation = scheduleEngine.evaluate(rooms: rooms, solarTimes: scheduleSolarTimes)
+        if evaluation.didChangeOverrides || evaluation.didChangeMissedAutomations {
+            objectWillChange.send()
+        }
+        if evaluation.didChangeOverrides {
+            persistValue(automationOverrides, key: automationOverridesKey)
+        }
 
-        for room in rooms {
-            for entry in room.schedules where entry.isEnabled {
-                let occurrences = scheduledOccurrences(for: entry, after: previous, through: now)
-                guard !occurrences.isEmpty else { continue }
-
-                for scheduledAt in occurrences {
-                    if let override = activeAutomationOverride(for: room.id) {
-                        if override.skipNextSchedule { resumeAutomation(for: room.id) }
-                        logActivity(.schedule, title: "Automation skipped", detail: "\(room.name): manual override was active")
-                        continue
+        for decision in evaluation.decisions {
+            switch decision {
+            case let .skipped(occurrence, consumedSkipOverride):
+                if consumedSkipOverride { lastActionSummary = "Automation resumed" }
+                logActivity(
+                    .schedule,
+                    title: "Automation skipped",
+                    detail: "\(occurrence.roomName): manual override was active"
+                )
+            case let .missed(missed):
+                logActivity(
+                    .schedule,
+                    title: "Automation needs review",
+                    detail: "\(missed.roomName): \(missed.entry.action.displayName) was missed while LumenDesk was unavailable"
+                )
+            case let .run(occurrence):
+                guard let room = rooms.first(where: { $0.id == occurrence.roomID }) else { continue }
+                let entry = occurrence.entry
+                logActivity(
+                    .schedule,
+                    title: "Automation ran",
+                    detail: "\(room.name): \(entry.action.displayName) at \(entry.timeString)"
+                )
+                let lights = devices(in: room)
+                switch entry.action {
+                case .turnOn, .atSunrise:
+                    for device in lights {
+                        device.isOn = true
+                        markPending(device.id)
+                        sendPower(device, on: true)
                     }
-                    if now.timeIntervalSince(previous) > 120 {
-                        let duplicate = missedAutomations.contains {
-                            $0.entry.id == entry.id && abs($0.scheduledAt.timeIntervalSince(scheduledAt)) < 1
-                        }
-                        if !duplicate {
-                            missedAutomations.append(MissedAutomation(roomID: room.id, roomName: room.name, entry: entry, scheduledAt: scheduledAt))
-                            logActivity(.schedule, title: "Automation needs review", detail: "\(room.name): \(entry.action.displayName) was missed while LumenDesk was unavailable")
-                        }
-                        continue
+                case .turnOff, .atSunset:
+                    for device in lights {
+                        device.isOn = false
+                        markPending(device.id)
+                        sendPower(device, on: false)
                     }
-
-                    guard ScheduleEvaluator.claim(entry.id, at: now, fired: &scheduleFiredThisMinute, calendar: cal) else { continue }
-                    logActivity(.schedule, title: "Automation ran", detail: "\(room.name): \(entry.action.displayName) at \(entry.timeString)")
-                    let lights = devices(in: room)
-                    switch entry.action {
-                    case .turnOn, .atSunrise:
-                        for d in lights { d.isOn = true; markPending(d.id); sendPower(d, on: true) }
-                    case .turnOff, .atSunset:
-                        for d in lights { d.isOn = false; markPending(d.id); sendPower(d, on: false) }
-                    default:
-                        if let brightness = entry.action.brightnessValue {
-                            for d in lights { d.brightness = brightness; markPending(d.id); sendBrightness(d, value: brightness) }
+                default:
+                    if let brightness = entry.action.brightnessValue {
+                        for device in lights {
+                            device.brightness = brightness
+                            markPending(device.id)
+                            sendBrightness(device, value: brightness)
                         }
                     }
                 }
             }
         }
-        scheduleFiredThisMinute = scheduleFiredThisMinute.filter { $0.value == nowKey }
     }
 
     func setAutomationOverride(for roomID: UUID, duration: AutomationOverrideDuration) {
-        let value: RoomAutomationOverride
-        switch duration {
-        case .nextSchedule: value = RoomAutomationOverride(createdAt: Date(), expiresAt: nil, skipNextSchedule: true)
-        case .oneHour: value = RoomAutomationOverride(createdAt: Date(), expiresAt: Date().addingTimeInterval(3600), skipNextSchedule: false)
-        case .untilResumed: value = RoomAutomationOverride(createdAt: Date(), expiresAt: nil, skipNextSchedule: false)
-        }
-        automationOverrides[roomID] = value
+        objectWillChange.send()
+        let value = scheduleEngine.setOverride(for: roomID, duration: duration)
         persistValue(automationOverrides, key: automationOverridesKey)
         lastActionSummary = "Automation paused — \(value.summary)"
     }
 
     func activeAutomationOverride(for roomID: UUID) -> RoomAutomationOverride? {
-        guard let value = automationOverrides[roomID] else { return nil }
-        if value.isActive() { return value }
-        automationOverrides.removeValue(forKey: roomID)
-        persistValue(automationOverrides, key: automationOverridesKey)
-        return nil
+        let lookup = scheduleEngine.activeOverride(for: roomID)
+        if lookup.didRemoveExpired {
+            objectWillChange.send()
+            persistValue(automationOverrides, key: automationOverridesKey)
+        }
+        return lookup.value
     }
 
     func resumeAutomation(for roomID: UUID) {
-        automationOverrides.removeValue(forKey: roomID)
+        guard scheduleEngine.resumeAutomation(for: roomID) else { return }
+        objectWillChange.send()
         persistValue(automationOverrides, key: automationOverridesKey)
         lastActionSummary = "Automation resumed"
     }
@@ -375,28 +391,11 @@ final class LightManager: ObservableObject {
             let on = missed.entry.action == .turnOn || missed.entry.action == .atSunrise
             for device in lights { device.isOn = on; sendPower(device, on: on) }
         }
-        missedAutomations.removeAll { $0.id == missed.id }
+        if scheduleEngine.removeMissedAutomation(id: missed.id) { objectWillChange.send() }
     }
 
-    func skipMissedAutomation(_ missed: MissedAutomation) { missedAutomations.removeAll { $0.id == missed.id } }
-
-    private func scheduledOccurrences(for entry: ScheduleEntry, after previous: Date, through now: Date) -> [Date] {
-        ScheduleEvaluator.occurrences(
-            for: entry,
-            after: previous,
-            through: now,
-            sunriseMinutes: sunriseHour * 60 + sunriseMinute,
-            sunsetMinutes: sunsetHour * 60 + sunsetMinute
-        )
-    }
-
-    fileprivate func scheduledOccurrenceToday(for entry: ScheduleEntry, relativeTo date: Date) -> Date? {
-        ScheduleEvaluator.occurrence(
-            for: entry,
-            relativeTo: date,
-            sunriseMinutes: sunriseHour * 60 + sunriseMinute,
-            sunsetMinutes: sunsetHour * 60 + sunsetMinute
-        )
+    func skipMissedAutomation(_ missed: MissedAutomation) {
+        if scheduleEngine.removeMissedAutomation(id: missed.id) { objectWillChange.send() }
     }
 
     private func refreshAll() {
@@ -2204,7 +2203,8 @@ extension LightManager {
         rooms[idx].schedules.append(entry)
         // Sort by resolved clock-minute so the list is always chronological.
         rooms[idx].schedules.sort { lhs, rhs in
-            scheduledMinute(lhs) < scheduledMinute(rhs)
+            scheduleEngine.scheduledMinute(for: lhs, solarTimes: scheduleSolarTimes)
+                < scheduleEngine.scheduledMinute(for: rhs, solarTimes: scheduleSolarTimes)
         }
         persistRooms()
     }
@@ -2223,56 +2223,24 @@ extension LightManager {
     }
 
     var hasActiveSchedules: Bool {
-        rooms.contains { room in room.schedules.contains { $0.isEnabled } }
+        scheduleEngine.hasEnabledSchedules(in: rooms)
     }
 
     func nextRunDescription(for entry: ScheduleEntry) -> String {
-        let now = Date()
-        let calendar = Calendar.current
-        var day = calendar.startOfDay(for: now)
-        var next: Date?
-        for _ in 0..<8 {
-            let weekday = calendar.component(.weekday, from: day)
-            if entry.weekdays.isEmpty || entry.weekdays.contains(weekday),
-               let occurrence = scheduledOccurrenceToday(for: entry, relativeTo: day),
-               occurrence > now {
-                next = occurrence
-                break
-            }
-            guard let followingDay = calendar.date(byAdding: .day, value: 1, to: day) else { break }
-            day = followingDay
-        }
+        let next = scheduleEngine.nextOccurrence(for: entry, solarTimes: scheduleSolarTimes)
         guard let next else { return "No next run" }
         return "Next runs \(next.formatted(.relative(presentation: .named))) at \(next.formatted(date: .omitted, time: .shortened))"
     }
 
     func conflictWarnings(for roomID: UUID) -> [String] {
-        let entries = schedules(for: roomID).filter { $0.isEnabled }
-        var warnings: [String] = []
-        guard entries.count > 1 else { return [] }
-        for i in 0..<(entries.count - 1) {
-            for j in (i + 1)..<entries.count {
-                let first = entries[i]
-                let second = entries[j]
-                if abs(scheduledMinute(first) - scheduledMinute(second)) <= 5 {
-                    warnings.append("\(first.action.displayName) and \(second.action.displayName) are within 5 minutes.")
-                }
-            }
-        }
-        return warnings
-    }
-
-    fileprivate func scheduledMinute(_ entry: ScheduleEntry) -> Int {
-        switch entry.action {
-        case .atSunrise: return max(0, min(1439, sunriseHour * 60 + sunriseMinute + entry.offsetMinutes))
-        case .atSunset: return max(0, min(1439, sunsetHour * 60 + sunsetMinute + entry.offsetMinutes))
-        default: return max(0, min(1439, entry.hour * 60 + entry.minute))
+        scheduleEngine.conflicts(in: schedules(for: roomID), solarTimes: scheduleSolarTimes).map { conflict in
+            "\(conflict.first.action.displayName) and \(conflict.second.action.displayName) are within 5 minutes."
         }
     }
 
     // Estimates are for the Northern Hemisphere. Southern Hemisphere users should set times manually.
     func applyEstimatedSolarTimes() {
-        let month = Calendar.current.component(.month, from: Date())
+        let month = Calendar.current.component(.month, from: scheduleEngine.currentDate)
         switch month {
         case 4...8:
             setSunriseTime(hour: 5, minute: 45)
@@ -2914,8 +2882,7 @@ extension LightManager {
             commandStates: commandStates,
             confirmedStates: confirmedStates,
             discoveryChanges: discoveryChanges,
-            automationOverrides: automationOverrides,
-            missedAutomations: missedAutomations,
+            scheduleState: scheduleEngine.state,
             sceneRevisions: sceneRevisions,
             sceneDrafts: sceneDrafts,
             lastActionSummary: lastActionSummary,
@@ -2931,8 +2898,6 @@ extension LightManager {
             sunriseMinute: sunriseMinute,
             sunsetHour: sunsetHour,
             sunsetMinute: sunsetMinute,
-            scheduleFiredThisMinute: scheduleFiredThisMinute,
-            lastScheduleCheck: lastScheduleCheck,
             undoStack: undoStack,
             redoStack: redoStack,
             lastChangeTime: lastChangeTime,
@@ -2978,8 +2943,7 @@ extension LightManager {
         commandStates = workspace.commandStates
         confirmedStates = workspace.confirmedStates
         discoveryChanges = workspace.discoveryChanges
-        automationOverrides = workspace.automationOverrides
-        missedAutomations = workspace.missedAutomations
+        scheduleEngine.restore(workspace.scheduleState)
         sceneRevisions = workspace.sceneRevisions
         sceneDrafts = workspace.sceneDrafts
         lastActionSummary = workspace.lastActionSummary
@@ -2995,8 +2959,6 @@ extension LightManager {
         sunriseMinute = workspace.sunriseMinute
         sunsetHour = workspace.sunsetHour
         sunsetMinute = workspace.sunsetMinute
-        scheduleFiredThisMinute = workspace.scheduleFiredThisMinute
-        lastScheduleCheck = workspace.lastScheduleCheck
         undoStack = workspace.undoStack
         redoStack = workspace.redoStack
         lastChangeTime = workspace.lastChangeTime

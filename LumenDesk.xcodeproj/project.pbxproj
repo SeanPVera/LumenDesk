@@ -36,9 +36,11 @@
 		B10000000000000000001E /* GoveeSegments.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000001E /* GoveeSegments.swift */; };
 		B10000000000000000001F /* GoveeSegmentEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000001F /* GoveeSegmentEditorView.swift */; };
 		B100000000000000000020 /* ProductShellView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000020 /* ProductShellView.swift */; };
+		B100000000000000000021 /* DemoWorkspaceController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000021 /* DemoWorkspaceController.swift */; };
 		B200000000000000000001 /* ProtocolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000001 /* ProtocolTests.swift */; };
 		B200000000000000000002 /* DomainTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000002 /* DomainTests.swift */; };
 		B200000000000000000003 /* NetworkUtilityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000003 /* NetworkUtilityTests.swift */; };
+		B200000000000000000004 /* DemoWorkspaceControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000004 /* DemoWorkspaceControllerTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -83,10 +85,12 @@
     A10000000000000000001E /* GoveeSegments.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoveeSegments.swift; sourceTree = "<group>"; };
     A10000000000000000001F /* GoveeSegmentEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoveeSegmentEditorView.swift; sourceTree = "<group>"; };
 		A100000000000000000020 /* ProductShellView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductShellView.swift; sourceTree = "<group>"; };
+		A100000000000000000021 /* DemoWorkspaceController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoWorkspaceController.swift; sourceTree = "<group>"; };
 		A100000000000000000099 /* LumenDesk.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LumenDesk.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A200000000000000000001 /* ProtocolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolTests.swift; sourceTree = "<group>"; };
 		A200000000000000000002 /* DomainTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DomainTests.swift; sourceTree = "<group>"; };
 		A200000000000000000003 /* NetworkUtilityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkUtilityTests.swift; sourceTree = "<group>"; };
+		A200000000000000000004 /* DemoWorkspaceControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoWorkspaceControllerTests.swift; sourceTree = "<group>"; };
 		A200000000000000000099 /* LumenDeskTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LumenDeskTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -152,6 +156,7 @@
 			isa = PBXGroup;
 			children = (
 				A100000000000000000004 /* LightManager.swift */,
+				A100000000000000000021 /* DemoWorkspaceController.swift */,
 				A100000000000000000005 /* UDPSocket.swift */,
 				A10000000000000000001B /* AudioLevelMonitor.swift */,
 				C100000000000000000005 /* LIFX */,
@@ -218,6 +223,7 @@
 				A200000000000000000001 /* ProtocolTests.swift */,
 				A200000000000000000002 /* DomainTests.swift */,
 				A200000000000000000003 /* NetworkUtilityTests.swift */,
+				A200000000000000000004 /* DemoWorkspaceControllerTests.swift */,
 			);
 			path = LumenDeskTests;
 			sourceTree = "<group>";
@@ -341,6 +347,7 @@ B10000000000000000001D /* UXCenterViews.swift in Sources */,
 B10000000000000000001E /* GoveeSegments.swift in Sources */,
 B10000000000000000001F /* GoveeSegmentEditorView.swift in Sources */,
 				B100000000000000000020 /* ProductShellView.swift in Sources */,
+				B100000000000000000021 /* DemoWorkspaceController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -351,6 +358,7 @@ B10000000000000000001F /* GoveeSegmentEditorView.swift in Sources */,
 				B200000000000000000001 /* ProtocolTests.swift in Sources */,
 				B200000000000000000002 /* DomainTests.swift in Sources */,
 				B200000000000000000003 /* NetworkUtilityTests.swift in Sources */,
+				B200000000000000000004 /* DemoWorkspaceControllerTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

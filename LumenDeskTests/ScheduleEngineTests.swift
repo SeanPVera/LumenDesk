@@ -232,6 +232,26 @@ final class ScheduleEngineTests: XCTestCase {
         XCTAssertEqual(calendar.component(.minute, from: occurrence), 30)
     }
 
+    func testDefaultCalendarTracksSystemTimeZoneChanges() throws {
+        let originalTimeZone = NSTimeZone.default
+        defer { NSTimeZone.default = originalTimeZone }
+        let reference = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-07-13T12:00:00Z"))
+        let entry = ScheduleEntry(hour: 10, minute: 0, action: .turnOn)
+
+        NSTimeZone.default = try XCTUnwrap(TimeZone(identifier: "America/New_York"))
+        let engine = ScheduleEngine()
+        let newYorkOccurrence = try XCTUnwrap(
+            engine.occurrence(for: entry, relativeTo: reference, solarTimes: solarTimes)
+        )
+
+        NSTimeZone.default = try XCTUnwrap(TimeZone(identifier: "America/Los_Angeles"))
+        let losAngelesOccurrence = try XCTUnwrap(
+            engine.occurrence(for: entry, relativeTo: reference, solarTimes: solarTimes)
+        )
+
+        XCTAssertEqual(losAngelesOccurrence.timeIntervalSince(newYorkOccurrence), 3 * 60 * 60)
+    }
+
     func testConflictDetectionUsesResolvedSolarTimes() {
         let engine = ScheduleEngine(calendar: utcCalendar())
         let sunrise = ScheduleEntry(hour: 0, minute: 0, offsetMinutes: 5, action: .atSunrise)

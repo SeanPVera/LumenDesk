@@ -51,7 +51,7 @@ final class ScheduleEngine {
 
     init(
         now: @escaping () -> Date = Date.init,
-        calendar: Calendar = .current,
+        calendar: Calendar = .autoupdatingCurrent,
         state: State = State()
     ) {
         self.now = now

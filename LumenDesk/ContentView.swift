@@ -21,6 +21,7 @@ struct ContentView: View {
     @State private var showingMissedAutomations = false
     @State private var showingIdentifyMode = false
     @State private var showingExperienceCenter = false
+    @State private var previewScene: LightingScene?
     @AppStorage(AppPreferenceKey.quietInterface) private var quietInterface = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -86,6 +87,7 @@ struct ContentView: View {
             .sheet(isPresented: $showingMissedAutomations) { MissedAutomationsView().environmentObject(manager) }
             .sheet(isPresented: $showingIdentifyMode) { IdentifyLightsView().environmentObject(manager) }
             .sheet(isPresented: $showingExperienceCenter) { ExperienceCenterView().environmentObject(manager) }
+            .sheet(item: $previewScene) { scene in ScenePreviewView(scene: scene).environmentObject(manager) }
 
             if selectionMode && !selectedIDs.isEmpty {
                 VStack(spacing: 6) {
@@ -280,7 +282,7 @@ struct ContentView: View {
             if !manager.devices.isEmpty {
                 Divider()
                 HStack(spacing: 10) {
-                    Button { manager.toggleAggregatePower(manager.devices) } label: {
+                    Button { manager.setAllPower(on: !manager.devices.allSatisfy { $0.isOn }) } label: {
                         let state = manager.aggregatePowerState(for: manager.devices)
                         Label(state.title, systemImage: state.symbol).font(.caption.weight(.medium))
                     }
@@ -530,7 +532,7 @@ struct ContentView: View {
         return VStack(alignment: .leading, spacing: 12) {
             HStack { Text("Scene Results").font(.headline); Text("\(matches.count)").foregroundStyle(.secondary); Spacer(); Button("Open Scene Library") { showingScenes = true } }
             if matches.isEmpty { Spacer(); Text("No scenes match your search.").foregroundStyle(.secondary).frame(maxWidth: .infinity); Spacer() }
-            else { List(matches) { scene in HStack { Label(scene.name, systemImage: "wand.and.stars"); Spacer(); Text("\(scene.snapshots.count) lights").foregroundStyle(.secondary); Button("Apply") { manager.applyScene(scene) } } }.listStyle(.inset) }
+            else { List(matches) { scene in HStack { Label(scene.name, systemImage: "wand.and.stars"); Spacer(); Text("\(scene.snapshots.count) lights").foregroundStyle(.secondary); Button("Preview & Apply") { previewScene = scene }.disabled(manager.availableDeviceIDs(for: scene).isEmpty) } }.listStyle(.inset) }
         }.padding(16)
     }
 
@@ -600,7 +602,7 @@ struct ContentView: View {
         Binding(
             get: {
                 let on = manager.devices.filter { $0.isOn }
-                guard !on.isEmpty else { return 1.0 }
+                guard !on.isEmpty else { return 0 }
                 return on.reduce(0) { $0 + $1.brightness } / Double(on.count)
             },
             set: { manager.setAllBrightness($0) }

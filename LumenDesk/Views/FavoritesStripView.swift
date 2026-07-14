@@ -114,10 +114,11 @@ private struct FavoriteRoomTile: View {
 private struct FavoriteSceneTile: View {
     @EnvironmentObject var manager: LightManager
     let scene: LightingScene
+    @State private var previewScene: LightingScene?
 
     var body: some View {
         Button {
-            manager.applyScene(scene)
+            previewScene = scene
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: "wand.and.stars")
@@ -131,8 +132,12 @@ private struct FavoriteSceneTile: View {
             }
         }
         .buttonStyle(.plain)
+        .disabled(manager.availableDeviceIDs(for: scene).isEmpty)
         .favoriteTileStyle()
         .contextMenu { Button("Remove Scene Favorite") { manager.toggleFavoriteScene(scene.id) } }
+        .sheet(item: $previewScene) { scene in
+            ScenePreviewView(scene: scene).environmentObject(manager)
+        }
     }
 }
 

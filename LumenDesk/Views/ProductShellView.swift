@@ -409,8 +409,9 @@ private struct GlobalLightingControl: View {
 
             HStack(spacing: 12) {
                 Image(systemName: "sun.min").foregroundStyle(Lumen.textSecondary)
-                Slider(value: Binding(get: { averageBrightness }, set: manager.setAllBrightness), in: 0.01...1)
+                Slider(value: Binding(get: { averageBrightness }, set: manager.setAllBrightness), in: 0...1)
                     .accessibilityLabel("Brightness for all lights")
+                    .disabled(manager.devices.isEmpty)
                 Text("\(Int(averageBrightness * 100))%")
                     .font(.callout.monospacedDigit())
                     .foregroundStyle(Lumen.textSecondary)
@@ -450,6 +451,7 @@ private struct FavoritesQuickStrip: View {
     @EnvironmentObject private var manager: LightManager
     let onOpenDevice: (LightDevice) -> Void
     let onOpenRoom: (Room) -> Void
+    @State private var previewScene: LightingScene?
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -461,10 +463,13 @@ private struct FavoritesQuickStrip: View {
                     FavoriteRoomTile(room: room, onOpen: { onOpenRoom(room) })
                 }
                 ForEach(manager.favoriteScenes) { scene in
-                    FavoriteSceneTile(scene: scene)
+                    FavoriteSceneTile(scene: scene, onPreview: { previewScene = scene })
                 }
             }
             .padding(.vertical, 2)
+        }
+        .sheet(item: $previewScene) { scene in
+            ScenePreviewView(scene: scene).environmentObject(manager)
         }
     }
 }
@@ -517,16 +522,17 @@ private struct FavoriteRoomTile: View {
                 Image(systemName: "rectangle.stack.fill")
                     .font(.title3).foregroundStyle(Lumen.violetBright)
                 Spacer()
-                Button { manager.toggleAggregatePower(lights) } label: {
+                Button { manager.setPower(in: room, on: lights.filter(\.isOn).count < lights.count) } label: {
                     Image(systemName: manager.aggregatePowerState(for: lights).symbol)
                 }
                 .buttonStyle(.bordered)
+                .disabled(lights.isEmpty)
                 .accessibilityLabel("Toggle all lights in \(room.name)")
             }
             Button(action: onOpen) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(room.name).font(.headline).lineLimit(1)
-                    Text("\(lights.filter(\.isOn).count) of \(lights.count) on")
+                    Text(lights.isEmpty ? "No lights" : "\(lights.filter(\.isOn).count) of \(lights.count) on")
                         .font(.caption).foregroundStyle(Lumen.textSecondary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -542,6 +548,7 @@ private struct FavoriteRoomTile: View {
 private struct FavoriteSceneTile: View {
     @EnvironmentObject private var manager: LightManager
     let scene: LightingScene
+    let onPreview: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -550,9 +557,14 @@ private struct FavoriteSceneTile: View {
             Text(scene.name).font(.headline).lineLimit(1)
             Text("\(scene.snapshots.count) lights")
                 .font(.caption).foregroundStyle(Lumen.textSecondary)
-            Button("Preview & Apply") { manager.applyScene(scene) }
+            Button("Preview & Apply", action: onPreview)
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                .disabled(manager.availableDeviceIDs(for: scene).isEmpty)
+            if manager.availableDeviceIDs(for: scene).isEmpty {
+                Text("No available lights")
+                    .font(.caption2).foregroundStyle(Lumen.warning)
+            }
         }
         .padding(14)
         .frame(width: 180, alignment: .leading)
@@ -575,16 +587,17 @@ private struct RoomSummaryCard: View {
                 Button(action: onOpen) {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(room.name).font(.title3.weight(.semibold)).lineLimit(1)
-                        Text("\(onCount) of \(lights.count) on")
+                        Text(lights.isEmpty ? "No lights" : "\(onCount) of \(lights.count) on")
                             .font(.callout).foregroundStyle(Lumen.textSecondary)
                     }
                 }
                 .buttonStyle(.plain)
                 Spacer()
-                Button { manager.toggleAggregatePower(lights) } label: {
+                Button { manager.setPower(in: room, on: lights.filter(\.isOn).count < lights.count) } label: {
                     Image(systemName: manager.aggregatePowerState(for: lights).symbol)
                 }
                 .buttonStyle(.borderedProminent)
+                .disabled(lights.isEmpty)
                 .accessibilityLabel("Toggle all lights in \(room.name)")
             }
 
@@ -605,6 +618,9 @@ private struct RoomSummaryCard: View {
                             .font(.caption).foregroundStyle(Lumen.success)
                     }
                 }
+            } else {
+                Label("No lights are assigned to this room.", systemImage: "lightbulb.slash")
+                    .font(.caption).foregroundStyle(Lumen.textSecondary)
             }
 
             HStack {
@@ -777,16 +793,23 @@ private struct RoomDetailSheet: View {
                             Label("Schedules", systemImage: "clock")
                         }
                     }
+                    .disabled(lights.isEmpty)
 
                     HStack(spacing: 12) {
                         Image(systemName: "sun.min")
-                        Slider(value: Binding(get: { averageBrightness }, set: { manager.setBrightness(in: currentRoom, value: $0) }), in: 0.01...1)
+                        Slider(value: Binding(get: { averageBrightness }, set: { manager.setBrightness(in: currentRoom, value: $0) }), in: 0...1)
                             .accessibilityLabel("Brightness in \(currentRoom.name)")
                         Text("\(Int(averageBrightness * 100))%")
                             .font(.callout.monospacedDigit()).frame(width: 44)
                     }
                     .padding(14)
                     .lumenCard(radius: 14)
+                    .disabled(lights.isEmpty)
+
+                    if lights.isEmpty {
+                        EmptyInlineView(icon: "lightbulb.slash", title: "No lights in this room",
+                                        message: "Assign a discovered light before using room power or brightness controls.")
+                    }
 
                     SectionHeader(title: "Lights", detail: "\(lights.count) devices")
                     ForEach(lights) { device in
@@ -1053,6 +1076,11 @@ struct LibraryWorkspaceView: View {
             Button("Preview & Apply") { previewScene = scene }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
+                .disabled(manager.availableDeviceIDs(for: scene).isEmpty)
+            if manager.availableDeviceIDs(for: scene).isEmpty {
+                Label("No scene lights are currently available", systemImage: "wifi.slash")
+                    .font(.caption2).foregroundStyle(Lumen.warning)
+            }
         }
         .padding(16)
         .lumenCard(radius: 16)

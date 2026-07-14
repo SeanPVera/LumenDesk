@@ -1100,8 +1100,12 @@ struct AuroraFireflyOverlay: View {
     }
 }
 
-#Preview {
-    ContentView()
-        .environmentObject(LightManager())
-        .frame(width: 640, height: 480)
+#if DEBUG
+struct ContentView_Previews: PreviewProvider {
+    static var previews: some View {
+        LumenDeskShellView()
+            .environmentObject(LightManager())
+            .frame(width: 980, height: 720)
+    }
 }
+#endif

@@ -1,0 +1,64 @@
+name: Generate brand assets
+
+on:
+  push:
+    branches:
+      - agent/add-lumendesk-app-icons
+    paths:
+      - BrandAssets/Logo/**
+      - scripts/generate_brand_assets.py
+      - .github/workflows/generate-brand-assets.yml
+  pull_request:
+    branches:
+      - main
+    paths:
+      - BrandAssets/Logo/**
+      - scripts/generate_brand_assets.py
+      - .github/workflows/generate-brand-assets.yml
+      - LumenDesk/Assets.xcassets/AppIcon.appiconset/**
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Pillow
+        run: python -m pip install --disable-pip-version-check pillow
+
+      - name: Generate and validate assets
+        run: python scripts/generate_brand_assets.py
+
+      - name: Commit generated assets on branch pushes
+        if: github.event_name != 'pull_request'
+        run: |
+          if git diff --quiet -- LumenDesk/Assets.xcassets/AppIcon.appiconset BrandAssets/AppIcons BrandAssets/Repository; then
+            echo "Generated assets are already current."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add LumenDesk/Assets.xcassets/AppIcon.appiconset BrandAssets/AppIcons BrandAssets/Repository
+          git commit -m "Generate LumenDesk app icon assets"
+          git push
+
+      - name: Verify generated assets are committed in pull requests
+        if: github.event_name == 'pull_request'
+        run: |
+          if ! git diff --quiet -- LumenDesk/Assets.xcassets/AppIcon.appiconset BrandAssets/AppIcons BrandAssets/Repository; then
+            echo "Generated assets are not committed or are stale."
+            git status --short
+            exit 1
+          fi

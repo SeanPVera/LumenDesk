@@ -77,6 +77,7 @@ final class LightManager: ObservableObject {
     private let demoWorkspaceController: DemoWorkspaceController
     let confirmationCoordinator: ConfirmationCoordinator
     private let scheduleEngine: ScheduleEngine
+    private let persistenceStore: ApplicationPersistence
     private var rehearsalSnapshot: [LightRuntimeSnapshot] = []
     private var expectedStates: [String: ExpectedDeviceState] = [:]
     // Devices currently streaming a razer-mode segment preview.
@@ -94,30 +95,6 @@ final class LightManager: ObservableObject {
     @Published var sunriseMinute: Int = 30
     @Published var sunsetHour: Int    = 20
     @Published var sunsetMinute: Int  = 30
-
-    private let roomsDefaultsKey        = "LumenDesk.rooms.v1"
-    private let favoritesDefaultsKey    = "LumenDesk.favorites.v1"
-    private let scenesDefaultsKey       = "LumenDesk.scenes.v1"
-    private let customNamesDefaultsKey  = "LumenDesk.customNames.v1"
-    private let collapsedRoomsKey       = "LumenDesk.collapsedRooms.v1"
-    private let solarKey                = "LumenDesk.solar.v1"
-    private let whiteModeKey            = "LumenDesk.whiteMode.v1"
-    fileprivate let roomFavoritesDefaultsKey = "LumenDesk.favoriteRooms.v1"
-    fileprivate let sceneFavoritesDefaultsKey = "LumenDesk.favoriteScenes.v1"
-    fileprivate let brightnessPresetsKey    = "LumenDesk.brightnessPresets.v1"
-    private let activityKey = "LumenDesk.activity.v1"
-    private let favoriteOrderKey = "LumenDesk.favoriteOrder.v1"
-    private let parliamentKey = "LumenDesk.parliament.v1"
-    private let parliamentSessionsKey = "LumenDesk.parliamentSessions.v1"
-    private let firefliesKey = "LumenDesk.fireflies.v1"
-    private let certificationsKey = "LumenDesk.certifications.v1"
-    private let recentColorsKey = "LumenDesk.recentColors.v1"
-    private let automationOverridesKey = "LumenDesk.automationOverrides.v1"
-    private let sceneRevisionsKey = "LumenDesk.sceneRevisions.v1"
-    private let sceneDraftsKey = "LumenDesk.sceneDrafts.v1"
-    private let goveeSegmentsKey = "LumenDesk.goveeSegments.v1"
-    private let segmentPresetsKey = "LumenDesk.segmentPresets.v1"
-    private let defaults: UserDefaults
 
     // MARK: - Undo / redo state
     /// One animated effect running against one scope. Several runs can be
@@ -156,38 +133,43 @@ final class LightManager: ObservableObject {
         defaults: UserDefaults = .standard,
         demoWorkspaceController: DemoWorkspaceController? = nil,
         confirmationCoordinator: ConfirmationCoordinator? = nil,
-        scheduleEngine: ScheduleEngine? = nil
+        scheduleEngine: ScheduleEngine? = nil,
+        persistenceStore: ApplicationPersistence? = nil
     ) {
-        self.defaults = defaults
         self.demoWorkspaceController = demoWorkspaceController ?? DemoWorkspaceController()
         self.confirmationCoordinator = confirmationCoordinator ?? ConfirmationCoordinator(defaults: defaults)
         self.scheduleEngine = scheduleEngine ?? ScheduleEngine()
-        rooms = loadRooms()
-        favoriteIDs = loadFavorites()
-        scenes = loadScenes()
-        customNames = loadCustomNames()
-        collapsedRooms = loadCollapsedRooms()
-        favoriteRoomIDs = loadUUIDSet(forKey: roomFavoritesDefaultsKey)
-        favoriteSceneIDs = loadUUIDSet(forKey: sceneFavoritesDefaultsKey)
-        customBrightnessPresets = loadBrightnessPresets()
-        whiteModeDeviceIDs = loadWhiteMode()
-        loadSolarPrefs()
-        activityEvents = loadValue([ActivityEvent].self, key: activityKey) ?? []
-        favoriteOrder = loadValue([FavoriteReference].self, key: favoriteOrderKey) ?? []
-        parliamentMembers = loadValue([ParliamentMember].self, key: parliamentKey) ?? []
-        parliamentSessions = loadValue([ParliamentSession].self, key: parliamentSessionsKey) ?? []
-        fireflyCitizens = loadValue([FireflyCitizen].self, key: firefliesKey) ?? []
-        sceneCertifications = loadValue([SceneCertification].self, key: certificationsKey) ?? []
-        recentColors = loadValue([RecentColor].self, key: recentColorsKey) ?? []
+        self.persistenceStore = persistenceStore ?? PersistenceStore.live(legacyDefaults: defaults)
+        let persistedState = self.persistenceStore.load()
+        rooms = persistedState.rooms
+        favoriteIDs = persistedState.favoriteIDs
+        scenes = persistedState.scenes
+        customNames = persistedState.customNames
+        collapsedRooms = persistedState.collapsedRooms
+        favoriteRoomIDs = persistedState.favoriteRoomIDs
+        favoriteSceneIDs = persistedState.favoriteSceneIDs
+        customBrightnessPresets = persistedState.customBrightnessPresets
+        whiteModeDeviceIDs = persistedState.whiteModeDeviceIDs
+        sunriseHour = persistedState.solarPreferences.sunriseHour
+        sunriseMinute = persistedState.solarPreferences.sunriseMinute
+        sunsetHour = persistedState.solarPreferences.sunsetHour
+        sunsetMinute = persistedState.solarPreferences.sunsetMinute
+        activityEvents = persistedState.activityEvents
+        favoriteOrder = persistedState.favoriteOrder
+        parliamentMembers = persistedState.parliamentMembers
+        parliamentSessions = persistedState.parliamentSessions
+        fireflyCitizens = persistedState.fireflyCitizens
+        sceneCertifications = persistedState.sceneCertifications
+        recentColors = persistedState.recentColors
         if scheduleEngine == nil {
             self.scheduleEngine.restoreAutomationOverrides(
-                loadValue([UUID: RoomAutomationOverride].self, key: automationOverridesKey) ?? [:]
+                persistedState.automationOverrides
             )
         }
-        sceneRevisions = loadValue([SceneRevision].self, key: sceneRevisionsKey) ?? []
-        sceneDrafts = loadValue([UUID: LightingScene].self, key: sceneDraftsKey) ?? [:]
-        goveeSegmentStates = loadValue([String: GoveeSegmentState].self, key: goveeSegmentsKey) ?? [:]
-        goveeSegmentPresets = loadValue([GoveeSegmentPreset].self, key: segmentPresetsKey) ?? []
+        sceneRevisions = persistedState.sceneRevisions
+        sceneDrafts = persistedState.sceneDrafts
+        goveeSegmentStates = persistedState.goveeSegmentStates
+        goveeSegmentPresets = persistedState.goveeSegmentPresets
     }
 
     var isDemoMode: Bool { demoWorkspaceController.isActive }
@@ -306,7 +288,7 @@ final class LightManager: ObservableObject {
             objectWillChange.send()
         }
         if evaluation.didChangeOverrides {
-            persistValue(automationOverrides, key: automationOverridesKey)
+            persistApplicationState()
         }
 
         for decision in evaluation.decisions {
@@ -362,7 +344,7 @@ final class LightManager: ObservableObject {
     func setAutomationOverride(for roomID: UUID, duration: AutomationOverrideDuration) {
         objectWillChange.send()
         let value = scheduleEngine.setOverride(for: roomID, duration: duration)
-        persistValue(automationOverrides, key: automationOverridesKey)
+        persistApplicationState()
         lastActionSummary = "Automation paused — \(value.summary)"
     }
 
@@ -370,7 +352,7 @@ final class LightManager: ObservableObject {
         let lookup = scheduleEngine.activeOverride(for: roomID)
         if lookup.didRemoveExpired {
             objectWillChange.send()
-            persistValue(automationOverrides, key: automationOverridesKey)
+            persistApplicationState()
         }
         return lookup.value
     }
@@ -378,7 +360,7 @@ final class LightManager: ObservableObject {
     func resumeAutomation(for roomID: UUID) {
         guard scheduleEngine.resumeAutomation(for: roomID) else { return }
         objectWillChange.send()
-        persistValue(automationOverrides, key: automationOverridesKey)
+        persistApplicationState()
         lastActionSummary = "Automation resumed"
     }
 
@@ -517,41 +499,16 @@ final class LightManager: ObservableObject {
         if let device = device(withID: deviceID) {
             device.customName = trimmed.isEmpty ? nil : trimmed
         }
-        persistCustomNames()
-    }
-
-    fileprivate func persistCustomNames() {
-        persistValue(customNames, key: customNamesDefaultsKey)
-    }
-
-    private func loadCustomNames() -> [String: String] {
-        loadValue([String: String].self, key: customNamesDefaultsKey) ?? [:]
+        persistApplicationState()
     }
 
     // MARK: - Solar preferences
 
     func setSunriseTime(hour: Int, minute: Int) {
-        sunriseHour = hour; sunriseMinute = minute; persistSolarPrefs()
+        sunriseHour = hour; sunriseMinute = minute; persistApplicationState()
     }
     func setSunsetTime(hour: Int, minute: Int) {
-        sunsetHour = hour; sunsetMinute = minute; persistSolarPrefs()
-    }
-
-    fileprivate func persistSolarPrefs() {
-        guard demoWorkspaceController.allowsLivePersistence else { return }
-        let d: [String: Int] = [
-            "sunriseHour": sunriseHour, "sunriseMinute": sunriseMinute,
-            "sunsetHour": sunsetHour,   "sunsetMinute": sunsetMinute
-        ]
-        defaults.set(d, forKey: solarKey)
-    }
-
-    private func loadSolarPrefs() {
-        guard let d = defaults.dictionary(forKey: solarKey) else { return }
-        sunriseHour   = d["sunriseHour"]   as? Int ?? 6
-        sunriseMinute = d["sunriseMinute"] as? Int ?? 30
-        sunsetHour    = d["sunsetHour"]    as? Int ?? 20
-        sunsetMinute  = d["sunsetMinute"]  as? Int ?? 30
+        sunsetHour = hour; sunsetMinute = minute; persistApplicationState()
     }
 
     // MARK: - Room expansion state
@@ -562,18 +519,10 @@ final class LightManager: ObservableObject {
         } else {
             collapsedRooms.insert(roomID)
         }
-        persistCollapsedRooms()
+        persistApplicationState()
     }
 
     func isRoomExpanded(_ roomID: UUID) -> Bool { !collapsedRooms.contains(roomID) }
-
-    fileprivate func persistCollapsedRooms() {
-        persistSet(collapsedRooms, key: collapsedRoomsKey)
-    }
-
-    private func loadCollapsedRooms() -> Set<UUID> {
-        loadSet(UUID.self, key: collapsedRoomsKey)
-    }
 
     // MARK: - Error / toast
 
@@ -1599,7 +1548,7 @@ extension LightManager {
             && previous?.colors == state.colors
             && previous?.gradient == state.gradient
         goveeSegmentStates[device.id] = stored
-        persistValue(goveeSegmentStates, key: goveeSegmentsKey)
+        persistApplicationState()
     }
 
     /// Applies a layout durably. Strip-family firmware stores the layout via
@@ -1620,7 +1569,7 @@ extension LightManager {
         var next = state
         next.isActive = true
         goveeSegmentStates[device.id] = next
-        persistValue(goveeSegmentStates, key: goveeSegmentsKey)
+        persistApplicationState()
         device.color = next.blendedColor
         if turnOn, !device.isOn {
             device.isOn = true
@@ -1656,13 +1605,13 @@ extension LightManager {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !stops.isEmpty else { return }
         goveeSegmentPresets.append(GoveeSegmentPreset(name: trimmed, stops: stops, fill: fill))
-        persistValue(goveeSegmentPresets, key: segmentPresetsKey)
+        persistApplicationState()
         lastActionSummary = "Saved segment preset \u{201C}\(trimmed)\u{201D}"
     }
 
     func deleteSegmentPreset(_ presetID: UUID) {
         goveeSegmentPresets.removeAll { $0.id == presetID }
-        persistValue(goveeSegmentPresets, key: segmentPresetsKey)
+        persistApplicationState()
     }
 
     /// Translates a layout into the packet batch the firmware expects: one
@@ -1715,7 +1664,7 @@ extension LightManager {
         }
         guard goveeSegmentStates[device.id]?.isActive == true else { return }
         goveeSegmentStates[device.id]?.isActive = false
-        persistValue(goveeSegmentStates, key: goveeSegmentsKey)
+        persistApplicationState()
     }
 }
 
@@ -1738,14 +1687,14 @@ extension LightManager {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         rooms.append(Room(name: trimmed))
-        persistRooms()
+        persistApplicationState()
     }
 
     func renameRoom(_ roomID: UUID, to name: String) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, let idx = rooms.firstIndex(where: { $0.id == roomID }) else { return }
         rooms[idx].name = trimmed
-        persistRooms()
+        persistApplicationState()
     }
 
     func deleteRoom(_ roomID: UUID) {
@@ -1768,7 +1717,7 @@ extension LightManager {
         let deleted = rooms[idx]
         lastDeletedRoom = (room: deleted, index: idx)
         rooms.remove(at: idx)
-        persistRooms()
+        persistApplicationState()
         publishError("\u{201C}\(deleted.name)\u{201D} deleted.") {
             self.undoDeleteRoom()
         }
@@ -1779,14 +1728,14 @@ extension LightManager {
         let insertAt = min(index, rooms.count)
         rooms.insert(room, at: insertAt)
         lastDeletedRoom = nil
-        persistRooms()
+        persistApplicationState()
         commandError = nil
         commandErrorUndo = nil
     }
 
     func moveRooms(from offsets: IndexSet, to destination: Int) {
         rooms.move(fromOffsets: offsets, toOffset: destination)
-        persistRooms()
+        persistApplicationState()
     }
 
     func moveRoom(_ roomID: UUID, by offset: Int) {
@@ -1794,7 +1743,7 @@ extension LightManager {
         let target = idx + offset
         guard rooms.indices.contains(target) else { return }
         rooms.swapAt(idx, target)
-        persistRooms()
+        persistApplicationState()
     }
 
     func assign(lightID: String, toRoom roomID: UUID?) {
@@ -1802,7 +1751,7 @@ extension LightManager {
         if let roomID, let idx = rooms.firstIndex(where: { $0.id == roomID }) {
             rooms[idx].lightIDs.append(lightID)
         }
-        persistRooms()
+        persistApplicationState()
     }
 
     func assign(lightIDs: Set<String>, toRoom roomID: UUID?) {
@@ -1811,7 +1760,7 @@ extension LightManager {
             let ordered = devices.map { $0.id }.filter { lightIDs.contains($0) }
             rooms[idx].lightIDs.append(contentsOf: ordered)
         }
-        persistRooms()
+        persistApplicationState()
     }
 
     func moveLight(_ lightID: String, in roomID: UUID, by offset: Int) {
@@ -1820,90 +1769,44 @@ extension LightManager {
         let target = l + offset
         guard rooms[r].lightIDs.indices.contains(target) else { return }
         rooms[r].lightIDs.swapAt(l, target)
-        persistRooms()
+        persistApplicationState()
     }
 
     func room(forLightID lightID: String) -> Room? {
         rooms.first { $0.lightIDs.contains(lightID) }
     }
 
-    struct ExportedConfiguration: Codable {
-        var rooms: [Room]
-        var favoriteIDs: [String]
-        var favoriteRoomIDs: [UUID]
-        var favoriteSceneIDs: [UUID]
-        var scenes: [LightingScene]
-        var customNames: [String: String]
-        var collapsedRooms: [UUID]
-        var sunriseHour: Int
-        var sunriseMinute: Int
-        var sunsetHour: Int
-        var sunsetMinute: Int
-        var brightnessPresets: [Double]
-        // Optional so configurations exported by earlier versions still import.
-        var goveeSegmentStates: [String: GoveeSegmentState]?
-        var goveeSegmentPresets: [GoveeSegmentPreset]?
-    }
+    typealias ExportedConfiguration = PersistenceStore.ConfigurationArchive
 
     func exportRoomsData() -> Data? { exportConfigurationData() }
 
     func exportConfigurationData() -> Data? {
-        let config = ExportedConfiguration(
-            rooms: rooms,
-            favoriteIDs: Array(favoriteIDs),
-            favoriteRoomIDs: Array(favoriteRoomIDs),
-            favoriteSceneIDs: Array(favoriteSceneIDs),
-            scenes: scenes,
-            customNames: customNames,
-            collapsedRooms: Array(collapsedRooms),
-            sunriseHour: sunriseHour,
-            sunriseMinute: sunriseMinute,
-            sunsetHour: sunsetHour,
-            sunsetMinute: sunsetMinute,
-            brightnessPresets: customBrightnessPresets,
-            goveeSegmentStates: goveeSegmentStates,
-            goveeSegmentPresets: goveeSegmentPresets
-        )
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        return try? encoder.encode(config)
+        try? persistenceStore.exportConfiguration(from: persistedApplicationState())
     }
 
     @discardableResult
     func importRoomsData(_ data: Data) -> Bool {
-        if let config = try? JSONDecoder().decode(ExportedConfiguration.self, from: data) {
-            rooms = config.rooms
-            favoriteIDs = Set(config.favoriteIDs)
-            favoriteRoomIDs = Set(config.favoriteRoomIDs)
-            favoriteSceneIDs = Set(config.favoriteSceneIDs)
-            scenes = config.scenes
-            customNames = config.customNames
-            collapsedRooms = Set(config.collapsedRooms)
-            sunriseHour = config.sunriseHour
-            sunriseMinute = config.sunriseMinute
-            sunsetHour = config.sunsetHour
-            sunsetMinute = config.sunsetMinute
-            customBrightnessPresets = sanitizedPresets(config.brightnessPresets)
-            // Older exports have no segment data; keep what this install knows.
-            if let segmentStates = config.goveeSegmentStates { goveeSegmentStates = segmentStates }
-            if let segmentPresets = config.goveeSegmentPresets { goveeSegmentPresets = segmentPresets }
+        do {
+            let importedState = try persistenceStore.importingConfiguration(
+                from: data,
+                into: persistedApplicationState()
+            )
+            if demoWorkspaceController.allowsLivePersistence {
+                // Persist the fully validated candidate atomically before
+                // replacing any live in-memory configuration.
+                try persistenceStore.save(importedState)
+            }
+            applyPersistedApplicationState(importedState)
             for device in devices {
                 device.customName = customNames[device.id]
             }
             sortDevices()
-            reconcileFavoriteOrder()
-            persistAllConfiguration()
             reportImportMatchStatus(roomCount: rooms.count)
             return true
-        }
-        guard let decoded = try? JSONDecoder().decode([Room].self, from: data) else {
+        } catch {
             statusMessage = "Import failed — that file isn’t a valid LumenDesk configuration."
             return false
         }
-        rooms = decoded
-        persistRooms()
-        reportImportMatchStatus(roomCount: decoded.count)
-        return true
     }
 
     func requestConfigurationImport(_ data: Data, fileName: String) {
@@ -1932,28 +1835,6 @@ extension LightManager {
         }
     }
 
-    private func persistAllConfiguration() {
-        persistRooms()
-        persistFavorites()
-        persistScenes()
-        persistCustomNames()
-        persistCollapsedRooms()
-        persistSolarPrefs()
-        persistUUIDSet(favoriteRoomIDs, forKey: roomFavoritesDefaultsKey)
-        persistUUIDSet(favoriteSceneIDs, forKey: sceneFavoritesDefaultsKey)
-        persistBrightnessPresets()
-        persistWhiteMode()
-        persistValue(goveeSegmentStates, key: goveeSegmentsKey)
-        persistValue(goveeSegmentPresets, key: segmentPresetsKey)
-    }
-
-    fileprivate func persistRooms() {
-        persistValue(rooms, key: roomsDefaultsKey)
-    }
-
-    private func loadRooms() -> [Room] {
-        loadValue([Room].self, key: roomsDefaultsKey) ?? []
-    }
 }
 
 // MARK: - Favorites
@@ -1967,7 +1848,7 @@ extension LightManager {
         } else {
             favoriteIDs.insert(deviceID)
         }
-        persistFavorites()
+        persistApplicationState()
     }
 
     var favoriteDevices: [LightDevice] {
@@ -1976,69 +1857,35 @@ extension LightManager {
             .sorted { $0.label.localizedCaseInsensitiveCompare($1.label) == .orderedAscending }
     }
 
-    fileprivate func persistFavorites() {
-        persistSet(favoriteIDs, key: favoritesDefaultsKey)
-    }
-
-    fileprivate func loadFavorites() -> Set<String> {
-        loadSet(String.self, key: favoritesDefaultsKey)
-    }
-
-
     func isFavoriteRoom(_ roomID: UUID) -> Bool { favoriteRoomIDs.contains(roomID) }
 
     func toggleFavoriteRoom(_ roomID: UUID) {
         if favoriteRoomIDs.contains(roomID) { favoriteRoomIDs.remove(roomID) } else { favoriteRoomIDs.insert(roomID) }
-        persistUUIDSet(favoriteRoomIDs, forKey: roomFavoritesDefaultsKey)
+        persistApplicationState()
     }
 
     func isFavoriteScene(_ sceneID: UUID) -> Bool { favoriteSceneIDs.contains(sceneID) }
 
     func toggleFavoriteScene(_ sceneID: UUID) {
         if favoriteSceneIDs.contains(sceneID) { favoriteSceneIDs.remove(sceneID) } else { favoriteSceneIDs.insert(sceneID) }
-        persistUUIDSet(favoriteSceneIDs, forKey: sceneFavoritesDefaultsKey)
+        persistApplicationState()
     }
 
     var favoriteRooms: [Room] { rooms.filter { favoriteRoomIDs.contains($0.id) } }
     var favoriteScenes: [LightingScene] { scenes.filter { favoriteSceneIDs.contains($0.id) } }
 
-    fileprivate func persistUUIDSet(_ values: Set<UUID>, forKey key: String) {
-        persistSet(values, key: key)
-    }
-
-    fileprivate func loadUUIDSet(forKey key: String) -> Set<UUID> {
-        loadSet(UUID.self, key: key)
-    }
-
     func addBrightnessPreset(_ value: Double) {
-        customBrightnessPresets = sanitizedPresets(customBrightnessPresets + [value])
-        persistBrightnessPresets()
+        customBrightnessPresets = PersistenceStore.sanitizedBrightnessPresets(
+            customBrightnessPresets + [value]
+        )
+        persistApplicationState()
     }
 
     func deleteBrightnessPreset(_ value: Double) {
         customBrightnessPresets.removeAll { abs($0 - value) < 0.005 }
-        persistBrightnessPresets()
+        persistApplicationState()
     }
 
-    fileprivate func sanitizedPresets(_ values: [Double]) -> [Double] {
-        var seen: Set<Int> = []
-        return values.map { max(0.01, min(1.0, $0)) }
-            .sorted()
-            .filter { value in
-                let key = Int((value * 100).rounded())
-                if seen.contains(key) { return false }
-                seen.insert(key)
-                return true
-            }
-    }
-
-    fileprivate func persistBrightnessPresets() {
-        persistValue(customBrightnessPresets, key: brightnessPresetsKey)
-    }
-
-    fileprivate func loadBrightnessPresets() -> [Double] {
-        sanitizedPresets(loadValue([Double].self, key: brightnessPresetsKey) ?? [])
-    }
 }
 
 // MARK: - Scenes
@@ -2060,7 +1907,7 @@ extension LightManager {
             )
         }
         scenes.append(LightingScene(name: trimmed, snapshots: snapshots))
-        persistScenes()
+        persistApplicationState()
         logActivity(.scene, title: "Scene captured", detail: "\(trimmed): \(snapshots.count) lights")
     }
 
@@ -2088,8 +1935,7 @@ extension LightManager {
         lastDeletedScene = (scene: deleted, index: idx)
         scenes.remove(at: idx)
         favoriteSceneIDs.remove(sceneID)
-        persistScenes()
-        persistUUIDSet(favoriteSceneIDs, forKey: sceneFavoritesDefaultsKey)
+        persistApplicationState()
         publishError("Scene “\(deleted.name)” deleted.") { self.undoDeleteScene() }
     }
 
@@ -2097,7 +1943,7 @@ extension LightManager {
         guard let (scene, index) = lastDeletedScene else { return }
         scenes.insert(scene, at: min(index, scenes.count))
         lastDeletedScene = nil
-        persistScenes()
+        persistApplicationState()
         commandError = nil
         commandErrorUndo = nil
     }
@@ -2106,7 +1952,7 @@ extension LightManager {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, let idx = scenes.firstIndex(where: { $0.id == sceneID }) else { return }
         scenes[idx].name = trimmed
-        persistScenes()
+        persistApplicationState()
     }
 
     func updateScene(_ draft: LightingScene, revisionLabel: String = "Before edit") {
@@ -2115,9 +1961,7 @@ extension LightManager {
         sceneRevisions = Array(sceneRevisions.prefix(60))
         scenes[index] = draft
         sceneDrafts.removeValue(forKey: draft.id)
-        persistValue(sceneDrafts, key: sceneDraftsKey)
-        persistScenes()
-        persistValue(sceneRevisions, key: sceneRevisionsKey)
+        persistApplicationState()
         lastActionSummary = "Saved \(draft.name) — Undo restores the previous version"
     }
 
@@ -2126,11 +1970,11 @@ extension LightManager {
     func recoveredDraft(for sceneID: UUID) -> LightingScene? { sceneDrafts[sceneID] }
     func autosaveSceneDraft(_ draft: LightingScene) {
         sceneDrafts[draft.id] = draft
-        persistValue(sceneDrafts, key: sceneDraftsKey)
+        persistApplicationState()
     }
     func discardSceneDraft(for sceneID: UUID) {
         sceneDrafts.removeValue(forKey: sceneID)
-        persistValue(sceneDrafts, key: sceneDraftsKey)
+        persistApplicationState()
     }
 
     func restoreSceneRevision(_ revision: SceneRevision) {
@@ -2138,7 +1982,7 @@ extension LightManager {
         sceneRevisions.insert(SceneRevision(scene: scenes[index], label: "Before restore"), at: 0)
         scenes[index].name = revision.name
         scenes[index].snapshots = revision.snapshots
-        persistScenes(); persistValue(sceneRevisions, key: sceneRevisionsKey)
+        persistApplicationState()
         lastActionSummary = "Restored \(revision.label)"
     }
 
@@ -2181,13 +2025,6 @@ extension LightManager {
         scenes.contains { $0.id != excludingSceneID && $0.name.caseInsensitiveCompare(candidate.trimmingCharacters(in: .whitespacesAndNewlines)) == .orderedSame } ? "Another scene already uses this name." : nil
     }
 
-    fileprivate func persistScenes() {
-        persistValue(scenes, key: scenesDefaultsKey)
-    }
-
-    fileprivate func loadScenes() -> [LightingScene] {
-        loadValue([LightingScene].self, key: scenesDefaultsKey) ?? []
-    }
 }
 
 // MARK: - Schedules
@@ -2206,20 +2043,20 @@ extension LightManager {
             scheduleEngine.scheduledMinute(for: lhs, solarTimes: scheduleSolarTimes)
                 < scheduleEngine.scheduledMinute(for: rhs, solarTimes: scheduleSolarTimes)
         }
-        persistRooms()
+        persistApplicationState()
     }
 
     func deleteSchedule(_ entryID: UUID, from roomID: UUID) {
         guard let idx = rooms.firstIndex(where: { $0.id == roomID }) else { return }
         rooms[idx].schedules.removeAll { $0.id == entryID }
-        persistRooms()
+        persistApplicationState()
     }
 
     func setScheduleEnabled(_ entryID: UUID, in roomID: UUID, enabled: Bool) {
         guard let rIdx = rooms.firstIndex(where: { $0.id == roomID }),
               let eIdx = rooms[rIdx].schedules.firstIndex(where: { $0.id == entryID }) else { return }
         rooms[rIdx].schedules[eIdx].isEnabled = enabled
-        persistRooms()
+        persistApplicationState()
     }
 
     var hasActiveSchedules: Bool {
@@ -2282,15 +2119,7 @@ extension LightManager {
 
     func setWhiteMode(_ deviceID: String, white: Bool) {
         if white { whiteModeDeviceIDs.insert(deviceID) } else { whiteModeDeviceIDs.remove(deviceID) }
-        persistWhiteMode()
-    }
-
-    fileprivate func persistWhiteMode() {
-        persistSet(whiteModeDeviceIDs, key: whiteModeKey)
-    }
-
-    private func loadWhiteMode() -> Set<String> {
-        loadSet(String.self, key: whiteModeKey)
+        persistApplicationState()
     }
 }
 
@@ -2412,35 +2241,80 @@ extension Color {
 // MARK: - Second-pass UX services
 
 extension LightManager {
-    private func persistValue<T: Encodable>(_ value: T, key: String) {
+    private func persistApplicationState() {
         guard demoWorkspaceController.allowsLivePersistence else { return }
-        guard let data = try? JSONEncoder().encode(value) else { return }
-        defaults.set(data, forKey: key)
+        try? persistenceStore.save(persistedApplicationState())
     }
 
-    private func loadValue<T: Decodable>(_ type: T.Type, key: String) -> T? {
-        guard let data = defaults.data(forKey: key) else { return nil }
-        return try? JSONDecoder().decode(type, from: data)
+    private func persistedApplicationState() -> PersistedApplicationState {
+        var state = PersistedApplicationState()
+        state.rooms = rooms
+        state.favoriteIDs = favoriteIDs
+        state.scenes = scenes
+        state.customNames = customNames
+        state.collapsedRooms = collapsedRooms
+        state.solarPreferences = .init(
+            sunriseHour: sunriseHour,
+            sunriseMinute: sunriseMinute,
+            sunsetHour: sunsetHour,
+            sunsetMinute: sunsetMinute
+        )
+        state.whiteModeDeviceIDs = whiteModeDeviceIDs
+        state.favoriteRoomIDs = favoriteRoomIDs
+        state.favoriteSceneIDs = favoriteSceneIDs
+        state.customBrightnessPresets = customBrightnessPresets
+        state.activityEvents = activityEvents
+        state.favoriteOrder = favoriteOrder
+        state.parliamentMembers = parliamentMembers
+        state.parliamentSessions = parliamentSessions
+        state.fireflyCitizens = fireflyCitizens
+        state.sceneCertifications = sceneCertifications
+        state.recentColors = recentColors
+        state.automationOverrides = automationOverrides
+        state.sceneRevisions = sceneRevisions
+        state.sceneDrafts = sceneDrafts
+        state.goveeSegmentStates = goveeSegmentStates
+        state.goveeSegmentPresets = goveeSegmentPresets
+        return state
     }
 
-    private func persistSet<T: Encodable & Hashable>(_ values: Set<T>, key: String) {
-        persistValue(Array(values), key: key)
-    }
-
-    private func loadSet<T: Decodable & Hashable>(_ type: T.Type, key: String) -> Set<T> {
-        guard let values = loadValue([T].self, key: key) else { return [] }
-        return Set(values)
+    private func applyPersistedApplicationState(_ state: PersistedApplicationState) {
+        rooms = state.rooms
+        favoriteIDs = state.favoriteIDs
+        scenes = state.scenes
+        customNames = state.customNames
+        collapsedRooms = state.collapsedRooms
+        sunriseHour = state.solarPreferences.sunriseHour
+        sunriseMinute = state.solarPreferences.sunriseMinute
+        sunsetHour = state.solarPreferences.sunsetHour
+        sunsetMinute = state.solarPreferences.sunsetMinute
+        whiteModeDeviceIDs = state.whiteModeDeviceIDs
+        favoriteRoomIDs = state.favoriteRoomIDs
+        favoriteSceneIDs = state.favoriteSceneIDs
+        customBrightnessPresets = state.customBrightnessPresets
+        activityEvents = state.activityEvents
+        favoriteOrder = state.favoriteOrder
+        parliamentMembers = state.parliamentMembers
+        parliamentSessions = state.parliamentSessions
+        fireflyCitizens = state.fireflyCitizens
+        sceneCertifications = state.sceneCertifications
+        recentColors = state.recentColors
+        scheduleEngine.restoreAutomationOverrides(state.automationOverrides)
+        sceneRevisions = state.sceneRevisions
+        sceneDrafts = state.sceneDrafts
+        goveeSegmentStates = state.goveeSegmentStates
+        goveeSegmentPresets = state.goveeSegmentPresets
     }
 
     func logActivity(_ kind: ActivityEvent.Kind, title: String, detail: String = "", isFailure: Bool = false) {
         activityEvents.insert(ActivityEvent(kind: kind, title: title, detail: detail, isFailure: isFailure), at: 0)
         if activityEvents.count > 250 { activityEvents.removeLast(activityEvents.count - 250) }
-        persistValue(activityEvents, key: activityKey)
+        persistApplicationState()
     }
 
     func clearActivity() {
         activityEvents.removeAll()
-        persistValue(activityEvents, key: activityKey)
+        persistApplicationState()
     }
 
     func activityExportText() -> String {
@@ -2560,14 +2434,14 @@ extension LightManager {
         guard let roomIndex = rooms.firstIndex(where: { $0.id == roomID }),
               let entryIndex = rooms[roomIndex].schedules.firstIndex(where: { $0.id == entry.id }) else { return }
         rooms[roomIndex].schedules[entryIndex] = entry
-        persistRooms()
+        persistApplicationState()
         logActivity(.schedule, title: "Schedule updated", detail: "\(rooms[roomIndex].name): \(entry.daySummary) at \(entry.timeString)")
     }
 
     func duplicateSchedule(_ entry: ScheduleEntry, in roomID: UUID) {
         guard let roomIndex = rooms.firstIndex(where: { $0.id == roomID }), rooms[roomIndex].schedules.count < 12 else { return }
         let copy = ScheduleEntry(hour: entry.hour, minute: entry.minute, offsetMinutes: entry.offsetMinutes, action: entry.action, weekdays: entry.weekdays)
-        rooms[roomIndex].schedules.append(copy); persistRooms()
+        rooms[roomIndex].schedules.append(copy); persistApplicationState()
         logActivity(.schedule, title: "Schedule duplicated", detail: rooms[roomIndex].name)
     }
 
@@ -2652,12 +2526,12 @@ extension LightManager {
             + favoriteSceneIDs.map { FavoriteReference(kind: .scene, rawID: $0.uuidString) })
         favoriteOrder = favoriteOrder.filter(active.contains)
         favoriteOrder.append(contentsOf: active.filter { !favoriteOrder.contains($0) }.sorted { $0.id < $1.id })
-        persistValue(favoriteOrder, key: favoriteOrderKey)
+        persistApplicationState()
     }
 
     func moveFavorite(from source: IndexSet, to destination: Int) {
         reconcileFavoriteOrder(); favoriteOrder.move(fromOffsets: source, toOffset: destination)
-        persistValue(favoriteOrder, key: favoriteOrderKey)
+        persistApplicationState()
     }
 
     func rememberColor(_ color: Color, name: String) {
@@ -2665,7 +2539,7 @@ extension LightManager {
         recentColors.removeAll { $0.hex == candidate.hex }
         recentColors.insert(candidate, at: 0)
         if recentColors.count > 8 { recentColors.removeLast(recentColors.count - 8) }
-        persistValue(recentColors, key: recentColorsKey)
+        persistApplicationState()
     }
 
     func ensureParliament() {
@@ -2676,7 +2550,7 @@ extension LightManager {
             parliamentMembers.append(ParliamentMember(id: device.id, parliamentaryName: "\(titles[index % titles.count]) of \(device.label)", party: parties[index % parties.count], approval: 50, lastVote: "Newly seated"))
         }
         parliamentMembers.removeAll { member in !devices.contains(where: { $0.id == member.id }) }
-        persistValue(parliamentMembers, key: parliamentKey)
+        persistApplicationState()
     }
 
     @discardableResult
@@ -2696,7 +2570,7 @@ extension LightManager {
         let session = ParliamentSession(id: UUID(), date: Date(), motion: motion, ayes: ayes, noes: noes, abstentions: abstentions, verdict: passed ? "Motion carried" : "Motion defeated")
         parliamentSessions.insert(session, at: 0)
         if parliamentSessions.count > 50 { parliamentSessions.removeLast() }
-        persistValue(parliamentMembers, key: parliamentKey); persistValue(parliamentSessions, key: parliamentSessionsKey)
+        persistApplicationState()
         logActivity(.parliament, title: session.verdict, detail: "\(ayes) ayes, \(noes) noes, \(abstentions) abstentions — \(motion)")
         if passed { executiveIlluminationOrder(motion: motion) }
         return session
@@ -2719,7 +2593,7 @@ extension LightManager {
         fireflyCitizens = (0..<max(6, min(18, devices.count * 2))).map { index in
             FireflyCitizen(id: UUID(), name: "Luxling \(index + 1)", generation: 1, hue: Double.random(in: 0...1), preferredKelvin: Int.random(in: 2500...6500), energy: Double.random(in: 0.55...1), rarity: index == 0 ? "Rare" : "Common", parentIDs: [])
         }
-        persistValue(fireflyCitizens, key: firefliesKey)
+        persistApplicationState()
     }
 
     func evolveFireflies() {
@@ -2732,7 +2606,7 @@ extension LightManager {
             fireflyCitizens.append(FireflyCitizen(id: UUID(), name: "Luxling \(fireflyCitizens.count + 1)", generation: max(a.generation, b.generation) + 1, hue: (a.hue + b.hue) / 2, preferredKelvin: (a.preferredKelvin + b.preferredKelvin) / 2, energy: 0.7, rarity: Int.random(in: 0..<12) == 0 ? "Iridescent" : "Common", parentIDs: [a.id, b.id]))
         }
         fireflyCitizens.removeAll { $0.energy <= 0.05 && fireflyCitizens.count > 6 }
-        persistValue(fireflyCitizens, key: firefliesKey)
+        persistApplicationState()
     }
 
     func certify(_ scene: LightingScene) -> SceneCertification {
@@ -2749,7 +2623,7 @@ extension LightManager {
         ]
         let certification = SceneCertification(id: UUID(), sceneID: scene.id, issuedAt: Date(), score: score, seal: seal, findings: findings, treatyCode: "IBL-\(Int.random(in: 10000...99999))-LUX")
         sceneCertifications.removeAll { $0.sceneID == scene.id }
-        sceneCertifications.append(certification); persistValue(sceneCertifications, key: certificationsKey)
+        sceneCertifications.append(certification); persistApplicationState()
         logActivity(.compliance, title: "Scene certified \(seal.rawValue.capitalized)", detail: "\(scene.name) scored \(score)/100")
         return certification
     }

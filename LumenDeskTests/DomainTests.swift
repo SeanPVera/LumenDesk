@@ -53,12 +53,18 @@ final class DomainTests: XCTestCase {
 
     @MainActor
     func testImportExportRoundTrip() throws {
-        let source = LightManager(defaults: isolatedDefaults())
+        let source = LightManager(
+            defaults: isolatedDefaults(),
+            persistenceStore: temporaryPersistenceStore()
+        )
         source.enterDemoMode()
         defer { source.exitDemoMode() }
 
         let data = try XCTUnwrap(source.exportConfigurationData())
-        let destination = LightManager(defaults: isolatedDefaults())
+        let destination = LightManager(
+            defaults: isolatedDefaults(),
+            persistenceStore: temporaryPersistenceStore()
+        )
         XCTAssertTrue(destination.importRoomsData(data))
         XCTAssertEqual(destination.rooms, source.rooms)
         XCTAssertEqual(destination.scenes, source.scenes)
@@ -84,7 +90,10 @@ final class DomainTests: XCTestCase {
 
     @MainActor
     func testUndoRedoSnapshotRestoration() throws {
-        let manager = LightManager(defaults: isolatedDefaults())
+        let manager = LightManager(
+            defaults: isolatedDefaults(),
+            persistenceStore: temporaryPersistenceStore()
+        )
         manager.enterDemoMode()
         defer { manager.exitDemoMode() }
         let device = try XCTUnwrap(manager.devices.first)

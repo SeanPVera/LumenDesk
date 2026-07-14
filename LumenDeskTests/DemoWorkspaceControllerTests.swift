@@ -5,7 +5,10 @@ final class DemoWorkspaceControllerTests: XCTestCase {
     @MainActor
     func testEnteringDemoModePreservesAndRestoresCompleteLiveWorkspace() async throws {
         let defaults = isolatedDefaults()
-        let manager = LightManager(defaults: defaults)
+        let manager = LightManager(
+            defaults: defaults,
+            persistenceStore: temporaryPersistenceStore(legacyDefaults: defaults)
+        )
         manager.lifxDiscovered(macHex: "AABBCCDDEEFF", address: "192.168.1.25")
         manager.goveeDiscovered(deviceID: "11:22:33:44", address: "192.168.1.26", sku: "H619A")
         await waitUntil { manager.devices.count == 2 }
@@ -82,7 +85,8 @@ final class DemoWorkspaceControllerTests: XCTestCase {
     @MainActor
     func testDemoChangesCannotMutatePersistedLiveConfiguration() throws {
         let defaults = isolatedDefaults()
-        let manager = LightManager(defaults: defaults)
+        let store = temporaryPersistenceStore(legacyDefaults: defaults)
+        let manager = LightManager(defaults: defaults, persistenceStore: store)
         manager.createRoom(name: "Persisted Live Room")
         manager.captureScene(name: "Persisted Live Scene")
         manager.addBrightnessPreset(0.44)
@@ -105,7 +109,7 @@ final class DemoWorkspaceControllerTests: XCTestCase {
             announce: false
         )
 
-        let reloaded = LightManager(defaults: defaults)
+        let reloaded = LightManager(defaults: defaults, persistenceStore: store)
         XCTAssertEqual(reloaded.rooms.map(\.name), ["Persisted Live Room"])
         XCTAssertEqual(reloaded.scenes.map(\.name), ["Persisted Live Scene"])
         XCTAssertEqual(reloaded.customBrightnessPresets, [0.44])
@@ -122,7 +126,10 @@ final class DemoWorkspaceControllerTests: XCTestCase {
 
     @MainActor
     func testLiveNetworkCallbacksAreIgnoredDuringDemoMode() async {
-        let manager = LightManager(defaults: isolatedDefaults())
+        let manager = LightManager(
+            defaults: isolatedDefaults(),
+            persistenceStore: temporaryPersistenceStore()
+        )
         manager.enterDemoMode()
         defer { manager.exitDemoMode() }
         let demoIDs = manager.devices.map(\.id)
@@ -137,7 +144,10 @@ final class DemoWorkspaceControllerTests: XCTestCase {
 
     @MainActor
     func testRepeatedEnterExitCyclesRemainStable() {
-        let manager = LightManager(defaults: isolatedDefaults())
+        let manager = LightManager(
+            defaults: isolatedDefaults(),
+            persistenceStore: temporaryPersistenceStore()
+        )
         manager.createRoom(name: "Stable Live Room")
         manager.captureScene(name: "Stable Live Scene")
         let liveRooms = manager.rooms
@@ -161,7 +171,10 @@ final class DemoWorkspaceControllerTests: XCTestCase {
     func testResumableAndCancelledTransientStateFollowsExistingPolicy() throws {
         let defaults = isolatedDefaults()
         defaults.set(ConfirmationPolicy.cautious.rawValue, forKey: AppPreferenceKey.confirmationPolicy)
-        let manager = LightManager(defaults: defaults)
+        let manager = LightManager(
+            defaults: defaults,
+            persistenceStore: temporaryPersistenceStore()
+        )
         manager.createRoom(name: "Pending Live Room")
         let roomID = try XCTUnwrap(manager.rooms.first?.id)
         manager.startNapMode()
@@ -183,7 +196,11 @@ final class DemoWorkspaceControllerTests: XCTestCase {
     @MainActor
     func testSimulatedDiscoveryUsesOnlyDemoDevices() async {
         let controller = DemoWorkspaceController(discoveryDelayNanoseconds: 0)
-        let manager = LightManager(defaults: isolatedDefaults(), demoWorkspaceController: controller)
+        let manager = LightManager(
+            defaults: isolatedDefaults(),
+            demoWorkspaceController: controller,
+            persistenceStore: temporaryPersistenceStore()
+        )
         manager.enterDemoMode()
         defer { manager.exitDemoMode() }
 

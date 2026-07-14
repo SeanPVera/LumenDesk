@@ -13,13 +13,6 @@ struct LightRuntimeSnapshot {
     let segments: GoveeSegmentState?
 }
 
-struct ExpectedDeviceState {
-    var isOn: Bool?
-    var brightness: Double?
-    var color: (red: Double, green: Double, blue: Double)?
-    var kelvin: Int?
-}
-
 /// Owns the isolated demo workspace and the live workspace held while Demo
 /// Mode is active. UI-facing publication remains with LightManager; this type
 /// owns the workspace transitions and isolation decisions.
@@ -37,7 +30,7 @@ final class DemoWorkspaceController {
         var statusMessage: String
         var commandError: String?
         var commandErrorUndo: (() -> Void)?
-        var commandPendingIDs: Set<String>
+        var commandState: CommandCoordinator.State
         var canUndo: Bool
         var canRedo: Bool
         var collapsedRooms: Set<UUID>
@@ -57,8 +50,6 @@ final class DemoWorkspaceController {
         var fireflyCitizens: [FireflyCitizen]
         var sceneCertifications: [SceneCertification]
         var recentColors: [RecentColor]
-        var commandStates: [String: DeviceCommandState]
-        var confirmedStates: [String: ConfirmedDeviceState]
         var discoveryChanges: [DiscoveryChange]
         var scheduleState: ScheduleEngine.State
         var sceneRevisions: [SceneRevision]
@@ -79,7 +70,6 @@ final class DemoWorkspaceController {
         var undoStack: [[LightRuntimeSnapshot]]
         var redoStack: [[LightRuntimeSnapshot]]
         var lastChangeTime: [String: Date]
-        var expectedStates: [String: ExpectedDeviceState]
         var razerActiveIDs: Set<String>
         var scanStartingIDs: Set<String>
         var scanStartingAddresses: [String: String]
@@ -245,10 +235,7 @@ final class DemoWorkspaceController {
         workspace.lastActionSummary = nil
         workspace.rehearsalSnapshot = []
         workspace.rehearsalSceneID = nil
-        workspace.commandPendingIDs = []
-        workspace.commandStates = [:]
-        workspace.confirmedStates = [:]
-        workspace.expectedStates = [:]
+        workspace.commandState = CommandCoordinator.State()
         workspace.discoveryChanges = []
         workspace.newlyDiscoveredIDs = []
         workspace.activeEffects = [:]
@@ -278,15 +265,15 @@ final class DemoWorkspaceController {
                 Int(rgb.g * 255),
                 Int(rgb.b * 255)
             )
-            workspace.confirmedStates[device.id] = ConfirmedDeviceState(
+            workspace.commandState.confirmedStates[device.id] = ConfirmedDeviceState(
                 isOn: device.isOn,
                 brightness: device.brightness,
                 colorHex: hex,
                 kelvin: device.kelvin,
                 confirmedAt: timestamp
             )
-            workspace.commandStates[device.id] = DeviceCommandState(
-                phase: .idle,
+            workspace.commandState.commandStates[device.id] = DeviceCommandState(
+                lifecycle: .confirmed,
                 summary: "Confirmed",
                 updatedAt: timestamp
             )

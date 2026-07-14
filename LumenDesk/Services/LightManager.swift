@@ -23,7 +23,6 @@ final class LightManager: ObservableObject {
     @Published private(set) var scanPhase: String = "Idle"
     @Published private(set) var lastScanDate: Date?
     @Published private(set) var scanResponseCount: Int = 0
-    @Published private(set) var commandPendingIDs: Set<String> = []
     @Published var statusMessage: String = ""
     @Published var commandError: String?
     @Published var commandErrorUndo: (() -> Void)?  // optional undo action on the error toast
@@ -46,8 +45,6 @@ final class LightManager: ObservableObject {
     @Published private(set) var fireflyCitizens: [FireflyCitizen] = []
     @Published private(set) var sceneCertifications: [SceneCertification] = []
     @Published private(set) var recentColors: [RecentColor] = []
-    @Published private(set) var commandStates: [String: DeviceCommandState] = [:]
-    @Published private(set) var confirmedStates: [String: ConfirmedDeviceState] = [:]
     @Published private(set) var discoveryChanges: [DiscoveryChange] = []
     @Published private(set) var sceneRevisions: [SceneRevision] = []
     @Published private(set) var sceneDrafts: [UUID: LightingScene] = [:]
@@ -69,17 +66,14 @@ final class LightManager: ObservableObject {
     private var napSnapshotBrightness: [String: Double] = [:]
     private var scanGeneration: Int = 0     // incremented each scan; clears isScanning safely
     private var hasStarted = false
-    private var commandTasks: [String: Task<Void, Never>] = [:]
-    private var commandTimeoutTasks: [String: Task<Void, Never>] = [:]
-    private var confirmationRefreshTasks: [String: Task<Void, Never>] = [:]
     private var scanStartingIDs: Set<String> = []
     private var scanStartingAddresses: [String: String] = [:]
     private let demoWorkspaceController: DemoWorkspaceController
     let confirmationCoordinator: ConfirmationCoordinator
     private let scheduleEngine: ScheduleEngine
     private let persistenceStore: ApplicationPersistence
+    private let commandCoordinator: CommandCoordinator
     private var rehearsalSnapshot: [LightRuntimeSnapshot] = []
-    private var expectedStates: [String: ExpectedDeviceState] = [:]
     // Devices currently streaming a razer-mode segment preview.
     private var razerActiveIDs: Set<String> = []
 
@@ -134,12 +128,14 @@ final class LightManager: ObservableObject {
         demoWorkspaceController: DemoWorkspaceController? = nil,
         confirmationCoordinator: ConfirmationCoordinator? = nil,
         scheduleEngine: ScheduleEngine? = nil,
-        persistenceStore: ApplicationPersistence? = nil
+        persistenceStore: ApplicationPersistence? = nil,
+        commandCoordinator: CommandCoordinator? = nil
     ) {
         self.demoWorkspaceController = demoWorkspaceController ?? DemoWorkspaceController()
         self.confirmationCoordinator = confirmationCoordinator ?? ConfirmationCoordinator(defaults: defaults)
         self.scheduleEngine = scheduleEngine ?? ScheduleEngine()
         self.persistenceStore = persistenceStore ?? PersistenceStore.live(legacyDefaults: defaults)
+        self.commandCoordinator = commandCoordinator ?? CommandCoordinator()
         let persistedState = self.persistenceStore.load()
         rooms = persistedState.rooms
         favoriteIDs = persistedState.favoriteIDs
@@ -170,11 +166,17 @@ final class LightManager: ObservableObject {
         sceneDrafts = persistedState.sceneDrafts
         goveeSegmentStates = persistedState.goveeSegmentStates
         goveeSegmentPresets = persistedState.goveeSegmentPresets
+        self.commandCoordinator.onChange = { [weak self] in
+            self?.objectWillChange.send()
+        }
     }
 
     var isDemoMode: Bool { demoWorkspaceController.isActive }
     var automationOverrides: [UUID: RoomAutomationOverride] { scheduleEngine.automationOverrides }
     var missedAutomations: [MissedAutomation] { scheduleEngine.missedAutomations }
+    var commandPendingIDs: Set<String> { commandCoordinator.pendingDeviceIDs }
+    var commandStates: [String: DeviceCommandState] { commandCoordinator.commandStates }
+    var confirmedStates: [String: ConfirmedDeviceState] { commandCoordinator.confirmedStates }
 
     private var scheduleSolarTimes: ScheduleEngine.SolarTimes {
         ScheduleEngine.SolarTimes(
@@ -319,20 +321,17 @@ final class LightManager: ObservableObject {
                 case .turnOn, .atSunrise:
                     for device in lights {
                         device.isOn = true
-                        markPending(device.id)
                         sendPower(device, on: true)
                     }
                 case .turnOff, .atSunset:
                     for device in lights {
                         device.isOn = false
-                        markPending(device.id)
                         sendPower(device, on: false)
                     }
                 default:
                     if let brightness = entry.action.brightnessValue {
                         for device in lights {
                             device.brightness = brightness
-                            markPending(device.id)
                             sendBrightness(device, value: brightness)
                         }
                     }
@@ -404,28 +403,24 @@ final class LightManager: ObservableObject {
         let wasStale = device.isStale
         device.lastSeen = Date()
         device.isStale = false
-        if confirmsPendingCommand {
-            commandTimeoutTasks[device.id]?.cancel(); commandTimeoutTasks[device.id] = nil
-            commandPendingIDs.remove(device.id)
-            expectedStates.removeValue(forKey: device.id)
-        }
-        if confirmsPendingCommand || !commandPendingIDs.contains(device.id) {
-            let rgb = device.color.rgbComponents
-            let hex = String(format: "#%02X%02X%02X", Int(rgb.r * 255), Int(rgb.g * 255), Int(rgb.b * 255))
-            confirmedStates[device.id] = ConfirmedDeviceState(isOn: device.isOn, brightness: device.brightness, colorHex: hex, kelvin: device.kelvin, confirmedAt: Date())
-            commandStates[device.id] = DeviceCommandState(phase: confirmsPendingCommand ? .applied : .idle, summary: confirmsPendingCommand ? "Confirmed by light" : "Confirmed", updatedAt: Date())
-        }
+        let rgb = device.color.rgbComponents
+        let hex = String(format: "#%02X%02X%02X", Int(rgb.r * 255), Int(rgb.g * 255), Int(rgb.b * 255))
+        commandCoordinator.recordObservation(
+            deviceID: device.id,
+            confirmedState: ConfirmedDeviceState(
+                isOn: device.isOn,
+                brightness: device.brightness,
+                colorHex: hex,
+                kelvin: device.kelvin,
+                confirmedAt: Date()
+            ),
+            confirmsPendingCommand: confirmsPendingCommand
+        )
         if wasStale {
             appendDiscoveryChange(device, kind: .backOnline, detail: "Responded again")
             // A light that dropped off and came back likely power-cycled,
             // which clears the razer overlay stream-hold layouts live in.
             reassertStreamHoldIfNeeded(device)
-        }
-        guard confirmsPendingCommand else { return }
-        Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 1_200_000_000)
-            guard self?.commandStates[device.id]?.phase == .applied else { return }
-            self?.commandStates[device.id] = DeviceCommandState(phase: .idle, summary: "Confirmed", updatedAt: Date())
         }
     }
 
@@ -438,38 +433,38 @@ final class LightManager: ObservableObject {
         blue: Double,
         kelvin: Int
     ) -> Bool {
-        guard let expected = expectedStates[deviceID] else { return false }
-        if let value = expected.isOn, value != isOn { return false }
-        if let value = expected.brightness, abs(value - brightness) > 0.03 { return false }
-        if let value = expected.kelvin, abs(value - kelvin) > 100 { return false }
-        if let value = expected.color {
-            let distance = max(abs(value.red - red), max(abs(value.green - green), abs(value.blue - blue)))
-            if distance > 0.06 { return false }
-        }
-        return true
+        commandCoordinator.reportedStateMatchesExpectation(
+            deviceID: deviceID,
+            reported: ReportedDeviceState(
+                isOn: isOn,
+                brightness: brightness,
+                red: red,
+                green: green,
+                blue: blue,
+                kelvin: kelvin
+            )
+        )
     }
 
     private func expectPower(_ device: LightDevice, on: Bool) {
         guard demoWorkspaceController.allowsLiveNetworking else { return }
-        expectedStates[device.id, default: ExpectedDeviceState()].isOn = on
+        commandCoordinator.expectPower(deviceID: device.id, isOn: on)
     }
 
     private func expectBrightness(_ device: LightDevice, value: Double) {
         guard demoWorkspaceController.allowsLiveNetworking else { return }
-        expectedStates[device.id, default: ExpectedDeviceState()].brightness = max(0, min(1, value))
+        commandCoordinator.expectBrightness(deviceID: device.id, brightness: value)
     }
 
     private func expectColor(_ device: LightDevice, color: Color) {
         guard demoWorkspaceController.allowsLiveNetworking else { return }
         let rgb = color.rgbComponents
-        expectedStates[device.id, default: ExpectedDeviceState()].color = (rgb.r, rgb.g, rgb.b)
-        expectedStates[device.id]?.kelvin = nil
+        commandCoordinator.expectColor(deviceID: device.id, red: rgb.r, green: rgb.g, blue: rgb.b)
     }
 
     private func expectKelvin(_ device: LightDevice, kelvin: Int) {
         guard demoWorkspaceController.allowsLiveNetworking else { return }
-        expectedStates[device.id, default: ExpectedDeviceState()].kelvin = kelvin
-        expectedStates[device.id]?.color = nil
+        commandCoordinator.expectKelvin(deviceID: device.id, kelvin: kelvin)
     }
 
     private func refresh(_ device: LightDevice) {
@@ -555,87 +550,53 @@ final class LightManager: ObservableObject {
 
     // MARK: - Command queue and confirmed state
 
-    fileprivate func markPending(_ deviceID: String, summary: String = "Applying change") {
-        commandPendingIDs.insert(deviceID)
-        commandStates[deviceID] = DeviceCommandState(phase: .queued, summary: summary, updatedAt: Date())
-    }
-
     private func enqueueCommand(for device: LightDevice, coalescingKey: String, summary: String, debounce: TimeInterval = 0.08, operation: @escaping @MainActor () -> Void) {
-        if isDemoMode {
-            markPending(device.id, summary: summary)
-            let demoKey = "\(device.id)|\(coalescingKey)"
-            commandTasks[demoKey]?.cancel()
-            commandTasks[demoKey] = Task { @MainActor [weak self, weak device] in
-                try? await Task.sleep(nanoseconds: 450_000_000)
-                guard !Task.isCancelled, let self, let device else { return }
-                self.commandPendingIDs.remove(device.id)
-                self.commandStates[device.id] = DeviceCommandState(phase: device.isStale ? .failed : .applied, summary: device.isStale ? "Simulated timeout" : "Simulated: \(summary)", updatedAt: Date())
-                if device.isStale { self.publishError("Demo failure: \(device.label) intentionally did not respond.") }
+        let simulated = isDemoMode ? CommandCoordinator.SimulatedCommand(
+            isStale: { [weak device] in device?.isStale ?? true },
+            didFail: { [weak self, weak device] in
+                guard let self, let device else { return }
+                self.publishError("Demo failure: \(device.label) intentionally did not respond.")
             }
-            return
-        }
-        markPending(device.id, summary: summary)
-        let taskKey = "\(device.id)|\(coalescingKey)"
-        commandTasks[taskKey]?.cancel()
-        commandTasks[taskKey] = Task { @MainActor [weak self, weak device] in
-            // Effect frames pass debounce 0 so beat-synced colors land with no
-            // added latency; interactive commands keep the coalescing window.
-            if debounce > 0 { try? await Task.sleep(nanoseconds: UInt64(debounce * 1_000_000_000)) }
-            guard !Task.isCancelled, let self, let device else { return }
-            self.commandStates[device.id] = DeviceCommandState(phase: .sending, summary: summary, updatedAt: Date())
-            operation()
-            self.startCommandTimeout(for: device, summary: summary)
-            self.scheduleConfirmationRefresh(for: device)
-        }
-    }
-
-    /// Pull fresh state shortly after the last command to a device so its
-    /// pending badge resolves from the light's own report. Without this, the
-    /// only confirmation source is the 30-second refresh cycle, and the
-    /// 3.5-second timeout reports "did not confirm" even for commands that
-    /// the light applied — neither brand replies to bare set commands.
-    private func scheduleConfirmationRefresh(for device: LightDevice) {
-        confirmationRefreshTasks[device.id]?.cancel()
-        confirmationRefreshTasks[device.id] = Task { @MainActor [weak self, weak device] in
-            try? await Task.sleep(nanoseconds: 1_200_000_000)
-            guard !Task.isCancelled, let self, let device else { return }
-            self.refresh(device)
-        }
-    }
-
-    private func startCommandTimeout(for device: LightDevice, summary: String) {
-        commandTimeoutTasks[device.id]?.cancel()
-        commandTimeoutTasks[device.id] = Task { @MainActor [weak self, weak device] in
-            try? await Task.sleep(nanoseconds: 3_500_000_000)
-            guard !Task.isCancelled, let self, let device,
-                  self.commandStates[device.id]?.phase == .sending else { return }
-            self.commandPendingIDs.remove(device.id)
-            self.expectedStates.removeValue(forKey: device.id)
-            self.commandStates[device.id] = DeviceCommandState(phase: .failed, summary: "No confirmation: \(summary)", updatedAt: Date(), retryCount: (self.commandStates[device.id]?.retryCount ?? 0) + 1)
-            self.publishError("\(device.label) did not confirm the change. Keep trying or rescan.")
-        }
+        ) : nil
+        commandCoordinator.enqueue(
+            deviceID: device.id,
+            coalescingKey: coalescingKey,
+            summary: summary,
+            debounceNanoseconds: UInt64(max(0, debounce) * 1_000_000_000),
+            simulated: simulated,
+            send: operation,
+            refresh: { [weak self, weak device] in
+                guard let self, let device else { return }
+                self.refresh(device)
+            },
+            timedOut: { [weak self, weak device] in
+                guard let self, let device else { return }
+                self.publishError("\(device.label) did not confirm the change. Keep trying or rescan.")
+            }
+        )
     }
 
     func cancelQueuedCommands(deviceIDs: Set<String>? = nil) {
-        let ids = deviceIDs ?? Set(commandTasks.keys.map { $0.split(separator: "|").first.map(String.init) ?? $0 })
-        for id in ids {
-            for key in commandTasks.keys.filter({ $0.hasPrefix("\(id)|") }) { commandTasks[key]?.cancel(); commandTasks[key] = nil }
-            commandTimeoutTasks[id]?.cancel(); commandTimeoutTasks[id] = nil
-            commandPendingIDs.remove(id)
-            expectedStates.removeValue(forKey: id)
-            commandStates[id] = DeviceCommandState(phase: .idle, summary: "Cancelled", updatedAt: Date())
-        }
+        let ids = commandCoordinator.cancel(deviceIDs: deviceIDs)
         lastActionSummary = "Cancelled \(ids.count) queued command\(ids.count == 1 ? "" : "s")"
     }
 
     func retryCommand(for device: LightDevice) {
-        refresh(device)
-        commandStates[device.id] = DeviceCommandState(phase: .sending, summary: "Checking confirmed state", updatedAt: Date(), retryCount: (commandStates[device.id]?.retryCount ?? 0) + 1)
-        startCommandTimeout(for: device, summary: "state refresh")
+        commandCoordinator.retry(
+            deviceID: device.id,
+            refresh: { [weak self, weak device] in
+                guard let self, let device else { return }
+                self.refresh(device)
+            },
+            timedOut: { [weak self, weak device] in
+                guard let self, let device else { return }
+                self.publishError("\(device.label) did not confirm the change. Keep trying or rescan.")
+            }
+        )
     }
 
     func commandState(for deviceID: String) -> DeviceCommandState {
-        commandStates[deviceID] ?? DeviceCommandState()
+        commandCoordinator.commandState(for: deviceID)
     }
 
     // MARK: - Control
@@ -646,7 +607,6 @@ final class LightManager: ObservableObject {
         }
         recordChange([device])
         device.isOn = on
-        markPending(device.id)
         sendPower(device, on: on)
         // Powering a stream-hold device back on restores its held segment
         // layout immediately instead of waiting for the next refresh tick.
@@ -656,7 +616,6 @@ final class LightManager: ObservableObject {
     func setBrightness(_ device: LightDevice, value: Double) {
         recordChange([device])
         device.brightness = value
-        markPending(device.id)
         sendBrightness(device, value: value)
     }
 
@@ -667,14 +626,12 @@ final class LightManager: ObservableObject {
         }
         recordChange([device])
         device.color = color
-        markPending(device.id)
         sendColor(device, color: color)
     }
 
     func setKelvin(_ device: LightDevice, kelvin: Int) {
         recordChange([device])
         device.kelvin = kelvin
-        markPending(device.id)
         sendColorTemperature(device, kelvin: kelvin)
     }
 
@@ -710,7 +667,7 @@ final class LightManager: ObservableObject {
         }
         recordChange(lights)
         announceAction("\(room.name) turned \(on ? "on" : "off")", lights: lights)
-        for d in lights { d.isOn = on; markPending(d.id); sendPower(d, on: on) }
+        for d in lights { d.isOn = on; sendPower(d, on: on) }
     }
 
     func setBrightness(in room: Room, value: Double) {
@@ -731,7 +688,7 @@ final class LightManager: ObservableObject {
         stopEffects(touching: Set(lights.map(\.id)))
         recordChange(lights)
         announceAction("\(room.name) color changed", lights: lights)
-        for d in lights { d.color = color; markPending(d.id); sendColor(d, color: color) }
+        for d in lights { d.color = color; sendColor(d, color: color) }
     }
 
     func setKelvin(in room: Room, kelvin: Int) {
@@ -740,7 +697,7 @@ final class LightManager: ObservableObject {
         stopEffects(touching: Set(lights.map(\.id)))
         recordChange(lights)
         announceAction("\(room.name) set to \(kelvin) K white", lights: lights)
-        for d in lights { d.kelvin = kelvin; markPending(d.id); sendColorTemperature(d, kelvin: kelvin) }
+        for d in lights { d.kelvin = kelvin; sendColorTemperature(d, kelvin: kelvin) }
     }
 
     func setAllPower(on: Bool) {
@@ -766,7 +723,7 @@ final class LightManager: ObservableObject {
         }
         recordChange(devices)
         announceAction("All lights turned \(on ? "on" : "off")", lights: devices)
-        for d in devices { d.isOn = on; markPending(d.id); sendPower(d, on: on) }
+        for d in devices { d.isOn = on; sendPower(d, on: on) }
     }
 
     func setAllBrightness(_ value: Double) {
@@ -782,13 +739,13 @@ final class LightManager: ObservableObject {
     func setPower(deviceIDs: Set<String>, on: Bool) {
         let lights = devices.filter { deviceIDs.contains($0.id) }
         recordChange(lights)
-        for d in lights { d.isOn = on; markPending(d.id); sendPower(d, on: on) }
+        for d in lights { d.isOn = on; sendPower(d, on: on) }
     }
 
     func setBrightness(deviceIDs: Set<String>, value: Double) {
         let lights = devices.filter { deviceIDs.contains($0.id) }
         recordChange(lights)
-        for d in lights { d.brightness = value; markPending(d.id); sendBrightness(d, value: value) }
+        for d in lights { d.brightness = value; sendBrightness(d, value: value) }
     }
 
     // MARK: - Theme & effect catalog
@@ -825,7 +782,6 @@ final class LightManager: ObservableObject {
             device.isOn = true
             device.brightness = theme.brightness
             device.color = color
-            markPending(device.id)
             sendPower(device, on: true)
             sendColor(device, color: color)
             if device.brand == .govee { sendBrightness(device, value: theme.brightness) }
@@ -853,7 +809,6 @@ final class LightManager: ObservableObject {
         activeEffects[scope] = effect.id
         for device in targets {
             device.isOn = true
-            markPending(device.id)
             sendPower(device, on: true)
             // Effect frames fold brightness into the RGB payload for Govee, so
             // open the device's own brightness to full range once up front.
@@ -1122,7 +1077,6 @@ final class LightManager: ObservableObject {
                 applySegments(device, state: segments, recordUndo: false, turnOn: false, announce: false)
                 sendBrightness(device, value: state.brightness)
             } else {
-                markPending(device.id)
                 sendColor(device, color: state.color)
                 if device.brand == .govee { sendBrightness(device, value: state.brightness) }
             }
@@ -1354,11 +1308,10 @@ extension LightManager: LIFXClientDelegate {
     nonisolated func lifxCommandFailed(_ error: Error) {
         Task { @MainActor in
             guard self.demoWorkspaceController.acceptsLiveNetworkCallbacks else { return }
-            for device in self.devices where device.brand == .lifx && self.commandPendingIDs.contains(device.id) {
-                self.commandPendingIDs.remove(device.id)
-                self.expectedStates.removeValue(forKey: device.id)
-                self.commandStates[device.id] = DeviceCommandState(phase: .failed, summary: "LIFX rejected the command", updatedAt: Date())
-            }
+            let affected = Set(self.devices.lazy
+                .filter { $0.brand == .lifx && self.commandPendingIDs.contains($0.id) }
+                .map(\.id))
+            self.commandCoordinator.fail(deviceIDs: affected, summary: "LIFX rejected the command")
             self.publishError("LIFX command failed: \(error)")
         }
     }
@@ -1426,11 +1379,10 @@ extension LightManager: GoveeClientDelegate {
     nonisolated func goveeCommandFailed(_ error: Error) {
         Task { @MainActor in
             guard self.demoWorkspaceController.acceptsLiveNetworkCallbacks else { return }
-            for device in self.devices where device.brand == .govee && self.commandPendingIDs.contains(device.id) {
-                self.commandPendingIDs.remove(device.id)
-                self.expectedStates.removeValue(forKey: device.id)
-                self.commandStates[device.id] = DeviceCommandState(phase: .failed, summary: "Govee rejected the command", updatedAt: Date())
-            }
+            let affected = Set(self.devices.lazy
+                .filter { $0.brand == .govee && self.commandPendingIDs.contains($0.id) }
+                .map(\.id))
+            self.commandCoordinator.fail(deviceIDs: affected, summary: "Govee rejected the command")
             self.publishError("Govee command failed: \(error)")
         }
     }
@@ -1640,15 +1592,7 @@ extension LightManager {
     /// apply with a false "did not confirm" error. Show a lightweight
     /// sending → applied badge instead.
     private func noteSegmentCommand(_ device: LightDevice, summary: String) {
-        commandStates[device.id] = DeviceCommandState(phase: .sending, summary: summary, updatedAt: Date())
-        Task { @MainActor [weak self, weak device] in
-            try? await Task.sleep(nanoseconds: 900_000_000)
-            guard let self, let device, self.commandStates[device.id]?.phase == .sending else { return }
-            self.commandStates[device.id] = DeviceCommandState(phase: .applied, summary: summary, updatedAt: Date())
-            try? await Task.sleep(nanoseconds: 1_200_000_000)
-            guard self.commandStates[device.id]?.phase == .applied else { return }
-            self.commandStates[device.id] = DeviceCommandState(phase: .idle, summary: "Sent", updatedAt: Date())
-        }
+        commandCoordinator.recordUnconfirmedSend(deviceID: device.id, summary: summary)
     }
 
     /// Called whenever a solid color or white command goes to a Govee device,
@@ -2353,7 +2297,6 @@ extension LightManager {
         brightnessTasks[device.id] = Task { @MainActor [weak self, weak device] in
             try? await Task.sleep(for: .milliseconds(120))
             guard !Task.isCancelled, let self, let device else { return }
-            self.markPending(device.id)
             self.sendBrightness(device, value: value)
         }
     }
@@ -2362,7 +2305,6 @@ extension LightManager {
         brightnessTasks[device.id]?.cancel()
         brightnessTasks[device.id] = nil
         device.brightness = value
-        markPending(device.id)
         sendBrightness(device, value: value)
         logActivity(.command, title: "Brightness changed", detail: "\(device.label): \(Int(value * 100))%")
     }
@@ -2391,12 +2333,9 @@ extension LightManager {
     }
 
     func retry(_ device: LightDevice) {
-        markPending(device.id)
-        if demoWorkspaceController.allowsLiveNetworking {
-            switch device.brand {
-            case .lifx: lifx?.refresh(macHex: device.backendID)
-            case .govee: govee?.refresh(deviceID: device.backendID)
-            }
+        commandCoordinator.recover(deviceID: device.id) { [weak self, weak device] in
+            guard let self, let device else { return }
+            self.refresh(device)
         }
         logActivity(.recovery, title: "Retried unreachable light", detail: device.label)
     }
@@ -2504,7 +2443,7 @@ extension LightManager {
             } else {
                 let color = Color(hue: snap.hue, saturation: snap.saturation, brightness: 1)
                 device.color = color
-                markPending(device.id); sendColor(device, color: color)
+                sendColor(device, color: color)
                 if device.brand == .govee { sendBrightness(device, value: snap.brightness) }
             }
             sendPower(device, on: snap.isOn)
@@ -2682,8 +2621,17 @@ extension LightManager {
         lastActionSummary = restoredWorkspace.lastActionSummary
         for id in commandPendingIDs {
             if let device = device(withID: id) {
-                scheduleConfirmationRefresh(for: device)
-                startCommandTimeout(for: device, summary: "restored pending command")
+                commandCoordinator.resumePendingCommand(
+                    deviceID: id,
+                    refresh: { [weak self, weak device] in
+                        guard let self, let device else { return }
+                        self.refresh(device)
+                    },
+                    timedOut: { [weak self, weak device] in
+                        guard let self, let device else { return }
+                        self.publishError("\(device.label) did not confirm the change. Keep trying or rescan.")
+                    }
+                )
             }
         }
     }
@@ -2708,14 +2656,7 @@ extension LightManager {
         scanGeneration += 1
         brightnessTasks.values.forEach { $0.cancel() }
         brightnessTasks = [:]
-        commandTasks.values.forEach { $0.cancel() }
-        commandTasks = [:]
-        commandTimeoutTasks.values.forEach { $0.cancel() }
-        commandTimeoutTasks = [:]
-        confirmationRefreshTasks.values.forEach { $0.cancel() }
-        confirmationRefreshTasks = [:]
-        commandPendingIDs = []
-        expectedStates = [:]
+        commandCoordinator.cancelAllTasks(clearPendingAndExpectations: true)
     }
 
     private func captureWorkspaceState(
@@ -2733,7 +2674,7 @@ extension LightManager {
             statusMessage: statusMessage,
             commandError: commandError,
             commandErrorUndo: commandErrorUndo,
-            commandPendingIDs: commandPendingIDs,
+            commandState: commandCoordinator.state,
             canUndo: canUndo,
             canRedo: canRedo,
             collapsedRooms: collapsedRooms,
@@ -2753,8 +2694,6 @@ extension LightManager {
             fireflyCitizens: fireflyCitizens,
             sceneCertifications: sceneCertifications,
             recentColors: recentColors,
-            commandStates: commandStates,
-            confirmedStates: confirmedStates,
             discoveryChanges: discoveryChanges,
             scheduleState: scheduleEngine.state,
             sceneRevisions: sceneRevisions,
@@ -2775,7 +2714,6 @@ extension LightManager {
             undoStack: undoStack,
             redoStack: redoStack,
             lastChangeTime: lastChangeTime,
-            expectedStates: expectedStates,
             razerActiveIDs: razerActiveIDs,
             scanStartingIDs: scanStartingIDs,
             scanStartingAddresses: scanStartingAddresses
@@ -2794,7 +2732,7 @@ extension LightManager {
         statusMessage = workspace.statusMessage
         commandError = workspace.commandError
         commandErrorUndo = workspace.commandErrorUndo
-        commandPendingIDs = workspace.commandPendingIDs
+        commandCoordinator.restore(workspace.commandState)
         canUndo = workspace.canUndo
         canRedo = workspace.canRedo
         collapsedRooms = workspace.collapsedRooms
@@ -2814,8 +2752,6 @@ extension LightManager {
         fireflyCitizens = workspace.fireflyCitizens
         sceneCertifications = workspace.sceneCertifications
         recentColors = workspace.recentColors
-        commandStates = workspace.commandStates
-        confirmedStates = workspace.confirmedStates
         discoveryChanges = workspace.discoveryChanges
         scheduleEngine.restore(workspace.scheduleState)
         sceneRevisions = workspace.sceneRevisions
@@ -2836,7 +2772,6 @@ extension LightManager {
         undoStack = workspace.undoStack
         redoStack = workspace.redoStack
         lastChangeTime = workspace.lastChangeTime
-        expectedStates = workspace.expectedStates
         razerActiveIDs = workspace.razerActiveIDs
         scanStartingIDs = workspace.scanStartingIDs
         scanStartingAddresses = workspace.scanStartingAddresses

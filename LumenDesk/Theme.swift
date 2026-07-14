@@ -7,8 +7,9 @@ import UIKit
 
 // MARK: - LumenDesk design system — "Aurora Noir"
 //
-// A single source of truth for the app's dark, sophisticated visual language:
-// deep violet-tinted surfaces, neon-pink energy, and sparing gold accents.
+// A single source of truth for the app's dark, sophisticated visual language.
+// The refined palette keeps everyday control surfaces calm and reserves
+// expressive colour for lighting previews and creative editing.
 // The app is locked to dark mode (see `RootView`), so these are fixed values
 // with no light-appearance variants to maintain.
 
@@ -17,68 +18,106 @@ enum Lumen {
     // MARK: Surfaces (never flat black — a violet undertone adds depth)
 
     /// Window background.
-    static let ink           = Color(hex: 0x070A12)
+    static let ink           = Color(hex: 0x090B12)
     /// Deepest tone, used for the backdrop gradient base / vignette.
-    static let inkDeep       = Color(hex: 0x03040A)
+    static let inkDeep       = Color(hex: 0x090B12)
     /// Cards & rows.
-    static let surface       = Color(hex: 0x101827)
+    static let surface       = Color(hex: 0x121722)
     /// Sheets, popovers, hovered/raised surfaces.
-    static let surfaceRaised = Color(hex: 0x18243A)
+    static let surfaceRaised = Color(hex: 0x181E2C)
     /// High-contrast cockpit panels used for oversized controls.
-    static let surfaceLoud   = Color(hex: 0x1E2F4A)
+    static let surfaceLoud   = Color(hex: 0x20283A)
 
     // MARK: Hairlines & separators
 
-    static let hairline       = Color.white.opacity(0.07)
-    static let hairlineStrong = Color.white.opacity(0.12)
+    static let hairline       = Color(hex: 0x2A3040)
+    static let hairlineStrong = Color(hex: 0x3A4358)
 
     // MARK: Accents
 
-    static let violet       = Color(hex: 0x6D5BFF)
-    static let violetBright = Color(hex: 0x9B5CFF)
-    static let cyan         = Color(hex: 0x00E5FF)
-    static let acid         = Color(hex: 0xC8FF2E)
-    static let pink         = Color(hex: 0xFF2D95)
-    static let pinkBright   = Color(hex: 0xFF5ACD)
+    static let violet       = Color(hex: 0x7566E8)
+    static let violetBright = Color(hex: 0x8B7BFF)
+    static let cyan         = Color(hex: 0x45D8E8)
+    static let acid         = Color(hex: 0x45D5A4)
+    static let pink         = Color(hex: 0xD65BB8)
+    static let pinkBright   = Color(hex: 0xEE68CB)
     /// Used sparingly — favorites, key dividers, premium emphasis.
-    static let gold         = Color(hex: 0xFFD23F)
-    static let goldBright   = Color(hex: 0xFFE66D)
+    static let gold         = Color(hex: 0xF2B85B)
+    static let goldBright   = Color(hex: 0xFFD27A)
     /// Govee brand accent, tuned to harmonize with the saturated palette.
-    static let coral        = Color(hex: 0xFF6A3D)
+    static let coral        = Color(hex: 0xFF8A68)
 
     // MARK: Text
 
-    static let textPrimary   = Color(hex: 0xF4F1FA)
-    static let textSecondary = Color(hex: 0xB0A8C4)
-    static let textTertiary  = Color(hex: 0x6E6883)
+    static let textPrimary   = Color(hex: 0xF5F7FB)
+    static let textSecondary = Color(hex: 0xAEB8C9)
+    static let textTertiary  = Color(hex: 0x758096)
 
     // MARK: Semantic
 
-    static let warning = Color(hex: 0xF2A94E)
-    static let danger  = Color(hex: 0xFF5470)
+    static let success = Color(hex: 0x45D5A4)
+    static let warning = Color(hex: 0xF2B85B)
+    static let danger  = Color(hex: 0xFF657D)
+    static let offline = Color(hex: 0x8992A6)
+    static let focus   = Color(hex: 0x65DDFF)
 
     // MARK: Gradients
 
     /// Primary brand gradient — violet → neon pink. Used for the wordmark,
     /// primary CTAs, and key emphasis.
     static let brandGradient = LinearGradient(
-        colors: [cyan, violetBright, pink],
+        colors: [cyan, violetBright, pinkBright],
         startPoint: .topLeading,
         endPoint: .bottomTrailing
     )
 
     /// A soft wash used behind the whole app.
     static let backdropGradient = LinearGradient(
-        colors: [Color(hex: 0x061A26), Color(hex: 0x160827), inkDeep],
+        colors: [Color(hex: 0x0D1019), Color(hex: 0x111322), inkDeep],
         startPoint: .top,
         endPoint: .bottom
     )
 
     // MARK: Metrics
 
-    static let cardRadius: CGFloat = 22
-    static let tileRadius: CGFloat = 16
-    static let iconBubble: CGFloat = 46
+    static let cardRadius: CGFloat = 18
+    static let tileRadius: CGFloat = 12
+    static let iconBubble: CGFloat = 44
+}
+
+/// Semantic aliases shared with the prototype and Figma variable names.
+/// Keeping the hierarchy explicit makes future design-token reconciliation
+/// mechanical without forcing the existing view layer to rename every token.
+enum LumenToken {
+    enum Background {
+        static let base = Lumen.ink
+        static let subtle = Color(hex: 0x0D1019)
+    }
+
+    enum Surface {
+        static let `default` = Lumen.surface
+        static let raised = Lumen.surfaceRaised
+        static let emphasis = Lumen.surfaceLoud
+        static let hover = Color(hex: 0x242D40)
+    }
+
+    enum Status {
+        static let success = Lumen.success
+        static let warning = Lumen.warning
+        static let error = Lumen.danger
+        static let offline = Lumen.offline
+    }
+
+    enum Spacing {
+        static let s1: CGFloat = 4
+        static let s2: CGFloat = 8
+        static let s3: CGFloat = 12
+        static let s4: CGFloat = 16
+        static let s5: CGFloat = 20
+        static let s6: CGFloat = 24
+        static let s8: CGFloat = 32
+        static let s10: CGFloat = 40
+    }
 }
 
 // MARK: - Hex color initializer
@@ -111,11 +150,11 @@ struct LumenBackground: View {
             if reduceTransparency || quietInterface { Lumen.inkDeep } else { Lumen.backdropGradient }
             if glow && !quietInterface && !reduceTransparency {
                 RadialGradient(
-                    colors: [Lumen.cyan.opacity(0.24), .clear],
+                    colors: [Lumen.cyan.opacity(0.10), .clear],
                     center: .topLeading, startRadius: 0, endRadius: 440
                 )
                 RadialGradient(
-                    colors: [Lumen.pink.opacity(0.22), .clear],
+                    colors: [Lumen.violetBright.opacity(0.10), .clear],
                     center: .bottomTrailing, startRadius: 0, endRadius: 480
                 )
                 .blendMode(.screen)
@@ -153,10 +192,10 @@ struct LumenCardModifier: ViewModifier {
                 }
             }
             .shadow(
-                color: glowColor?.opacity(0.45) ?? Color.black.opacity(0.30),
-                radius: glowColor == nil ? 10 : 16,
+                color: glowColor?.opacity(0.22) ?? Color.black.opacity(0.22),
+                radius: glowColor == nil ? 8 : 12,
                 x: 0,
-                y: glowColor == nil ? 6 : 0
+                y: glowColor == nil ? 3 : 0
             )
     }
 }

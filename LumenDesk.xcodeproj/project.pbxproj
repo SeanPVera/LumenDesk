@@ -34,7 +34,9 @@
 		B10000000000000000001C /* UXEnhancements.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000001C /* UXEnhancements.swift */; };
 		B10000000000000000001D /* UXCenterViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000001D /* UXCenterViews.swift */; };
 		B10000000000000000001E /* GoveeSegments.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000001E /* GoveeSegments.swift */; };
-		B10000000000000000001F /* GoveeSegmentEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000001F /* GoveeSegmentEditorView.swift */; };/* End PBXBuildFile section */
+		B10000000000000000001F /* GoveeSegmentEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000001F /* GoveeSegmentEditorView.swift */; };
+		B100000000000000000020 /* ProductShellView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000020 /* ProductShellView.swift */; };
+/* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		A100000000000000000001 /* LumenDeskApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LumenDeskApp.swift; sourceTree = "<group>"; };
@@ -67,6 +69,7 @@
     A10000000000000000001D /* UXCenterViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UXCenterViews.swift; sourceTree = "<group>"; };
     A10000000000000000001E /* GoveeSegments.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoveeSegments.swift; sourceTree = "<group>"; };
     A10000000000000000001F /* GoveeSegmentEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoveeSegmentEditorView.swift; sourceTree = "<group>"; };
+		A100000000000000000020 /* ProductShellView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductShellView.swift; sourceTree = "<group>"; };
 		A100000000000000000099 /* LumenDesk.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LumenDesk.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -162,6 +165,7 @@
 				A100000000000000000019 /* OnboardingView.swift */,
 				A10000000000000000001D /* UXCenterViews.swift */,
 				A10000000000000000001F /* GoveeSegmentEditorView.swift */,
+				A100000000000000000020 /* ProductShellView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -278,6 +282,7 @@ B10000000000000000001C /* UXEnhancements.swift in Sources */,
 B10000000000000000001D /* UXCenterViews.swift in Sources */,
 B10000000000000000001E /* GoveeSegments.swift in Sources */,
 B10000000000000000001F /* GoveeSegmentEditorView.swift in Sources */,
+				B100000000000000000020 /* ProductShellView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

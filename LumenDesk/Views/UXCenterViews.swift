@@ -748,13 +748,17 @@ struct ExperienceCenterView: View {
 
     private var sceneConfidence: some View {
         LazyVGrid(columns: columns, spacing: 12) {
-            ForEach(Array(manager.scenes.prefix(6)), id: \.id) { scene in
-                let missing = scene.snapshots.filter { snap in !manager.devices.contains(where: { $0.id == snap.deviceID }) }.count
-                let stale = scene.snapshots.filter { snap in manager.devices.first(where: { $0.id == snap.deviceID })?.isStale == true }.count
+            ForEach(manager.scenes.prefix(6), id: \.id) { scene in
+                let missing = scene.snapshots.keys.filter { deviceID in
+                    !manager.devices.contains(where: { $0.id == deviceID })
+                }.count
+                let stale = scene.snapshots.keys.filter { deviceID in
+                    manager.devices.first(where: { $0.id == deviceID })?.isStale == true
+                }.count
                 VStack(alignment: .leading, spacing: 8) {
                     HStack { Label(scene.name, systemImage: "wand.and.stars").lineLimit(1); Spacer(); confidenceBadge(missing: missing, stale: stale) }
                     Text("\(scene.snapshots.count) lights · \(missing) missing · \(stale) stale").font(.caption).foregroundStyle(.secondary)
-                    HStack { Button("Preview") { selectedScene = scene; manager.commandError = "Preview: \(scene.name) will affect \(scene.snapshots.count) lights." }; Button("20s Rehearsal") { selectedScene = scene; rehearsalEndsAt = Date().addingTimeInterval(20); manager.startSceneRehearsal(scene, deviceIDs: Set(scene.snapshots.map(\.deviceID))) }; Button("Apply") { manager.applyScene(scene) } }
+                    HStack { Button("Preview") { selectedScene = scene; manager.commandError = "Preview: \(scene.name) will affect \(scene.snapshots.count) lights." }; Button("20s Rehearsal") { selectedScene = scene; rehearsalEndsAt = Date().addingTimeInterval(20); manager.startSceneRehearsal(scene, deviceIDs: Set(scene.snapshots.keys)) }; Button("Apply") { manager.applyScene(scene) } }
                 }.padding(12).lumenCard(radius: 12, highlighted: selectedScene?.id == scene.id)
             }
             if let selectedScene, let rehearsalEndsAt { Text("Previewing \(selectedScene.name) until \(rehearsalEndsAt.formatted(date: .omitted, time: .standard)). Keep it or use Undo to revert.").padding(12).lumenCard(radius: 12, glowColor: Lumen.gold.opacity(0.4)) }

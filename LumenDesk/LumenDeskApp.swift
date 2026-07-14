@@ -147,7 +147,7 @@ struct RootView: View {
     var body: some View {
         ZStack {
             if hasOnboarded {
-                ContentView()
+                LumenDeskShellView()
                     .transition(.opacity)
             } else {
                 OnboardingView(onFinish: { hasOnboarded = true })

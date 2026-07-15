@@ -151,6 +151,31 @@ final class CommandCoordinatorTests: XCTestCase {
     }
 
     @MainActor
+    func testCompletedCommandIsNotCancelledLater() async {
+        let coordinator = makeCoordinator()
+        coordinator.enqueue(
+            deviceID: "light-1",
+            coalescingKey: "power",
+            summary: "Turning on",
+            debounceNanoseconds: 0,
+            send: {},
+            refresh: {},
+            timedOut: { XCTFail("The command was confirmed") }
+        )
+
+        await waitUntil { coordinator.commandState(for: "light-1").phase == .sending }
+        coordinator.recordObservation(
+            deviceID: "light-1",
+            confirmedState: confirmedState(isOn: true),
+            confirmsPendingCommand: true
+        )
+        await waitUntil { coordinator.commandState(for: "light-1").phase == .idle }
+
+        XCTAssertTrue(coordinator.cancel().isEmpty)
+        XCTAssertEqual(coordinator.commandState(for: "light-1").lifecycle, .confirmed)
+    }
+
+    @MainActor
     func testSupersededCommandWithSameKeySendsOnlyLatestOperation() async {
         let coordinator = makeCoordinator()
         var sentValues: [Int] = []

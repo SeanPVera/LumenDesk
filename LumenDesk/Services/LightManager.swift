@@ -42,7 +42,6 @@ final class LightManager: ObservableObject {
     @Published private(set) var favoriteOrder: [FavoriteReference] = []
     @Published private(set) var parliamentMembers: [ParliamentMember] = []
     @Published private(set) var parliamentSessions: [ParliamentSession] = []
-    @Published private(set) var fireflyCitizens: [FireflyCitizen] = []
     @Published private(set) var sceneCertifications: [SceneCertification] = []
     @Published private(set) var recentColors: [RecentColor] = []
     @Published private(set) var discoveryChanges: [DiscoveryChange] = []
@@ -160,7 +159,6 @@ final class LightManager: ObservableObject {
         favoriteOrder = persistedState.favoriteOrder
         parliamentMembers = persistedState.parliamentMembers
         parliamentSessions = persistedState.parliamentSessions
-        fireflyCitizens = persistedState.fireflyCitizens
         sceneCertifications = persistedState.sceneCertifications
         recentColors = persistedState.recentColors
         if scheduleEngine == nil {
@@ -213,7 +211,6 @@ final class LightManager: ObservableObject {
         scan()
         scheduleRefresh()
         startScheduleTimer()
-        if fireflyCitizens.isEmpty { seedFireflies() }
         logActivity(.system, title: "LumenDesk started", detail: "Local automation and discovery services are active.")
     }
 
@@ -1019,10 +1016,6 @@ final class LightManager: ObservableObject {
             case .candlelight:
                 color = palette.randomElement()?.color ?? color
                 brightness = Double.random(in: 0.38...0.76)
-            case .twinkle:
-                let spark = Double.random(in: 0...1) > 0.78
-                color = (spark ? palette[0] : palette[(index + 1) % palette.count]).color
-                brightness = spark ? Double.random(in: 0.72...1) : Double.random(in: 0.16...0.34)
             case .musicPulse:
                 // Routed through `startMusicMode`; this restrained fallback is
                 // deliberately flash-free if a future caller bypasses it.
@@ -2365,7 +2358,6 @@ extension LightManager {
         state.favoriteOrder = favoriteOrder
         state.parliamentMembers = parliamentMembers
         state.parliamentSessions = parliamentSessions
-        state.fireflyCitizens = fireflyCitizens
         state.sceneCertifications = sceneCertifications
         state.recentColors = recentColors
         state.automationOverrides = automationOverrides
@@ -2396,7 +2388,6 @@ extension LightManager {
         favoriteOrder = state.favoriteOrder
         parliamentMembers = state.parliamentMembers
         parliamentSessions = state.parliamentSessions
-        fireflyCitizens = state.fireflyCitizens
         sceneCertifications = state.sceneCertifications
         recentColors = state.recentColors
         scheduleEngine.restoreAutomationOverrides(state.automationOverrides)
@@ -2681,26 +2672,6 @@ extension LightManager {
         logActivity(.parliament, title: "Executive Illumination Order", detail: motion)
     }
 
-    func seedFireflies() {
-        fireflyCitizens = (0..<max(6, min(18, devices.count * 2))).map { index in
-            FireflyCitizen(id: UUID(), name: "Luxling \(index + 1)", generation: 1, hue: Double.random(in: 0...1), preferredKelvin: Int.random(in: 2500...6500), energy: Double.random(in: 0.55...1), rarity: index == 0 ? "Rare" : "Common", parentIDs: [])
-        }
-        persistApplicationState()
-    }
-
-    func evolveFireflies() {
-        let litFraction = Double(devices.filter(\.isOn).count) / Double(max(1, devices.count))
-        for index in fireflyCitizens.indices {
-            fireflyCitizens[index].energy = max(0.05, min(1, fireflyCitizens[index].energy + litFraction * 0.08 - 0.03))
-            fireflyCitizens[index].hue = (fireflyCitizens[index].hue + Double.random(in: -0.015...0.015) + 1).truncatingRemainder(dividingBy: 1)
-        }
-        if litFraction > 0.6, fireflyCitizens.count < 40, let a = fireflyCitizens.randomElement(), let b = fireflyCitizens.randomElement() {
-            fireflyCitizens.append(FireflyCitizen(id: UUID(), name: "Luxling \(fireflyCitizens.count + 1)", generation: max(a.generation, b.generation) + 1, hue: (a.hue + b.hue) / 2, preferredKelvin: (a.preferredKelvin + b.preferredKelvin) / 2, energy: 0.7, rarity: Int.random(in: 0..<12) == 0 ? "Iridescent" : "Common", parentIDs: [a.id, b.id]))
-        }
-        fireflyCitizens.removeAll { $0.energy <= 0.05 && fireflyCitizens.count > 6 }
-        persistApplicationState()
-    }
-
     func certify(_ scene: LightingScene) -> SceneCertification {
         let onCount = scene.snapshots.values.filter(\.isOn).count
         let hues = scene.snapshots.values.map(\.hue)
@@ -2848,7 +2819,6 @@ extension LightManager {
             favoriteOrder: favoriteOrder,
             parliamentMembers: parliamentMembers,
             parliamentSessions: parliamentSessions,
-            fireflyCitizens: fireflyCitizens,
             sceneCertifications: sceneCertifications,
             recentColors: recentColors,
             discoveryChanges: discoveryChanges,
@@ -2909,7 +2879,6 @@ extension LightManager {
         favoriteOrder = workspace.favoriteOrder
         parliamentMembers = workspace.parliamentMembers
         parliamentSessions = workspace.parliamentSessions
-        fireflyCitizens = workspace.fireflyCitizens
         sceneCertifications = workspace.sceneCertifications
         recentColors = workspace.recentColors
         discoveryChanges = workspace.discoveryChanges

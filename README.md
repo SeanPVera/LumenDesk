@@ -258,7 +258,6 @@ The Lighting Library includes the following non-music animated effects:
 - Ocean Wave.
 - Breathe.
 - Candlelight.
-- Firefly Field.
 - Prism Shuffle.
 - Summer Storm.
 - Golden Sunrise.
@@ -361,7 +360,6 @@ Demo Mode is useful for screenshots, testing UI flows, or learning the app befor
 The UI honors system accessibility settings where applicable, including reduced motion and reduced transparency. Interface preferences include:
 
 - Quiet Interface.
-- Aurora Firefly ambient overlay toggle.
 - Workspace layout.
 - Interface density.
 - Menu bar content scope.

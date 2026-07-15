@@ -147,7 +147,7 @@ struct ActivityLogView: View {
     }
 
     private func icon(for kind: ActivityEvent.Kind) -> String {
-        switch kind { case .scan: return "antenna.radiowaves.left.and.right"; case .schedule: return "clock"; case .scene: return "wand.and.stars"; case .recovery: return "wrench"; case .parliament: return "building.columns"; case .ecosystem: return "ladybug"; case .compliance: return "checkmark.seal"; default: return "lightbulb" }
+        switch kind { case .scan: return "antenna.radiowaves.left.and.right"; case .schedule: return "clock"; case .scene: return "wand.and.stars"; case .recovery: return "wrench"; case .parliament: return "building.columns"; case .compliance: return "checkmark.seal"; default: return "lightbulb" }
     }
 
     #if os(macOS)
@@ -222,32 +222,6 @@ struct LightingParliamentView: View {
 
     private func result(_ name: String, _ value: Int, _ color: Color) -> some View { VStack { Text("\(value)").font(.title2.bold()).foregroundStyle(color); Text(name).font(.caption) } }
     private func partyColor(_ party: ParliamentMember.Party) -> Color { switch party { case .warmCoalition: return .orange; case .chromaticLeft: return .pink; case .efficiencyBloc: return .green; case .nocturnalCaucus: return .indigo } }
-}
-
-struct FireflyEcosystemView: View {
-    @EnvironmentObject var manager: LightManager
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        VStack(spacing: 14) {
-            sheetHeader("Aurora Firefly Conservatory", icon: "ladybug.fill", dismiss: dismiss)
-            Text("A persistent artificial ecosystem whose genetics and energy respond to your real lighting habits. It is scientifically indefensible.").font(.callout).foregroundStyle(.secondary)
-            HStack { metric("Population", "\(manager.fireflyCitizens.count)"); metric("Generations", "\(manager.fireflyCitizens.map(\.generation).max() ?? 1)"); metric("Rare", "\(manager.fireflyCitizens.filter { $0.rarity != "Common" }.count)"); Spacer(); Button("Advance Evolution") { manager.evolveFireflies() }; Button("Reseed", role: .destructive) { manager.seedFireflies() } }
-            ScrollView {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150))], spacing: 10) {
-                    ForEach(manager.fireflyCitizens) { citizen in
-                        VStack(alignment: .leading, spacing: 6) {
-                            HStack { Circle().fill(Color(hue: citizen.hue, saturation: 0.8, brightness: 1)).frame(width: 18, height: 18).shadow(color: Color(hue: citizen.hue, saturation: 0.8, brightness: 1), radius: 7); Text(citizen.name).font(.callout.weight(.medium)) }
-                            Text("Generation \(citizen.generation) · \(citizen.rarity)").font(.caption2).foregroundStyle(.secondary)
-                            ProgressView(value: citizen.energy) { Text("Energy") }.tint(Color(hue: citizen.hue, saturation: 0.8, brightness: 1))
-                            Text("Prefers \(citizen.preferredKelvin) K").font(.caption2).foregroundStyle(.tertiary)
-                        }.padding(10).lumenCard(radius: 9)
-                    }
-                }.padding(4)
-            }
-        }.padding(20).sheetFrame(minWidth: 680, idealWidth: 800, minHeight: 500, idealHeight: 660).background(LumenBackground(glow: false))
-    }
-    private func metric(_ title: String, _ value: String) -> some View { VStack(alignment: .leading) { Text(value).font(.title3.bold()); Text(title).font(.caption).foregroundStyle(.secondary) }.padding(10).lumenCard(radius: 8) }
 }
 
 struct ComplianceSuiteView: View {
@@ -397,7 +371,6 @@ struct LumenDeskSettingsView: View {
     @AppStorage(AppPreferenceKey.menuBarScope) private var menuBarScope = MenuBarScope.activeRooms.rawValue
     @AppStorage(AppPreferenceKey.showMenuBarUrgentOnly) private var urgentOnly = false
     @AppStorage(AppPreferenceKey.audioPrivacyAcknowledged) private var audioAcknowledged = false
-    @AppStorage("LumenDesk.auroraFireflies.v1") private var fireflies = true
 
     var body: some View {
         TabView {
@@ -411,7 +384,6 @@ struct LumenDeskSettingsView: View {
             Form {
                 Toggle("Quiet interface", isOn: $quietInterface)
                 Text("Removes ornamental motion, translucent decoration, and nonessential visual activity. System Reduce Motion and Reduce Transparency are respected automatically.").font(.caption).foregroundStyle(.secondary)
-                Toggle("Aurora Fireflies", isOn: $fireflies).disabled(quietInterface)
             }.padding(20).tabItem { Label("Appearance", systemImage: "paintbrush") }
 
             Form {

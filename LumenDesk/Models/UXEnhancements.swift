@@ -40,7 +40,7 @@ enum AggregatePowerState: Equatable {
 }
 
 struct ActivityEvent: Identifiable, Codable, Equatable {
-    enum Kind: String, Codable, CaseIterable { case scan, command, schedule, scene, recovery, system, parliament, ecosystem, compliance }
+    enum Kind: String, Codable, CaseIterable { case scan, command, schedule, scene, recovery, system, parliament, compliance }
     let id: UUID
     let date: Date
     let kind: Kind
@@ -106,17 +106,6 @@ struct ParliamentSession: Identifiable, Codable, Equatable {
     let noes: Int
     let abstentions: Int
     let verdict: String
-}
-
-struct FireflyCitizen: Identifiable, Codable, Equatable {
-    let id: UUID
-    var name: String
-    var generation: Int
-    var hue: Double
-    var preferredKelvin: Int
-    var energy: Double
-    var rarity: String
-    var parentIDs: [UUID]
 }
 
 struct SceneCertification: Identifiable, Codable, Equatable {

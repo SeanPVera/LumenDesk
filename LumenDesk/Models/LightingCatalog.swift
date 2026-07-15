@@ -29,7 +29,6 @@ struct LightingEffect: Identifiable, Hashable {
         case oceanWave
         case breathe
         case candlelight
-        case twinkle
         case musicPulse
         case prismShuffle
         case lightning
@@ -92,7 +91,6 @@ enum LightingCatalog {
         effect("ocean-wave", "Ocean Wave", "Rolling bands of aqua and deep blue rise and recede.", "water.waves", .oceanWave, [0x56E0D5, 0x22AFCF, 0x2867C7, 0x15366E], 0.12),
         effect("breathe", "Breathe", "The room slowly inhales and exhales with a tranquil violet glow.", "lungs.fill", .breathe, [0x7E6BFF, 0xC17DFF, 0x5976D9], 0.10),
         effect("candlelight", "Candlelight", "Independent amber flickers create the warmth of a cluster of candles.", "flame.fill", .candlelight, [0xFF7A24, 0xFFAA3C, 0xFFD178, 0xD94A1E], 0.22),
-        effect("fireflies", "Firefly Field", "Golden sparks wink on and off over a deep forest green.", "sparkles", .twinkle, [0xFFE57A, 0xB8E36D, 0x315C3A, 0x142D24], 0.18),
         effect("music-pulse", "Music Mode", "Local system-audio choreography on Mac and microphone-driven lighting on iPhone and iPad. Soundcheck is included as a preset.", "music.note.list", .musicPulse, [0xFF3B9D, 0x7D5CFF, 0x16D9D0, 0xFFB52E], 0.09, audio: true, energy: true),
         effect("prism-shuffle", "Prism Shuffle", "Bold color combinations reshuffle for instant party energy.", "die.face.5.fill", .prismShuffle, [0xFF3155, 0xFFCC33, 0x39E681, 0x32A8FF, 0xA64DFF], 0.24, energy: true),
         effect("summer-storm", "Summer Storm", "Moody blue calm interrupted by sudden white-violet lightning.", "cloud.bolt.rain.fill", .lightning, [0x132957, 0x274B8C, 0x899FE8, 0xE9EDFF], 0.20, energy: true),

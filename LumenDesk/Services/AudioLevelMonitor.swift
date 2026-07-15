@@ -42,11 +42,12 @@ final class AudioCaptureService {
     private let analysisQueue = DispatchQueue(label: "LumenDesk.audioAnalysis")
     // Audio callbacks can arrive faster than spectral analysis during a CPU
     // spike. A single-slot pipeline drops superseded buffers instead of
-    // retaining an unbounded queue of stale audio, and 30 Hz is comfortably
-    // above the cadence used to render lighting effects.
+    // retaining an unbounded queue of stale audio. Twenty analyses per second
+    // is enough to catch onsets while leaving substantially more CPU headroom
+    // for the UI and network transports.
     private let analysisSlot = DispatchSemaphore(value: 1)
     private var nextAnalysisUptime: UInt64 = 0
-    private let analysisIntervalNanoseconds: UInt64 = 33_333_333
+    private let analysisIntervalNanoseconds: UInt64 = 50_000_000
     // Several rooms can run the same audio-reactive effect. They share one
     // capture session instead of starting a ScreenCaptureKit/AVAudioEngine
     // pipeline per room.
@@ -105,7 +106,9 @@ final class AudioCaptureService {
         // The microphone is never started here, so room noise can't pollute the
         // music analysis, and there is no silent mic fallback.
         let capture = SystemAudioCapture { [weak self] buffer in
-            self?.consume(buffer)
+            // SystemAudioCapture already created an owned mono buffer. Avoid
+            // allocating and copying it a second time before analysis.
+            self?.consume(buffer, requiresOwnedCopy: false)
         }
         systemAudioCapture = capture
         capture.start { [weak self] result in
@@ -195,7 +198,7 @@ final class AudioCaptureService {
     }
     #endif
 
-    private func consume(_ buffer: AVAudioPCMBuffer) {
+    private func consume(_ buffer: AVAudioPCMBuffer, requiresOwnedCopy: Bool = true) {
         guard analysisSlot.wait(timeout: .now()) == .success else { return }
         let now = DispatchTime.now().uptimeNanoseconds
         guard now >= nextAnalysisUptime else {
@@ -203,14 +206,20 @@ final class AudioCaptureService {
             return
         }
         nextAnalysisUptime = now &+ analysisIntervalNanoseconds
-        guard let ownedBuffer = buffer.ownedFloatCopy() else {
-            analysisSlot.signal()
-            return
+        let analysisBuffer: AVAudioPCMBuffer
+        if requiresOwnedCopy {
+            guard let ownedBuffer = buffer.ownedFloatCopy() else {
+                analysisSlot.signal()
+                return
+            }
+            analysisBuffer = ownedBuffer
+        } else {
+            analysisBuffer = buffer
         }
         analysisQueue.async { [weak self] in
             guard let self else { return }
             defer { self.analysisSlot.signal() }
-            guard let snapshot = self.analyzer.analyze(ownedBuffer) else { return }
+            guard let snapshot = self.analyzer.analyze(analysisBuffer) else { return }
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 self.onLevel?(snapshot.level)
@@ -288,24 +297,20 @@ final class MusicFeatureAnalyzer {
     private var pulseEnv: Double = 0
     private var dropEnv: Double = 0
     private var beatCount: Int = 0
-    // Cached DFT twiddle factors (cos/sin) per analysis window size, built once
-    // and reused. Lets bandEnergy index a table instead of calling cos/sin per
-    // sample — identical result, far less CPU. Touched only on the analysis
-    // queue, so no synchronization is needed.
-    private var twiddleTables: [Int: (cos: [Float], sin: [Float])] = [:]
+    // One Accelerate real FFT replaces three nested per-bin/per-sample DFTs.
+    // The setup and scratch buffers are reused on the serial analysis queue.
+    private var fftSetup: FFTSetup?
+    private var fftSize = 0
+    private var fftLog2Size: vDSP_Length = 0
+    private var fftReal: [Float] = []
+    private var fftImaginary: [Float] = []
+    private var fftMagnitudes: [Float] = []
     private var monoSamples: [Float] = []
 
     init(sourceDescription: String) { self.sourceDescription = sourceDescription }
 
-    private func twiddles(for n: Int) -> (cos: [Float], sin: [Float]) {
-        if let cached = twiddleTables[n] { return cached }
-        if twiddleTables.count >= 6 { twiddleTables.removeAll(keepingCapacity: true) }
-        let tables: (cos: [Float], sin: [Float]) = (
-            (0..<n).map { Float(cos(-2 * Double.pi * Double($0) / Double(n))) },
-            (0..<n).map { Float(sin(-2 * Double.pi * Double($0) / Double(n))) }
-        )
-        twiddleTables[n] = tables
-        return tables
+    deinit {
+        if let fftSetup { vDSP_destroy_fftsetup(fftSetup) }
     }
 
     func analyze(_ buffer: AVAudioPCMBuffer) -> AudioReactiveSnapshot? {
@@ -319,7 +324,15 @@ final class MusicFeatureAnalyzer {
             vDSP_vclr(&monoSamples, 1, vDSP_Length(frameCount))
         }
         for channel in 0..<channels {
-            for index in 0..<frameCount { monoSamples[index] += channelData[channel][index] }
+            monoSamples.withUnsafeMutableBufferPointer { destination in
+                guard let output = destination.baseAddress else { return }
+                vDSP_vadd(
+                    output, 1,
+                    channelData[channel], 1,
+                    output, 1,
+                    vDSP_Length(frameCount)
+                )
+            }
         }
         let divisor = Float(max(1, channels))
         var divisorValue = divisor
@@ -343,18 +356,15 @@ final class MusicFeatureAnalyzer {
         // music or a cranked mix. Rising instantly and decaying slowly keeps
         // the scale steady within a song.
         //
-        // Each band uses its own analysis window rather than a shared 1024
-        // samples: bass is only ~3 bins wide even at full resolution (its
-        // 45-160Hz range is narrow in absolute Hz), so it needs the long
-        // window to have any bins at all. Mids and highs span far more Hz, so
-        // a shorter window (fewer bins, and far fewer samples summed per bin)
-        // still leaves them plenty of bins — at roughly a tenth of the CPU
-        // cost of running all three bands at 1024. This shortens frequency
-        // resolution, not the per-sample rate, so it does not reintroduce the
-        // decimation aliasing bandEnergy's doc comment warns about.
-        let bassRaw = bandEnergy(samples: monoSamples, sampleRate: sampleRate, low: 45, high: 160, window: 1024)
-        let midsRaw = bandEnergy(samples: monoSamples, sampleRate: sampleRate, low: 350, high: 2200, window: 512)
-        let highsRaw = bandEnergy(samples: monoSamples, sampleRate: sampleRate, low: 3200, high: 12000, window: 256)
+        // Compute the spectrum once, then reduce three bin ranges. The former
+        // implementation repeated a direct DFT for every bin in every band,
+        // doing tens of thousands of scalar multiply/adds per audio buffer.
+        // A 1024-point radix-2 FFT gives bass the resolution it needs and is
+        // also cheaper than any one of those direct band calculations.
+        guard let spectrumSize = updateSpectrum(from: monoSamples) else { return nil }
+        let bassRaw = bandEnergy(sampleRate: sampleRate, low: 45, high: 160, spectrumSize: spectrumSize)
+        let midsRaw = bandEnergy(sampleRate: sampleRate, low: 350, high: 2200, spectrumSize: spectrumSize)
+        let highsRaw = bandEnergy(sampleRate: sampleRate, low: 3200, high: 12000, spectrumSize: spectrumSize)
         spectralPeak = max(spectralPeak * 0.9992, bassRaw, midsRaw, highsRaw)
         let bandScale = 0.9 / max(0.001, spectralPeak)
         let bass = clamp(bassRaw * bandScale)
@@ -409,46 +419,67 @@ final class MusicFeatureAnalyzer {
         return AudioReactiveSnapshot(level: level, beat: beat, kick: kick, snare: snare, percussion: percussion, bass: bass, mids: mids, highs: highs, energy: energy, mood: mood, confidence: clamp(level * 1.8), pulse: pulse, drop: drop, beatCount: beatCount, sourceDescription: sourceDescription)
     }
 
-    /// Mean DFT-bin magnitude inside [low, high] Hz, normalized per bin
-    /// (|X|/n, so a full-scale sine centered on a bin reads ~0.5) and averaged
-    /// over ONLY the band's own bins — averaging across the whole spectrum
-    /// dilutes a narrow band like bass (~3 bins of 1024) to ~1e-3, which
-    /// starves every downstream onset detector and leaves the show reacting
-    /// to nothing but loudness. Every sample feeds the sum: decimating the
-    /// input aliases the highs band and shrinks magnitudes further. Returns
-    /// the raw mean; `analyze` applies the spectral AGC.
-    ///
-    /// `window` caps the number of samples the DFT covers, independent of the
-    /// sample rate — it trades frequency resolution for CPU, not aliasing
-    /// safety (every sample within the window is still used). Bands that
-    /// span many Hz keep plenty of bins even at a short window, so `analyze`
-    /// passes a much smaller window for mids/highs than for bass, which
-    /// needs its full resolution just to have any bins at all.
-    private func bandEnergy(samples: [Float], sampleRate: Double, low: Double, high: Double, window: Int) -> Double {
-        let n = min(samples.count, window)
-        guard n > 8 else { return 0 }
-        let (cosTable, sinTable) = twiddles(for: n)
-        let firstBin = max(0, Int(ceil(low * Double(n) / sampleRate)))
-        let lastBin = min(n - 1, Int(floor(high * Double(n) / sampleRate)))
-        guard firstBin <= lastBin else { return 0 }
-        var sum: Float = 0
-        var bins = 0
-        for k in firstBin...lastBin {
-            var r: Float = 0, i: Float = 0
-            // idx walks (k·t) mod n without a modulo: it advances by k < n
-            // each sample, so a single subtraction wraps it.
-            var idx = 0
-            for t in 0..<n {
-                r += samples[t] * cosTable[idx]
-                i += samples[t] * sinTable[idx]
-                idx += k
-                if idx >= n { idx -= n }
+    /// Updates a normalized half-spectrum and returns the FFT size. The input
+    /// is capped at 1024 samples and rounded down to a power of two so the
+    /// radix-2 setup remains fast even if a capture source changes buffer size.
+    private func updateSpectrum(from samples: [Float]) -> Int? {
+        let cappedSize = min(1_024, samples.count)
+        guard cappedSize >= 16 else { return nil }
+        let log2Size = vDSP_Length(floor(log2(Double(cappedSize))))
+        let size = 1 << Int(log2Size)
+
+        if size != fftSize {
+            if let fftSetup { vDSP_destroy_fftsetup(fftSetup) }
+            guard let newSetup = vDSP_create_fftsetup(log2Size, FFTRadix(kFFTRadix2)) else {
+                fftSetup = nil
+                fftSize = 0
+                return nil
             }
-            sum += sqrt(r * r + i * i) / Float(n)
-            bins += 1
+            fftSetup = newSetup
+            fftSize = size
+            fftLog2Size = log2Size
+            fftReal = [Float](repeating: 0, count: size / 2)
+            fftImaginary = [Float](repeating: 0, count: size / 2)
+            fftMagnitudes = [Float](repeating: 0, count: size / 2)
         }
-        guard bins > 0 else { return 0 }
-        return Double(sum) / Double(bins)
+
+        guard let fftSetup else { return nil }
+        for index in 0..<(size / 2) {
+            fftReal[index] = samples[index * 2]
+            fftImaginary[index] = samples[index * 2 + 1]
+        }
+        fftReal.withUnsafeMutableBufferPointer { real in
+            fftImaginary.withUnsafeMutableBufferPointer { imaginary in
+                guard let realBase = real.baseAddress, let imaginaryBase = imaginary.baseAddress else { return }
+                var split = DSPSplitComplex(realp: realBase, imagp: imaginaryBase)
+                vDSP_fft_zrip(fftSetup, &split, 1, fftLog2Size, FFTDirection(FFT_FORWARD))
+                fftMagnitudes.withUnsafeMutableBufferPointer { magnitudes in
+                    guard let magnitudeBase = magnitudes.baseAddress else { return }
+                    vDSP_zvabs(&split, 1, magnitudeBase, 1, vDSP_Length(size / 2))
+                }
+            }
+        }
+        var scale = 1 / Float(size)
+        vDSP_vsmul(fftMagnitudes, 1, &scale, &fftMagnitudes, 1, vDSP_Length(size / 2))
+        return size
+    }
+
+    /// Mean normalized magnitude inside one frequency band. Only the band's
+    /// bins participate so narrow bass energy is not diluted by the spectrum.
+    private func bandEnergy(sampleRate: Double, low: Double, high: Double, spectrumSize: Int) -> Double {
+        let firstBin = max(1, Int(ceil(low * Double(spectrumSize) / sampleRate)))
+        let lastBin = min(fftMagnitudes.count - 1, Int(floor(high * Double(spectrumSize) / sampleRate)))
+        guard firstBin <= lastBin else { return 0 }
+        var mean: Float = 0
+        fftMagnitudes.withUnsafeBufferPointer { magnitudes in
+            guard let base = magnitudes.baseAddress else { return }
+            vDSP_meanv(
+                base.advanced(by: firstBin), 1,
+                &mean,
+                vDSP_Length(lastBin - firstBin + 1)
+            )
+        }
+        return Double(mean)
     }
 
     private func clamp(_ value: Double) -> Double { max(0, min(1, value)) }

@@ -1464,7 +1464,6 @@ struct SettingsWorkspaceView: View {
     @AppStorage(AppPreferenceKey.menuBarScope) private var menuBarScope = MenuBarScope.activeRooms.rawValue
     @AppStorage(AppPreferenceKey.showMenuBarUrgentOnly) private var urgentOnly = false
     @AppStorage(AppPreferenceKey.audioPrivacyAcknowledged) private var audioAcknowledged = false
-    @AppStorage("LumenDesk.auroraFireflies.v1") private var fireflies = true
     @AppStorage("LumenDesk.hasOnboarded.v1") private var hasOnboarded = true
 
     var body: some View {
@@ -1491,8 +1490,6 @@ struct SettingsWorkspaceView: View {
 
                 SettingsSection(title: "Appearance & accessibility", icon: "accessibility") {
                     Toggle("Quiet interface", isOn: $quietInterface)
-                    Divider()
-                    Toggle("Aurora fireflies", isOn: $fireflies).disabled(quietInterface)
                     Text("System Reduce Motion and Reduce Transparency settings are respected automatically. Status always includes text or a symbol.")
                         .font(.caption).foregroundStyle(Lumen.textSecondary)
                 }

@@ -20,7 +20,6 @@ struct PersistedApplicationState: Codable, Equatable {
     var favoriteOrder: [FavoriteReference] = []
     var parliamentMembers: [ParliamentMember] = []
     var parliamentSessions: [ParliamentSession] = []
-    var fireflyCitizens: [FireflyCitizen] = []
     var sceneCertifications: [SceneCertification] = []
     var recentColors: [RecentColor] = []
     var automationOverrides: [UUID: RoomAutomationOverride] = [:]
@@ -54,7 +53,6 @@ struct PersistedApplicationState: Codable, Equatable {
         case favoriteOrder
         case parliamentMembers
         case parliamentSessions
-        case fireflyCitizens
         case sceneCertifications
         case recentColors
         case automationOverrides
@@ -85,7 +83,6 @@ struct PersistedApplicationState: Codable, Equatable {
         favoriteOrder = (try? container.decode([FavoriteReference].self, forKey: .favoriteOrder)) ?? []
         parliamentMembers = (try? container.decode([ParliamentMember].self, forKey: .parliamentMembers)) ?? []
         parliamentSessions = (try? container.decode([ParliamentSession].self, forKey: .parliamentSessions)) ?? []
-        fireflyCitizens = (try? container.decode([FireflyCitizen].self, forKey: .fireflyCitizens)) ?? []
         sceneCertifications = (try? container.decode([SceneCertification].self, forKey: .sceneCertifications)) ?? []
         recentColors = (try? container.decode([RecentColor].self, forKey: .recentColors)) ?? []
         automationOverrides = (try? container.decode([UUID: RoomAutomationOverride].self, forKey: .automationOverrides)) ?? [:]
@@ -234,7 +231,6 @@ final class PersistenceStore: ApplicationPersistence {
         static let favoriteOrder = "LumenDesk.favoriteOrder.v1"
         static let parliament = "LumenDesk.parliament.v1"
         static let parliamentSessions = "LumenDesk.parliamentSessions.v1"
-        static let fireflies = "LumenDesk.fireflies.v1"
         static let certifications = "LumenDesk.certifications.v1"
         static let recentColors = "LumenDesk.recentColors.v1"
         static let automationOverrides = "LumenDesk.automationOverrides.v1"
@@ -247,7 +243,7 @@ final class PersistenceStore: ApplicationPersistence {
             rooms, favorites, scenes, customNames, collapsedRooms, solar,
             whiteMode, favoriteRooms, favoriteScenes, brightnessPresets,
             activity, favoriteOrder, parliament, parliamentSessions,
-            fireflies, certifications, recentColors, automationOverrides,
+            certifications, recentColors, automationOverrides,
             sceneRevisions, sceneDrafts, goveeSegments, segmentPresets
         ]
     }
@@ -451,7 +447,6 @@ final class PersistenceStore: ApplicationPersistence {
         state.favoriteOrder = legacyValue([FavoriteReference].self, key: LegacyKey.favoriteOrder, defaults: defaults) ?? []
         state.parliamentMembers = legacyValue([ParliamentMember].self, key: LegacyKey.parliament, defaults: defaults) ?? []
         state.parliamentSessions = legacyValue([ParliamentSession].self, key: LegacyKey.parliamentSessions, defaults: defaults) ?? []
-        state.fireflyCitizens = legacyValue([FireflyCitizen].self, key: LegacyKey.fireflies, defaults: defaults) ?? []
         state.sceneCertifications = legacyValue([SceneCertification].self, key: LegacyKey.certifications, defaults: defaults) ?? []
         state.recentColors = legacyValue([RecentColor].self, key: LegacyKey.recentColors, defaults: defaults) ?? []
         state.automationOverrides = legacyValue([UUID: RoomAutomationOverride].self, key: LegacyKey.automationOverrides, defaults: defaults) ?? [:]

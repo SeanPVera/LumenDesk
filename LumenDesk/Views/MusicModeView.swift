@@ -398,7 +398,7 @@ private struct MusicModeInputStatusView: View {
 
     private var permissionMessage: String {
         #if os(macOS)
-        return "Screen Recording permission is required to analyze system audio. Enable LumenDesk in System Settings › Privacy & Security › Screen & System Audio Recording."
+        return "Screen Recording permission is required to analyze system audio. Enable LumenDesk in System Settings › Privacy & Security › Screen & System Audio Recording, return here, and press Start again. A relaunch is normally unnecessary."
         #else
         return "Microphone permission is required on iPhone and iPad. Enable LumenDesk in Settings › Privacy & Security › Microphone."
         #endif

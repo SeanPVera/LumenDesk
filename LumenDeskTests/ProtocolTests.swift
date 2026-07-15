@@ -101,6 +101,16 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(statusResponse?.msg.data.colorTemInKelvin, 4_200)
     }
 
+    func testH612BDiscoveryResponseIsAccepted() {
+        let response = Data(#"{"msg":{"cmd":"scan","data":{"ip":"192.168.1.44","device":"11:22:33:44:55:66","sku":"H612B","deviceName":"Strip Light S"}}}"#.utf8)
+        let decoded = GoveeProtocol.decodeScanResponse(response)
+
+        XCTAssertEqual(decoded?.msg.data.ip, "192.168.1.44")
+        XCTAssertEqual(decoded?.msg.data.device, "11:22:33:44:55:66")
+        XCTAssertEqual(decoded?.msg.data.sku, "H612B")
+        XCTAssertEqual(decoded?.msg.data.deviceName, "Strip Light S")
+    }
+
     func testSegmentCommandByteGeneration() {
         let color = GoveeProtocol.segmentColorPacket(r: 300, g: -1, b: 64, segments: [0, 8, 55, 56, -1])
         XCTAssertEqual(color.count, 20)

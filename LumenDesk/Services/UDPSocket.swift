@@ -34,8 +34,11 @@ final class UDPSocket {
         guard s >= 0 else { throw SocketError.create(errno) }
         self.fd = s
 
-        try setOpt(SOL_SOCKET, SO_REUSEADDR, 1, name: "SO_REUSEADDR")
-        try setOpt(SOL_SOCKET, SO_REUSEPORT, 1, name: "SO_REUSEPORT")
+        // Do not enable SO_REUSEPORT here. Govee replies to a fixed UDP port
+        // (4002), and multiple LumenDesk processes sharing that port cause the
+        // kernel to distribute discovery replies between unrelated app
+        // instances. An exclusive bind makes the second instance fail loudly
+        // instead of making lights appear intermittently undiscoverable.
         try setOpt(SOL_SOCKET, SO_BROADCAST, 1, name: "SO_BROADCAST")
 
         var addr = sockaddr_in()

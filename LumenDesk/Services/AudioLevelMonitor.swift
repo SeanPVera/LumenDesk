@@ -1,6 +1,7 @@
 import AVFoundation
 import Accelerate
 #if os(macOS)
+import CoreServices
 import ScreenCaptureKit
 #endif
 
@@ -470,6 +471,12 @@ private final class SystemAudioCapture: NSObject, SCStreamOutput {
 
     func start(completion: @escaping (SystemAudioStartResult) -> Void) {
         guard #available(macOS 13.0, *) else { completion(.unavailable); return }
+
+        // Screen Recording's system sheet may offer to quit and reopen the
+        // requesting app. Refresh this exact bundle before asking so Launch
+        // Services does not choose a stale DerivedData/test copy that happens
+        // to share LumenDesk's bundle identifier.
+        _ = LSRegisterURL(Bundle.main.bundleURL as CFURL, true)
 
         startTask = Task {
             do {

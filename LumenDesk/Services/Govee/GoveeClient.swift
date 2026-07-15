@@ -49,15 +49,14 @@ final class GoveeClient {
         } catch {
             NSLog("Govee discover send failed: \(error)")
         }
-        #if os(iOS)
-        // Without the multicast entitlement the group send above fails, but
-        // Govee bulbs also answer scan requests sent straight to their IP.
+        // Govee bulbs also answer scan requests sent directly to their IP.
+        // This is required on iOS without the multicast entitlement and gives
+        // macOS a deterministic fallback on routers that suppress multicast.
         queue.async { [socket] in
             for host in LocalSubnet.probeHosts() {
                 try? socket.send(pkt, to: host, port: GoveeProtocol.discoveryPort)
             }
         }
-        #endif
     }
 
     func refresh(deviceID: String) {
@@ -208,12 +207,16 @@ final class GoveeClient {
         // Govee occasionally emits truncated/duplicated frames; ignore failures.
         if let scan = GoveeProtocol.decodeScanResponse(data) {
             let id = scan.msg.data.device
-            if addressByDevice[id] != scan.msg.data.ip {
-                if let oldAddress = addressByDevice[id] { deviceByAddress.removeValue(forKey: oldAddress) }
-                addressByDevice[id] = scan.msg.data.ip
-                deviceByAddress[scan.msg.data.ip] = id
-                delegate?.goveeDiscovered(deviceID: id, address: scan.msg.data.ip, sku: scan.msg.data.sku)
+            let address = scan.msg.data.ip
+            if let oldAddress = addressByDevice[id], oldAddress != address {
+                deviceByAddress.removeValue(forKey: oldAddress)
             }
+            addressByDevice[id] = address
+            deviceByAddress[address] = id
+            // Every valid response is evidence that the device is reachable.
+            // Suppressing repeated responses made manual rescans report zero
+            // devices when the address had not changed.
+            delegate?.goveeDiscovered(deviceID: id, address: address, sku: scan.msg.data.sku)
             // Pull status right after discovery.
             refresh(deviceID: id)
             return

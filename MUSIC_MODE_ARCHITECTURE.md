@@ -4,7 +4,7 @@ Music Mode extends LumenDesk's existing `music-pulse` effect and effect lifecycl
 
 ## Data flow
 
-1. `AudioCaptureService` owns the single platform audio source. ScreenCaptureKit captures system audio on macOS; AVAudioEngine captures microphone input on iOS. Subscribers share the session, and accepted buffers enter a single-slot 30 Hz analysis pipeline off the main thread.
+1. `AudioCaptureService` owns the single platform audio source. ScreenCaptureKit captures system audio on macOS; AVAudioEngine captures microphone input on iOS. Subscribers share the session, and accepted buffers enter a single-slot 20 Hz analysis pipeline off the main thread. One reusable Accelerate FFT supplies every frequency band.
 2. `MusicFeatureAnalyzer` converts generated or live PCM buffers into normalized level, band, onset, beat, pulse, energy, mood, and confidence features. Adaptive peaks, onset baselines, cooldown, smoothing, and decay live here.
 3. `AudioReactiveSessionController` owns one render clock and any number of non-overlapping scope sessions. It samples the latest analysis rather than rendering from every audio callback. Demo sessions can substitute a deterministic synthetic feature pattern.
 4. `MusicChoreographyEngine` combines a feature snapshot, `MusicModeConfiguration`, and `FixtureTopology` into a vendor-neutral `MusicLightingFrame`. Its output contains fixture and optional segment IDs, HSB values, transition duration, priority, timestamp, and sequence number.

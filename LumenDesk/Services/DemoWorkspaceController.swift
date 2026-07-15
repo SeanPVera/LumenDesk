@@ -47,7 +47,6 @@ final class DemoWorkspaceController {
         var favoriteOrder: [FavoriteReference]
         var parliamentMembers: [ParliamentMember]
         var parliamentSessions: [ParliamentSession]
-        var fireflyCitizens: [FireflyCitizen]
         var sceneCertifications: [SceneCertification]
         var recentColors: [RecentColor]
         var discoveryChanges: [DiscoveryChange]
@@ -228,7 +227,6 @@ final class DemoWorkspaceController {
         )]
         workspace.parliamentMembers = []
         workspace.parliamentSessions = []
-        workspace.fireflyCitizens = []
         workspace.sceneCertifications = []
         workspace.recentColors = []
         workspace.scheduleState = ScheduleEngine.State()

@@ -11,19 +11,15 @@ struct ContentView: View {
     @State private var setupChecks: Set<Int> = []
     @State private var showingScenes: Bool = false
     @State private var showingShortcuts: Bool = false
-    @AppStorage("LumenDesk.auroraFireflies.v1") private var auroraFireflies: Bool = true
     @State private var showingDiagnostics = false
     @State private var showingActivity = false
     @State private var showingParliament = false
-    @State private var showingEcosystem = false
     @State private var showingCompliance = false
     @State private var showingDiscoveryInbox = false
     @State private var showingMissedAutomations = false
     @State private var showingIdentifyMode = false
     @State private var showingExperienceCenter = false
     @State private var previewScene: LightingScene?
-    @AppStorage(AppPreferenceKey.quietInterface) private var quietInterface = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @AppStorage("LumenDesk.workspaceLayout.v1") private var layoutRaw = WorkspaceLayout.automatic.rawValue
     @AppStorage("LumenDesk.interfaceDensity.v1") private var densityRaw = InterfaceDensity.comfortable.rawValue
@@ -81,7 +77,6 @@ struct ContentView: View {
             .sheet(isPresented: $showingDiagnostics) { DiagnosticsCenterView().environmentObject(manager) }
             .sheet(isPresented: $showingActivity) { ActivityLogView().environmentObject(manager) }
             .sheet(isPresented: $showingParliament) { LightingParliamentView().environmentObject(manager) }
-            .sheet(isPresented: $showingEcosystem) { FireflyEcosystemView().environmentObject(manager) }
             .sheet(isPresented: $showingCompliance) { ComplianceSuiteView().environmentObject(manager) }
             .sheet(isPresented: $showingDiscoveryInbox) { DiscoveryInboxView().environmentObject(manager) }
             .sheet(isPresented: $showingMissedAutomations) { MissedAutomationsView().environmentObject(manager) }
@@ -99,12 +94,6 @@ struct ContentView: View {
                     .padding(.bottom, manager.commandError == nil ? 16 : 72)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
-            }
-
-            if auroraFireflies && !quietInterface && !reduceMotion && !manager.devices.isEmpty {
-                AuroraFireflyOverlay(colors: manager.fireflyCitizens.map { Color(hue: $0.hue, saturation: 0.82, brightness: max(0.45, $0.energy)) })
-                    .allowsHitTesting(false)
-                    .transition(.opacity)
             }
 
             if let summary = manager.lastActionSummary {
@@ -258,7 +247,6 @@ struct ContentView: View {
                     Picker("Layout", selection: $layoutRaw) { ForEach(WorkspaceLayout.allCases) { Text($0.title).tag($0.rawValue) } }
                     Picker("Density", selection: $densityRaw) { ForEach(InterfaceDensity.allCases) { Text($0.title).tag($0.rawValue) } }
                     Divider()
-                    Toggle("Aurora Fireflies", isOn: $auroraFireflies)
                     Button { if manager.napPhase != .inactive { manager.cancelNapMode() } else { manager.startNapMode() } } label: { Label(manager.napPhase == .inactive ? "Start Nap Mode" : "Cancel Nap Mode", systemImage: "moon.fill") }
                     Divider()
                     Button { showingDiagnostics = true } label: { Label("Discovery Diagnostics", systemImage: "stethoscope") }
@@ -268,9 +256,7 @@ struct ContentView: View {
                     Button { showingActivity = true } label: { Label("Activity Log", systemImage: "clock.arrow.circlepath") }
                     Divider()
                     Menu("Labs") {
-                        Toggle("Aurora Fireflies", isOn: $auroraFireflies)
                         Button { showingParliament = true } label: { Label("Lighting Parliament", systemImage: "building.columns") }
-                        Button { showingEcosystem = true } label: { Label("Firefly Conservatory", systemImage: "ladybug") }
                         Button { showingCompliance = true } label: { Label("Lumens Compliance", systemImage: "checkmark.seal") }
                     }
                 } label: { Label("More", systemImage: "ellipsis.circle") }
@@ -1064,41 +1050,6 @@ struct KeyboardShortcutsView: View {
         .padding(20)
         .frame(width: 360)
         .background(LumenBackground(glow: false))
-    }
-}
-
-struct AuroraFireflyOverlay: View {
-    let colors: [Color]
-    @State private var drift = false
-    private let points: [(CGFloat, CGFloat)] = [(0.12,0.25),(0.28,0.72),(0.46,0.18),(0.63,0.64),(0.81,0.32),(0.92,0.78)]
-
-    var body: some View {
-        GeometryReader { proxy in
-            Canvas { context, size in
-                let palette = colors.isEmpty ? [Lumen.violet, Lumen.pink, Lumen.gold] : colors
-                for (idx, point) in points.enumerated() {
-                    let color = palette[idx % palette.count]
-                    let x = size.width * point.0 + (drift ? 18 : -18) * sin(Double(idx + 1))
-                    let y = size.height * point.1 + (drift ? -14 : 14) * cos(Double(idx + 2))
-                    context.fill(Path(ellipseIn: CGRect(x: x, y: y, width: 7, height: 7)), with: .color(color.opacity(0.55)))
-                    context.addFilter(.blur(radius: 8))
-                    context.fill(Path(ellipseIn: CGRect(x: x - 10, y: y - 10, width: 27, height: 27)), with: .color(color.opacity(0.16)))
-                    context.drawLayer { layer in
-                        if idx > 0 {
-                            let previous = points[idx - 1]
-                            var path = Path()
-                            path.move(to: CGPoint(x: size.width * previous.0, y: size.height * previous.1))
-                            path.addLine(to: CGPoint(x: x + 3, y: y + 3))
-                            layer.stroke(path, with: .color(color.opacity(0.08)), lineWidth: 1)
-                        }
-                    }
-                }
-            }
-            .ignoresSafeArea()
-            .onAppear {
-                withAnimation(.easeInOut(duration: 5).repeatForever(autoreverses: true)) { drift.toggle() }
-            }
-        }
     }
 }
 

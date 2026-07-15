@@ -72,7 +72,6 @@ struct MusicModeVisualizerView: View {
                     .shadow(color: previewColor(state).opacity(0.4), radius: 5)
             }
         }
-        .animation(.easeOut(duration: 0.1), value: frame?.sequenceNumber)
     }
 
     private func previewColor(_ state: MusicLightingState?) -> Color {

@@ -37,6 +37,7 @@ final class AudioReactiveSessionController: ObservableObject {
         let startedAt: TimeInterval
         let engine = MusicChoreographyEngine()
         let onFrame: (MusicLightingFrame) -> Void
+        var lastPreviewPublishedAt = -Double.greatestFiniteMagnitude
 
         init(
             configuration: MusicModeConfiguration,
@@ -69,6 +70,9 @@ final class AudioReactiveSessionController: ObservableObject {
     private var sessions: [LightScope: Session] = [:]
     private var renderTimer: Timer?
     private var sequenceNumber: UInt64 = 0
+    private var analysisSnapshot = AudioReactiveSnapshot()
+    private var lastSnapshotPublishedAt = -Double.greatestFiniteMagnitude
+    private let previewPublicationInterval: TimeInterval = 0.1
 
     init(
         captureService: AudioCaptureService = AudioCaptureService(),
@@ -79,10 +83,18 @@ final class AudioReactiveSessionController: ObservableObject {
         subscriptionToken = captureService.subscribe { [weak self] snapshot in
             Task { @MainActor in
                 guard let self else { return }
-                self.latestSnapshot = snapshot
-                self.isAudioPlaying = snapshot.confidence >= 0.025
+                self.analysisSnapshot = snapshot
+                let isPlaying = snapshot.confidence >= 0.025
                     || snapshot.level >= 0.025
                     || snapshot.energy >= 0.035
+                if self.isAudioPlaying != isPlaying {
+                    self.isAudioPlaying = isPlaying
+                }
+                let timestamp = self.now()
+                if snapshot.beat > 0 || timestamp - self.lastSnapshotPublishedAt >= self.previewPublicationInterval {
+                    self.latestSnapshot = snapshot
+                    self.lastSnapshotPublishedAt = timestamp
+                }
             }
         }
     }
@@ -112,7 +124,7 @@ final class AudioReactiveSessionController: ObservableObject {
 
         if useSyntheticPattern {
             sourceStatus = .syntheticDemo
-            isAudioPlaying = true
+            if !isAudioPlaying { isAudioPlaying = true }
             completion(.started)
             return
         }
@@ -177,10 +189,13 @@ final class AudioReactiveSessionController: ObservableObject {
     private func startRenderTimerIfNeeded() {
         guard renderTimer == nil else { return }
         renderTick()
-        renderTimer = Timer.scheduledTimer(withTimeInterval: 1 / 30, repeats: true) { [weak self] _ in
+        // Lighting and preview output do not benefit from display-refresh
+        // cadence. Twenty frames per second remains fluid and cuts a third of
+        // the choreography, allocation, and main-thread publication work.
+        renderTimer = Timer.scheduledTimer(withTimeInterval: 1 / 20, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.renderTick() }
         }
-        renderTimer?.tolerance = 0.004
+        renderTimer?.tolerance = 0.01
     }
 
     private func renderTick() {
@@ -190,10 +205,14 @@ final class AudioReactiveSessionController: ObservableObject {
         for (scope, session) in sessions {
             let snapshot = session.synthetic
                 ? syntheticSnapshot(elapsed: max(0, timestamp - session.startedAt))
-                : latestSnapshot
+                : analysisSnapshot
             if session.synthetic {
-                latestSnapshot = snapshot
-                isAudioPlaying = true
+                analysisSnapshot = snapshot
+                if timestamp - lastSnapshotPublishedAt >= previewPublicationInterval {
+                    latestSnapshot = snapshot
+                    lastSnapshotPublishedAt = timestamp
+                }
+                if !isAudioPlaying { isAudioPlaying = true }
             }
             let frame = session.engine.makeFrame(
                 snapshot: snapshot,
@@ -204,7 +223,15 @@ final class AudioReactiveSessionController: ObservableObject {
                 sequenceNumber: sequenceNumber,
                 reducedMotion: session.reducedMotion
             )
-            latestFrames[scope] = frame
+            // Network output keeps the 20 Hz render cadence, but preview cards
+            // only need 10 Hz. Keeping those clocks separate prevents every
+            // transport frame from invalidating the entire Music Mode UI.
+            if frame.flashApplied
+                || snapshot.beat > 0
+                || timestamp - session.lastPreviewPublishedAt >= previewPublicationInterval {
+                latestFrames[scope] = frame
+                session.lastPreviewPublishedAt = timestamp
+            }
             session.onFrame(frame)
         }
     }
@@ -259,6 +286,8 @@ final class AudioReactiveSessionController: ObservableObject {
         renderTimer = nil
         sourceStatus = .idle
         latestSnapshot = AudioReactiveSnapshot()
+        analysisSnapshot = AudioReactiveSnapshot()
+        lastSnapshotPublishedAt = -Double.greatestFiniteMagnitude
         isAudioPlaying = false
     }
 }

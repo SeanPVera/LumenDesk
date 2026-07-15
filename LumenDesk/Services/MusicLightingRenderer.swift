@@ -73,7 +73,7 @@ final class MusicLightingRenderer {
 
     static func minimumInterval(for transport: MusicTransportKind) -> TimeInterval {
         switch transport {
-        case .goveeRealtimeSegments: return 0.04  // 25 fps volatile stream
+        case .goveeRealtimeSegments: return 0.05  // 20 fps volatile stream
         case .lifxLAN: return 0.06                 // combined HSBK packet
         case .goveeLAN: return 0.1                 // ordinary LAN JSON ceiling
         }

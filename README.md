@@ -616,11 +616,11 @@ If LumenDesk reports a bind failure for Govee, another app may already be listen
 
 On macOS, Music Mode analyzes the **system-audio mix** as its **only** source. It is not an Apple Music-specific feed and does not use the microphone, so room noise never mixes into the analysis. System audio is captured through ScreenCaptureKit, which macOS gates behind the **Screen Recording** permission:
 
-- The first time you start Music Mode without the permission, macOS shows the Screen Recording prompt. Turn on **LumenDesk** in System Settings, then start Music Mode again. LumenDesk re-checks the permission live on every start, so the grant is usually picked up without relaunching. (Some macOS versions may require one relaunch before applying the grant to the running app.)
+- The first time you start Music Mode without the permission, macOS shows the Screen Recording prompt. Turn on **LumenDesk** in System Settings, return to LumenDesk, and start Music Mode again. LumenDesk re-checks the permission live on every start, so a relaunch is normally unnecessary.
 - If the permission is still off, LumenDesk shows a message pointing you to **System Settings → Privacy & Security → Screen & System Audio Recording** (called **Screen Recording** before macOS 15). Enable LumenDesk there and start Music Mode again.
 - macOS shows the permission prompt only the first time; after that LumenDesk points you to System Settings instead. LumenDesk **never** silently falls back to the microphone on macOS — if it can't read system audio, it tells you why instead of reacting to room noise.
 
-> **Note (developer builds):** A Screen Recording grant is tied to the app's code signature. An unsigned or ad-hoc-signed build (the default when no development team is set) gets a new identity on every rebuild, so macOS drops the grant and re-prompts each build cycle. With a stable signing identity (set `DEVELOPMENT_TEAM` in `project.yml`) the grant persists.
+> **Note (developer builds):** Debug builds disable Xcode's automatic Launch Services registration so test products in temporary DerivedData folders do not become permission-relaunch candidates. Music Mode refreshes the currently running bundle's registration immediately before asking for access. A Screen Recording grant is also tied to the app's code signature. An unsigned or ad-hoc-signed build (the default when no development team is set) can still be re-prompted after rebuilding; set `DEVELOPMENT_TEAM` in `project.yml` for a stable signing identity.
 
 On **iOS**, Music Mode uses the **microphone** (there is no system-audio capture on iOS); grant microphone access when prompted.
 

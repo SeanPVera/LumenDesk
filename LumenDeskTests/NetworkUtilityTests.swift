@@ -1,4 +1,5 @@
 import XCTest
+import Darwin
 @testable import LumenDesk
 
 final class NetworkUtilityTests: XCTestCase {
@@ -42,5 +43,23 @@ final class NetworkUtilityTests: XCTestCase {
         XCTAssertFalse(hosts.contains("172.16.8.20"))
         XCTAssertFalse(hosts.contains("172.16.8.21"))
         XCTAssertFalse(hosts.contains("172.16.8.255"))
+    }
+
+    func testBoundUDPPortIsExclusive() throws {
+        let first = try UDPSocket(boundPort: 0, queue: DispatchQueue(label: "LumenDeskTests.udp.first"))
+        var address = sockaddr_in()
+        var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+        let result = withUnsafeMutablePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                getsockname(first.fd, $0, &length)
+            }
+        }
+        XCTAssertEqual(result, 0)
+        let port = UInt16(bigEndian: address.sin_port)
+        XCTAssertNotEqual(port, 0)
+
+        XCTAssertThrowsError(
+            try UDPSocket(boundPort: port, queue: DispatchQueue(label: "LumenDeskTests.udp.second"))
+        )
     }
 }

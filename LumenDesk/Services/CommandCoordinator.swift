@@ -133,6 +133,7 @@ final class CommandCoordinator {
     private let now: () -> Date
     private let sleep: Sleep
     private var commandTasks: [String: Task<Void, Never>] = [:]
+    private var commandTaskTokens: [String: UUID] = [:]
     private var commandTimeoutTasks: [String: Task<Void, Never>] = [:]
     private var confirmationRefreshTasks: [String: Task<Void, Never>] = [:]
     private var settlingTasks: [String: Task<Void, Never>] = [:]
@@ -226,10 +227,14 @@ final class CommandCoordinator {
         markQueued(deviceID, summary: summary)
         let taskKey = "\(deviceID)|\(coalescingKey)"
         commandTasks[taskKey]?.cancel()
+        let taskToken = UUID()
+        commandTaskTokens[taskKey] = taskToken
 
         if let simulated {
             commandTasks[taskKey] = Task { @MainActor [weak self] in
-                guard let self, await self.awaitDelay(self.timing.simulatedResultNanoseconds) else { return }
+                guard let self else { return }
+                defer { self.finishCommandTask(taskKey, token: taskToken) }
+                guard await self.awaitDelay(self.timing.simulatedResultNanoseconds) else { return }
                 let failed = simulated.isStale()
                 self.updateState {
                     self.state.pendingDeviceIDs.remove(deviceID)
@@ -247,7 +252,9 @@ final class CommandCoordinator {
 
         let delay = debounceNanoseconds ?? timing.defaultDebounceNanoseconds
         commandTasks[taskKey] = Task { @MainActor [weak self] in
-            guard let self, await self.awaitDelay(delay) else { return }
+            guard let self else { return }
+            defer { self.finishCommandTask(taskKey, token: taskToken) }
+            guard await self.awaitDelay(delay) else { return }
             self.updateState {
                 self.state.commandStates[deviceID] = DeviceCommandState(
                     lifecycle: .sending,
@@ -424,6 +431,7 @@ final class CommandCoordinator {
         confirmationRefreshTasks.values.forEach { $0.cancel() }
         settlingTasks.values.forEach { $0.cancel() }
         commandTasks = [:]
+        commandTaskTokens = [:]
         commandTimeoutTasks = [:]
         confirmationRefreshTasks = [:]
         settlingTasks = [:]
@@ -479,6 +487,7 @@ final class CommandCoordinator {
         for key in commandTasks.keys.filter({ $0.hasPrefix("\(deviceID)|") }) {
             commandTasks[key]?.cancel()
             commandTasks[key] = nil
+            commandTaskTokens[key] = nil
         }
         commandTimeoutTasks[deviceID]?.cancel()
         commandTimeoutTasks[deviceID] = nil
@@ -486,6 +495,12 @@ final class CommandCoordinator {
         confirmationRefreshTasks[deviceID] = nil
         settlingTasks[deviceID]?.cancel()
         settlingTasks[deviceID] = nil
+    }
+
+    private func finishCommandTask(_ taskKey: String, token: UUID) {
+        guard commandTaskTokens[taskKey] == token else { return }
+        commandTasks[taskKey] = nil
+        commandTaskTokens[taskKey] = nil
     }
 
     private func awaitDelay(_ nanoseconds: UInt64) async -> Bool {

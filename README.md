@@ -13,6 +13,7 @@ The app is designed for day-to-day lighting control as well as richer home-light
 - Groups lights into vendor-agnostic rooms, so LIFX and Govee bulbs can live in the same room.
 - Saves and recalls scenes captured from your current lighting state.
 - Applies curated static lighting themes and animated effects.
+- Choreographs local music into beat, frequency, and spatial lighting through a configurable Music Mode.
 - Runs room schedules, including fixed times and sunrise/sunset-style actions.
 - Provides undo/redo for recent lighting changes.
 - Tracks command progress, failures, confirmations, discovery changes, and activity history.
@@ -69,7 +70,7 @@ LumenDesk is intentionally local-first:
 
 The app needs local network permission because it sends and receives UDP packets on your network. On iOS, the first scan triggers Apple's Local Network privacy prompt; you must allow it for discovery and control to work.
 
-The music-reactive effect uses microphone access only to measure live audio levels locally. Audio is not recorded or retained by LumenDesk.
+Music Mode analyzes **system audio on macOS** through ScreenCaptureKit and **microphone input on iOS**. Analysis is local, audio is never recorded or retained, and the feature does not receive an Apple Music-only feed.
 
 ## Feature guide
 
@@ -234,16 +235,30 @@ Themes include palettes such as Aurora Veil, Afterglow, Tidepool, Forest Bath, W
 
 Themes can be applied to all lights or to a specific room.
 
+### Music Mode
+
+Music Mode is a first-class section of the Lighting Library. It turns the existing `music-pulse` effect into a configurable choreography session while preserving that identifier for saved-state compatibility.
+
+- Built-in presets: Ambient, Balanced, Concert, Cinematic, and Soundcheck, plus a persisted Custom configuration.
+- Beat, bass, percussion, color-change, brightness, movement, silence, palette, and restoration controls.
+- Explicit left-to-right, front-to-back, circular, or custom fixture topology. Rooms with no saved topology use deterministic label-and-ID ordering rather than discovery order.
+- Vendor-neutral lighting frames translated to combined LIFX HSBK, efficient ordinary Govee LAN color, or volatile Govee RGBIC segment streaming.
+- Independent transport ceilings and latest-frame coalescing so a slower bulb does not hold back an RGBIC stream.
+- Photosensitivity-safe mode is enabled by default. Flash requests are disabled in safe mode and are always subject to an absolute 3-per-second ceiling plus the user's lower configured limit.
+- Reduced Motion limits spatial movement and disables flashes.
+- Demo Mode includes LIFX-style bulbs, Govee bulbs, segmented Govee fixtures, and a deterministic synthetic rhythm with no copyrighted audio.
+
+On macOS the source is system audio and requires Screen Recording permission. On iPhone and iPad the source is the microphone and is labeled accordingly. See [Music Mode architecture](MUSIC_MODE_ARCHITECTURE.md) for the data flow and safety boundaries.
+
 ### Animated effects
 
-The Lighting Library includes 10 animated effects:
+The Lighting Library includes the following non-music animated effects:
 
 - Color Flow.
 - Ocean Wave.
 - Breathe.
 - Candlelight.
 - Firefly Field.
-- Soundcheck.
 - Prism Shuffle.
 - Summer Storm.
 - Golden Sunrise.
@@ -251,7 +266,7 @@ The Lighting Library includes 10 animated effects:
 
 Effects can run against all lights or a specific room. Multiple effects may run at the same time as long as their device scopes do not overlap. Effects can be stopped individually or all at once, and LumenDesk can restore previous light states when stopping effects.
 
-The Soundcheck effect is audio-reactive. On macOS it reads Apple Music/system audio through ScreenCaptureKit (Screen Recording permission); on iOS it measures live audio levels through the microphone (microphone permission). All analysis happens locally.
+Soundcheck now lives inside Music Mode as a built-in compatibility preset.
 
 ### Schedules and automation
 
@@ -589,25 +604,25 @@ If LumenDesk reports a bind failure for Govee, another app may already be listen
 - On string, curtain, and permanent-outdoor lights (H70Cx, H70Bx, H702x, H705x), applied layouts are **held by LumenDesk**, not stored in the light — their firmware has no segment memory. The layout re-applies automatically while LumenDesk runs; if LumenDesk quits, the lights fall back to their built-in state until it next launches.
 - A firmware update in the Govee Home app can help on devices that predate LAN segment support.
 
-### Music-reactive effects do not respond
+### Music Mode does not respond
 
-- On **macOS**, Soundcheck reacts to **system audio** (Apple Music and other apps). Make sure something is actually playing — Soundcheck has nothing to react to in silence.
+- On **macOS**, Music Mode reacts to **system audio from any app**. Make sure something is actually playing; there is no musical input to analyze during silence.
 - Grant **Screen Recording** to LumenDesk (macOS) or **microphone** access (iOS) when prompted.
-- Make sure the selected effect is Soundcheck.
+- Open **Lighting Library → Music Mode**, choose a preset and scope, then select **Start**.
 - Confirm the audio is loud enough for the input being monitored.
-- Stop and restart the effect after changing permissions.
+- Stop and restart Music Mode after changing permissions.
 
-### Soundcheck and system audio (Screen Recording, macOS)
+### Music Mode and system audio (Screen Recording, macOS)
 
-On macOS, Soundcheck analyzes **system audio** — Apple Music and any other app — as its **only** source. It does not use the microphone, so room noise never mixes into the music analysis. System audio is captured through ScreenCaptureKit, which macOS gates behind the **Screen Recording** permission:
+On macOS, Music Mode analyzes the **system-audio mix** as its **only** source. It is not an Apple Music-specific feed and does not use the microphone, so room noise never mixes into the analysis. System audio is captured through ScreenCaptureKit, which macOS gates behind the **Screen Recording** permission:
 
-- The first time you start Soundcheck without the permission, macOS shows the Screen Recording prompt. Turn on **LumenDesk** in System Settings, then just **start Soundcheck again** — LumenDesk re-checks the permission live on every start, so the grant is picked up without relaunching. (If macOS hasn't applied the grant to the running app yet — some versions only apply it at launch — relaunch LumenDesk once.)
-- If the permission is still off, LumenDesk shows a message pointing you to **System Settings → Privacy & Security → Screen & System Audio Recording** (called **Screen Recording** before macOS 15). Enable LumenDesk there and start Soundcheck again.
+- The first time you start Music Mode without the permission, macOS shows the Screen Recording prompt. Turn on **LumenDesk** in System Settings, then start Music Mode again. LumenDesk re-checks the permission live on every start, so the grant is usually picked up without relaunching. (Some macOS versions may require one relaunch before applying the grant to the running app.)
+- If the permission is still off, LumenDesk shows a message pointing you to **System Settings → Privacy & Security → Screen & System Audio Recording** (called **Screen Recording** before macOS 15). Enable LumenDesk there and start Music Mode again.
 - macOS shows the permission prompt only the first time; after that LumenDesk points you to System Settings instead. LumenDesk **never** silently falls back to the microphone on macOS — if it can't read system audio, it tells you why instead of reacting to room noise.
 
 > **Note (developer builds):** A Screen Recording grant is tied to the app's code signature. An unsigned or ad-hoc-signed build (the default when no development team is set) gets a new identity on every rebuild, so macOS drops the grant and re-prompts each build cycle. With a stable signing identity (set `DEVELOPMENT_TEAM` in `project.yml`) the grant persists.
 
-On **iOS**, Soundcheck uses the **microphone** (there is no system-audio capture on iOS); grant microphone access when prompted.
+On **iOS**, Music Mode uses the **microphone** (there is no system-audio capture on iOS); grant microphone access when prompted.
 
 ## Protocol references
 

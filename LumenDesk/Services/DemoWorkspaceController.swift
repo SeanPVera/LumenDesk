@@ -59,6 +59,8 @@ final class DemoWorkspaceController {
         var rehearsalSceneID: UUID?
         var goveeSegmentStates: [String: GoveeSegmentState]
         var goveeSegmentPresets: [GoveeSegmentPreset]
+        var musicModeConfiguration: MusicModeConfiguration
+        var fixtureTopologies: [String: FixtureTopology]
         var customNames: [String: String]
         var favoriteRoomIDs: Set<UUID>
         var favoriteSceneIDs: Set<UUID>
@@ -215,6 +217,9 @@ final class DemoWorkspaceController {
         workspace.customBrightnessPresets = [0.1, 0.35, 0.7]
         workspace.goveeSegmentStates = [:]
         workspace.goveeSegmentPresets = []
+        workspace.musicModeConfiguration = .configuration(for: .balanced)
+        workspace.musicModeConfiguration.usesSyntheticDemoPattern = true
+        workspace.fixtureTopologies = [:]
         workspace.activityEvents = [ActivityEvent(
             kind: .system,
             title: "Demo mode entered",

@@ -428,10 +428,10 @@ struct LumenDeskSettingsView: View {
             }.padding(20).tabItem { Label("Advanced", systemImage: "slider.horizontal.3") }
 
             Form {
-                Label("Audio-reactive effects analyze Apple Music/system audio on the Mac (via the Screen Recording permission) and the microphone on iPhone and iPad, entirely locally. LumenDesk does not record or retain audio.", systemImage: "waveform")
+                Label("Music Mode analyzes system audio on the Mac (via the Screen Recording permission) and the microphone on iPhone and iPad, entirely locally. LumenDesk does not record or retain audio.", systemImage: "waveform")
                 Toggle("I understand the audio behavior", isOn: $audioAcknowledged)
                 Button("Open Audio Privacy Settings") {
-                    // macOS: Soundcheck reads system audio through ScreenCaptureKit,
+                    // macOS: Music Mode reads system audio through ScreenCaptureKit,
                     // so the pane that matters is Screen Recording, not Microphone.
                     PlatformOpener.openSettings(macPane: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
                 }

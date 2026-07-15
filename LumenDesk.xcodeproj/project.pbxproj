@@ -41,6 +41,12 @@
 		B100000000000000000023 /* ScheduleEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000023 /* ScheduleEngine.swift */; };
 		B100000000000000000024 /* PersistenceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000024 /* PersistenceStore.swift */; };
 		B100000000000000000025 /* CommandCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000025 /* CommandCoordinator.swift */; };
+		B100000000000000000026 /* MusicMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000026 /* MusicMode.swift */; };
+		B100000000000000000027 /* MusicChoreographyEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000027 /* MusicChoreographyEngine.swift */; };
+		B100000000000000000028 /* MusicLightingRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000028 /* MusicLightingRenderer.swift */; };
+		B100000000000000000029 /* AudioReactiveSessionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000029 /* AudioReactiveSessionController.swift */; };
+		B10000000000000000002A /* MusicModeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000002A /* MusicModeView.swift */; };
+		B10000000000000000002B /* MusicModeVisualizerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000002B /* MusicModeVisualizerView.swift */; };
 		B200000000000000000001 /* ProtocolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000001 /* ProtocolTests.swift */; };
 		B200000000000000000002 /* DomainTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000002 /* DomainTests.swift */; };
 		B200000000000000000003 /* NetworkUtilityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000003 /* NetworkUtilityTests.swift */; };
@@ -49,6 +55,7 @@
 		B200000000000000000006 /* ScheduleEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000006 /* ScheduleEngineTests.swift */; };
 		B200000000000000000007 /* PersistenceStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000007 /* PersistenceStoreTests.swift */; };
 		B200000000000000000008 /* CommandCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000008 /* CommandCoordinatorTests.swift */; };
+		B200000000000000000009 /* MusicModeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000009 /* MusicModeTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -86,18 +93,24 @@
 		A100000000000000000017 /* ScheduleEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleEditorView.swift; sourceTree = "<group>"; };
 		A100000000000000000018 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		A100000000000000000019 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
-    A10000000000000000001A /* LightingCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LightingCatalog.swift; sourceTree = "<group>"; };
-    A10000000000000000001B /* AudioLevelMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioLevelMonitor.swift; sourceTree = "<group>"; };
-    A10000000000000000001C /* UXEnhancements.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UXEnhancements.swift; sourceTree = "<group>"; };
-    A10000000000000000001D /* UXCenterViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UXCenterViews.swift; sourceTree = "<group>"; };
-    A10000000000000000001E /* GoveeSegments.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoveeSegments.swift; sourceTree = "<group>"; };
-    A10000000000000000001F /* GoveeSegmentEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoveeSegmentEditorView.swift; sourceTree = "<group>"; };
+		A10000000000000000001A /* LightingCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LightingCatalog.swift; sourceTree = "<group>"; };
+		A10000000000000000001B /* AudioLevelMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioLevelMonitor.swift; sourceTree = "<group>"; };
+		A10000000000000000001C /* UXEnhancements.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UXEnhancements.swift; sourceTree = "<group>"; };
+		A10000000000000000001D /* UXCenterViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UXCenterViews.swift; sourceTree = "<group>"; };
+		A10000000000000000001E /* GoveeSegments.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoveeSegments.swift; sourceTree = "<group>"; };
+		A10000000000000000001F /* GoveeSegmentEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoveeSegmentEditorView.swift; sourceTree = "<group>"; };
 		A100000000000000000020 /* ProductShellView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductShellView.swift; sourceTree = "<group>"; };
 		A100000000000000000021 /* DemoWorkspaceController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoWorkspaceController.swift; sourceTree = "<group>"; };
 		A100000000000000000022 /* ConfirmationCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfirmationCoordinator.swift; sourceTree = "<group>"; };
 		A100000000000000000023 /* ScheduleEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleEngine.swift; sourceTree = "<group>"; };
 		A100000000000000000024 /* PersistenceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceStore.swift; sourceTree = "<group>"; };
 		A100000000000000000025 /* CommandCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandCoordinator.swift; sourceTree = "<group>"; };
+		A100000000000000000026 /* MusicMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicMode.swift; sourceTree = "<group>"; };
+		A100000000000000000027 /* MusicChoreographyEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicChoreographyEngine.swift; sourceTree = "<group>"; };
+		A100000000000000000028 /* MusicLightingRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicLightingRenderer.swift; sourceTree = "<group>"; };
+		A100000000000000000029 /* AudioReactiveSessionController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioReactiveSessionController.swift; sourceTree = "<group>"; };
+		A10000000000000000002A /* MusicModeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicModeView.swift; sourceTree = "<group>"; };
+		A10000000000000000002B /* MusicModeVisualizerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicModeVisualizerView.swift; sourceTree = "<group>"; };
 		A100000000000000000099 /* LumenDesk.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LumenDesk.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A200000000000000000001 /* ProtocolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolTests.swift; sourceTree = "<group>"; };
 		A200000000000000000002 /* DomainTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DomainTests.swift; sourceTree = "<group>"; };
@@ -107,6 +120,7 @@
 		A200000000000000000006 /* ScheduleEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleEngineTests.swift; sourceTree = "<group>"; };
 		A200000000000000000007 /* PersistenceStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceStoreTests.swift; sourceTree = "<group>"; };
 		A200000000000000000008 /* CommandCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandCoordinatorTests.swift; sourceTree = "<group>"; };
+		A200000000000000000009 /* MusicModeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicModeTests.swift; sourceTree = "<group>"; };
 		A200000000000000000099 /* LumenDeskTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LumenDeskTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -131,6 +145,7 @@
 		C100000000000000000001 = {
 			isa = PBXGroup;
 			children = (
+				C100000000000000000008 /* Preview Content */,
 				C100000000000000000002 /* LumenDesk */,
 				C200000000000000000001 /* LumenDeskTests */,
 				C100000000000000000099 /* Products */,
@@ -147,7 +162,6 @@
 				C100000000000000000004 /* Services */,
 				C100000000000000000007 /* Views */,
 				A10000000000000000000B /* Assets.xcassets */,
-				C100000000000000000008 /* Preview Content */,
 				A10000000000000000000D /* Info.plist */,
 				A10000000000000000000E /* LumenDesk.entitlements */,
 			);
@@ -164,6 +178,7 @@
 				A10000000000000000001A /* LightingCatalog.swift */,
 				A10000000000000000001C /* UXEnhancements.swift */,
 				A10000000000000000001E /* GoveeSegments.swift */,
+				A100000000000000000026 /* MusicMode.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -177,6 +192,9 @@
 				A100000000000000000023 /* ScheduleEngine.swift */,
 				A100000000000000000024 /* PersistenceStore.swift */,
 				A100000000000000000025 /* CommandCoordinator.swift */,
+				A100000000000000000027 /* MusicChoreographyEngine.swift */,
+				A100000000000000000028 /* MusicLightingRenderer.swift */,
+				A100000000000000000029 /* AudioReactiveSessionController.swift */,
 				A100000000000000000005 /* UDPSocket.swift */,
 				A10000000000000000001B /* AudioLevelMonitor.swift */,
 				C100000000000000000005 /* LIFX */,
@@ -216,6 +234,8 @@
 				A10000000000000000001D /* UXCenterViews.swift */,
 				A10000000000000000001F /* GoveeSegmentEditorView.swift */,
 				A100000000000000000020 /* ProductShellView.swift */,
+				A10000000000000000002A /* MusicModeView.swift */,
+				A10000000000000000002B /* MusicModeVisualizerView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -248,6 +268,7 @@
 				A200000000000000000006 /* ScheduleEngineTests.swift */,
 				A200000000000000000007 /* PersistenceStoreTests.swift */,
 				A200000000000000000008 /* CommandCoordinatorTests.swift */,
+				A200000000000000000009 /* MusicModeTests.swift */,
 			);
 			path = LumenDeskTests;
 			sourceTree = "<group>";
@@ -364,18 +385,24 @@
 				B100000000000000000017 /* ScheduleEditorView.swift in Sources */,
 				B100000000000000000018 /* Theme.swift in Sources */,
 				B100000000000000000019 /* OnboardingView.swift in Sources */,
-B10000000000000000001A /* LightingCatalog.swift in Sources */,
-B10000000000000000001B /* AudioLevelMonitor.swift in Sources */,
-B10000000000000000001C /* UXEnhancements.swift in Sources */,
-B10000000000000000001D /* UXCenterViews.swift in Sources */,
-B10000000000000000001E /* GoveeSegments.swift in Sources */,
-B10000000000000000001F /* GoveeSegmentEditorView.swift in Sources */,
+				B10000000000000000001A /* LightingCatalog.swift in Sources */,
+				B10000000000000000001B /* AudioLevelMonitor.swift in Sources */,
+				B10000000000000000001C /* UXEnhancements.swift in Sources */,
+				B10000000000000000001D /* UXCenterViews.swift in Sources */,
+				B10000000000000000001E /* GoveeSegments.swift in Sources */,
+				B10000000000000000001F /* GoveeSegmentEditorView.swift in Sources */,
 				B100000000000000000020 /* ProductShellView.swift in Sources */,
 				B100000000000000000021 /* DemoWorkspaceController.swift in Sources */,
 				B100000000000000000022 /* ConfirmationCoordinator.swift in Sources */,
 				B100000000000000000023 /* ScheduleEngine.swift in Sources */,
 				B100000000000000000024 /* PersistenceStore.swift in Sources */,
 				B100000000000000000025 /* CommandCoordinator.swift in Sources */,
+				B100000000000000000026 /* MusicMode.swift in Sources */,
+				B100000000000000000027 /* MusicChoreographyEngine.swift in Sources */,
+				B100000000000000000028 /* MusicLightingRenderer.swift in Sources */,
+				B100000000000000000029 /* AudioReactiveSessionController.swift in Sources */,
+				B10000000000000000002A /* MusicModeView.swift in Sources */,
+				B10000000000000000002B /* MusicModeVisualizerView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -391,6 +418,7 @@ B10000000000000000001F /* GoveeSegmentEditorView.swift in Sources */,
 				B200000000000000000006 /* ScheduleEngineTests.swift in Sources */,
 				B200000000000000000007 /* PersistenceStoreTests.swift in Sources */,
 				B200000000000000000008 /* CommandCoordinatorTests.swift in Sources */,
+				B200000000000000000009 /* MusicModeTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -528,11 +556,11 @@ B10000000000000000001F /* GoveeSegmentEditorView.swift in Sources */,
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = "LumenDesk/LumenDesk.entitlements";
+				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = LumenDesk/LumenDesk.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_ASSET_PATHS = "\"LumenDesk/Preview Content\"";
+				DEVELOPMENT_ASSET_PATHS = "\"Preview Content\"";
 				"ENABLE_HARDENED_RUNTIME[sdk=macosx*]" = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -563,11 +591,11 @@ B10000000000000000001F /* GoveeSegmentEditorView.swift in Sources */,
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = "LumenDesk/LumenDesk.entitlements";
+				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = LumenDesk/LumenDesk.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_ASSET_PATHS = "\"LumenDesk/Preview Content\"";
+				DEVELOPMENT_ASSET_PATHS = "\"Preview Content\"";
 				"ENABLE_HARDENED_RUNTIME[sdk=macosx*]" = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;

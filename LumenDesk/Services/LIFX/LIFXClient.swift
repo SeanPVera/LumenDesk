@@ -16,6 +16,8 @@ final class LIFXClient {
     private let queue = DispatchQueue(label: "LumenDesk.lifx")
     private let source: UInt32 = UInt32.random(in: 1...UInt32.max)
     private var addressesByMac: [String: String] = [:]
+    private var targetsByMac: [String: Data] = [:]
+    private var macByTarget: [Data: String] = [:]
 
     init() throws {
         socket = try UDPSocket(boundPort: 0, queue: queue)
@@ -46,23 +48,38 @@ final class LIFXClient {
     }
 
     func refresh(macHex: String) {
-        guard let host = addressesByMac[macHex], let mac = Data(hex: macHex) else { return }
-        let pkt = LIFXProtocol.packet(type: .lightGet, source: source, target: mac, payload: Data())
-        sendCommand(pkt, to: host)
+        queue.async { [weak self] in
+            guard let self,
+                  let host = self.addressesByMac[macHex],
+                  let target = self.targetsByMac[macHex] else { return }
+            let packet = LIFXProtocol.packet(type: .lightGet, source: self.source,
+                                             target: target, payload: Data())
+            self.sendCommand(packet, to: host)
+        }
     }
 
     func setPower(macHex: String, on: Bool) {
-        guard let host = addressesByMac[macHex], let mac = Data(hex: macHex) else { return }
-        let payload = LIFXProtocol.setPowerPayload(on: on)
-        let pkt = LIFXProtocol.packet(type: .setLightPower, source: source, target: mac, payload: payload)
-        sendCommand(pkt, to: host)
+        queue.async { [weak self] in
+            guard let self,
+                  let host = self.addressesByMac[macHex],
+                  let target = self.targetsByMac[macHex] else { return }
+            let payload = LIFXProtocol.setPowerPayload(on: on)
+            let packet = LIFXProtocol.packet(type: .setLightPower, source: self.source,
+                                             target: target, payload: payload)
+            self.sendCommand(packet, to: host)
+        }
     }
 
     func setColor(macHex: String, color: LIFXHSBK, durationMS: UInt32 = 200) {
-        guard let host = addressesByMac[macHex], let mac = Data(hex: macHex) else { return }
-        let payload = LIFXProtocol.setColorPayload(color, durationMS: durationMS)
-        let pkt = LIFXProtocol.packet(type: .lightSetColor, source: source, target: mac, payload: payload)
-        sendCommand(pkt, to: host)
+        queue.async { [weak self] in
+            guard let self,
+                  let host = self.addressesByMac[macHex],
+                  let target = self.targetsByMac[macHex] else { return }
+            let payload = LIFXProtocol.setColorPayload(color, durationMS: durationMS)
+            let packet = LIFXProtocol.packet(type: .lightSetColor, source: self.source,
+                                             target: target, payload: payload)
+            self.sendCommand(packet, to: host)
+        }
     }
 
     private func sendCommand(_ data: Data, to host: String) {
@@ -81,7 +98,14 @@ final class LIFXClient {
         // (some firmwares echo zero).
         if header.source != source && header.source != 0 { return }
 
-        let macHex = header.target.hexString
+        let macHex: String
+        if let cached = macByTarget[header.target] {
+            macHex = cached
+        } else {
+            macHex = header.target.hexString
+            macByTarget[header.target] = macHex
+        }
+        targetsByMac[macHex] = header.target
         guard let type = LIFXMessage(rawValue: header.type) else { return }
 
         switch type {
@@ -91,10 +115,9 @@ final class LIFXClient {
                 delegate?.lifxDiscovered(macHex: macHex, address: host)
             }
             // Immediately query state.
-            if let mac = Data(hex: macHex) {
-                let pkt = LIFXProtocol.packet(type: .lightGet, source: source, target: mac, payload: Data())
-                sendCommand(pkt, to: host)
-            }
+            let packet = LIFXProtocol.packet(type: .lightGet, source: source,
+                                             target: header.target, payload: Data())
+            sendCommand(packet, to: host)
         case .lightState:
             if let parsed = LIFXProtocol.parseLightState(header.payload) {
                 delegate?.lifxDidUpdate(macHex: macHex,

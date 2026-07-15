@@ -14,6 +14,7 @@ final class GoveeClient {
     private let socket: UDPSocket
     private let queue = DispatchQueue(label: "LumenDesk.govee")
     private var addressByDevice: [String: String] = [:]
+    private var deviceByAddress: [String: String] = [:]
 
     /// Minimum spacing between commands sent to one device. Govee firmware
     /// processes one LAN command at a time and drops datagrams that arrive
@@ -183,7 +184,14 @@ final class GoveeClient {
         }
         earliestSend[deviceID] = DispatchTime.now() + commandGap
         sendCommand(payload, to: host)
-        if !order.isEmpty { scheduleDrain(deviceID) }
+        if order.isEmpty {
+            queuedOrder.removeValue(forKey: deviceID)
+            if queuedPayloads[deviceID]?.isEmpty == true {
+                queuedPayloads.removeValue(forKey: deviceID)
+            }
+        } else {
+            scheduleDrain(deviceID)
+        }
     }
 
     private func sendCommand(_ data: Data, to host: String) {
@@ -201,7 +209,9 @@ final class GoveeClient {
         if let scan = GoveeProtocol.decodeScanResponse(data) {
             let id = scan.msg.data.device
             if addressByDevice[id] != scan.msg.data.ip {
+                if let oldAddress = addressByDevice[id] { deviceByAddress.removeValue(forKey: oldAddress) }
                 addressByDevice[id] = scan.msg.data.ip
+                deviceByAddress[scan.msg.data.ip] = id
                 delegate?.goveeDiscovered(deviceID: id, address: scan.msg.data.ip, sku: scan.msg.data.sku)
             }
             // Pull status right after discovery.
@@ -211,7 +221,7 @@ final class GoveeClient {
 
         if let status = GoveeProtocol.decodeStatusResponse(data) {
             // We don't have a device ID in the status payload, so we match by source IP.
-            guard let id = addressByDevice.first(where: { $0.value == host })?.key else { return }
+            guard let id = deviceByAddress[host] else { return }
             let d = status.msg.data
             delegate?.goveeDidUpdate(deviceID: id,
                                      isOn: d.onOff == 1,

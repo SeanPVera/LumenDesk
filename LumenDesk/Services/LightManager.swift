@@ -54,6 +54,10 @@ final class LightManager: ObservableObject {
     // and reusable multi-color paint jobs, both persisted across sessions.
     @Published private(set) var goveeSegmentStates: [String: GoveeSegmentState] = [:]
     @Published private(set) var goveeSegmentPresets: [GoveeSegmentPreset] = []
+    @Published private(set) var musicModeConfiguration = MusicModeConfiguration.configuration(for: .soundcheck)
+    @Published private(set) var fixtureTopologies: [String: FixtureTopology] = [:]
+
+    let musicModeController = AudioReactiveSessionController()
 
     private var errorClearTask: Task<Void, Never>?
     private var lifx: LIFXClient?
@@ -61,13 +65,13 @@ final class LightManager: ObservableObject {
     private var refreshTimer: Timer?
     private var scheduleTimer: Timer?
     private var napTimer: Timer?
-    private var ecosystemTimer: Timer?
     private var brightnessTasks: [String: Task<Void, Never>] = [:]
     private var napSnapshotBrightness: [String: Double] = [:]
     private var scanGeneration: Int = 0     // incremented each scan; clears isScanning safely
     private var hasStarted = false
     private var scanStartingIDs: Set<String> = []
     private var scanStartingAddresses: [String: String] = [:]
+    private var devicesByID: [String: LightDevice] = [:]
     private let demoWorkspaceController: DemoWorkspaceController
     let confirmationCoordinator: ConfirmationCoordinator
     private let scheduleEngine: ScheduleEngine
@@ -101,20 +105,22 @@ final class LightManager: ObservableObject {
         var phase: Double = 0
         var snapshot: [LightRuntimeSnapshot]
         var timer: Timer?
-        // Music-reactive show state.
-        var lastBeatCount: Int = 0  // beats already consumed for color stepping
-        var colorIndex: Int = 0     // palette rotation; advances on each beat
-        var strobeOn: Bool = false  // toggled per frame while a drop strobes
-        init(effect: LightingEffect, scope: LightScope, snapshot: [LightRuntimeSnapshot]) {
+        var restorePreviousState: Bool
+        var reducedMotion: Bool
+        // Network effects may run faster than the UI needs to redraw. Keep the
+        // device model at a smooth 4 fps while commands retain their full cadence.
+        var modelUpdateElapsed: TimeInterval = .greatestFiniteMagnitude
+        init(effect: LightingEffect, scope: LightScope, snapshot: [LightRuntimeSnapshot], restorePreviousState: Bool = true, reducedMotion: Bool = false) {
             self.effect = effect
             self.scope = scope
             self.snapshot = snapshot
+            self.restorePreviousState = restorePreviousState
+            self.reducedMotion = reducedMotion
         }
     }
     private var effectRuns: [LightScope: EffectRun] = [:]
-    private var audioLevel: Double = 0
-    private var audioSnapshot = AudioReactiveSnapshot()
-    private let audioLevelMonitor = AudioLevelMonitor()
+    private let musicLightingRenderer = MusicLightingRenderer()
+    private var musicModelUpdateAt: [String: TimeInterval] = [:]
     private var undoStack: [[LightRuntimeSnapshot]] = []
     private var redoStack: [[LightRuntimeSnapshot]] = []
     private var lastChangeTime: [String: Date] = [:]
@@ -166,6 +172,8 @@ final class LightManager: ObservableObject {
         sceneDrafts = persistedState.sceneDrafts
         goveeSegmentStates = persistedState.goveeSegmentStates
         goveeSegmentPresets = persistedState.goveeSegmentPresets
+        musicModeConfiguration = persistedState.musicModeConfiguration
+        fixtureTopologies = persistedState.fixtureTopologies
         self.commandCoordinator.onChange = { [weak self] in
             self?.objectWillChange.send()
         }
@@ -186,10 +194,7 @@ final class LightManager: ObservableObject {
     }
 
     func start() {
-        guard !hasStarted else {
-            scan()
-            return
-        }
+        guard !hasStarted else { return }
         hasStarted = true
         do {
             let lx = try LIFXClient()
@@ -208,7 +213,7 @@ final class LightManager: ObservableObject {
         scan()
         scheduleRefresh()
         startScheduleTimer()
-        startEcosystemTimer()
+        if fireflyCitizens.isEmpty { seedFireflies() }
         logActivity(.system, title: "LumenDesk started", detail: "Local automation and discovery services are active.")
     }
 
@@ -268,6 +273,7 @@ final class LightManager: ObservableObject {
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refreshAll() }
         }
+        refreshTimer?.tolerance = 3
     }
 
     private func startScheduleTimer() {
@@ -280,6 +286,7 @@ final class LightManager: ObservableObject {
                 self.scheduleTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
                     Task { @MainActor in self?.checkSchedules() }
                 }
+                self.scheduleTimer?.tolerance = 1
             }
         }
     }
@@ -791,6 +798,14 @@ final class LightManager: ObservableObject {
     }
 
     func startEffect(_ effect: LightingEffect, scope: LightScope = .all) {
+        if effect.id == "music-pulse" || effect.style == .musicPulse {
+            startMusicMode(
+                configuration: .configuration(for: .soundcheck),
+                scope: scope,
+                reducedMotion: false
+            )
+            return
+        }
         let targets = devices(in: scope)
         guard !targets.isEmpty else {
             publishError(scope == .all
@@ -812,7 +827,10 @@ final class LightManager: ObservableObject {
             sendPower(device, on: true)
             // Effect frames fold brightness into the RGB payload for Govee, so
             // open the device's own brightness to full range once up front.
-            if device.brand == .govee { sendBrightness(device, value: 1.0) }
+            if device.brand == .govee {
+                markSegmentsInactive(device)
+                sendBrightness(device, value: 1.0)
+            }
         }
 
         // Effects animate on a fixed timer at the effect's cadence. The timer
@@ -828,45 +846,93 @@ final class LightManager: ObservableObject {
                     self.runEffectFrame(activeRun)
                 }
             }
+            run.timer?.tolerance = min(0.02, effect.frameInterval * 0.1)
         }
 
-        if effect.isAudioReactive {
-            // Keep the latest audio snapshot fresh for the render timer to read.
-            // Rendering stays on the timer (rather than driven off the audio
-            // stream) so the lights always animate even if audio delivery
-            // stalls; the analyzer's decaying `pulse` envelope and monotonic
-            // `beatCount` keep the timer-sampled output beat-reactive.
-            audioLevelMonitor.onSnapshot = { [weak self] snapshot in
-                self?.audioLevel = snapshot.level
-                self?.audioSnapshot = snapshot
+        startTimer()
+    }
+
+    /// Starts the first-class Music Mode while preserving the `music-pulse`
+    /// catalog identifier used by earlier saved state. Choreography and
+    /// transport pacing live outside LightManager; this method only joins
+    /// them to the existing scope, undo, and restoration lifecycle.
+    func startMusicMode(
+        configuration: MusicModeConfiguration,
+        scope: LightScope = .all,
+        reducedMotion: Bool = false
+    ) {
+        guard let effect = LightingCatalog.effects.first(where: { $0.id == "music-pulse" }) else { return }
+        let targets = devices(in: scope)
+        guard !targets.isEmpty else {
+            publishError(scope == .all
+                ? "Discover a light before starting Music Mode."
+                : "No lights in “\(scopeDisplayName(scope))” for Music Mode.")
+            return
+        }
+
+        let normalized = configuration.normalized(reducedMotion: reducedMotion)
+        let inherited = stopEffects(touching: Set(targets.map(\.id)))
+        let startingSnapshot = targets.map { inherited[$0.id] ?? snapshot($0) }
+        recordChange(targets)
+        let run = EffectRun(
+            effect: effect,
+            scope: scope,
+            snapshot: startingSnapshot,
+            restorePreviousState: normalized.restorePreviousState,
+            reducedMotion: reducedMotion
+        )
+        effectRuns[scope] = run
+        activeEffects[scope] = effect.id
+        let fixtures = musicFixtureDescriptors(in: scope)
+        let topology = fixtureTopology(for: scope)
+
+        for device in targets {
+            device.isOn = true
+            sendPower(device, on: true)
+            if device.brand == .govee, segmentProfile(for: device) == nil {
+                // Ordinary Govee LAN color packets fold brightness into RGB.
+                // Opening device brightness once avoids a second write per frame.
+                markSegmentsInactive(device)
+                sendBrightness(device, value: 1)
             }
-            audioLevelMonitor.requestAccessAndStart { [weak self] result in
-                guard let self else { return }
+        }
+
+        musicModeController.start(
+            scope: scope,
+            configuration: normalized,
+            topology: topology,
+            fixtures: fixtures,
+            reducedMotion: reducedMotion,
+            useSyntheticPattern: isDemoMode && normalized.usesSyntheticDemoPattern,
+            onFrame: { [weak self] frame in
+                self?.renderMusicFrame(frame, scope: scope)
+            },
+            completion: { [weak self, weak run] result in
+                guard let self, let run, self.effectRuns[scope] === run else { return }
                 switch result {
                 case .started:
-                    startTimer()
+                    self.logActivity(
+                        .command,
+                        title: "Music Mode started",
+                        detail: "\(normalized.preset.displayName) · \(self.scopeDisplayName(scope))"
+                    )
                 case .needsScreenRecording, .unavailable:
-                    // Tear the run down so the lights don't freeze on a started
-                    // effect that has no audio to react to.
-                    if self.effectRuns[scope] === run {
-                        self.effectRuns[scope] = nil
-                        self.activeEffects[scope] = nil
-                    }
-                    self.stopAudioMonitorIfIdle()
-                    self.publishError(self.soundcheckFailureMessage(for: result))
+                    self.stopEffect(scope: scope, restore: true)
+                    self.publishError(self.musicModeFailureMessage(for: result))
                 }
             }
-        } else {
-            startTimer()
-        }
+        )
     }
 
     func stopEffect(scope: LightScope, restore: Bool = true) {
         guard let run = effectRuns.removeValue(forKey: scope) else { return }
         run.timer?.invalidate()
+        if run.effect.id == "music-pulse" {
+            musicModeController.stop(scope: scope)
+            finishMusicStreaming(for: run.snapshot.map(\.deviceID))
+        }
         activeEffects[scope] = nil
-        if restore { restoreDeviceStates(run.snapshot) }
-        stopAudioMonitorIfIdle()
+        if restore && run.restorePreviousState { restoreDeviceStates(run.snapshot) }
     }
 
     func stopAllEffects(restore: Bool = true) {
@@ -885,6 +951,10 @@ final class LightManager: ObservableObject {
             let runIDs = Set(run.snapshot.map(\.deviceID)).union(devices(in: scope).map(\.id))
             guard !runIDs.isDisjoint(with: deviceIDs) else { continue }
             run.timer?.invalidate()
+            if run.effect.id == "music-pulse" {
+                musicModeController.stop(scope: scope)
+                finishMusicStreaming(for: runIDs)
+            }
             effectRuns[scope] = nil
             activeEffects[scope] = nil
             for snap in run.snapshot where deviceIDs.contains(snap.deviceID) {
@@ -892,31 +962,21 @@ final class LightManager: ObservableObject {
             }
             restoreDeviceStates(run.snapshot.filter { !deviceIDs.contains($0.deviceID) })
         }
-        stopAudioMonitorIfIdle()
         return inherited
     }
 
-    private func stopAudioMonitorIfIdle() {
-        guard !effectRuns.values.contains(where: { $0.effect.isAudioReactive }) else { return }
-        audioLevelMonitor.stop()
-        audioLevelMonitor.onLevel = nil
-        audioLevelMonitor.onSnapshot = nil
-        audioLevel = 0
-        audioSnapshot = AudioReactiveSnapshot()
-    }
-
-    /// User-facing message when Soundcheck can't start its audio source.
+    /// User-facing message when Music Mode can't start its audio source.
     /// macOS uses system audio (Screen Recording); iOS uses the microphone.
-    private func soundcheckFailureMessage(for result: AudioLevelMonitor.AudioStartResult) -> String {
+    private func musicModeFailureMessage(for result: AudioCaptureService.AudioStartResult) -> String {
         #if os(macOS)
         switch result {
         case .needsScreenRecording:
-            return "Soundcheck needs Screen Recording to read Apple Music — turn on LumenDesk in System Settings › Privacy & Security › Screen & System Audio Recording (Screen Recording on older macOS), then start Soundcheck again. If it still can't connect, relaunch LumenDesk."
+            return "Music Mode needs Screen Recording permission to analyze system audio. Turn on LumenDesk in System Settings › Privacy & Security › Screen & System Audio Recording (Screen Recording on older macOS), then try again."
         case .unavailable, .started:
-            return "Soundcheck couldn't read system audio. Make sure Apple Music (or another app) is playing, then try again."
+            return "Music Mode couldn't start system-audio analysis. Make sure an audio app is playing, then try again."
         }
         #else
-        return "Soundcheck needs microphone access. Enable it in System Settings › Privacy & Security › Microphone."
+        return "Music Mode needs microphone access on iPhone and iPad. Enable it in Settings › Privacy & Security › Microphone."
         #endif
     }
 
@@ -935,20 +995,9 @@ final class LightManager: ObservableObject {
         let effectPhase = run.phase
         let palette = effect.colors
         let targets = devices(in: run.scope)
-
-        // Advance the music show's per-frame state once (not per device): step
-        // the palette by however many beats landed since the last frame so the
-        // color snaps on the beat, and flip the strobe phase so an active drop
-        // alternates light and dark.
-        if effect.style == .musicPulse {
-            let beats = audioSnapshot.beatCount
-            if beats < run.lastBeatCount { run.lastBeatCount = beats } // analyzer restarted
-            if beats > run.lastBeatCount {
-                run.colorIndex += beats - run.lastBeatCount
-                run.lastBeatCount = beats
-            }
-            run.strobeOn.toggle()
-        }
+        run.modelUpdateElapsed += effect.frameInterval
+        let shouldUpdateModel = run.modelUpdateElapsed >= 0.25
+        if shouldUpdateModel { run.modelUpdateElapsed = 0 }
 
         for (index, device) in targets.enumerated() {
             var color = palette[(index + Int(effectPhase)) % palette.count].color
@@ -975,48 +1024,11 @@ final class LightManager: ObservableObject {
                 color = (spark ? palette[0] : palette[(index + 1) % palette.count]).color
                 brightness = spark ? Double.random(in: 0.72...1) : Double.random(in: 0.16...0.34)
             case .musicPulse:
-                let audio = audioSnapshot
-                let p = palette.count
-                // Each fixture takes an instrument role so the rig reads as a
-                // coordinated show: some lights thump with the kick, others pop
-                // on snares/claps, others shimmer with the hi-hats. Every light
-                // also rides the shared `pulse` envelope, so even a single bulb
-                // clearly flashes on the beat.
-                let onset: Double
-                let accent: Color
-                switch index % 3 {
-                case 0:
-                    onset = audio.kick
-                    accent = palette[0].color                            // bass → lead palette color
-                case 1:
-                    onset = audio.snare
-                    accent = Color(hue: 0, saturation: 0, brightness: 1) // snare/clap → white pop
-                default:
-                    onset = audio.percussion
-                    accent = palette[min(p - 1, 2)].color                // hi-hats → bright accent
-                }
-
-                if audio.drop > 0.5 {
-                    // Drop: hard strobe across the whole rig, white on / dim off.
-                    color = run.strobeOn ? Color(hue: 0, saturation: 0, brightness: 1)
-                                         : palette[(index + run.colorIndex) % p].color
-                    brightness = run.strobeOn ? 1.0 : 0.05
-                } else {
-                    // Color steps on the beat and holds between; mood nudges the
-                    // hue (heavier/bass cooler, airier/treble warmer).
-                    let stepped = palette[(index + run.colorIndex) % p].color
-                    let hsb = stepped.hsbComponents
-                    let moodHue = (hsb.h + (audio.mood - 0.5) * 0.12 + 1).truncatingRemainder(dividingBy: 1)
-                    let beatColor = Color(hue: moodHue, saturation: max(0.55, hsb.s), brightness: 1)
-                    // Flash to the role accent on a strong hit, else hold the beat color.
-                    color = onset > 0.4 ? accent : beatColor
-                    // Brightness tracks loudness (compressed so even quiet or
-                    // mic-captured audio clearly lifts the lights) and punches up
-                    // on the shared beat pulse and this fixture's own onset, so
-                    // it always visibly reacts to any audio.
-                    let drive = pow(max(audio.level, audio.energy), 0.55)
-                    brightness = 0.08 + drive * 0.5 + audio.pulse * 0.4 + onset * 0.2
-                }
+                // Routed through `startMusicMode`; this restrained fallback is
+                // deliberately flash-free if a future caller bypasses it.
+                let wave = (sin(effectPhase + Double(index) * 0.75) + 1) / 2
+                color = palette[index % palette.count].color
+                brightness = 0.18 + wave * 0.36
             case .prismShuffle:
                 color = palette.randomElement()?.color ?? color
                 brightness = Double.random(in: 0.62...0.92)
@@ -1034,41 +1046,49 @@ final class LightManager: ObservableObject {
                 brightness = 0.82 - progress * 0.58
             }
 
-            device.isOn = true
-            device.color = color
-            device.brightness = max(0.05, min(1, brightness))
-            switch device.brand {
-            case .lifx:
-                sendColor(device, color: color, debounce: 0) // brightness rides inside the HSBK packet; effect frames send immediately
-            case .govee:
-                sendGoveeEffectFrame(device, color: color, brightness: device.brightness)
+            let clampedBrightness = max(0.05, min(1, brightness))
+            if shouldUpdateModel {
+                if device.color.rgbDistance(to: color) > 0.005 { device.color = color }
+                if abs(device.brightness - clampedBrightness) > 0.005 { device.brightness = clampedBrightness }
             }
+            sendEffectFrame(device, color: color, brightness: clampedBrightness,
+                            duration: effect.frameInterval)
         }
     }
 
-    /// Govee has no combined color+brightness command, and a separate
-    /// brightness packet chasing every color packet doubles traffic and lets
-    /// the two halves of a frame land out of step (worst on slow multi-segment
-    /// devices like curtain lights). Effects instead scale the RGB payload by
-    /// the frame brightness so each frame is a single atomic command; the
-    /// device's own brightness is set to 100% in `startEffect`.
-    private func sendGoveeEffectFrame(_ device: LightDevice, color: Color, brightness: Double) {
-        enqueueCommand(for: device, coalescingKey: "color", summary: "Effect frame", debounce: 0) { [weak self, weak device] in
-            guard let self, let device else { return }
-            self.markSegmentsInactive(device)
+    /// Effect frames are transient and never receive command acknowledgements.
+    /// Sending them through the normal confirmation pipeline used to allocate
+    /// three Tasks and publish several whole-app changes per light, per frame.
+    private func sendEffectFrame(_ device: LightDevice, color: Color, brightness: Double,
+                                 duration: TimeInterval) {
+        guard demoWorkspaceController.allowsLiveNetworking else { return }
+        switch device.brand {
+        case .lifx:
+            let hsb = color.hsbComponents
+            lifx?.setColor(
+                macHex: device.backendID,
+                color: LIFXHSBK(
+                    hue: UInt16(hsb.h * 65535),
+                    saturation: UInt16(hsb.s * 65535),
+                    brightness: UInt16(brightness * 65535),
+                    kelvin: UInt16(device.kelvin)
+                ),
+                durationMS: UInt32(max(0, min(500, Int(duration * 1_000))))
+            )
+        case .govee:
             let rgb = color.rgbComponents
             let scale = max(0, min(1, brightness))
-            self.govee?.setColor(deviceID: device.backendID,
-                                 r: Int(rgb.r * 255 * scale),
-                                 g: Int(rgb.g * 255 * scale),
-                                 b: Int(rgb.b * 255 * scale),
-                                 kelvin: 0)
+            govee?.setColor(deviceID: device.backendID,
+                            r: Int(rgb.r * 255 * scale),
+                            g: Int(rgb.g * 255 * scale),
+                            b: Int(rgb.b * 255 * scale),
+                            kelvin: 0)
         }
     }
 
     private func restoreDeviceStates(_ states: [LightRuntimeSnapshot]) {
         for state in states {
-            guard let device = devices.first(where: { $0.id == state.deviceID }) else { continue }
+            guard let device = device(withID: state.deviceID) else { continue }
             device.isOn = state.isOn
             device.brightness = state.brightness
             device.color = state.color
@@ -1173,7 +1193,7 @@ final class LightManager: ObservableObject {
     func undo() {
         guard let entry = undoStack.popLast() else { return }
         let current = entry.compactMap { snap -> LightRuntimeSnapshot? in
-            guard let d = devices.first(where: { $0.id == snap.deviceID }) else { return nil }
+            guard let d = device(withID: snap.deviceID) else { return nil }
             return snapshot(d)
         }
         redoStack.append(current)
@@ -1185,7 +1205,7 @@ final class LightManager: ObservableObject {
     func redo() {
         guard let entry = redoStack.popLast() else { return }
         let current = entry.compactMap { snap -> LightRuntimeSnapshot? in
-            guard let d = devices.first(where: { $0.id == snap.deviceID }) else { return nil }
+            guard let d = device(withID: snap.deviceID) else { return nil }
             return snapshot(d)
         }
         undoStack.append(current)
@@ -1196,7 +1216,7 @@ final class LightManager: ObservableObject {
 
     private func apply(_ entry: [LightRuntimeSnapshot]) {
         for snap in entry {
-            guard let d = devices.first(where: { $0.id == snap.deviceID }) else { continue }
+            guard let d = device(withID: snap.deviceID) else { continue }
             d.isOn = snap.isOn
             d.brightness = snap.brightness
             d.color = snap.color
@@ -1222,6 +1242,7 @@ final class LightManager: ObservableObject {
 
         if let idx = devices.firstIndex(where: { $0.id == device.id }) {
             let existing = devices[idx]
+            devicesByID[existing.id] = existing
             let oldAddress = existing.address
             existing.name = device.name
             existing.address = device.address
@@ -1230,6 +1251,7 @@ final class LightManager: ObservableObject {
             markSeen(existing)
         } else {
             devices.append(device)
+            devicesByID[device.id] = device
             appendDiscoveryChange(device, kind: .new, detail: "Ready to assign to a room")
             sortDevices()
             // UX 9: briefly flag newly discovered devices so the UI can highlight them.
@@ -1246,7 +1268,7 @@ final class LightManager: ObservableObject {
     }
 
     fileprivate func device(withID id: String) -> LightDevice? {
-        devices.first { $0.id == id }
+        devicesByID[id]
     }
 }
 
@@ -1296,10 +1318,10 @@ extension LightManager: LIFXClientDelegate {
                 kelvin: Int(color.kelvin)
             )
             if !self.isEffectAnimating(id) && (!self.commandPendingIDs.contains(id) || matches) {
-                device.isOn = isOn
-                device.brightness = brightness
-                device.kelvin = Int(color.kelvin)
-                device.color = reportedColor
+                if device.isOn != isOn { device.isOn = isOn }
+                if abs(device.brightness - brightness) > 0.001 { device.brightness = brightness }
+                if device.kelvin != Int(color.kelvin) { device.kelvin = Int(color.kelvin) }
+                if device.color.rgbDistance(to: reportedColor) > 0.005 { device.color = reportedColor }
             }
             self.markSeen(device, confirmsPendingCommand: matches)
         }
@@ -1367,10 +1389,13 @@ extension LightManager: GoveeClientDelegate {
                 kelvin: kelvin
             )
             if !self.isEffectAnimating(id) && (!self.commandPendingIDs.contains(id) || matches) {
-                device.isOn = isOn
-                device.brightness = normalizedBrightness
-                device.kelvin = kelvin > 0 ? kelvin : device.kelvin
-                device.color = Color(red: red, green: green, blue: blue)
+                if device.isOn != isOn { device.isOn = isOn }
+                if abs(device.brightness - normalizedBrightness) > 0.001 {
+                    device.brightness = normalizedBrightness
+                }
+                if kelvin > 0, device.kelvin != kelvin { device.kelvin = kelvin }
+                let reportedColor = Color(red: red, green: green, blue: blue)
+                if device.color.rgbDistance(to: reportedColor) > 0.005 { device.color = reportedColor }
             }
             self.markSeen(device, confirmsPendingCommand: matches)
         }
@@ -1623,8 +1648,7 @@ extension LightManager {
     }
 
     func devices(in room: Room) -> [LightDevice] {
-        let index = Dictionary(uniqueKeysWithValues: devices.map { ($0.id, $0) })
-        return room.lightIDs.compactMap { index[$0] }
+        room.lightIDs.compactMap { devicesByID[$0] }
     }
 
     func createRoom(name: String) {
@@ -2082,6 +2106,7 @@ extension LightManager {
         napTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tickNapMode() }
         }
+        napTimer?.tolerance = 1
     }
 
     func cancelNapMode() {
@@ -2159,6 +2184,12 @@ extension LightManager {
 // MARK: - Color helpers
 
 extension Color {
+    func rgbDistance(to other: Color) -> Double {
+        let lhs = rgbComponents
+        let rhs = other.rgbComponents
+        return max(abs(lhs.r - rhs.r), max(abs(lhs.g - rhs.g), abs(lhs.b - rhs.b)))
+    }
+
     var hsbComponents: (h: Double, s: Double, b: Double) {
         var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
         #if os(macOS)
@@ -2179,6 +2210,129 @@ extension Color {
         guard UIColor(self).getRed(&r, green: &g, blue: &bb, alpha: &a) else { return (1, 1, 1) }
         #endif
         return (Double(r), Double(g), Double(bb))
+    }
+}
+
+// MARK: - Music Mode
+
+extension LightManager {
+    func setMusicModeConfiguration(_ configuration: MusicModeConfiguration) {
+        musicModeConfiguration = configuration.normalized()
+        persistApplicationState()
+        for scope in musicModeController.activeScopeIDs {
+            musicModeController.update(
+                scope: scope,
+                configuration: musicModeConfiguration,
+                topology: fixtureTopology(for: scope),
+                fixtures: musicFixtureDescriptors(in: scope),
+                reducedMotion: effectRuns[scope]?.reducedMotion ?? false
+            )
+        }
+    }
+
+    func applyMusicModePreset(_ preset: MusicModePreset) {
+        guard preset != .custom else {
+            var custom = musicModeConfiguration
+            custom.preset = .custom
+            setMusicModeConfiguration(custom)
+            return
+        }
+        setMusicModeConfiguration(.configuration(for: preset))
+    }
+
+    func fixtureTopology(for scope: LightScope) -> FixtureTopology {
+        fixtureTopologies[topologyKey(for: scope)] ?? FixtureTopology()
+    }
+
+    func setFixtureTopology(_ topology: FixtureTopology, for scope: LightScope) {
+        let available = Set(musicFixtureDescriptors(in: scope).map(\.id))
+        var normalized = topology
+        normalized.fixtureOrder = topology.fixtureOrder.filter(available.contains)
+        fixtureTopologies[topologyKey(for: scope)] = normalized
+        persistApplicationState()
+        if musicModeController.activeScopeIDs.contains(scope) {
+            musicModeController.update(
+                scope: scope,
+                configuration: musicModeConfiguration,
+                topology: normalized,
+                fixtures: musicFixtureDescriptors(in: scope),
+                reducedMotion: effectRuns[scope]?.reducedMotion ?? false
+            )
+        }
+    }
+
+    func musicFixtureDescriptors(in scope: LightScope) -> [MusicFixtureDescriptor] {
+        devices(in: scope).map { device in
+            if device.brand == .govee, segmentProfile(for: device) != nil {
+                return MusicFixtureDescriptor(
+                    id: device.id,
+                    label: device.label,
+                    transport: .goveeRealtimeSegments,
+                    segmentCount: segmentState(for: device).segmentCount
+                )
+            }
+            return MusicFixtureDescriptor(
+                id: device.id,
+                label: device.label,
+                transport: device.brand == .lifx ? .lifxLAN : .goveeLAN
+            )
+        }
+    }
+
+    private func topologyKey(for scope: LightScope) -> String {
+        switch scope {
+        case .all: return "all"
+        case .room(let roomID): return "room:\(roomID.uuidString.lowercased())"
+        }
+    }
+
+    private func renderMusicFrame(_ frame: MusicLightingFrame, scope: LightScope) {
+        guard effectRuns[scope]?.effect.id == "music-pulse" else { return }
+        let fixtures = musicFixtureDescriptors(in: scope)
+        let commands = musicLightingRenderer.enqueue(frame, fixtures: fixtures, at: frame.timestamp)
+        for command in commands {
+            guard let device = device(withID: command.fixtureID), let first = command.states.first else { continue }
+            let color = Color(hue: first.hue, saturation: first.saturation, brightness: 1)
+            if frame.timestamp - (musicModelUpdateAt[device.id] ?? -Double.greatestFiniteMagnitude) >= 0.2 {
+                device.color = color
+                device.brightness = first.brightness
+                musicModelUpdateAt[device.id] = frame.timestamp
+            }
+
+            switch command.transport {
+            case .lifxLAN, .goveeLAN:
+                sendEffectFrame(
+                    device,
+                    color: color,
+                    brightness: first.brightness,
+                    duration: first.transitionDuration
+                )
+            case .goveeRealtimeSegments:
+                let segments = command.states.map { state in
+                    GoveeSegmentColor(
+                        color: Color(hue: state.hue, saturation: state.saturation, brightness: 1),
+                        brightness: state.brightness
+                    )
+                }
+                guard !segments.isEmpty else { continue }
+                previewSegments(
+                    device,
+                    state: GoveeSegmentState(colors: segments, gradient: false, isActive: false)
+                )
+            }
+        }
+    }
+
+    private func finishMusicStreaming<S: Sequence>(for deviceIDs: S) where S.Element == String {
+        let ids = Set(deviceIDs)
+        musicLightingRenderer.reset(fixtureIDs: ids)
+        for id in ids {
+            musicModelUpdateAt.removeValue(forKey: id)
+            guard let device = device(withID: id),
+                  device.brand == .govee,
+                  segmentProfile(for: device) != nil else { continue }
+            endSegmentPreview(device)
+        }
     }
 }
 
@@ -2219,6 +2373,8 @@ extension LightManager {
         state.sceneDrafts = sceneDrafts
         state.goveeSegmentStates = goveeSegmentStates
         state.goveeSegmentPresets = goveeSegmentPresets
+        state.musicModeConfiguration = musicModeConfiguration
+        state.fixtureTopologies = fixtureTopologies
         return state
     }
 
@@ -2248,6 +2404,8 @@ extension LightManager {
         sceneDrafts = state.sceneDrafts
         goveeSegmentStates = state.goveeSegmentStates
         goveeSegmentPresets = state.goveeSegmentPresets
+        musicModeConfiguration = state.musicModeConfiguration
+        fixtureTopologies = state.fixtureTopologies
     }
 
     func logActivity(_ kind: ActivityEvent.Kind, title: String, detail: String = "", isFailure: Bool = false) {
@@ -2298,6 +2456,7 @@ extension LightManager {
             try? await Task.sleep(for: .milliseconds(120))
             guard !Task.isCancelled, let self, let device else { return }
             self.sendBrightness(device, value: value)
+            self.brightnessTasks[device.id] = nil
         }
     }
 
@@ -2522,12 +2681,6 @@ extension LightManager {
         logActivity(.parliament, title: "Executive Illumination Order", detail: motion)
     }
 
-    func startEcosystemTimer() {
-        if fireflyCitizens.isEmpty { seedFireflies() }
-        ecosystemTimer?.invalidate()
-        ecosystemTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in Task { @MainActor in self?.evolveFireflies() } }
-    }
-
     func seedFireflies() {
         fireflyCitizens = (0..<max(6, min(18, devices.count * 2))).map { index in
             FireflyCitizen(id: UUID(), name: "Luxling \(index + 1)", generation: 1, hue: Double.random(in: 0...1), preferredKelvin: Int.random(in: 2500...6500), energy: Double.random(in: 0.55...1), rarity: index == 0 ? "Rare" : "Common", parentIDs: [])
@@ -2608,7 +2761,11 @@ extension LightManager {
         if napPhase != .inactive { scheduleNapTimer() }
         for (scope, effectID) in restoredWorkspace.activeEffects {
             if let effect = LightingCatalog.effects.first(where: { $0.id == effectID }) {
-                startEffect(effect, scope: scope)
+                if effect.id == "music-pulse" {
+                    startMusicMode(configuration: musicModeConfiguration, scope: scope)
+                } else {
+                    startEffect(effect, scope: scope)
+                }
             }
         }
         // Restarting a previously active effect must not manufacture a new
@@ -2703,6 +2860,8 @@ extension LightManager {
             rehearsalSceneID: rehearsalSceneID,
             goveeSegmentStates: goveeSegmentStates,
             goveeSegmentPresets: goveeSegmentPresets,
+            musicModeConfiguration: musicModeConfiguration,
+            fixtureTopologies: fixtureTopologies,
             customNames: customNames,
             favoriteRoomIDs: favoriteRoomIDs,
             favoriteSceneIDs: favoriteSceneIDs,
@@ -2722,6 +2881,7 @@ extension LightManager {
 
     private func applyWorkspaceState(_ workspace: DemoWorkspaceController.WorkspaceState) {
         devices = workspace.devices
+        devicesByID = Dictionary(uniqueKeysWithValues: devices.map { ($0.id, $0) })
         rooms = workspace.rooms
         favoriteIDs = workspace.favoriteIDs
         scenes = workspace.scenes
@@ -2761,6 +2921,8 @@ extension LightManager {
         rehearsalSceneID = workspace.rehearsalSceneID
         goveeSegmentStates = workspace.goveeSegmentStates
         goveeSegmentPresets = workspace.goveeSegmentPresets
+        musicModeConfiguration = workspace.musicModeConfiguration
+        fixtureTopologies = workspace.fixtureTopologies
         customNames = workspace.customNames
         favoriteRoomIDs = workspace.favoriteRoomIDs
         favoriteSceneIDs = workspace.favoriteSceneIDs

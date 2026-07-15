@@ -3,7 +3,7 @@ import Foundation
 /// The complete structured configuration that survives app launches.
 /// Lightweight view preferences remain in `UserDefaults` at their call sites.
 struct PersistedApplicationState: Codable, Equatable {
-    static let currentSchemaVersion = 1
+    static let currentSchemaVersion = 2
 
     var schemaVersion: Int = currentSchemaVersion
     var rooms: [Room] = []
@@ -28,6 +28,8 @@ struct PersistedApplicationState: Codable, Equatable {
     var sceneDrafts: [UUID: LightingScene] = [:]
     var goveeSegmentStates: [String: GoveeSegmentState] = [:]
     var goveeSegmentPresets: [GoveeSegmentPreset] = []
+    var musicModeConfiguration = MusicModeConfiguration.configuration(for: .soundcheck)
+    var fixtureTopologies: [String: FixtureTopology] = [:]
 
     struct SolarPreferences: Codable, Equatable {
         var sunriseHour: Int = 6
@@ -60,6 +62,8 @@ struct PersistedApplicationState: Codable, Equatable {
         case sceneDrafts
         case goveeSegmentStates
         case goveeSegmentPresets
+        case musicModeConfiguration
+        case fixtureTopologies
     }
 
     init() {}
@@ -89,6 +93,9 @@ struct PersistedApplicationState: Codable, Equatable {
         sceneDrafts = (try? container.decode([UUID: LightingScene].self, forKey: .sceneDrafts)) ?? [:]
         goveeSegmentStates = (try? container.decode([String: GoveeSegmentState].self, forKey: .goveeSegmentStates)) ?? [:]
         goveeSegmentPresets = (try? container.decode([GoveeSegmentPreset].self, forKey: .goveeSegmentPresets)) ?? []
+        musicModeConfiguration = ((try? container.decode(MusicModeConfiguration.self, forKey: .musicModeConfiguration))
+            ?? .configuration(for: .soundcheck)).normalized()
+        fixtureTopologies = (try? container.decode([String: FixtureTopology].self, forKey: .fixtureTopologies)) ?? [:]
     }
 }
 
@@ -124,6 +131,8 @@ final class PersistenceStore: ApplicationPersistence {
         // Optional so configurations exported by earlier versions still import.
         var goveeSegmentStates: [String: GoveeSegmentState]?
         var goveeSegmentPresets: [GoveeSegmentPreset]?
+        var musicModeConfiguration: MusicModeConfiguration?
+        var fixtureTopologies: [String: FixtureTopology]?
 
         init(
             schemaVersion: Int = PersistedApplicationState.currentSchemaVersion,
@@ -140,7 +149,9 @@ final class PersistenceStore: ApplicationPersistence {
             sunsetMinute: Int,
             brightnessPresets: [Double],
             goveeSegmentStates: [String: GoveeSegmentState]?,
-            goveeSegmentPresets: [GoveeSegmentPreset]?
+            goveeSegmentPresets: [GoveeSegmentPreset]?,
+            musicModeConfiguration: MusicModeConfiguration?,
+            fixtureTopologies: [String: FixtureTopology]?
         ) {
             self.schemaVersion = schemaVersion
             self.rooms = rooms
@@ -157,6 +168,8 @@ final class PersistenceStore: ApplicationPersistence {
             self.brightnessPresets = brightnessPresets
             self.goveeSegmentStates = goveeSegmentStates
             self.goveeSegmentPresets = goveeSegmentPresets
+            self.musicModeConfiguration = musicModeConfiguration
+            self.fixtureTopologies = fixtureTopologies
         }
 
         private enum CodingKeys: String, CodingKey {
@@ -175,6 +188,8 @@ final class PersistenceStore: ApplicationPersistence {
             case brightnessPresets
             case goveeSegmentStates
             case goveeSegmentPresets
+            case musicModeConfiguration
+            case fixtureTopologies
         }
 
         init(from decoder: Decoder) throws {
@@ -194,6 +209,8 @@ final class PersistenceStore: ApplicationPersistence {
             brightnessPresets = try container.decode([Double].self, forKey: .brightnessPresets)
             goveeSegmentStates = try container.decodeIfPresent([String: GoveeSegmentState].self, forKey: .goveeSegmentStates)
             goveeSegmentPresets = try container.decodeIfPresent([GoveeSegmentPreset].self, forKey: .goveeSegmentPresets)
+            musicModeConfiguration = try container.decodeIfPresent(MusicModeConfiguration.self, forKey: .musicModeConfiguration)
+            fixtureTopologies = try container.decodeIfPresent([String: FixtureTopology].self, forKey: .fixtureTopologies)
         }
     }
 
@@ -316,7 +333,9 @@ final class PersistenceStore: ApplicationPersistence {
             sunsetMinute: solar.sunsetMinute,
             brightnessPresets: state.customBrightnessPresets,
             goveeSegmentStates: state.goveeSegmentStates,
-            goveeSegmentPresets: state.goveeSegmentPresets
+            goveeSegmentPresets: state.goveeSegmentPresets,
+            musicModeConfiguration: state.musicModeConfiguration,
+            fixtureTopologies: state.fixtureTopologies
         )
         return try encoder.encode(archive)
     }
@@ -350,6 +369,12 @@ final class PersistenceStore: ApplicationPersistence {
             }
             if let segmentPresets = archive.goveeSegmentPresets {
                 next.goveeSegmentPresets = segmentPresets
+            }
+            if let musicConfiguration = archive.musicModeConfiguration {
+                next.musicModeConfiguration = musicConfiguration.normalized()
+            }
+            if let topologies = archive.fixtureTopologies {
+                next.fixtureTopologies = topologies
             }
             next.favoriteOrder = reconciledFavoriteOrder(in: next)
             return migratedAndNormalized(next)
@@ -388,6 +413,7 @@ final class PersistenceStore: ApplicationPersistence {
         migrated.customBrightnessPresets = Self.sanitizedBrightnessPresets(
             migrated.customBrightnessPresets
         )
+        migrated.musicModeConfiguration = migrated.musicModeConfiguration.normalized()
         return migrated
     }
 

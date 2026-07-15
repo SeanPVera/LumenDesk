@@ -19,7 +19,10 @@ final class LightDevice: ObservableObject, Identifiable {
     @Published var brightness: Double   // 0…1
     @Published var color: Color
     @Published var kelvin: Int          // 2500…9000 K; used in white-light mode
-    @Published var lastSeen: Date
+    // Reachability UI only needs a refresh when the stale flag changes. Publishing
+    // every heartbeat forced every visible row to redraw even though nothing the
+    // user could see had changed.
+    var lastSeen: Date
     @Published var isStale: Bool = false
 
     /// The label shown in the UI: custom name when set, otherwise the vendor label.

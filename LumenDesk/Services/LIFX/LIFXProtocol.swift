@@ -26,6 +26,9 @@ enum LIFXProtocol {
     static let port: UInt16 = 56700
     static let broadcastAddress = "255.255.255.255"
     static let headerSize = 36
+    private static let zeros2 = Data(repeating: 0, count: 2)
+    private static let zeros6 = Data(repeating: 0, count: 6)
+    private static let zeros8 = Data(repeating: 0, count: 8)
 
     /// Build a LIFX LAN packet.
     /// - target: 6-byte MAC (empty Data for broadcast / tagged messages)
@@ -38,6 +41,7 @@ enum LIFXProtocol {
                        ackRequired: Bool = false) -> Data {
         var data = Data()
         let size = UInt16(headerSize + payload.count)
+        data.reserveCapacity(Int(size))
         data.appendLE(size)
 
         // protocol(12 bits = 1024) | addressable(1) | tagged(1) | origin(2) = uint16 LE
@@ -50,14 +54,11 @@ enum LIFXProtocol {
         data.appendLE(source)
 
         // Target: 6 byte MAC padded to 8 bytes (LE byte order on the wire).
-        var t = Data(count: 8)
-        if !target.isEmpty {
-            let n = min(6, target.count)
-            t.replaceSubrange(0..<n, with: target.prefix(n))
-        }
-        data.append(t)
+        let targetCount = min(6, target.count)
+        if targetCount > 0 { data.append(target.prefix(targetCount)) }
+        data.append(zeros8.prefix(8 - targetCount))
 
-        data.append(Data(count: 6)) // reserved
+        data.append(zeros6) // reserved
 
         var respFlags: UInt8 = 0
         if resRequired { respFlags |= 0x01 }
@@ -65,10 +66,10 @@ enum LIFXProtocol {
         data.append(respFlags)
         data.append(sequence)
 
-        data.append(Data(count: 8)) // reserved
+        data.append(zeros8) // reserved
 
         data.appendLE(type.rawValue)
-        data.append(Data(count: 2)) // reserved
+        data.append(zeros2) // reserved
 
         data.append(payload)
         return data
@@ -100,6 +101,7 @@ enum LIFXProtocol {
 
     static func setColorPayload(_ c: LIFXHSBK, durationMS: UInt32 = 250) -> Data {
         var p = Data()
+        p.reserveCapacity(13)
         p.append(0) // reserved
         p.appendLE(c.hue)
         p.appendLE(c.saturation)
@@ -111,6 +113,7 @@ enum LIFXProtocol {
 
     static func setPowerPayload(on: Bool, durationMS: UInt32 = 250) -> Data {
         var p = Data()
+        p.reserveCapacity(6)
         p.appendLE(UInt16(on ? 65535 : 0))
         p.appendLE(durationMS)
         return p

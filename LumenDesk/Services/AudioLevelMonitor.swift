@@ -4,7 +4,7 @@ import Accelerate
 import ScreenCaptureKit
 #endif
 
-struct AudioReactiveSnapshot {
+struct AudioReactiveSnapshot: Equatable {
     var level: Double = 0
     var beat: Double = 0
     var kick: Double = 0
@@ -19,22 +19,41 @@ struct AudioReactiveSnapshot {
     // Fast-attack / slow-decay envelope that spikes on every onset — the
     // "heartbeat" the light show pulses brightness to.
     var pulse: Double = 0
-    // 0…1 strength of a sustained high-intensity section (a drop/chorus); the
-    // show strobes while this is high.
+    // 0…1 strength of a sustained high-intensity section. Choreography treats
+    // this as evidence, not as a guaranteed musical "drop."
     var drop: Double = 0
     // Monotonic count of detected beats. The renderer steps colors by the
     // delta so no beat is dropped even when frames are throttled.
     var beatCount: Int = 0
-    var sourceDescription: String = "Microphone calibration"
+    var sourceDescription: String = "Microphone input"
 }
 
-final class AudioLevelMonitor {
+final class AudioCaptureService {
+    struct SubscriptionToken: Hashable {
+        fileprivate let id: UUID
+    }
+
     private let engine = AVAudioEngine()
-    private var analyzer = MusicFeatureAnalyzer(sourceDescription: "Microphone calibration")
+    private var analyzer = MusicFeatureAnalyzer(sourceDescription: "Microphone input")
     // Mic taps deliver on the AVAudioEngine render thread while system-audio
     // taps deliver on their own capture queue; serialize both onto this queue
     // before touching the analyzer's mutable state.
     private let analysisQueue = DispatchQueue(label: "LumenDesk.audioAnalysis")
+    // Audio callbacks can arrive faster than spectral analysis during a CPU
+    // spike. A single-slot pipeline drops superseded buffers instead of
+    // retaining an unbounded queue of stale audio, and 30 Hz is comfortably
+    // above the cadence used to render lighting effects.
+    private let analysisSlot = DispatchSemaphore(value: 1)
+    private var nextAnalysisUptime: UInt64 = 0
+    private let analysisIntervalNanoseconds: UInt64 = 33_333_333
+    // Several rooms can run the same audio-reactive effect. They share one
+    // capture session instead of starting a ScreenCaptureKit/AVAudioEngine
+    // pipeline per room.
+    private var isStarting = false
+    private(set) var isRunning = false
+    private var startGeneration = 0
+    private var startCompletions: [(AudioStartResult) -> Void] = []
+    private var snapshotSubscribers: [UUID: (AudioReactiveSnapshot) -> Void] = [:]
     var onLevel: ((Double) -> Void)?
     var onSnapshot: ((AudioReactiveSnapshot) -> Void)?
 
@@ -45,11 +64,11 @@ final class AudioLevelMonitor {
     /// Outcome of starting the analysis source, so the caller can show the
     /// precise message. On macOS the source is system audio (ScreenCaptureKit);
     /// on iOS it is the microphone.
-    enum AudioStartResult {
+    enum AudioStartResult: Equatable {
         /// Capture is running and feeding the analyzer.
         case started
         /// macOS only: Screen Recording is not granted. macOS shows its prompt
-        /// on the first-ever attempt; after granting, starting Soundcheck again
+        /// on the first-ever attempt; after granting, starting Music Mode again
         /// picks the grant up — permission is re-checked live on every start.
         /// Never falls back to the microphone.
         case needsScreenRecording
@@ -58,7 +77,27 @@ final class AudioLevelMonitor {
         case unavailable
     }
 
+    @discardableResult
+    func subscribe(_ subscriber: @escaping (AudioReactiveSnapshot) -> Void) -> SubscriptionToken {
+        let token = SubscriptionToken(id: UUID())
+        snapshotSubscribers[token.id] = subscriber
+        return token
+    }
+
+    func unsubscribe(_ token: SubscriptionToken) {
+        snapshotSubscribers.removeValue(forKey: token.id)
+    }
+
     func requestAccessAndStart(completion: @escaping (AudioStartResult) -> Void) {
+        if isRunning {
+            completion(.started)
+            return
+        }
+        startCompletions.append(completion)
+        guard !isStarting else { return }
+        isStarting = true
+        startGeneration += 1
+        let generation = startGeneration
         analyzer = MusicFeatureAnalyzer(sourceDescription: preferredSourceDescription)
         #if os(macOS)
         // macOS: system audio (Apple Music / other apps) is the SOLE source.
@@ -70,31 +109,48 @@ final class AudioLevelMonitor {
         systemAudioCapture = capture
         capture.start { [weak self] result in
             guard let self else { return }
+            guard self.startGeneration == generation else {
+                capture.stop()
+                return
+            }
+            let startResult: AudioStartResult
             switch result {
             case .started:
-                self.analyzer.sourceDescription = "Apple Music / system audio"
-                completion(.started)
+                self.analyzer.sourceDescription = "System audio"
+                startResult = .started
             case .needsScreenRecording:
                 self.analyzer.sourceDescription = "System audio unavailable — Screen Recording off"
                 self.systemAudioCapture = nil
-                completion(.needsScreenRecording)
+                startResult = .needsScreenRecording
             case .unavailable:
                 self.analyzer.sourceDescription = "System audio unavailable"
                 self.systemAudioCapture = nil
-                completion(.unavailable)
+                startResult = .unavailable
             }
+            self.finishStart(startResult)
         }
         #else
         // iOS: microphone is the only available source (no ScreenCaptureKit).
-        startMicrophone { started in completion(started ? .started : .unavailable) }
+        startMicrophone { [weak self] started in
+            guard let self, self.startGeneration == generation else { return }
+            self.finishStart(started ? .started : .unavailable)
+        }
         #endif
+    }
+
+    private func finishStart(_ result: AudioStartResult) {
+        isStarting = false
+        isRunning = result == .started
+        let completions = startCompletions
+        startCompletions.removeAll(keepingCapacity: true)
+        for completion in completions { completion(result) }
     }
 
     private var preferredSourceDescription: String {
         #if os(macOS)
-        "Apple Music / system audio"
+        "System audio"
         #else
-        "Microphone calibration"
+        "Microphone input"
         #endif
     }
 
@@ -139,16 +195,35 @@ final class AudioLevelMonitor {
     #endif
 
     private func consume(_ buffer: AVAudioPCMBuffer) {
+        guard analysisSlot.wait(timeout: .now()) == .success else { return }
+        let now = DispatchTime.now().uptimeNanoseconds
+        guard now >= nextAnalysisUptime else {
+            analysisSlot.signal()
+            return
+        }
+        nextAnalysisUptime = now &+ analysisIntervalNanoseconds
+        guard let ownedBuffer = buffer.ownedFloatCopy() else {
+            analysisSlot.signal()
+            return
+        }
         analysisQueue.async { [weak self] in
-            guard let self, let snapshot = self.analyzer.analyze(buffer) else { return }
+            guard let self else { return }
+            defer { self.analysisSlot.signal() }
+            guard let snapshot = self.analyzer.analyze(ownedBuffer) else { return }
             DispatchQueue.main.async { [weak self] in
-                self?.onLevel?(snapshot.level)
-                self?.onSnapshot?(snapshot)
+                guard let self else { return }
+                self.onLevel?(snapshot.level)
+                self.onSnapshot?(snapshot)
+                for subscriber in self.snapshotSubscribers.values { subscriber(snapshot) }
             }
         }
     }
 
     func stop() {
+        startGeneration += 1
+        isStarting = false
+        isRunning = false
+        startCompletions.removeAll(keepingCapacity: true)
         #if os(iOS)
         if engine.isRunning {
             engine.inputNode.removeTap(onBus: 0)
@@ -162,13 +237,34 @@ final class AudioLevelMonitor {
     }
 }
 
-private final class MusicFeatureAnalyzer {
+/// Source-compatible name for saved call sites while Music Mode moves onto
+/// the shared, multi-subscriber capture service.
+typealias AudioLevelMonitor = AudioCaptureService
+
+private extension AVAudioPCMBuffer {
+    /// AVAudioEngine tap memory is only valid for the duration of the callback.
+    /// Copying the accepted (already throttled) buffer makes the asynchronous
+    /// analyzer safe without retaining every callback under load.
+    func ownedFloatCopy() -> AVAudioPCMBuffer? {
+        guard !format.isInterleaved,
+              let source = floatChannelData,
+              let copy = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameLength),
+              let destination = copy.floatChannelData else { return nil }
+        copy.frameLength = frameLength
+        let frames = Int(frameLength)
+        for channel in 0..<Int(format.channelCount) {
+            destination[channel].update(from: source[channel], count: frames)
+        }
+        return copy
+    }
+}
+
+final class MusicFeatureAnalyzer {
     var sourceDescription: String
     private var noiseFloor: Double = 0.01
     private var previousBass: Double = 0
     private var previousHighs: Double = 0
     private var previousMids: Double = 0
-    private var previousEnergy: Double = 0
     // Refractory period, in seconds, before another beat can be counted.
     // Measured in time (via `dt`) rather than a fixed number of analyze()
     // calls: the OS's audio buffer size (and therefore how often analyze()
@@ -196,11 +292,13 @@ private final class MusicFeatureAnalyzer {
     // sample — identical result, far less CPU. Touched only on the analysis
     // queue, so no synchronization is needed.
     private var twiddleTables: [Int: (cos: [Float], sin: [Float])] = [:]
+    private var monoSamples: [Float] = []
 
     init(sourceDescription: String) { self.sourceDescription = sourceDescription }
 
     private func twiddles(for n: Int) -> (cos: [Float], sin: [Float]) {
         if let cached = twiddleTables[n] { return cached }
+        if twiddleTables.count >= 6 { twiddleTables.removeAll(keepingCapacity: true) }
         let tables: (cos: [Float], sin: [Float]) = (
             (0..<n).map { Float(cos(-2 * Double.pi * Double($0) / Double(n))) },
             (0..<n).map { Float(sin(-2 * Double.pi * Double($0) / Double(n))) }
@@ -214,15 +312,20 @@ private final class MusicFeatureAnalyzer {
         let frameCount = Int(buffer.frameLength)
         guard frameCount > 0 else { return nil }
         let channels = Int(buffer.format.channelCount)
-        var mono = [Float](repeating: 0, count: frameCount)
+        if monoSamples.count != frameCount {
+            monoSamples = [Float](repeating: 0, count: frameCount)
+        } else {
+            vDSP_vclr(&monoSamples, 1, vDSP_Length(frameCount))
+        }
         for channel in 0..<channels {
-            for index in 0..<frameCount { mono[index] += channelData[channel][index] }
+            for index in 0..<frameCount { monoSamples[index] += channelData[channel][index] }
         }
         let divisor = Float(max(1, channels))
-        for index in 0..<frameCount { mono[index] /= divisor }
+        var divisorValue = divisor
+        vDSP_vsdiv(monoSamples, 1, &divisorValue, &monoSamples, 1, vDSP_Length(frameCount))
 
         var meanSquare: Float = 0
-        vDSP_measqv(mono, 1, &meanSquare, vDSP_Length(frameCount))
+        vDSP_measqv(monoSamples, 1, &meanSquare, vDSP_Length(frameCount))
         let rms = Double(sqrt(meanSquare))
         let sampleRate = buffer.format.sampleRate
         let dt = Double(frameCount) / max(1, sampleRate)
@@ -248,9 +351,9 @@ private final class MusicFeatureAnalyzer {
         // cost of running all three bands at 1024. This shortens frequency
         // resolution, not the per-sample rate, so it does not reintroduce the
         // decimation aliasing bandEnergy's doc comment warns about.
-        let bassRaw = bandEnergy(samples: mono, sampleRate: sampleRate, low: 45, high: 160, window: 1024)
-        let midsRaw = bandEnergy(samples: mono, sampleRate: sampleRate, low: 350, high: 2200, window: 512)
-        let highsRaw = bandEnergy(samples: mono, sampleRate: sampleRate, low: 3200, high: 12000, window: 256)
+        let bassRaw = bandEnergy(samples: monoSamples, sampleRate: sampleRate, low: 45, high: 160, window: 1024)
+        let midsRaw = bandEnergy(samples: monoSamples, sampleRate: sampleRate, low: 350, high: 2200, window: 512)
+        let highsRaw = bandEnergy(samples: monoSamples, sampleRate: sampleRate, low: 3200, high: 12000, window: 256)
         spectralPeak = max(spectralPeak * 0.9992, bassRaw, midsRaw, highsRaw)
         let bandScale = 0.9 / max(0.001, spectralPeak)
         let bass = clamp(bassRaw * bandScale)
@@ -289,7 +392,8 @@ private final class MusicFeatureAnalyzer {
         if isBeat { pulseEnv = max(pulseEnv, 0.85) }
         let pulse = clamp(pulseEnv)
 
-        // Drop: sustained high energy above the running baseline → strobe fuel.
+        // Legacy compatibility signal: sustained energy above the running baseline.
+        // Music Mode treats this as evidence, not as guaranteed section/drop detection.
         energyBaseline = energyBaseline * 0.985 + energy * 0.015
         let intensity = clamp((energy - 0.5) * 2.4) * clamp((energy - energyBaseline) * 4 + 0.3)
         dropEnv = max(dropEnv * exp(-dt / 0.3), intensity)
@@ -301,7 +405,6 @@ private final class MusicFeatureAnalyzer {
         previousBass = bass
         previousMids = mids
         previousHighs = highs
-        previousEnergy = energy
         return AudioReactiveSnapshot(level: level, beat: beat, kick: kick, snare: snare, percussion: percussion, bass: bass, mids: mids, highs: highs, energy: energy, mood: mood, confidence: clamp(level * 1.8), pulse: pulse, drop: drop, beatCount: beatCount, sourceDescription: sourceDescription)
     }
 
@@ -324,11 +427,12 @@ private final class MusicFeatureAnalyzer {
         let n = min(samples.count, window)
         guard n > 8 else { return 0 }
         let (cosTable, sinTable) = twiddles(for: n)
+        let firstBin = max(0, Int(ceil(low * Double(n) / sampleRate)))
+        let lastBin = min(n - 1, Int(floor(high * Double(n) / sampleRate)))
+        guard firstBin <= lastBin else { return 0 }
         var sum: Float = 0
         var bins = 0
-        for k in 0..<n {
-            let frequency = Double(k) * sampleRate / Double(n)
-            guard frequency >= low && frequency <= high else { continue }
+        for k in firstBin...lastBin {
             var r: Float = 0, i: Float = 0
             // idx walks (k·t) mod n without a modulo: it advances by k < n
             // each sample, so a single subtraction wraps it.
@@ -359,6 +463,7 @@ private enum SystemAudioStartResult {
 
 private final class SystemAudioCapture: NSObject, SCStreamOutput {
     private var stream: SCStream?
+    private var startTask: Task<Void, Never>?
     private let onBuffer: (AVAudioPCMBuffer) -> Void
 
     init(onBuffer: @escaping (AVAudioPCMBuffer) -> Void) { self.onBuffer = onBuffer }
@@ -366,17 +471,18 @@ private final class SystemAudioCapture: NSObject, SCStreamOutput {
     func start(completion: @escaping (SystemAudioStartResult) -> Void) {
         guard #available(macOS 13.0, *) else { completion(.unavailable); return }
 
-        Task {
+        startTask = Task {
             do {
                 // Ask ScreenCaptureKit itself whether capture is allowed instead
                 // of pre-gating on CGPreflightScreenCaptureAccess(): the preflight
                 // only reflects the TCC state from process launch, so it kept
                 // answering "denied" after the user granted Screen Recording and
-                // Soundcheck never noticed the grant. SCShareableContent consults
+                // Music Mode never noticed the grant. SCShareableContent consults
                 // the live TCC state on every call — and shows the system
                 // permission prompt on the first-ever request — so each start
                 // sees the user's current answer.
                 let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+                guard !Task.isCancelled else { return }
                 guard let display = content.displays.first else {
                     await MainActor.run { completion(.unavailable) }
                     return
@@ -392,7 +498,7 @@ private final class SystemAudioCapture: NSObject, SCStreamOutput {
                 configuration.width = 2
                 configuration.height = 2
                 configuration.minimumFrameInterval = CMTime(value: 1, timescale: 1)
-                configuration.queueDepth = 5
+                configuration.queueDepth = 3
                 configuration.showsCursor = false
                 let stream = SCStream(filter: filter, configuration: configuration, delegate: nil)
                 try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: DispatchQueue(label: "LumenDesk.systemAudio"))
@@ -403,9 +509,16 @@ private final class SystemAudioCapture: NSObject, SCStreamOutput {
                 // pipeline and the log flood.
                 try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: DispatchQueue(label: "LumenDesk.systemVideo"))
                 try await stream.startCapture()
+                guard !Task.isCancelled else {
+                    try? await stream.stopCapture()
+                    return
+                }
                 self.stream = stream
+                self.startTask = nil
                 await MainActor.run { completion(.started) }
             } catch {
+                guard !Task.isCancelled else { return }
+                self.startTask = nil
                 // ScreenCaptureKit surfaces a missing Screen Recording grant as
                 // .userDeclined; anything else is a genuine capture failure.
                 let denied = (error as? SCStreamError)?.code == .userDeclined
@@ -415,6 +528,8 @@ private final class SystemAudioCapture: NSObject, SCStreamOutput {
     }
 
     func stop() {
+        startTask?.cancel()
+        startTask = nil
         guard let stream else { return }
         Task { try? await stream.stopCapture() }
         self.stream = nil

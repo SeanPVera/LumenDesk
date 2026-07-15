@@ -876,6 +876,7 @@ private struct NewRoomSheet: View {
 private enum ProductLibrarySection: String, CaseIterable, Identifiable {
     case scenes = "Scenes"
     case themes = "Themes"
+    case music = "Music Mode"
     case effects = "Effects"
     var id: String { rawValue }
 }
@@ -906,7 +907,7 @@ struct LibraryWorkspaceView: View {
                 .pickerStyle(.segmented)
 
                 HStack(spacing: 10) {
-                    if section != .scenes {
+                    if section != .scenes && section != .music {
                         Text("Apply to").font(.caption).foregroundStyle(Lumen.textSecondary)
                         Picker("Apply to", selection: $scope) {
                             Text("All Lights").tag(LightScope.all)
@@ -923,6 +924,7 @@ struct LibraryWorkspaceView: View {
                 switch section {
                 case .scenes: scenesSection
                 case .themes: themesSection
+                case .music: MusicModeView(scope: $scope)
                 case .effects: effectsSection
                 }
             }
@@ -1140,7 +1142,8 @@ struct LibraryWorkspaceView: View {
     }
 
     private var filteredEffects: [LightingEffect] {
-        searchText.isEmpty ? LightingCatalog.effects : LightingCatalog.effects.filter {
+        let effects = LightingCatalog.effects.filter { $0.id != "music-pulse" }
+        return searchText.isEmpty ? effects : effects.filter {
             $0.name.localizedCaseInsensitiveContains(searchText) || $0.summary.localizedCaseInsensitiveContains(searchText)
         }
     }

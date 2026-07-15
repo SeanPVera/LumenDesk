@@ -23,6 +23,7 @@ final class UDPSocket {
     let fd: Int32
     private let queue: DispatchQueue
     private var source: DispatchSourceRead?
+    private var receiveBuffer = [UInt8](repeating: 0, count: 4096)
 
     /// Called on `queue` for every datagram received.
     var onReceive: ((Data, String, UInt16) -> Void)?
@@ -71,11 +72,10 @@ final class UDPSocket {
     }
 
     private func drain() {
-        var buf = [UInt8](repeating: 0, count: 4096)
         while true {
             var addr = sockaddr_in()
             var len = socklen_t(MemoryLayout<sockaddr_in>.size)
-            let n = buf.withUnsafeMutableBufferPointer { bptr -> Int in
+            let n = receiveBuffer.withUnsafeMutableBufferPointer { bptr -> Int in
                 withUnsafeMutablePointer(to: &addr) { aptr in
                     aptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sptr in
                         recvfrom(fd, bptr.baseAddress, bptr.count, 0, sptr, &len)
@@ -83,7 +83,7 @@ final class UDPSocket {
                 }
             }
             if n <= 0 { return }
-            let data = Data(buf.prefix(n))
+            let data = Data(receiveBuffer.prefix(n))
             let host = Self.ipString(addr.sin_addr)
             let port = UInt16(bigEndian: addr.sin_port)
             onReceive?(data, host, port)

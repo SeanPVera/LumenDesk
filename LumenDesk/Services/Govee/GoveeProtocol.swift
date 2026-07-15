@@ -8,6 +8,12 @@ enum GoveeProtocol {
     static let discoveryPort: UInt16 = 4001
     static let responsePort: UInt16 = 4002
     static let controlPort: UInt16 = 4003
+    // GoveeClient decodes on one serial queue, so reusing the decoder is safe.
+    // Command markers also avoid attempting a full ScanResponse decode for
+    // every routine status heartbeat.
+    private static let decoder = JSONDecoder()
+    private static let scanMarker = Data(#""scan""#.utf8)
+    private static let statusMarker = Data(#""devStatus""#.utf8)
 
     struct ScanResponse: Decodable {
         let msg: Inner
@@ -43,13 +49,15 @@ enum GoveeProtocol {
     }
 
     static func decodeScanResponse(_ data: Data) -> ScanResponse? {
-        guard let response = try? JSONDecoder().decode(ScanResponse.self, from: data),
+        guard data.range(of: scanMarker) != nil,
+              let response = try? decoder.decode(ScanResponse.self, from: data),
               response.msg.cmd == "scan" else { return nil }
         return response
     }
 
     static func decodeStatusResponse(_ data: Data) -> StatusResponse? {
-        guard let response = try? JSONDecoder().decode(StatusResponse.self, from: data),
+        guard data.range(of: statusMarker) != nil,
+              let response = try? decoder.decode(StatusResponse.self, from: data),
               response.msg.cmd == "devStatus" else { return nil }
         return response
     }

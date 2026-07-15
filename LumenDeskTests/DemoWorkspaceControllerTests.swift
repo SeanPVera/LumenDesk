@@ -168,6 +168,40 @@ final class DemoWorkspaceControllerTests: XCTestCase {
     }
 
     @MainActor
+    func testResetDemoModeRestoresMusicDefaultsAndClearsRunningSessions() {
+        let manager = LightManager(
+            defaults: isolatedDefaults(),
+            persistenceStore: temporaryPersistenceStore()
+        )
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+
+        let scope = LightScope.room(manager.rooms[0].id)
+        manager.renameRoom(manager.rooms[0].id, to: "Changed Demo Room")
+        manager.setMusicModeConfiguration(.configuration(for: .concert))
+        manager.setFixtureTopology(
+            FixtureTopology(layout: .custom, fixtureOrder: Array(manager.musicFixtureDescriptors(in: scope).map(\.id).reversed())),
+            for: scope
+        )
+        var running = manager.musicModeConfiguration
+        running.usesSyntheticDemoPattern = true
+        manager.startMusicMode(configuration: running, scope: scope)
+
+        XCTAssertFalse(manager.activeEffects.isEmpty)
+        XCTAssertFalse(manager.fixtureTopologies.isEmpty)
+
+        manager.resetDemoMode()
+
+        XCTAssertTrue(manager.isDemoMode)
+        XCTAssertEqual(manager.rooms.map(\.name), ["Demo Office", "Demo Lounge"])
+        XCTAssertEqual(manager.musicModeConfiguration.preset, .balanced)
+        XCTAssertTrue(manager.musicModeConfiguration.usesSyntheticDemoPattern)
+        XCTAssertTrue(manager.fixtureTopologies.isEmpty)
+        XCTAssertTrue(manager.activeEffects.isEmpty)
+        XCTAssertTrue(manager.musicModeController.activeScopeIDs.isEmpty)
+    }
+
+    @MainActor
     func testResumableAndCancelledTransientStateFollowsExistingPolicy() throws {
         let defaults = isolatedDefaults()
         defaults.set(ConfirmationPolicy.cautious.rawValue, forKey: AppPreferenceKey.confirmationPolicy)

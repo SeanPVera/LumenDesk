@@ -3,6 +3,16 @@ import XCTest
 @testable import LumenDesk
 
 final class DomainTests: XCTestCase {
+    func testH60B0UsesThreeStreamedLampSegments() throws {
+        let profile = try XCTUnwrap(GoveeSegmentProfile.detect(sku: "h60b0"))
+
+        XCTAssertEqual(profile.layout, .lamp)
+        XCTAssertEqual(profile.defaultSegmentCount, 3)
+        XCTAssertFalse(profile.supportsGradient)
+        XCTAssertTrue(profile.recognized)
+        XCTAssertTrue(profile.appliesViaStream)
+    }
+
     func testSceneSerialization() throws {
         let segmentState = GoveeSegmentState(
             colors: [

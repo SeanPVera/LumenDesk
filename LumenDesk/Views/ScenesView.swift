@@ -147,6 +147,7 @@ struct ScenesView: View {
                         Label(themeCategory?.rawValue ?? "All moods", systemImage: "line.3.horizontal.decrease.circle")
                     }
                     .fixedSize()
+                    .lumenInteractiveTarget()
                 }
 
                 if section != .scenes {
@@ -362,7 +363,9 @@ struct ScenesView: View {
             Button { manager.toggleFavoriteScene(scene.id) } label: {
                 Image(systemName: manager.isFavoriteScene(scene.id) ? "star.fill" : "star")
                     .foregroundStyle(manager.isFavoriteScene(scene.id) ? Lumen.gold : .secondary)
-            }.buttonStyle(.plain)
+            }
+            .buttonStyle(.plain)
+            .lumenInteractiveTarget()
             Image(systemName: "wand.and.stars").foregroundStyle(Lumen.violetBright).font(.title3)
             VStack(alignment: .leading, spacing: 4) {
                 if renamingID == scene.id {
@@ -399,7 +402,9 @@ struct ScenesView: View {
                 Button(manager.isFavoriteScene(scene.id) ? "Remove Favorite" : "Favorite") { manager.toggleFavoriteScene(scene.id) }
                 Button("Delete Scene", role: .destructive) { manager.deleteScene(scene.id) }
             } label: { Image(systemName: "ellipsis.circle") }
-            .menuStyle(.borderlessButton).fixedSize()
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .lumenInteractiveTarget()
         }
         .padding(12).lumenCard(radius: 8)
     }

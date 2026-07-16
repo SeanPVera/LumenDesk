@@ -26,20 +26,26 @@ struct DeviceSnapshot: Equatable {
     /// Govee segment layout that was active when the scene was captured.
     /// Nil for solid-color devices and for scenes saved by older versions.
     var segments: GoveeSegmentState?
+    /// LIFX matrix layout (including Luna's 26 zones) that was active when
+    /// captured. Nil for solid-color devices and older scenes.
+    var matrix: LIFXMatrixState?
 
-    init(isOn: Bool, brightness: Double, hue: Double, saturation: Double, kelvin: Int = 3500, segments: GoveeSegmentState? = nil) {
+    init(isOn: Bool, brightness: Double, hue: Double, saturation: Double,
+         kelvin: Int = 3500, segments: GoveeSegmentState? = nil,
+         matrix: LIFXMatrixState? = nil) {
         self.isOn = isOn
         self.brightness = brightness
         self.hue = hue
         self.saturation = saturation
         self.kelvin = kelvin
         self.segments = segments
+        self.matrix = matrix
     }
 }
 
 extension DeviceSnapshot: Codable {
     enum CodingKeys: String, CodingKey {
-        case isOn, brightness, hue, saturation, kelvin, segments
+        case isOn, brightness, hue, saturation, kelvin, segments, matrix
     }
 
     init(from decoder: Decoder) throws {
@@ -50,5 +56,6 @@ extension DeviceSnapshot: Codable {
         saturation = try c.decode(Double.self, forKey: .saturation)
         kelvin = (try? c.decode(Int.self, forKey: .kelvin)) ?? 3500
         segments = try? c.decodeIfPresent(GoveeSegmentState.self, forKey: .segments)
+        matrix = try? c.decodeIfPresent(LIFXMatrixState.self, forKey: .matrix)
     }
 }

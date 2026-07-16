@@ -53,6 +53,7 @@ final class LightManager: ObservableObject {
     // and reusable multi-color paint jobs, both persisted across sessions.
     @Published private(set) var goveeSegmentStates: [String: GoveeSegmentState] = [:]
     @Published private(set) var goveeSegmentPresets: [GoveeSegmentPreset] = []
+    @Published private(set) var lifxMatrixStates: [String: LIFXMatrixState] = [:]
     @Published private(set) var musicModeConfiguration = MusicModeConfiguration.configuration(for: .soundcheck)
     @Published private(set) var fixtureTopologies: [String: FixtureTopology] = [:]
 
@@ -1057,6 +1058,7 @@ final class LightManager: ObservableObject {
         guard demoWorkspaceController.allowsLiveNetworking else { return }
         switch device.brand {
         case .lifx:
+            markLIFXMatrixInactive(device)
             let hsb = color.hsbComponents
             lifx?.setColor(
                 macHex: device.backendID,
@@ -1086,7 +1088,10 @@ final class LightManager: ObservableObject {
             device.brightness = state.brightness
             device.color = state.color
             device.kelvin = state.kelvin
-            if let segments = state.segments, device.brand == .govee {
+            if let matrix = state.matrix, device.isLIFXLuna {
+                applyLIFXMatrix(device, state: matrix, recordUndo: false,
+                                turnOn: false, announce: false)
+            } else if let segments = state.segments, device.brand == .govee {
                 applySegments(device, state: segments, recordUndo: false, turnOn: false, announce: false)
                 sendBrightness(device, value: state.brightness)
             } else {
@@ -1112,13 +1117,30 @@ final class LightManager: ObservableObject {
 
     private func sendBrightness(_ device: LightDevice, value: Double) {
         expectBrightness(device, value: value)
+        let matrixUpdate: LIFXMatrixState?
+        if device.isLIFXLuna,
+           let current = activeLIFXMatrixState(for: device.id) {
+            let updated = current.settingBrightness(value)
+            lifxMatrixStates[device.id] = updated
+            matrixUpdate = updated
+        } else {
+            matrixUpdate = nil
+        }
         enqueueCommand(for: device, coalescingKey: "brightness", summary: "Brightness \(Int(value * 100)) percent") { [weak self, weak device] in
             guard let self, let device else { return }
             switch device.brand {
             case .lifx:
-                let hsb = device.color.hsbComponents
-                let lifxColor = LIFXHSBK(hue: UInt16(hsb.h * 65535), saturation: UInt16(hsb.s * 65535), brightness: UInt16(max(0, min(1, value)) * 65535), kelvin: UInt16(device.kelvin))
-                self.lifx?.setColor(macHex: device.backendID, color: lifxColor)
+                if let matrixUpdate {
+                    self.lifx?.setMatrixColors(
+                        macHex: device.backendID,
+                        colors: matrixUpdate.colors.map(\.hsbk),
+                        width: matrixUpdate.width
+                    )
+                } else {
+                    let hsb = device.color.hsbComponents
+                    let lifxColor = LIFXHSBK(hue: UInt16(hsb.h * 65535), saturation: UInt16(hsb.s * 65535), brightness: UInt16(max(0, min(1, value)) * 65535), kelvin: UInt16(device.kelvin))
+                    self.lifx?.setColor(macHex: device.backendID, color: lifxColor)
+                }
             case .govee:
                 self.govee?.setBrightness(deviceID: device.backendID, percent: Int(value * 100))
             }
@@ -1126,6 +1148,7 @@ final class LightManager: ObservableObject {
     }
 
     private func sendColor(_ device: LightDevice, color: Color, debounce: TimeInterval = 0.08) {
+        if device.brand == .lifx { markLIFXMatrixInactive(device) }
         expectColor(device, color: color)
         enqueueCommand(for: device, coalescingKey: "color", summary: "Changing color", debounce: debounce) { [weak self, weak device] in
             guard let self, let device else { return }
@@ -1143,6 +1166,7 @@ final class LightManager: ObservableObject {
     }
 
     private func sendColorTemperature(_ device: LightDevice, kelvin: Int) {
+        if device.brand == .lifx { markLIFXMatrixInactive(device) }
         expectKelvin(device, kelvin: kelvin)
         enqueueCommand(for: device, coalescingKey: "kelvin", summary: "Color temperature \(kelvin) kelvin") { [weak self, weak device] in
             guard let self, let device else { return }
@@ -1162,7 +1186,8 @@ final class LightManager: ObservableObject {
     private func snapshot(_ device: LightDevice) -> LightRuntimeSnapshot {
         LightRuntimeSnapshot(deviceID: device.id, isOn: device.isOn,
                     brightness: device.brightness, color: device.color, kelvin: device.kelvin,
-                    segments: activeSegmentState(for: device.id))
+                    segments: activeSegmentState(for: device.id),
+                    matrix: activeLIFXMatrixState(for: device.id))
     }
 
     private func recordChange(_ devices: [LightDevice]) {
@@ -1214,7 +1239,10 @@ final class LightManager: ObservableObject {
             d.brightness = snap.brightness
             d.color = snap.color
             d.kelvin = snap.kelvin
-            if let segments = snap.segments, d.brand == .govee {
+            if let matrix = snap.matrix, d.isLIFXLuna {
+                applyLIFXMatrix(d, state: matrix, recordUndo: false,
+                                turnOn: false, announce: false)
+            } else if let segments = snap.segments, d.brand == .govee {
                 applySegments(d, state: segments, recordUndo: false, turnOn: false, announce: false)
                 sendBrightness(d, value: snap.brightness)
             } else {
@@ -1239,6 +1267,8 @@ final class LightManager: ObservableObject {
             let oldAddress = existing.address
             existing.name = device.name
             existing.address = device.address
+            existing.sku = device.sku ?? existing.sku
+            existing.productID = device.productID ?? existing.productID
             if oldAddress != device.address { appendDiscoveryChange(existing, kind: .changed, detail: "Address changed from \(oldAddress) to \(device.address)") }
             existing.customName = customNames[existing.id]
             markSeen(existing)
@@ -1286,6 +1316,18 @@ extension LightManager: LIFXClientDelegate {
         }
     }
 
+    nonisolated func lifxDidIdentify(macHex: String, vendorID: UInt32, productID: UInt32) {
+        Task { @MainActor in
+            guard self.demoWorkspaceController.acceptsLiveNetworkCallbacks,
+                  vendorID == 1,
+                  let device = self.device(withID: "lifx:\(macHex)") else { return }
+            device.productID = productID
+            if let sku = LIFXProductCatalog.sku(for: productID) {
+                device.sku = sku
+            }
+        }
+    }
+
     nonisolated func lifxDidUpdate(macHex: String, label: String, color: LIFXHSBK, isOn: Bool) {
         Task { @MainActor in
             guard self.demoWorkspaceController.acceptsLiveNetworkCallbacks else { return }
@@ -1317,6 +1359,28 @@ extension LightManager: LIFXClientDelegate {
                 if device.color.rgbDistance(to: reportedColor) > 0.005 { device.color = reportedColor }
             }
             self.markSeen(device, confirmsPendingCommand: matches)
+        }
+    }
+
+    nonisolated func lifxDidUpdateMatrix(macHex: String, productID: UInt32,
+                                         width: Int, height: Int,
+                                         colors: [LIFXHSBK]) {
+        Task { @MainActor in
+            guard self.demoWorkspaceController.acceptsLiveNetworkCallbacks,
+                  let device = self.device(withID: "lifx:\(macHex)") else { return }
+            if productID != 0 {
+                device.productID = productID
+                device.sku = LIFXProductCatalog.sku(for: productID) ?? device.sku
+            }
+            guard device.isLIFXLuna else { return }
+            self.lifxMatrixStates[device.id] = LIFXMatrixState(
+                productID: device.productID ?? productID,
+                width: width,
+                height: height,
+                colors: colors.map(LIFXMatrixColor.init),
+                isActive: true
+            )
+            self.markSeen(device)
         }
     }
 
@@ -1403,6 +1467,74 @@ extension LightManager: GoveeClientDelegate {
             self.commandCoordinator.fail(deviceIDs: affected, summary: "Govee rejected the command")
             self.publishError("Govee command failed: \(error)")
         }
+    }
+}
+
+// MARK: - LIFX Luna matrix color studio
+
+extension LightManager {
+    func lifxMatrixState(for device: LightDevice) -> LIFXMatrixState? {
+        guard device.isLIFXLuna else { return nil }
+        return lifxMatrixStates[device.id]
+    }
+
+    func activeLIFXMatrixState(for deviceID: String) -> LIFXMatrixState? {
+        guard let state = lifxMatrixStates[deviceID], state.isActive else { return nil }
+        return state
+    }
+
+    func refreshLIFXMatrix(_ device: LightDevice) {
+        guard device.isLIFXLuna else { return }
+        if isDemoMode {
+            if lifxMatrixStates[device.id] == nil {
+                lifxMatrixStates[device.id] = .demoLuna(brightness: device.brightness)
+            }
+            return
+        }
+        lifx?.refreshMatrix(macHex: device.backendID)
+    }
+
+    func applyLIFXMatrix(_ device: LightDevice, state: LIFXMatrixState,
+                         recordUndo: Bool = true, turnOn: Bool = true,
+                         announce: Bool = true) {
+        guard device.isLIFXLuna else { return }
+        if recordUndo {
+            if device.isStale {
+                publishError("\u{201C}\(device.label)\u{201D} may be offline — command sent anyway.")
+            }
+            recordChange([device])
+        }
+
+        var next = state
+        next.productID = device.productID ?? state.productID
+        next.isActive = true
+        lifxMatrixStates[device.id] = next
+        if turnOn, !device.isOn {
+            device.isOn = true
+            sendPower(device, on: true)
+        }
+
+        commandCoordinator.recordUnconfirmedSend(
+            deviceID: device.id,
+            summary: "Applying \(next.zoneCount)-zone Luna layout"
+        )
+        if demoWorkspaceController.allowsLiveNetworking {
+            lifx?.setMatrixColors(
+                macHex: device.backendID,
+                colors: next.colors.map(\.hsbk),
+                width: next.width
+            )
+        }
+        if announce {
+            logActivity(.command, title: "Luna layout applied",
+                        detail: "\(device.label): \(next.zoneCount) color zones")
+            lastActionSummary = "Painted \(next.zoneCount) zones on \(device.label)"
+        }
+    }
+
+    fileprivate func markLIFXMatrixInactive(_ device: LightDevice) {
+        guard lifxMatrixStates[device.id]?.isActive == true else { return }
+        lifxMatrixStates[device.id]?.isActive = false
     }
 }
 
@@ -1864,7 +1996,8 @@ extension LightManager {
                 hue: hsb.h,
                 saturation: hsb.s,
                 kelvin: d.kelvin,
-                segments: activeSegmentState(for: d.id)
+                segments: activeSegmentState(for: d.id),
+                matrix: activeLIFXMatrixState(for: d.id)
             )
         }
         scenes.append(LightingScene(name: trimmed, snapshots: snapshots))
@@ -1959,8 +2092,14 @@ extension LightManager {
         for device in targets {
             guard let value = scene.snapshots[device.id] else { continue }
             device.isOn = value.isOn; device.brightness = value.brightness; device.kelvin = value.kelvin
-            device.color = Color(hue: value.hue, saturation: value.saturation, brightness: 1)
-            sendColor(device, color: device.color); sendPower(device, on: value.isOn)
+            if let matrix = value.matrix, device.isLIFXLuna {
+                applyLIFXMatrix(device, state: matrix, recordUndo: false,
+                                turnOn: false, announce: false)
+            } else {
+                device.color = Color(hue: value.hue, saturation: value.saturation, brightness: 1)
+                sendColor(device, color: device.color)
+            }
+            sendPower(device, on: value.isOn)
         }
         lastActionSummary = "Rehearsing \(scene.name) on \(targets.count) light\(targets.count == 1 ? "" : "s")"
     }
@@ -2464,6 +2603,7 @@ extension LightManager {
         let originalColor = device.color
         let originalBrightness = device.brightness
         let originalSegments = activeSegmentState(for: device.id)
+        let originalMatrix = activeLIFXMatrixState(for: device.id)
         device.isOn = true
         device.color = .cyan
         device.brightness = 1
@@ -2473,7 +2613,10 @@ extension LightManager {
             try? await Task.sleep(for: .seconds(2))
             guard let self, let device else { return }
             device.color = originalColor; device.brightness = originalBrightness; device.isOn = originalPower
-            if let originalSegments {
+            if let originalMatrix {
+                self.applyLIFXMatrix(device, state: originalMatrix, recordUndo: false,
+                                     turnOn: false, announce: false)
+            } else if let originalSegments {
                 self.applySegments(device, state: originalSegments, recordUndo: false, turnOn: false, announce: false)
             } else {
                 self.sendColor(device, color: originalColor)
@@ -2587,7 +2730,10 @@ extension LightManager {
             if !allowTurningOff && !snap.isOn { skipped.append(device.id); continue }
             if device.isStale { failed.append(device.id) } else { succeeded.append(device.id) }
             device.brightness = snap.brightness; device.kelvin = snap.kelvin; device.isOn = snap.isOn
-            if let segments = snap.segments, device.brand == .govee {
+            if let matrix = snap.matrix, device.isLIFXLuna {
+                applyLIFXMatrix(device, state: matrix, recordUndo: false,
+                                turnOn: false, announce: false)
+            } else if let segments = snap.segments, device.brand == .govee {
                 applySegments(device, state: segments, recordUndo: false, turnOn: false, announce: false)
                 sendBrightness(device, value: snap.brightness)
             } else {
@@ -2830,6 +2976,7 @@ extension LightManager {
             rehearsalSceneID: rehearsalSceneID,
             goveeSegmentStates: goveeSegmentStates,
             goveeSegmentPresets: goveeSegmentPresets,
+            lifxMatrixStates: lifxMatrixStates,
             musicModeConfiguration: musicModeConfiguration,
             fixtureTopologies: fixtureTopologies,
             customNames: customNames,
@@ -2890,6 +3037,7 @@ extension LightManager {
         rehearsalSceneID = workspace.rehearsalSceneID
         goveeSegmentStates = workspace.goveeSegmentStates
         goveeSegmentPresets = workspace.goveeSegmentPresets
+        lifxMatrixStates = workspace.lifxMatrixStates
         musicModeConfiguration = workspace.musicModeConfiguration
         fixtureTopologies = workspace.fixtureTopologies
         customNames = workspace.customNames

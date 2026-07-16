@@ -14,6 +14,7 @@ struct LightRowView: View {
     @State private var showingInspector = false
     @State private var showingPreciseColor = false
     @State private var showingSegmentStudio = false
+    @State private var showingLunaStudio = false
 
     private enum LightColorMode: String, CaseIterable {
         case color = "Color"
@@ -103,6 +104,7 @@ struct LightRowView: View {
         .sheet(isPresented: $showingInspector) { DeviceInspectorView(device: device).environmentObject(manager) }
         .sheet(isPresented: $showingPreciseColor) { PreciseColorEditorView(device: device).environmentObject(manager) }
         .sheet(isPresented: $showingSegmentStudio) { GoveeSegmentEditorView(device: device).environmentObject(manager) }
+        .sheet(isPresented: $showingLunaStudio) { LIFXLunaEditorView(device: device).environmentObject(manager) }
         .contextMenu { if !selectionMode { roomMenuContents } }
     }
 
@@ -282,7 +284,40 @@ struct LightRowView: View {
             if manager.segmentProfile(for: device) != nil {
                 segmentStudioRow
             }
+            if device.isLIFXLuna {
+                lunaStudioRow
+            }
         }
+    }
+
+    private var lunaStudioRow: some View {
+        Button {
+            showingLunaStudio = true
+        } label: {
+            HStack(spacing: 8) {
+                LunaMiniGridView(state: manager.lifxMatrixState(for: device), fallback: device.color)
+                    .frame(width: 36, height: 28)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Luna Color Studio")
+                        .font(.caption.weight(.semibold))
+                    Text(manager.lifxMatrixState(for: device) == nil
+                         ? "Read and paint 26 color zones"
+                         : "26 zones · \(manager.activeLIFXMatrixState(for: device.id) == nil ? "solid color" : "multi-color")")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Image(systemName: "circle.grid.3x3.fill")
+                    .font(.caption)
+                    .foregroundStyle(Lumen.violetBright)
+                    .accessibilityHidden(true)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(selectionMode)
+        .help("Open Luna Color Studio — paint all 26 zones")
+        .accessibilityLabel("Luna Color Studio for \(device.label)")
     }
 
     // Per-segment control entry for recognized Govee RGBIC devices (COB
@@ -493,6 +528,9 @@ struct LightRowView: View {
         Button("Precise Color\u{2026}") { showingPreciseColor = true }
         if device.brand == .govee {
             Button("Segment Studio\u{2026}") { showingSegmentStudio = true }
+        }
+        if device.isLIFXLuna {
+            Button("Luna Color Studio\u{2026}") { showingLunaStudio = true }
         }
         if device.isStale { Button("Retry Connection") { manager.retry(device) } }
         if manager.commandState(for: device.id).phase == .failed { Button("Keep Trying") { manager.retryCommand(for: device) } }

@@ -8,11 +8,18 @@ enum LIFXMessage: UInt16 {
     case stateService = 3
     case getHostFirmware = 14
     case stateLabel = 25
+    case getVersion = 32
+    case stateVersion = 33
     case setLightPower = 117
     case stateLightPower = 118
     case lightGet = 101
     case lightSetColor = 102
     case lightState = 107
+    case getDeviceChain = 701
+    case stateDeviceChain = 702
+    case get64 = 707
+    case state64 = 711
+    case set64 = 715
 }
 
 struct LIFXHSBK: Equatable {
@@ -20,6 +27,13 @@ struct LIFXHSBK: Equatable {
     var saturation: UInt16   // 0…65535
     var brightness: UInt16   // 0…65535
     var kelvin: UInt16       // 2500…9000
+}
+
+struct LIFXMatrixDevice: Equatable {
+    var width: Int
+    var height: Int
+    var vendorID: UInt32
+    var productID: UInt32
 }
 
 enum LIFXProtocol {
@@ -119,6 +133,44 @@ enum LIFXProtocol {
         return p
     }
 
+    static func get64Payload(width: Int, tileIndex: UInt8 = 0, length: UInt8 = 1) -> Data {
+        var p = Data()
+        p.reserveCapacity(6)
+        p.append(tileIndex)
+        p.append(length)
+        p.append(0) // reserved
+        p.append(0) // x
+        p.append(0) // y
+        p.append(UInt8(clamping: width))
+        return p
+    }
+
+    /// Matrix devices always expect a fixed array of 64 HSBK values. Devices
+    /// with fewer physical zones ignore cells outside their reported bounds.
+    static func set64Payload(colors: [LIFXHSBK], width: Int,
+                             durationMS: UInt32 = 250,
+                             tileIndex: UInt8 = 0, length: UInt8 = 1) -> Data {
+        var p = Data()
+        p.reserveCapacity(522)
+        p.append(tileIndex)
+        p.append(length)
+        p.append(0) // visible frame buffer
+        p.append(0) // x
+        p.append(0) // y
+        p.append(UInt8(clamping: width))
+        p.appendLE(durationMS)
+
+        let off = LIFXHSBK(hue: 0, saturation: 0, brightness: 0, kelvin: 3_500)
+        for index in 0..<64 {
+            let color = colors.indices.contains(index) ? colors[index] : off
+            p.appendLE(color.hue)
+            p.appendLE(color.saturation)
+            p.appendLE(color.brightness)
+            p.appendLE(color.kelvin)
+        }
+        return p
+    }
+
     // MARK: Payload parsers
 
     static func parseLightState(_ payload: Data) -> (color: LIFXHSBK, power: UInt16, label: String)? {
@@ -132,6 +184,46 @@ enum LIFXProtocol {
         let labelBytes = payload.subdata(in: (payload.startIndex + 12)..<(payload.startIndex + 12 + 32))
         let label = String(bytes: labelBytes.prefix { $0 != 0 }, encoding: .utf8) ?? ""
         return (LIFXHSBK(hue: hue, saturation: sat, brightness: bri, kelvin: kel), power, label)
+    }
+
+    static func parseVersion(_ payload: Data) -> (vendorID: UInt32, productID: UInt32)? {
+        guard payload.count >= 12 else { return nil }
+        return (payload.readLE(at: 0), payload.readLE(at: 4))
+    }
+
+    /// StateDeviceChain contains 16 fixed-width Tile structures followed by
+    /// the number that are valid. Luna is a single matrix device, so the first
+    /// structure supplies its geometry and product identity.
+    static func parseMatrixDevice(_ payload: Data) -> LIFXMatrixDevice? {
+        let tileSize = 55
+        let tileCountOffset = 1 + 16 * tileSize
+        guard payload.count > tileCountOffset, payload[tileCountOffset] > 0 else { return nil }
+        let firstTile = 1
+        let width = Int(payload[firstTile + 16])
+        let height = Int(payload[firstTile + 17])
+        guard width > 0, height > 0, width * height <= 64 else { return nil }
+        let vendor: UInt32 = payload.readLE(at: firstTile + 19)
+        let product: UInt32 = payload.readLE(at: firstTile + 23)
+        return LIFXMatrixDevice(width: width, height: height,
+                                vendorID: vendor, productID: product)
+    }
+
+    static func parseState64(_ payload: Data) -> (width: Int, colors: [LIFXHSBK])? {
+        guard payload.count >= 5 + 64 * 8 else { return nil }
+        let width = Int(payload[4])
+        guard width > 0 else { return nil }
+        var colors: [LIFXHSBK] = []
+        colors.reserveCapacity(64)
+        for index in 0..<64 {
+            let offset = 5 + index * 8
+            colors.append(LIFXHSBK(
+                hue: payload.readLE(at: offset),
+                saturation: payload.readLE(at: offset + 2),
+                brightness: payload.readLE(at: offset + 4),
+                kelvin: payload.readLE(at: offset + 6)
+            ))
+        }
+        return (width, colors)
     }
 }
 

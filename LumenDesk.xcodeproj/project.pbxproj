@@ -47,6 +47,8 @@
 		B100000000000000000029 /* AudioReactiveSessionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000029 /* AudioReactiveSessionController.swift */; };
 		B10000000000000000002A /* MusicModeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000002A /* MusicModeView.swift */; };
 		B10000000000000000002B /* MusicModeVisualizerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000002B /* MusicModeVisualizerView.swift */; };
+		B10000000000000000002C /* LIFXMatrix.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000002C /* LIFXMatrix.swift */; };
+		B10000000000000000002D /* LIFXLunaEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000002D /* LIFXLunaEditorView.swift */; };
 		B200000000000000000001 /* ProtocolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000001 /* ProtocolTests.swift */; };
 		B200000000000000000002 /* DomainTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000002 /* DomainTests.swift */; };
 		B200000000000000000003 /* NetworkUtilityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000003 /* NetworkUtilityTests.swift */; };
@@ -111,6 +113,8 @@
 		A100000000000000000029 /* AudioReactiveSessionController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioReactiveSessionController.swift; sourceTree = "<group>"; };
 		A10000000000000000002A /* MusicModeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicModeView.swift; sourceTree = "<group>"; };
 		A10000000000000000002B /* MusicModeVisualizerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicModeVisualizerView.swift; sourceTree = "<group>"; };
+		A10000000000000000002C /* LIFXMatrix.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LIFXMatrix.swift; sourceTree = "<group>"; };
+		A10000000000000000002D /* LIFXLunaEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LIFXLunaEditorView.swift; sourceTree = "<group>"; };
 		A100000000000000000099 /* LumenDesk.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LumenDesk.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A200000000000000000001 /* ProtocolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolTests.swift; sourceTree = "<group>"; };
 		A200000000000000000002 /* DomainTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DomainTests.swift; sourceTree = "<group>"; };
@@ -178,6 +182,7 @@
 				A10000000000000000001A /* LightingCatalog.swift */,
 				A10000000000000000001C /* UXEnhancements.swift */,
 				A10000000000000000001E /* GoveeSegments.swift */,
+				A10000000000000000002C /* LIFXMatrix.swift */,
 				A100000000000000000026 /* MusicMode.swift */,
 			);
 			path = Models;
@@ -233,6 +238,7 @@
 				A100000000000000000019 /* OnboardingView.swift */,
 				A10000000000000000001D /* UXCenterViews.swift */,
 				A10000000000000000001F /* GoveeSegmentEditorView.swift */,
+				A10000000000000000002D /* LIFXLunaEditorView.swift */,
 				A100000000000000000020 /* ProductShellView.swift */,
 				A10000000000000000002A /* MusicModeView.swift */,
 				A10000000000000000002B /* MusicModeVisualizerView.swift */,
@@ -403,6 +409,8 @@
 				B100000000000000000029 /* AudioReactiveSessionController.swift in Sources */,
 				B10000000000000000002A /* MusicModeView.swift in Sources */,
 				B10000000000000000002B /* MusicModeVisualizerView.swift in Sources */,
+				B10000000000000000002C /* LIFXMatrix.swift in Sources */,
+				B10000000000000000002D /* LIFXLunaEditorView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

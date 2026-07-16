@@ -9,6 +9,7 @@ The app is designed for day-to-day lighting control as well as richer home-light
 - Discovers supported LIFX and Govee lights on the same LAN.
 - Controls individual bulbs, rooms, selected groups, or every light at once.
 - Supports power, brightness, full-color RGB control, and white color temperature control.
+- Detects the LIFX SuperColor Luna (LFXCAP8/RGBW/WH) and paints its 26 matrix zones with individual colors, gradients, and curated Luna looks over the local LAN.
 - Paints individual segments on Govee RGBIC devices (COB strips, string lights, neon ropes) with per-segment color and brightness, gradient blending, and live preview — the same specificity as the Govee Home app, without the cloud.
 - Groups lights into vendor-agnostic rooms, so LIFX and Govee bulbs can live in the same room.
 - Saves and recalls scenes captured from your current lighting state.
@@ -117,8 +118,23 @@ Each light row supports:
 - Offline/stale indicators.
 - Recent colors and useful presets where available.
 - A Segment Studio row on recognized Govee RGBIC devices, with a live mini-preview of the saved layout.
+- A Luna Color Studio row on LIFX Luna lamps, with a 26-zone face preview and multi-color editor.
 
 LumenDesk keeps a brand-agnostic device model while still sending the correct vendor-specific packets behind the scenes.
+
+### Luna Color Studio (LIFX SuperColor Luna)
+
+LumenDesk recognizes LIFX Luna product IDs 219 and 220 and reads the lamp's matrix geometry and colors through the official LIFX LAN protocol. The Luna editor includes:
+
+- A visual 26-zone lamp face with individual and multi-zone selection.
+- Color swatches and a full custom color picker.
+- Two-color gradients across all zones or only the selected zones.
+- Aurora, Sunset, Ocean, Rainbow, and Warm Glow starter looks.
+- Reload from Lamp and Apply to Luna actions.
+- Matrix-aware brightness control that preserves multi-color layouts.
+- Scene capture, rehearsal, undo, and effect restoration for Luna layouts.
+
+The demo workspace includes a simulated Luna, so the editor can be explored without the physical lamp.
 
 ### Segment Studio (Govee COB strips, string lights, neon ropes)
 

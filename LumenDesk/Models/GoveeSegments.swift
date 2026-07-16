@@ -4,12 +4,13 @@ import SwiftUI
 // MARK: - Segment capability catalog
 
 /// Physical layout of a segmented Govee light. Drives how the Segment Studio
-/// draws the device (continuous COB bar vs. bulbs on a wire) and which
+/// draws the device (continuous COB bar, bulbs on a wire, or lamp zones) and which
 /// controls make sense (only blended strips expose the gradient toggle).
 enum GoveeSegmentLayout: String, Codable {
     case cobStrip      // continuous chip-on-board strip; colors can blend
     case stringLights  // discrete bulbs or clusters along a wire
     case neonRope      // flexible neon tube; behaves like a fine-grained strip
+    case lamp          // independently addressable lighting zones in a lamp
     case generic       // unrecognized RGBIC device
 
     var displayName: String {
@@ -17,6 +18,7 @@ enum GoveeSegmentLayout: String, Codable {
         case .cobStrip: return "COB strip"
         case .stringLights: return "String lights"
         case .neonRope: return "Neon rope"
+        case .lamp: return "Segmented lamp"
         case .generic: return "RGBIC light"
         }
     }
@@ -26,6 +28,7 @@ enum GoveeSegmentLayout: String, Codable {
         case .cobStrip: return "rectangle.split.3x1.fill"
         case .stringLights: return "party.popper.fill"
         case .neonRope: return "scribble.variable"
+        case .lamp: return "lamp.floor.fill"
         case .generic: return "lightbulb.led.fill"
         }
     }
@@ -42,7 +45,7 @@ struct GoveeSegmentProfile {
     let recognized: Bool
     /// Families whose firmware ignores the static Bluetooth-format segment
     /// write — Govee's own platform API reports no segment capability for
-    /// them (string, curtain, and permanent-outdoor lights). Their layouts
+    /// them (multi-zone lamps, string, curtain, and permanent-outdoor lights). Their layouts
     /// are held on the light through the razer streaming overlay instead,
     /// and LumenDesk re-asserts the held frame on refresh ticks and device
     /// recovery.
@@ -89,6 +92,9 @@ struct GoveeSegmentProfile {
         add("H61A3", .neonRope, 20, true)
         add("H61A5", .neonRope, 20, true)
         add("H61D0", .neonRope, 20, true)
+        // Uplighter floor lamp: upper ripple, middle RGBIC, and task-light
+        // zones are independently addressable and held through streaming.
+        add("H60B0", .lamp, 3, false, stream: true)
         // String / curtain lights: no static segment write in firmware,
         // layouts are held via the razer stream.
         add("H70C1", .stringLights, 20, false, stream: true)

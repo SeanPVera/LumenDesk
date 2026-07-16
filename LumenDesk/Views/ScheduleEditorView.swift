@@ -67,7 +67,10 @@ struct ScheduleEditorView: View {
                 Button("Duplicate") { manager.duplicateSchedule(entry, in: room.id) }
                 Divider()
                 Button("Delete", role: .destructive) { manager.deleteSchedule(entry.id, from: room.id) }
-            } label: { Image(systemName: "ellipsis.circle") }.menuStyle(.borderlessButton).fixedSize()
+            } label: { Image(systemName: "ellipsis.circle") }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .lumenInteractiveTarget()
         }.padding(.vertical, 5)
     }
 }

@@ -213,6 +213,7 @@ struct HomeWorkspaceView: View {
                     }
                     .menuStyle(.borderlessButton)
                     .fixedSize()
+                    .lumenInteractiveTarget()
                     .accessibilityLabel("Home actions")
                 }
 
@@ -502,6 +503,7 @@ private struct FavoriteDeviceTile: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(.plain)
+            .lumenInteractiveTarget()
         }
         .padding(14)
         .frame(width: 180)
@@ -538,6 +540,7 @@ private struct FavoriteRoomTile: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(.plain)
+            .lumenInteractiveTarget()
         }
         .padding(14)
         .frame(width: 180)
@@ -592,6 +595,7 @@ private struct RoomSummaryCard: View {
                     }
                 }
                 .buttonStyle(.plain)
+                .lumenInteractiveTarget()
                 Spacer()
                 Button { manager.setPower(in: room, on: lights.filter(\.isOn).count < lights.count) } label: {
                     Image(systemName: manager.aggregatePowerState(for: lights).symbol)
@@ -630,6 +634,7 @@ private struct RoomSummaryCard: View {
                 Button("Open", action: onOpen)
                     .buttonStyle(.plain)
                     .foregroundStyle(Lumen.cyan)
+                    .lumenInteractiveTarget()
             }
         }
         .padding(16)
@@ -657,6 +662,7 @@ private struct DeviceCompactRow: View {
                         .foregroundStyle(selected ? Lumen.violetBright : Lumen.textTertiary)
                 }
                 .buttonStyle(.plain)
+                .lumenInteractiveTarget()
                 .accessibilityLabel(selected ? "Deselect \(device.label)" : "Select \(device.label)")
             }
 
@@ -1068,6 +1074,7 @@ struct LibraryWorkspaceView: View {
                     Button("Delete", role: .destructive) { manager.deleteScene(scene.id) }
                 } label: { Image(systemName: "ellipsis") }
                 .menuStyle(.borderlessButton)
+                .lumenInteractiveTarget()
             }
             Text(scene.name).font(.headline)
             Text("\(scene.snapshots.count) lights · saved \(scene.createdAt.formatted(.relative(presentation: .named)))")
@@ -1288,6 +1295,7 @@ private struct AutomationRoomCard: View {
                         Label("Pause", systemImage: "pause")
                     }
                     .controlSize(.small)
+                    .lumenInteractiveTarget()
                 }
                 Button("Edit", action: onEdit)
                     .buttonStyle(.bordered).controlSize(.small)

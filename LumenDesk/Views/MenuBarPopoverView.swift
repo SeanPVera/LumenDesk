@@ -112,7 +112,9 @@ struct MenuBarPopoverView: View {
                 NSApp.activate(ignoringOtherApps: true)
                 NSApp.windows.first(where: { $0.canBecomeKey })?.makeKeyAndOrderFront(nil)
             } label: { Image(systemName: "macwindow") }
-            .buttonStyle(.borderless).help("Resume in LumenDesk")
+            .buttonStyle(.borderless)
+            .lumenInteractiveTarget()
+            .help("Resume in LumenDesk")
             if manager.isScanning {
                 ProgressView().controlSize(.mini)
             } else {
@@ -123,6 +125,7 @@ struct MenuBarPopoverView: View {
                         .font(.caption)
                 }
                 .buttonStyle(.borderless)
+                .lumenInteractiveTarget()
                 .help("Scan for lights")
                 .accessibilityLabel("Scan for lights")
             }

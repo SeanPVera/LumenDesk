@@ -105,6 +105,7 @@ struct RoomSectionView: View {
                     .frame(width: 14)
             }
             .buttonStyle(.plain)
+            .lumenInteractiveTarget()
             .accessibilityLabel(isExpanded ? "Collapse \(room.name)" : "Expand \(room.name)")
 
             Button {
@@ -114,6 +115,7 @@ struct RoomSectionView: View {
                     .foregroundStyle(manager.isFavoriteRoom(room.id) ? Lumen.gold : .secondary)
             }
             .buttonStyle(.plain)
+            .lumenInteractiveTarget()
             .help(manager.isFavoriteRoom(room.id) ? "Unpin room from favorites" : "Pin room to favorites")
 
             if renaming {
@@ -250,6 +252,7 @@ struct RoomSectionView: View {
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
+            .lumenInteractiveTarget()
         }
         .contentShape(Rectangle())
     }
@@ -370,6 +373,8 @@ struct RoomSectionView: View {
                         .fill(swatch.color)
                         .frame(width: 24, height: 24)
                         .overlay(Circle().stroke(Color.primary.opacity(0.25), lineWidth: 0.5))
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .help("Set every light in \(room.name) to \(swatch.label)")
@@ -386,6 +391,7 @@ struct RoomSectionView: View {
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
+            .lumenInteractiveTarget()
             .help("Set a white color temperature for \(room.name)")
             .accessibilityLabel("\(room.name) white color temperature")
             Spacer(minLength: 0)

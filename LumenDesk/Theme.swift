@@ -273,6 +273,14 @@ struct LumenWordmark: View {
 
 /// Shims that let the shared SwiftUI code compile on both macOS and iOS.
 extension View {
+    /// Gives compact icon and text controls a forgiving click/tap area without
+    /// forcing their visible artwork to grow. Forty-four points matches the
+    /// platform accessibility guidance and keeps neighboring targets distinct.
+    func lumenInteractiveTarget(minimumSize: CGFloat = 44) -> some View {
+        frame(minWidth: minimumSize, minHeight: minimumSize)
+            .contentShape(Rectangle())
+    }
+
     /// Desktop windows and sheets get generous minimum sizes; on iPhone the
     /// sheet should simply fill the available screen, so this is a no-op there.
     func sheetFrame(minWidth: CGFloat? = nil,

@@ -11,6 +11,7 @@ struct LightRuntimeSnapshot {
     let color: Color
     let kelvin: Int
     let segments: GoveeSegmentState?
+    let matrix: LIFXMatrixState?
 }
 
 /// Owns the isolated demo workspace and the live workspace held while Demo
@@ -58,6 +59,7 @@ final class DemoWorkspaceController {
         var rehearsalSceneID: UUID?
         var goveeSegmentStates: [String: GoveeSegmentState]
         var goveeSegmentPresets: [GoveeSegmentPreset]
+        var lifxMatrixStates: [String: LIFXMatrixState]
         var musicModeConfiguration: MusicModeConfiguration
         var fixtureTopologies: [String: FixtureTopology]
         var customNames: [String: String]
@@ -152,8 +154,9 @@ final class DemoWorkspaceController {
         var workspace = current
         let timestamp = now()
         let palette: [Color] = [.orange, .cyan, .purple, .mint, .pink, .yellow]
-        let names = ["Desk Glow", "Desk COB Strip", "Window Wash", "Shelf String Lights", "Floor Lamp", "Ceiling"]
-        let skus: [String?] = [nil, "H619A", nil, "H70C1", nil, nil]
+        let names = ["Luna Lamp", "Desk COB Strip", "Window Wash", "Shelf String Lights", "Floor Lamp", "Ceiling"]
+        let skus: [String?] = [LIFXProductCatalog.lunaSKU, "H619A", nil, "H70C1", nil, nil]
+        let productIDs: [UInt32?] = [219, nil, nil, nil, nil, nil]
 
         workspace.devices = (0..<6).map { index in
             let device = LightDevice(
@@ -163,6 +166,7 @@ final class DemoWorkspaceController {
                 name: names[index],
                 address: "Simulation",
                 sku: skus[index],
+                productID: productIDs[index],
                 isOn: index != 4,
                 brightness: 0.35 + Double(index) * 0.1,
                 color: palette[index],
@@ -216,6 +220,9 @@ final class DemoWorkspaceController {
         workspace.customBrightnessPresets = [0.1, 0.35, 0.7]
         workspace.goveeSegmentStates = [:]
         workspace.goveeSegmentPresets = []
+        workspace.lifxMatrixStates = [
+            workspace.devices[0].id: .demoLuna(brightness: workspace.devices[0].brightness)
+        ]
         workspace.musicModeConfiguration = .configuration(for: .balanced)
         workspace.musicModeConfiguration.usesSyntheticDemoPattern = true
         workspace.fixtureTopologies = [:]

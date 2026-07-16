@@ -23,6 +23,14 @@ final class DomainTests: XCTestCase {
                     saturation: 0.75,
                     kelvin: 3_200,
                     segments: segmentState
+                ),
+                "lifx:luna": DeviceSnapshot(
+                    isOn: true,
+                    brightness: 0.72,
+                    hue: 0.6,
+                    saturation: 0.8,
+                    kelvin: 3_500,
+                    matrix: .demoLuna(brightness: 0.72)
                 )
             ],
             createdAt: Date(timeIntervalSince1970: 1_700_000_000)

@@ -12,6 +12,16 @@ final class DemoWorkspaceControllerTests: XCTestCase {
         manager.lifxDiscovered(macHex: "AABBCCDDEEFF", address: "192.168.1.25")
         manager.goveeDiscovered(deviceID: "11:22:33:44", address: "192.168.1.26", sku: "H619A")
         await waitUntil { manager.devices.count == 2 }
+        let liveLuna = LIFXMatrixState.demoLuna(brightness: 0.68)
+        manager.lifxDidIdentify(macHex: "AABBCCDDEEFF", vendorID: 1, productID: 219)
+        manager.lifxDidUpdateMatrix(
+            macHex: "AABBCCDDEEFF",
+            productID: 219,
+            width: liveLuna.width,
+            height: liveLuna.height,
+            colors: liveLuna.colors.map(\.hsbk)
+        )
+        await waitUntil { !manager.lifxMatrixStates.isEmpty }
 
         let liveDevice = try XCTUnwrap(manager.devices.first { $0.brand == .lifx })
         let liveSegmentedDevice = try XCTUnwrap(manager.devices.first { $0.brand == .govee })
@@ -44,6 +54,7 @@ final class DemoWorkspaceControllerTests: XCTestCase {
         let liveActivity = manager.activityEvents
         let livePresets = manager.customBrightnessPresets
         let liveSegmentStates = manager.goveeSegmentStates
+        let liveMatrixStates = manager.lifxMatrixStates
         let liveAutomationOverrides = manager.automationOverrides
 
         manager.enterDemoMode()
@@ -75,6 +86,7 @@ final class DemoWorkspaceControllerTests: XCTestCase {
         XCTAssertEqual(manager.activityEvents, liveActivity)
         XCTAssertEqual(manager.customBrightnessPresets, livePresets)
         XCTAssertEqual(manager.goveeSegmentStates, liveSegmentStates)
+        XCTAssertEqual(manager.lifxMatrixStates, liveMatrixStates)
         XCTAssertEqual(manager.automationOverrides, liveAutomationOverrides)
         XCTAssertEqual(manager.sunriseHour, 7)
         XCTAssertEqual(manager.sunriseMinute, 15)

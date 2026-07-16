@@ -2,7 +2,10 @@ import Foundation
 
 protocol LIFXClientDelegate: AnyObject {
     func lifxDiscovered(macHex: String, address: String)
+    func lifxDidIdentify(macHex: String, vendorID: UInt32, productID: UInt32)
     func lifxDidUpdate(macHex: String, label: String, color: LIFXHSBK, isOn: Bool)
+    func lifxDidUpdateMatrix(macHex: String, productID: UInt32,
+                             width: Int, height: Int, colors: [LIFXHSBK])
     func lifxCommandFailed(_ error: Error)
 }
 
@@ -18,6 +21,8 @@ final class LIFXClient {
     private var addressesByMac: [String: String] = [:]
     private var targetsByMac: [String: Data] = [:]
     private var macByTarget: [Data: String] = [:]
+    private var productByMac: [String: UInt32] = [:]
+    private var matrixDimensionsByMac: [String: (width: Int, height: Int)] = [:]
 
     init() throws {
         socket = try UDPSocket(boundPort: 0, queue: queue)
@@ -55,6 +60,22 @@ final class LIFXClient {
             let packet = LIFXProtocol.packet(type: .lightGet, source: self.source,
                                              target: target, payload: Data())
             self.sendCommand(packet, to: host)
+            self.sendMatrixRefreshIfKnown(macHex: macHex, host: host, target: target)
+        }
+    }
+
+    func refreshMatrix(macHex: String) {
+        queue.async { [weak self] in
+            guard let self,
+                  let host = self.addressesByMac[macHex],
+                  let target = self.targetsByMac[macHex] else { return }
+            if self.matrixDimensionsByMac[macHex] != nil {
+                self.sendMatrixRefreshIfKnown(macHex: macHex, host: host, target: target)
+            } else {
+                let version = LIFXProtocol.packet(type: .getVersion, source: self.source,
+                                                  target: target, payload: Data())
+                self.sendCommand(version, to: host)
+            }
         }
     }
 
@@ -80,6 +101,28 @@ final class LIFXClient {
                                              target: target, payload: payload)
             self.sendCommand(packet, to: host)
         }
+    }
+
+    func setMatrixColors(macHex: String, colors: [LIFXHSBK], width: Int,
+                         durationMS: UInt32 = 250) {
+        queue.async { [weak self] in
+            guard let self,
+                  let host = self.addressesByMac[macHex],
+                  let target = self.targetsByMac[macHex] else { return }
+            let payload = LIFXProtocol.set64Payload(colors: colors, width: width,
+                                                    durationMS: durationMS)
+            let packet = LIFXProtocol.packet(type: .set64, source: self.source,
+                                             target: target, payload: payload)
+            self.sendCommand(packet, to: host)
+        }
+    }
+
+    private func sendMatrixRefreshIfKnown(macHex: String, host: String, target: Data) {
+        guard let dimensions = matrixDimensionsByMac[macHex] else { return }
+        let payload = LIFXProtocol.get64Payload(width: dimensions.width)
+        let packet = LIFXProtocol.packet(type: .get64, source: source,
+                                         target: target, payload: payload)
+        sendCommand(packet, to: host)
     }
 
     private func sendCommand(_ data: Data, to host: String) {
@@ -118,6 +161,35 @@ final class LIFXClient {
             let packet = LIFXProtocol.packet(type: .lightGet, source: source,
                                              target: header.target, payload: Data())
             sendCommand(packet, to: host)
+            let version = LIFXProtocol.packet(type: .getVersion, source: source,
+                                              target: header.target, payload: Data())
+            sendCommand(version, to: host)
+        case .stateVersion:
+            guard let version = LIFXProtocol.parseVersion(header.payload) else { return }
+            productByMac[macHex] = version.productID
+            delegate?.lifxDidIdentify(macHex: macHex, vendorID: version.vendorID,
+                                      productID: version.productID)
+            if version.vendorID == 1 && Self.lunaProductIDs.contains(version.productID) {
+                let chain = LIFXProtocol.packet(type: .getDeviceChain, source: source,
+                                                target: header.target, payload: Data())
+                sendCommand(chain, to: host)
+            }
+        case .stateDeviceChain:
+            guard let matrix = LIFXProtocol.parseMatrixDevice(header.payload) else { return }
+            productByMac[macHex] = matrix.productID
+            matrixDimensionsByMac[macHex] = (matrix.width, matrix.height)
+            delegate?.lifxDidIdentify(macHex: macHex, vendorID: matrix.vendorID,
+                                      productID: matrix.productID)
+            sendMatrixRefreshIfKnown(macHex: macHex, host: host, target: header.target)
+        case .state64:
+            guard let matrix = LIFXProtocol.parseState64(header.payload) else { return }
+            let dimensions = matrixDimensionsByMac[macHex]
+            let width = dimensions?.width ?? matrix.width
+            let height = dimensions?.height ?? max(1, min(64 / max(1, width), 6))
+            delegate?.lifxDidUpdateMatrix(macHex: macHex,
+                                          productID: productByMac[macHex] ?? 0,
+                                          width: width, height: height,
+                                          colors: matrix.colors)
         case .lightState:
             if let parsed = LIFXProtocol.parseLightState(header.payload) {
                 delegate?.lifxDidUpdate(macHex: macHex,
@@ -129,6 +201,8 @@ final class LIFXClient {
             break
         }
     }
+
+    private static let lunaProductIDs: Set<UInt32> = [219, 220]
 }
 
 extension Data {

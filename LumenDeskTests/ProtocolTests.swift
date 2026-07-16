@@ -59,6 +59,65 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(state?.label, "Desk Lamp")
     }
 
+    func testLIFXLunaVersionAndMatrixPayloads() throws {
+        var version = Data()
+        version.appendLE(UInt32(1))
+        version.appendLE(UInt32(219))
+        version.append(Data(count: 4))
+        let identity = try XCTUnwrap(LIFXProtocol.parseVersion(version))
+        XCTAssertEqual(identity.vendorID, 1)
+        XCTAssertEqual(identity.productID, 219)
+
+        let get = LIFXProtocol.get64Payload(width: 5)
+        XCTAssertEqual(Array(get), [0, 1, 0, 0, 0, 5])
+
+        let colors = (0..<64).map { index in
+            LIFXHSBK(hue: UInt16(index * 100), saturation: 50_000,
+                     brightness: 40_000, kelvin: 3_500)
+        }
+        let set = LIFXProtocol.set64Payload(colors: colors, width: 5, durationMS: 400)
+        XCTAssertEqual(set.count, 522)
+        XCTAssertEqual(set[5], 5)
+        XCTAssertEqual(set.readLE(at: 6) as UInt32, 400)
+        XCTAssertEqual(set.readLE(at: 10) as UInt16, 0)
+        XCTAssertEqual(set.readLE(at: 18) as UInt16, 100)
+
+        var state = Data([0, 0, 0, 0, 5])
+        for color in colors {
+            state.appendLE(color.hue)
+            state.appendLE(color.saturation)
+            state.appendLE(color.brightness)
+            state.appendLE(color.kelvin)
+        }
+        let parsed = try XCTUnwrap(LIFXProtocol.parseState64(state))
+        XCTAssertEqual(parsed.width, 5)
+        XCTAssertEqual(parsed.colors, colors)
+    }
+
+    func testLIFXLunaDeviceChainAndZoneMask() throws {
+        var tile = Data(count: 19)
+        tile[16] = 5
+        tile[17] = 6
+        tile.appendLE(UInt32(1))
+        tile.appendLE(UInt32(219))
+        tile.append(Data(count: 55 - tile.count))
+
+        var chain = Data([0])
+        chain.append(tile)
+        chain.append(Data(count: 15 * 55))
+        chain.append(1)
+
+        let device = try XCTUnwrap(LIFXProtocol.parseMatrixDevice(chain))
+        XCTAssertEqual(device, LIFXMatrixDevice(width: 5, height: 6,
+                                                vendorID: 1, productID: 219))
+
+        let matrix = LIFXMatrixState.demoLuna()
+        XCTAssertEqual(matrix.zoneCount, 26)
+        XCTAssertFalse(matrix.containsZone(0))
+        XCTAssertTrue(matrix.containsZone(1))
+        XCTAssertFalse(matrix.containsZone(29))
+    }
+
     func testGoveeDiscoveryMessageEncoding() throws {
         let root = try jsonObject(GoveeProtocol.scanRequest())
         let message = try XCTUnwrap(root["msg"] as? [String: Any])

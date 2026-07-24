@@ -32,7 +32,7 @@ CI additionally runs, before the build steps:
 
 Other tooling:
 
-- **Brand assets**: `python scripts/generate_brand_assets.py` (needs Pillow) regenerates app icons from `BrandAssets/Logo/`. A separate workflow fails PRs if generated assets under `LumenDesk/Assets.xcassets/AppIcon.appiconset`, `BrandAssets/AppIcons`, or `BrandAssets/Repository` are stale relative to the logo sources.
+- **Brand assets**: `python scripts/generate_brand_assets.py` (needs Pillow) regenerates app icons. The icon geometry and palette are hard-coded in the script's `MASTER`/`MICRO`/`COLORS` constants — it does not read the SVGs in `BrandAssets/Logo/`, so a logo redesign means editing the script, not just the SVGs. A separate workflow (triggered by changes to the logo files, the script, or the appiconset) reruns the script on PRs and fails if the committed outputs under `LumenDesk/Assets.xcassets/AppIcon.appiconset`, `BrandAssets/AppIcons`, or `BrandAssets/Repository` don't match what it generates.
 - **Design prototype** (`design-prototype/`): standalone React/TypeScript/Vite UX mockup with no backend and no real lighting commands. `npm install && npm run dev` (port 4173); `npm run build` type-checks and builds. It is not part of the app build.
 
 ## Adding, renaming, or deleting Swift files
@@ -48,7 +48,7 @@ If you change build settings, change them in `project.yml` as well so regenerati
 
 ### LightManager and extracted services
 
-`Services/LightManager.swift` (~3,000 lines, `@MainActor ObservableObject`) is the single app-state hub, created once in `LumenDeskApp` and injected via `environmentObject`. All UI-facing state publishes through it, but domain logic is deliberately extracted into focused services that LightManager composes. The services stay SwiftUI-free and take injectable clocks/sleep functions so tests are deterministic:
+`Services/LightManager.swift` (~3,000 lines, `@MainActor ObservableObject`) is the single app-state hub, created once in `LumenDeskApp` and injected via `environmentObject`. All UI-facing state publishes through it, but domain logic is deliberately extracted into focused services that LightManager composes, taking injectable clocks/sleep functions so tests are deterministic. Most are UI-framework-free (`CommandCoordinator`, `ConfirmationCoordinator`, `ScheduleEngine`, `PersistenceStore` import no SwiftUI); the exceptions are `AudioReactiveSessionController`, itself an `ObservableObject` with `@Published` state that views observe directly, and `DemoWorkspaceController`, whose snapshots store SwiftUI `Color` values:
 
 - `CommandCoordinator` — vendor-neutral command lifecycle (`queued → sending → applied → confirmed / failed / timedOut / cancelled`), pending-device tracking, expected-vs-confirmed device state, debounce/timeout timing via an injectable `Timing`/`sleep`. Vendor clients only encode packets and transport them.
 - `ConfirmationCoordinator` — confirmation policy and the pending-request lifecycle; surfaced through the `managedActionConfirmations` modifier applied in `RootView`.
@@ -70,7 +70,9 @@ Both clients report discovery and state through delegate protocols back to Light
 
 ### Persistence
 
-`PersistedApplicationState` (in `Services/PersistenceStore.swift`) is the versioned structured archive — currently `schemaVersion` 2 — stored as JSON via UserDefaults; lightweight view preferences stay in `UserDefaults`/`@AppStorage` at their call sites with keys like `LumenDesk.workspaceLayout.v1`. Decoding is tolerant by convention: every field decodes with `(try? container.decode(...)) ?? default` so older archives and exports never fail. When adding persisted state, add the property, its `CodingKey`, and a tolerant decode line; bump the schema version when semantics change and supply safe defaults for older schemas (see the Music Mode schema-2 migration for the pattern). Import/export (macOS app menu) round-trips this same configuration.
+`PersistedApplicationState` (in `Services/PersistenceStore.swift`) is the versioned structured archive — currently `schemaVersion` 2 — stored as a JSON file at `Application Support/LumenDesk/ApplicationState.json`, with a one-time migration from the individual `UserDefaults` values earlier releases used. Lightweight view preferences stay in `UserDefaults`/`@AppStorage` at their call sites with keys like `LumenDesk.workspaceLayout.v1`. Decoding is tolerant by convention: every field decodes with `(try? container.decode(...)) ?? default` so older archives and exports never fail. When adding persisted state, add the property, its `CodingKey`, and a tolerant decode line; bump the schema version when semantics change and supply safe defaults for older schemas (see the Music Mode schema-2 migration for the pattern).
+
+Import/export (macOS app menu) does **not** reuse `PersistedApplicationState`: it goes through the separate `ConfigurationArchive` struct in the same file, whose fields are mapped by hand in `exportConfiguration(from:)` and `importingConfiguration(from:into:)`. A property added only to `PersistedApplicationState` persists locally but silently drops out of exported configurations — exportable values must also be added to `ConfigurationArchive` (as optionals, so configurations exported by older versions still import) and to both mappings.
 
 ### Music Mode
 
@@ -82,7 +84,7 @@ Documented in `MUSIC_MODE_ARCHITECTURE.md`; read it before touching the pipeline
 
 ### Views and navigation
 
-`RootView` (in `LumenDeskApp.swift`) chooses `OnboardingView` on first run, then `LumenDeskShellView` (`Views/ProductShellView.swift`): a macOS `NavigationSplitView` / iOS `TabView` shell with Home, Library, Automation, Devices, and Settings destinations. `ContentView.swift` holds the main workspace (search, filters, bulk selection). macOS-only surfaces — command menus with keyboard shortcuts, the Settings scene, configuration import/export, and the `MenuBarExtra` controller — live behind `#if os(macOS)`, a pattern used throughout.
+`RootView` (in `LumenDeskApp.swift`) chooses `OnboardingView` on first run, then `LumenDeskShellView` (`Views/ProductShellView.swift`): on macOS a `NavigationSplitView` with Home, Library, Automation, Devices, and Settings destinations; on iOS a `TabView` with the first four as tabs and Settings presented as a sheet from the toolbar. The Home workspace (search, filters, bulk selection) is `HomeWorkspaceView`, also in `ProductShellView.swift`. The top-level `ContentView` in `ContentView.swift` is legacy — the running app never instantiates it (even its preview renders the shell) — but the file still hosts components the shell does use (`CommandToastView`, `BulkActionBar`, `DiscoveryDiagnosticsCard`), so make workspace changes in `HomeWorkspaceView`, not there. macOS-only surfaces — command menus with keyboard shortcuts, the Settings scene, configuration import/export, and the `MenuBarExtra` controller — live behind `#if os(macOS)`, a pattern used throughout.
 
 The app is locked to dark mode. Visual styling comes from the "Aurora Noir" design system: the `Lumen` token namespace in `Theme.swift` is the source of truth in code, `DESIGN_SYSTEM.md` documents the palette/typography/state matrix, and `SWIFTUI_HANDOFF.md` maps the redesign onto existing views.
 

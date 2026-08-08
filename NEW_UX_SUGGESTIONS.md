@@ -22,9 +22,38 @@
 
 ---
 
+## 20 Professional-Grade UX Recommendations
+
+To jump LumenDesk from a polished consumer app to a prosumer/professional tool, we need to introduce advanced automation, integration, and diagnostics while maintaining the calm consumer-friendly surface.
+
+| # | Recommendation | Usability problem | Proposed improvement | Impact | Effort |
+|---|---|---|---|---|---|
+| 11 | **Event-Driven Macros** | Time-based schedules are useful, but pros want lights to react to events (e.g., Mac unlocks, specific app opens, screen brightness changes). | Add "Macros" where system events trigger lighting changes locally without a cloud service (e.g., Turn on "Focus Mode" scene when Xcode is opened). | High | High |
+| 12 | **MIDI & Stream Deck Integration** | Streamers and musicians want tactile control, but setting up webhooks is complex and requires custom scripts. | Add native support for local MIDI input and an Elgato Stream Deck plugin, mapping physical buttons to scenes, toggles, and brightness steps. | High | High |
+| 13 | **Advanced Signal Diagnostics Panel** | When a command fails, "Check network" isn't enough for an IT-savvy user diagnosing a complex VLAN or mDNS issue. | Add a "Pro Network Inspector" showing packet drop rates, round-trip times (ping), multicast reception status, and detailed UDP bind logs. | Medium | Medium |
+| 14 | **Multi-User Sync & State Handoff** | If a partner opens LumenDesk on their iPhone, they don't see the Mac's scenes or active timers because state is isolated per-device. | Use local peer-to-peer syncing (e.g., MultipeerConnectivity) to silently sync scenes, rooms, and schedule states across devices on the same LAN. | High | High |
+| 15 | **Interactive Floor Plan View** | Lists and grids do not reflect physical reality. In large homes or studios, spatial layout is faster for targeting lights. | Allow users to upload a basic image (floor plan) and pin lights to it. Clicking a pin controls the light, and the pins reflect current color/power state. | Medium | High |
+| 16 | **DMX/Art-Net Output Support** | The app is great for consumer bulbs, but prosumers often have a mix of smart bulbs and DMX-controlled led strips. | Add basic Art-Net or sACN output support. LumenDesk translates its color/brightness commands to DMX universes, allowing control of pro fixtures. | High | High |
+| 17 | **Scriptable CLI / Local HTTP API** | Power users want to integrate LumenDesk into their existing local scripts (e.g., cron, bash, local Home Assistant). | Expose a local, authenticated HTTP server or a command-line interface tool to allow programmatic triggering of scenes and toggles. | High | Medium |
+| 18 | **Dynamic Light Transitions (Curves)** | Standard fades are linear and can feel robotic. Theater pros expect smooth ease-in/ease-out curves. | Let users customize the transition curve (Linear, Ease-in, Ease-out, Bezier) and duration for scene changes and manual toggles. | Medium | Medium |
+| 19 | **Hardware Controller Mode (Kiosk Mode)** | Users repurpose old iPads as permanent wall-mounted smart home controllers, but the standard UI has too much navigation. | Add a "Kiosk Mode" that strips away settings, diagnostics, and complex menus, leaving only a fullscreen, high-contrast dashboard of favored rooms/scenes. | High | Medium |
+| 20 | **Live Audio Spectral Visualizer** | Music Mode is a black box. Users want to *see* how the audio is being interpreted to tune their settings. | Add a small live FFT spectral visualizer in the Music Mode UI, showing which frequency bands are triggering which light reactions in real-time. | Medium | High |
+| 21 | **Snapshot Compare & Restore** | Making sweeping changes to a 30-light setup is nerve-wracking if you can't easily A/B test the result. | Allow capturing a temporary "Snapshot". Users can tweak freely, hit "Compare" to instantly flip between Snapshot and Current, and choose which to keep. | High | Medium |
+| 22 | **Sunlight-Sync (Circadian Rhythm)** | Setting manual color temperatures throughout the day is tedious. Users want "Apple TrueTone" but for their room lighting. | Implement an automated background curve that matches color temperature and brightness to the sun's position based on local geolocation. | High | Medium |
+| 23 | **Advanced Batch Renaming & Numbering** | Naming 10 new Govee strips is annoying ("Strip 1", "Strip 2"). | Provide a bulk-rename utility: select 10 lights, type "Studio Desk #", and the app sequentially names them "Studio Desk 1" through "10". | Low | Low |
+| 24 | **Exportable Configuration Backups (Versioned)** | Currently, if a user imports a bad config, their old one is gone. | Maintain an automatic rolling history of the last 5 configuration states before imports or major destructive changes, allowing a 1-click restore. | Medium | Low |
+| 25 | **Shortcuts App Integration (iOS/macOS)** | Users want to trigger LumenDesk actions using Siri or native Apple Shortcuts, but the app is isolated. | Expose App Intents for Siri and Shortcuts, allowing "Turn on Studio scene" or integrating LumenDesk into larger Apple ecosystem routines. | High | Medium |
+| 26 | **Power Consumption Estimation** | Pros managing many lights care about energy usage, but bulbs don't always report it. | Use known bulb models and current brightness levels to estimate real-time wattage and calculate daily/monthly kW/h usage in a dashboard. | Medium | Medium |
+| 27 | **Visual Effect Editor (Timeline/Keyframes)** | The built-in animated effects are static. Creative pros want to design their own pulsing/chasing animations. | Introduce a lightweight timeline editor (like video editing software) where users can keyframe colors and brightness over time to build custom effects. | High | High |
+| 28 | **Tag-Based Filtering & Organization** | Rooms are too rigid. A bulb might be in the "Living Room" but also part of the "Reading Nook" and "Accent Lights" groups. | Add a tagging system. Users can tag lights (`#accent`, `#task`, `#holiday`) and filter or command them by tag across different rooms. | High | Medium |
+| 29 | **Color Palette Extraction from Images** | Designers want to light their room based on a specific brand color, mood board, or movie poster. | Allow users to drag-and-drop an image into the app; LumenDesk extracts a dominant color palette and maps those colors across selected lights. | Medium | Medium |
+| 30 | **Granular User Roles & Permissions** | In a studio or large family home, the admin doesn't want kids or interns changing the network config or deleting scenes. | Implement a basic PIN-locked "Admin" mode. When unlocked, all edits are available; when locked, only safe, pre-approved scenes and toggles can be used. | High | Medium |
+
+
 ## Implementation Priority
 
-1. **Phase 1 (Quick Wins):** Copy/Paste States, Screen Color Sampler, Semantic Iconography.
-2. **Phase 2 (Interaction Refinement):** Relative Bulk Adjustments, Smart Brightness Caps, Temporary Automation Hold.
-3. **Phase 3 (Organization & Health):** Logical Fixture Grouping, Stability Tracking.
-4. **Phase 4 (Advanced Features):** Location Profiles, Natural Language Schedule Entry.
+1. **Phase 1 (Quick Wins):** Copy/Paste States, Screen Color Sampler, Semantic Iconography, Advanced Batch Renaming, Exportable Versioned Backups.
+2. **Phase 2 (Interaction Refinement):** Relative Bulk Adjustments, Smart Brightness Caps, Temporary Automation Hold, Tag-Based Filtering, Snapshot Compare.
+3. **Phase 3 (Organization & Health):** Logical Fixture Grouping, Stability Tracking, Shortcuts App Integration, Power Consumption Estimation.
+4. **Phase 4 (Advanced Features):** Location Profiles, Natural Language Schedule Entry, Dynamic Light Transitions, Hardware Controller Mode, Color Palette Extraction.
+5. **Phase 5 (Prosumer & Studio Tools):** Event-Driven Macros, MIDI & Stream Deck, Multi-User Sync, Interactive Floor Plan, DMX/Art-Net Output, Local HTTP API, Live Audio Visualizer, Sunlight-Sync, Visual Effect Editor, User Roles.

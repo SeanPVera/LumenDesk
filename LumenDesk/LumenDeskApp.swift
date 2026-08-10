@@ -80,7 +80,7 @@ struct LumenDeskApp: App {
                 .environmentObject(manager)
                 .preferredColorScheme(.dark)
         } label: {
-            Image(systemName: "lightbulb.fill")
+            LumenMark(size: 16, monochrome: true)
                 .foregroundStyle(moodColor)
         }
         .menuBarExtraStyle(.window)

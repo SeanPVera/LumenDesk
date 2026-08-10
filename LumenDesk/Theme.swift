@@ -5,84 +5,104 @@ import AppKit
 import UIKit
 #endif
 
-// MARK: - LumenDesk design system — "Aurora Noir"
+// MARK: - LumenDesk design system — "The Lighting Desk"
 //
-// A single source of truth for the app's dark, sophisticated visual language.
-// The refined palette keeps everyday control surfaces calm and reserves
-// expressive colour for lighting previews and creative editing.
-// The app is locked to dark mode (see `RootView`), so these are fixed values
-// with no light-appearance variants to maintain.
+// LumenDesk should look like an instrument for a room, not a generic neon
+// dashboard. Warm graphite surfaces recall lighting consoles and architectural
+// materials. Signal amber marks direct control, while cool blue is reserved
+// for the local network. A light's own colour remains data and is shown only
+// where the user is working with that light.
 
 enum Lumen {
 
-    // MARK: Surfaces (never flat black — a violet undertone adds depth)
+    // MARK: Surfaces
 
     /// Window background.
-    static let ink           = Color(hex: 0x090B12)
-    /// Deepest tone, used for the backdrop gradient base / vignette.
-    static let inkDeep       = Color(hex: 0x090B12)
+    static let ink           = Color(hex: 0x11120F)
+    /// Deepest tone, used for the window well and high-contrast controls.
+    static let inkDeep       = Color(hex: 0x0B0C0A)
     /// Cards & rows.
-    static let surface       = Color(hex: 0x121722)
+    static let surface       = Color(hex: 0x191B17)
     /// Sheets, popovers, hovered/raised surfaces.
-    static let surfaceRaised = Color(hex: 0x181E2C)
+    static let surfaceRaised = Color(hex: 0x22251F)
     /// High-contrast cockpit panels used for oversized controls.
-    static let surfaceLoud   = Color(hex: 0x20283A)
+    static let surfaceLoud   = Color(hex: 0x2B2F27)
 
     // MARK: Hairlines & separators
 
-    static let hairline       = Color(hex: 0x2A3040)
-    static let hairlineStrong = Color(hex: 0x3A4358)
+    static let hairline       = Color(hex: 0x34382F)
+    static let hairlineStrong = Color(hex: 0x4C5345)
 
-    // MARK: Accents
+    // MARK: Instrument accents
 
-    static let violet       = Color(hex: 0x7566E8)
-    static let violetBright = Color(hex: 0x8B7BFF)
-    static let cyan         = Color(hex: 0x45D8E8)
-    static let acid         = Color(hex: 0x45D5A4)
-    static let pink         = Color(hex: 0xD65BB8)
-    static let pinkBright   = Color(hex: 0xEE68CB)
-    /// Used sparingly — favorites, key dividers, premium emphasis.
-    static let gold         = Color(hex: 0xF2B85B)
-    static let goldBright   = Color(hex: 0xFFD27A)
-    /// Govee brand accent, tuned to harmonize with the saturated palette.
-    static let coral        = Color(hex: 0xFF8A68)
+    /// The physical-control color: selected navigation, primary actions, focus.
+    static let signal       = Color(hex: 0xE7B35A)
+    static let signalBright = Color(hex: 0xFFD68A)
+    /// Local-link blue appears only on discovery and network truth.
+    static let cyan         = Color(hex: 0x73B4BD)
+    /// Copper is a restrained creative accent for motion and music.
+    static let copper       = Color(hex: 0xC97852)
+    static let copperBright = Color(hex: 0xE59A70)
+    static let acid         = Color(hex: 0x83B67A)
+    static let gold         = signal
+    static let goldBright   = signalBright
+    static let coral        = copperBright
+
+    // Legacy aliases keep presentation-only refactors narrow. New UI should
+    // use `signal` and `copper` so the intent is obvious at the call site.
+    static let violet       = Color(hex: 0xB99A62)
+    static let violetBright = signal
+    static let pink         = copper
+    static let pinkBright   = copperBright
 
     // MARK: Text
 
-    static let textPrimary   = Color(hex: 0xF5F7FB)
-    static let textSecondary = Color(hex: 0xAEB8C9)
-    static let textTertiary  = Color(hex: 0x758096)
+    static let textPrimary   = Color(hex: 0xF1EFE8)
+    static let textSecondary = Color(hex: 0xB8B8AF)
+    static let textTertiary  = Color(hex: 0x858A80)
 
     // MARK: Semantic
 
-    static let success = Color(hex: 0x45D5A4)
-    static let warning = Color(hex: 0xF2B85B)
-    static let danger  = Color(hex: 0xFF657D)
-    static let offline = Color(hex: 0x8992A6)
-    static let focus   = Color(hex: 0x65DDFF)
+    static let success = Color(hex: 0x83B67A)
+    static let warning = Color(hex: 0xD6A24C)
+    static let danger  = Color(hex: 0xD86E60)
+    static let offline = Color(hex: 0x858A80)
+    static let focus   = Color(hex: 0xFFD68A)
 
     // MARK: Gradients
 
-    /// Primary brand gradient — violet → neon pink. Used for the wordmark,
-    /// primary CTAs, and key emphasis.
+    /// The warm aperture is the only brand gradient. Interface chrome stays
+    /// flat so gradients retain meaning when they appear in light previews.
     static let brandGradient = LinearGradient(
-        colors: [cyan, violetBright, pinkBright],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
+        colors: [signalBright, signal],
+        startPoint: .top,
+        endPoint: .bottom
     )
 
-    /// A soft wash used behind the whole app.
+    /// A low-contrast work surface used behind the whole app.
     static let backdropGradient = LinearGradient(
-        colors: [Color(hex: 0x0D1019), Color(hex: 0x111322), inkDeep],
+        colors: [Color(hex: 0x171912), ink, inkDeep],
         startPoint: .top,
         endPoint: .bottom
     )
 
     // MARK: Metrics
 
-    static let cardRadius: CGFloat = 18
-    static let tileRadius: CGFloat = 12
-    static let iconBubble: CGFloat = 44
+    static let cardRadius: CGFloat = 12
+    static let tileRadius: CGFloat = 8
+    static let iconBubble: CGFloat = 40
+}
+
+/// Typography has two voices: New York for orientation and SF Mono for
+/// instrument labels. Standard controls continue to use native SF Pro.
+enum LumenType {
+    static func display(size: CGFloat, weight: Font.Weight = .semibold) -> Font {
+        .system(size: size, weight: weight, design: .serif)
+    }
+
+    static func instrumentLabel(size: CGFloat = 10) -> Font {
+        .system(size: size, weight: .semibold, design: .monospaced)
+    }
 }
 
 /// Semantic aliases shared with the prototype and Figma variable names.
@@ -91,14 +111,14 @@ enum Lumen {
 enum LumenToken {
     enum Background {
         static let base = Lumen.ink
-        static let subtle = Color(hex: 0x0D1019)
+        static let subtle = Color(hex: 0x141611)
     }
 
     enum Surface {
         static let `default` = Lumen.surface
         static let raised = Lumen.surfaceRaised
         static let emphasis = Lumen.surfaceLoud
-        static let hover = Color(hex: 0x242D40)
+        static let hover = Color(hex: 0x30342B)
     }
 
     enum Status {
@@ -137,9 +157,8 @@ extension Color {
 
 // MARK: - App backdrop
 
-/// The app-wide background: a deep violet-to-black gradient with a couple of
-/// faint aurora glows. Sits at the bottom of the view stack and ignores the
-/// safe area so it bleeds to every edge.
+/// The app-wide work surface. A faint tapered beam repeats the geometry of the
+/// LumenDesk mark without turning every screen into decorative wallpaper.
 struct LumenBackground: View {
     var glow: Bool = true
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -149,26 +168,38 @@ struct LumenBackground: View {
         ZStack {
             if reduceTransparency || quietInterface { Lumen.inkDeep } else { Lumen.backdropGradient }
             if glow && !quietInterface && !reduceTransparency {
-                RadialGradient(
-                    colors: [Lumen.cyan.opacity(0.10), .clear],
-                    center: .topLeading, startRadius: 0, endRadius: 440
-                )
-                RadialGradient(
-                    colors: [Lumen.violetBright.opacity(0.10), .clear],
-                    center: .bottomTrailing, startRadius: 0, endRadius: 480
-                )
-                .blendMode(.screen)
+                LumenBeamShape()
+                    .fill(
+                        LinearGradient(
+                            colors: [Lumen.signalBright.opacity(0.055), .clear],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .frame(maxWidth: 680)
+                    .offset(y: -120)
             }
         }
         .ignoresSafeArea()
     }
 }
 
+private struct LumenBeamShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.midX - rect.width * 0.07, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.midX + rect.width * 0.07, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+        path.closeSubpath()
+        return path
+    }
+}
+
 // MARK: - Card surface
 
-/// Standard elevated surface: violet-tinted fill, hairline border, soft shadow.
-/// Pass `highlighted` for a brand-gradient border or `glowColor` for a colored
-/// glow (e.g. a light that is currently on).
+/// Standard instrument panel: flat graphite, a deliberate hairline, and a
+/// quiet leading signal rail for selection.
 struct LumenCardModifier: ViewModifier {
     var radius: CGFloat = Lumen.cardRadius
     var fill: Color = Lumen.surface
@@ -188,14 +219,23 @@ struct LumenCardModifier: ViewModifier {
             .overlay {
                 if highlighted {
                     RoundedRectangle(cornerRadius: radius, style: .continuous)
-                        .stroke(Lumen.brandGradient, lineWidth: 1.5)
+                        .stroke(Lumen.signal, lineWidth: 1.5)
+                }
+            }
+            .overlay(alignment: .leading) {
+                if highlighted {
+                    Capsule()
+                        .fill(Lumen.signal)
+                        .frame(width: 3)
+                        .padding(.vertical, 10)
+                        .padding(.leading, 6)
                 }
             }
             .shadow(
-                color: glowColor?.opacity(0.22) ?? Color.black.opacity(0.22),
-                radius: glowColor == nil ? 8 : 12,
+                color: glowColor?.opacity(0.12) ?? Color.black.opacity(0.16),
+                radius: glowColor == nil ? 3 : 7,
                 x: 0,
-                y: glowColor == nil ? 3 : 0
+                y: glowColor == nil ? 2 : 0
             )
     }
 }
@@ -212,21 +252,24 @@ extension View {
 
 // MARK: - Button styles
 
-/// Filled, gradient primary action with a soft neon glow.
+/// Warm, squared primary action inspired by a console's illuminated key.
 struct LumenPrimaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.headline)
-            .foregroundStyle(.white)
-            .padding(.vertical, 11)
-            .padding(.horizontal, 24)
-            .background(Capsule().fill(Lumen.brandGradient))
-            .overlay(Capsule().stroke(Color.white.opacity(0.18), lineWidth: 1))
-            .shadow(color: Lumen.pink.opacity(configuration.isPressed ? 0.20 : 0.45),
-                    radius: configuration.isPressed ? 6 : 14, y: 4)
-            .scaleEffect(configuration.isPressed ? 0.97 : 1)
-            .animation(.spring(duration: 0.2), value: configuration.isPressed)
-            .contentShape(Capsule())
+            .font(.system(.headline, design: .default, weight: .semibold))
+            .foregroundStyle(Lumen.inkDeep)
+            .padding(.vertical, 10)
+            .padding(.horizontal, 18)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(configuration.isPressed ? Lumen.signal : Lumen.signalBright)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(Color.white.opacity(0.16), lineWidth: 1)
+            )
+            .opacity(configuration.isPressed ? 0.82 : 1)
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
 
@@ -234,35 +277,79 @@ struct LumenPrimaryButtonStyle: ButtonStyle {
 struct LumenSecondaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.headline)
+            .font(.system(.headline, design: .default, weight: .semibold))
             .foregroundStyle(Lumen.textPrimary)
-            .padding(.vertical, 11)
-            .padding(.horizontal, 24)
-            .background(Capsule().fill(Lumen.surfaceRaised))
-            .overlay(Capsule().stroke(Lumen.hairlineStrong, lineWidth: 1))
-            .scaleEffect(configuration.isPressed ? 0.97 : 1)
-            .animation(.spring(duration: 0.2), value: configuration.isPressed)
-            .contentShape(Capsule())
+            .padding(.vertical, 10)
+            .padding(.horizontal, 18)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(configuration.isPressed ? Lumen.surfaceLoud : Lumen.surfaceRaised)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(Lumen.hairlineStrong, lineWidth: 1)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
 
 // MARK: - Wordmark
 
-/// The LumenDesk brand lockup: a gradient-filled bulb glyph beside the
-/// gradient wordmark. Used on the welcome screen (and reusable elsewhere).
+/// The aperture casts one beam onto a desk rail. It is drawn in SwiftUI so the
+/// product never falls back to a stock lightbulb as its identity.
+struct LumenMark: View {
+    var size: CGFloat = 30
+    var monochrome = false
+
+    var body: some View {
+        GeometryReader { proxy in
+            let width = proxy.size.width
+            let height = proxy.size.height
+            ZStack {
+                Path { path in
+                    path.move(to: CGPoint(x: width * 0.43, y: height * 0.23))
+                    path.addLine(to: CGPoint(x: width * 0.57, y: height * 0.23))
+                    path.addLine(to: CGPoint(x: width * 0.77, y: height * 0.70))
+                    path.addLine(to: CGPoint(x: width * 0.23, y: height * 0.70))
+                    path.closeSubpath()
+                }
+                .fill(monochrome ? AnyShapeStyle(Color.primary) : AnyShapeStyle(Lumen.brandGradient))
+
+                RoundedRectangle(cornerRadius: height * 0.035, style: .continuous)
+                    .fill(monochrome ? Color.primary : Lumen.signalBright)
+                    .frame(width: width * 0.24, height: height * 0.09)
+                    .position(x: width * 0.5, y: height * 0.18)
+
+                RoundedRectangle(cornerRadius: height * 0.045, style: .continuous)
+                    .fill(monochrome ? Color.primary : Lumen.textPrimary)
+                    .frame(width: width * 0.72, height: height * 0.11)
+                    .position(x: width * 0.5, y: height * 0.78)
+
+                HStack(spacing: width * 0.055) {
+                    Circle().fill(monochrome ? Color.clear : Lumen.cyan)
+                    Circle().fill(monochrome ? Color.clear : Lumen.signal)
+                    Circle().fill(monochrome ? Color.clear : Lumen.success)
+                }
+                .frame(width: width * 0.25, height: height * 0.035)
+                .position(x: width * 0.5, y: height * 0.78)
+            }
+        }
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
+    }
+}
+
+/// LumenDesk wordmark: editorial type beside the product-specific aperture.
 struct LumenWordmark: View {
     var size: CGFloat = 34
 
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "lightbulb.fill")
-                .font(.system(size: size * 0.82))
-                .foregroundStyle(Lumen.brandGradient)
-                .shadow(color: Lumen.pink.opacity(0.5), radius: 12)
-                .accessibilityHidden(true)
+        HStack(spacing: size * 0.28) {
+            LumenMark(size: size * 1.05)
             Text("LumenDesk")
-                .font(.system(size: size, weight: .bold, design: .rounded))
-                .foregroundStyle(Lumen.brandGradient)
+                .font(LumenType.display(size: size, weight: .semibold))
+                .foregroundStyle(Lumen.textPrimary)
+                .tracking(-0.4)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("LumenDesk")

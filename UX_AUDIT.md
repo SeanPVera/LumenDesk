@@ -1,5 +1,7 @@
 # LumenDesk UX audit and redesign direction
 
+> Historical audit of the pre–Lighting Desk interface. The implemented brand remediation, current tokens, mark, typography, and voice now live in `BRAND_IDENTITY.md` and `DESIGN_SYSTEM.md`.
+
 ## Product summary and primary jobs
 
 LumenDesk is a local-first controller for mixed LIFX and Govee lighting. Its strongest product promise is not merely privacy; it is fast, honest control with unusually capable local creative tools. The primary jobs are:

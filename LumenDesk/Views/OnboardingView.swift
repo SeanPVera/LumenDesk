@@ -67,7 +67,7 @@ struct OnboardingView: View {
             ForEach(Step.allCases, id: \.self) { s in
                 Capsule()
                     .fill(s.rawValue <= step.rawValue
-                          ? AnyShapeStyle(Lumen.brandGradient)
+                          ? AnyShapeStyle(Lumen.signal)
                           : AnyShapeStyle(Lumen.hairlineStrong))
                     .frame(width: s == step ? 26 : 16, height: 5)
                     .animation(.spring(duration: 0.3), value: step)
@@ -90,31 +90,26 @@ struct OnboardingView: View {
         VStack(spacing: 22) {
             Spacer(minLength: 12)
             LumenWordmark(size: 44)
-            Text("Beautiful, local control for your LIFX and Govee lights.")
+            Text("One desk for every local light.")
                 .font(.title3)
                 .foregroundStyle(Lumen.textSecondary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
 
             VStack(spacing: 14) {
-                valueRow("lock.shield.fill", Lumen.violetBright,
-                         "Entirely local", "No cloud, no accounts, no API keys — commands never leave your network.")
-                valueRow("square.grid.2x2.fill", Lumen.pink,
-                         "Rooms & scenes", "Group bulbs across brands and recall the perfect lighting in one tap.")
-                valueRow("clock.fill", Lumen.gold,
-                         "Set it and forget it", "Schedule lights to follow your day, sunrise to bedtime.")
+                valueRow("network", Lumen.cyan,
+                         "Stays on this network", "LIFX and Govee commands travel directly from this device to your lights.")
+                valueRow("rectangle.3.group.fill", Lumen.signal,
+                         "Mixed lights, one desk", "Build rooms and scenes across brands without adding a bridge or an account.")
+                valueRow("clock.badge.checkmark.fill", Lumen.success,
+                         "Cues keep time", "Set local schedules for the routines your rooms already follow.")
             }
             .padding(.top, 4)
 
             VStack(alignment: .leading, spacing: 10) {
-                Text("Choose your interface energy").font(.headline)
-                HStack {
-                    Button("Calm") { quietInterface = true }
-                    Button("Expressive") { quietInterface = false }
-                    Button("Minimal") { quietInterface = true }
-                }
-                .buttonStyle(.bordered)
-                Text("You can change this later in Settings. Calm and Minimal reduce ornamental motion and late-night visual noise.")
+                Toggle("Quiet interface", isOn: $quietInterface)
+                    .font(.headline)
+                Text("Keeps the work surface flat and removes the faint brand beam. You can change it later in Settings.")
                     .font(.caption)
                     .foregroundStyle(Lumen.textSecondary)
             }
@@ -130,7 +125,6 @@ struct OnboardingView: View {
                 .font(.title2)
                 .foregroundStyle(tint)
                 .frame(width: 34)
-                .shadow(color: tint.opacity(0.5), radius: 8)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.headline).foregroundStyle(Lumen.textPrimary)
@@ -147,16 +141,16 @@ struct OnboardingView: View {
 
     private var prepareStep: some View {
         VStack(alignment: .leading, spacing: 18) {
-            stepTitle("A quick checklist", "Two minutes now saves a lot of head-scratching later.")
+            stepTitle("Set the stage", "A minute here keeps discovery predictable.")
 
             VStack(spacing: 12) {
-                checklistCard("wifi", Lumen.violetBright,
+                checklistCard("wifi", Lumen.cyan,
                               "Same Wi-Fi network",
                               "Your Mac and every bulb must share one network and subnet. Many routers isolate “IoT” Wi-Fi — if so, join the same one.")
-                checklistCard("network", Lumen.coral,
+                checklistCard("network", Lumen.copper,
                               "Govee: enable LAN Control",
                               "In the Govee Home app: Device → Settings → LAN Control. Only certain Govee models support it.")
-                checklistCard("dot.radiowaves.left.and.right", Lumen.pink,
+                checklistCard("dot.radiowaves.left.and.right", Lumen.signal,
                               "LIFX: powered & paired",
                               "Make sure each LIFX bulb is switched on and already set up in the LIFX app.")
             }
@@ -284,7 +278,7 @@ struct OnboardingView: View {
 
             HStack(spacing: 8) {
                 Image(systemName: "rectangle.stack.badge.plus")
-                    .foregroundStyle(Lumen.violetBright)
+                    .foregroundStyle(Lumen.signal)
                     .accessibilityHidden(true)
                 TextField("New room name (e.g. Living Room)", text: $newRoomName)
                     .textFieldStyle(.plain)
@@ -293,7 +287,7 @@ struct OnboardingView: View {
                     .onSubmit(createRoom)
                 Button("Add", action: createRoom)
                     .buttonStyle(.plain)
-                    .foregroundStyle(canCreateRoom ? Lumen.violetBright : Lumen.textTertiary)
+                    .foregroundStyle(canCreateRoom ? Lumen.signal : Lumen.textTertiary)
                     .disabled(!canCreateRoom)
             }
             .padding(.horizontal, 12)
@@ -317,13 +311,16 @@ struct OnboardingView: View {
                         .background(Capsule().fill(Color.black.opacity(0.25)))
                 }
             }
-            .foregroundStyle(active ? .white : Lumen.textSecondary)
+            .foregroundStyle(active ? Lumen.inkDeep : Lumen.textSecondary)
             .padding(.horizontal, 12).padding(.vertical, 7)
             .background(
-                Capsule().fill(active ? AnyShapeStyle(Lumen.brandGradient)
-                                      : AnyShapeStyle(Lumen.surface))
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(active ? AnyShapeStyle(Lumen.signal) : AnyShapeStyle(Lumen.surface))
             )
-            .overlay(Capsule().stroke(active ? Color.clear : Lumen.hairline, lineWidth: 1))
+            .overlay(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .stroke(active ? Color.clear : Lumen.hairline, lineWidth: 1)
+            )
         }
         .buttonStyle(.plain)
         .help(active ? "Tap lights to add them to \(room.name)" : "Select \(room.name)")
@@ -335,18 +332,19 @@ struct OnboardingView: View {
         VStack(spacing: 22) {
             Spacer(minLength: 12)
             ZStack {
-                Circle()
-                    .fill(Lumen.brandGradient)
-                    .frame(width: 92, height: 92)
-                    .shadow(color: Lumen.pink.opacity(0.6), radius: 22)
-                Image(systemName: "checkmark")
-                    .font(.system(size: 42, weight: .bold))
-                    .foregroundStyle(.white)
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Lumen.surfaceRaised)
+                    .frame(width: 108, height: 108)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .stroke(Lumen.hairlineStrong, lineWidth: 1)
+                    )
+                LumenMark(size: 80)
             }
             .accessibilityHidden(true)
 
-            Text("You're all set")
-                .font(.system(size: 30, weight: .bold, design: .rounded))
+            Text("Your desk is ready")
+                .font(LumenType.display(size: 32, weight: .semibold))
                 .foregroundStyle(Lumen.textPrimary)
 
             Text(doneRecap)
@@ -395,8 +393,8 @@ struct OnboardingView: View {
 
     private var primaryTitle: String {
         switch step {
-        case .welcome: return "Get Started"
-        case .done:    return "Enter LumenDesk"
+        case .welcome: return "Set Up My Desk"
+        case .done:    return "Open My Desk"
         default:       return "Continue"
         }
     }
@@ -406,7 +404,7 @@ struct OnboardingView: View {
     private func stepTitle(_ title: String, _ subtitle: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
-                .font(.system(size: 26, weight: .bold, design: .rounded))
+                .font(LumenType.display(size: 28, weight: .semibold))
                 .foregroundStyle(Lumen.textPrimary)
             Text(subtitle)
                 .font(.callout)
@@ -462,7 +460,7 @@ private struct ScanPulse: View {
         ZStack {
             ForEach(0..<3, id: \.self) { i in
                 Circle()
-                    .stroke(Lumen.violetBright.opacity(0.5), lineWidth: 2)
+                    .stroke(Lumen.cyan.opacity(0.45), lineWidth: 2)
                     .frame(width: 120, height: 120)
                     .scaleEffect(animate ? 1.7 : 0.45)
                     .opacity(animate ? 0 : 0.85)
@@ -475,8 +473,7 @@ private struct ScanPulse: View {
             }
             Image(systemName: "antenna.radiowaves.left.and.right")
                 .font(.system(size: 30))
-                .foregroundStyle(Lumen.brandGradient)
-                .shadow(color: Lumen.pink.opacity(0.5), radius: 10)
+                .foregroundStyle(Lumen.signal)
         }
         .frame(width: 130, height: 130)
         .onAppear { animate = true }
@@ -515,7 +512,7 @@ private struct DiscoverChip: View {
                 .toggleStyle(.switch)
                 .labelsHidden()
                 .controlSize(.mini)
-                .tint(Lumen.pink)
+                .tint(Lumen.signal)
                 .help("Turn this light on or off to identify it")
                 .accessibilityLabel(device.isOn ? "Turn off \(device.label)" : "Turn on \(device.label)")
         }
@@ -545,7 +542,7 @@ private struct AssignChip: View {
                 .toggleStyle(.switch)
                 .labelsHidden()
                 .controlSize(.mini)
-                .tint(Lumen.pink)
+                .tint(Lumen.signal)
                 .help("Turn this light on or off to identify it")
                 .accessibilityLabel(device.isOn ? "Turn off \(device.label)" : "Turn on \(device.label)")
 
@@ -564,12 +561,12 @@ private struct AssignChip: View {
                             .lineLimit(1)
                         Text(room?.name ?? "Unassigned")
                             .font(.caption2)
-                            .foregroundStyle(room == nil ? Lumen.textTertiary : Lumen.violetBright)
+                            .foregroundStyle(room == nil ? Lumen.textTertiary : Lumen.signal)
                     }
                     Spacer(minLength: 0)
                     Image(systemName: inActiveRoom ? "checkmark.circle.fill" : "plus.circle")
                         .font(.title3)
-                        .foregroundStyle(inActiveRoom ? Lumen.pink : Lumen.textTertiary)
+                        .foregroundStyle(inActiveRoom ? Lumen.signal : Lumen.textTertiary)
                         .accessibilityHidden(true)
                 }
                 .contentShape(Rectangle())

@@ -37,7 +37,7 @@ struct LumenDeskShellView: View {
 
             statusOverlays
         }
-        .tint(Lumen.violetBright)
+        .tint(Lumen.signal)
         .safeAreaInset(edge: .top, spacing: 0) {
             if manager.isDemoMode { DemoModeBanner() }
         }
@@ -50,18 +50,47 @@ struct LumenDeskShellView: View {
     #if os(macOS)
     private var desktopShell: some View {
         NavigationSplitView {
-            List(LumenDeskDestination.allCases, selection: $destination) { item in
-                Label(item.rawValue, systemImage: item.symbol)
-                    .tag(item)
-                    .padding(.vertical, 4)
+            ZStack {
+                LumenToken.Background.subtle
+                    .ignoresSafeArea()
+                VStack(alignment: .leading, spacing: 0) {
+                    VStack(alignment: .leading, spacing: 7) {
+                        LumenWordmark(size: 18)
+                        Text("LOCAL LIGHTING DESK")
+                            .font(LumenType.instrumentLabel(size: 8))
+                            .tracking(1.1)
+                            .foregroundStyle(Lumen.textTertiary)
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.top, 18)
+                    .padding(.bottom, 22)
+
+                    VStack(spacing: 4) {
+                        ForEach(LumenDeskDestination.allCases) { item in
+                            Button {
+                                destination = item
+                            } label: {
+                                SidebarDestinationRow(item: item, selected: destination == item)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, 10)
+
+                    Spacer(minLength: 12)
+
+                    ConnectionSummary()
+                        .padding(12)
+                        .background(Lumen.surface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .stroke(Lumen.hairline, lineWidth: 1)
+                        )
+                        .padding(12)
+                }
             }
-            .listStyle(.sidebar)
             .navigationTitle("LumenDesk")
             .navigationSplitViewColumnWidth(min: 200, ideal: 228, max: 260)
-            .safeAreaInset(edge: .bottom) {
-                ConnectionSummary()
-                    .padding(12)
-            }
         } detail: {
             NavigationStack { destinationView(destination) }
         }
@@ -73,7 +102,7 @@ struct LumenDeskShellView: View {
                         .help(manager.scanPhase)
                 }
                 Button { manager.scan() } label: {
-                    Label("Scan", systemImage: "arrow.clockwise")
+                    Label("Scan Lights", systemImage: "arrow.clockwise")
                 }
                 .disabled(manager.isScanning)
                 .keyboardShortcut("r", modifiers: .command)
@@ -143,8 +172,11 @@ struct LumenDeskShellView: View {
                 .font(.caption)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
-                .background(Lumen.surfaceRaised, in: Capsule())
-                .overlay(Capsule().stroke(Lumen.hairline, lineWidth: 1))
+                .background(Lumen.surfaceRaised, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(Lumen.hairline, lineWidth: 1)
+                )
             }
 
             if let error = manager.commandError {
@@ -157,6 +189,39 @@ struct LumenDeskShellView: View {
         }
         .padding(.horizontal, 16)
         .padding(.bottom, 16)
+    }
+}
+
+private struct SidebarDestinationRow: View {
+    let item: LumenDeskDestination
+    let selected: Bool
+
+    var body: some View {
+        HStack(spacing: 11) {
+            Image(systemName: item.symbol)
+                .font(.system(size: 14, weight: selected ? .semibold : .regular))
+                .foregroundStyle(selected ? Lumen.signalBright : Lumen.textSecondary)
+                .frame(width: 22)
+            Text(item.rawValue)
+                .font(.system(size: 13, weight: selected ? .semibold : .regular))
+                .foregroundStyle(selected ? Lumen.textPrimary : Lumen.textSecondary)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 11)
+        .frame(minHeight: 38)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(selected ? Lumen.surfaceRaised : Color.clear)
+        )
+        .overlay(alignment: .leading) {
+            if selected {
+                Capsule()
+                    .fill(Lumen.signal)
+                    .frame(width: 3, height: 19)
+            }
+        }
+        .contentShape(Rectangle())
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 
@@ -185,9 +250,9 @@ struct HomeWorkspaceView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: LumenToken.Spacing.s6) {
                 PageHeader(
-                    eyebrow: greeting,
+                    eyebrow: "Live desk · \(greeting)",
                     title: "Home",
-                    subtitle: "Everyday control, device truth, and the next lighting event."
+                    subtitle: "Power, level, and device response at a glance."
                 ) {
                     Menu {
                         Button { showingNewRoom = true } label: {
@@ -221,10 +286,10 @@ struct HomeWorkspaceView: View {
                     EmptyWorkspaceView(
                         icon: "lightbulb.slash",
                         title: "No lights discovered",
-                        message: "Scan the local network, or explore every workflow in the isolated demo workspace.",
-                        primaryTitle: "Scan for Lights",
+                        message: "Scan this network for LIFX and Govee, or try the controls on an isolated demo rig.",
+                        primaryTitle: "Scan This Network",
                         primaryAction: manager.scan,
-                        secondaryTitle: "Open Demo Workspace",
+                        secondaryTitle: "Try the Demo Rig",
                         secondaryAction: manager.enterDemoMode
                     )
                 } else {
@@ -232,7 +297,7 @@ struct HomeWorkspaceView: View {
                     GlobalLightingControl()
 
                     if hasFavorites {
-                        SectionHeader(title: "Favorites", detail: "Your fastest routes")
+                        SectionHeader(title: "Favorites", detail: "Pinned controls")
                         FavoritesQuickStrip(onOpenDevice: { selectedDevice = $0 },
                                             onOpenRoom: { selectedRoom = $0 })
                     }
@@ -337,15 +402,15 @@ private struct ActiveLightingSummary: View {
             SummaryMetric(icon: manager.isScanning ? "dot.radiowaves.left.and.right" : "wifi",
                           tint: manager.devices.contains(where: \.isStale) ? Lumen.warning : Lumen.success,
                           value: manager.isScanning ? "Scanning" : connectionValue,
-                          label: manager.isScanning ? manager.scanPhase : "Local connection")
+                          label: manager.isScanning ? manager.scanPhase : "Local link")
             SummaryMetric(icon: "waveform",
                           tint: manager.activeEffects.isEmpty ? Lumen.textTertiary : Lumen.pinkBright,
                           value: manager.activeEffects.isEmpty ? "None" : "\(manager.activeEffects.count) running",
-                          label: "Active effects")
+                          label: "Live motion")
             SummaryMetric(icon: "clock.badge.exclamationmark",
                           tint: manager.missedAutomations.isEmpty ? Lumen.textTertiary : Lumen.warning,
                           value: manager.missedAutomations.isEmpty ? "On track" : "\(manager.missedAutomations.count) missed",
-                          label: "Automation")
+                          label: "Cue status")
         }
     }
 
@@ -362,20 +427,27 @@ private struct SummaryMetric: View {
     let label: String
 
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: icon)
-                .font(.title3)
-                .foregroundStyle(tint)
-                .frame(width: 26)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(value).font(.headline).foregroundStyle(Lumen.textPrimary)
-                Text(label).font(.caption).foregroundStyle(Lumen.textSecondary).lineLimit(1)
+        VStack(alignment: .leading, spacing: 9) {
+            HStack {
+                Text(label.uppercased())
+                    .font(LumenType.instrumentLabel(size: 9))
+                    .tracking(0.7)
+                    .foregroundStyle(Lumen.textTertiary)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                Image(systemName: icon)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(tint)
             }
-            Spacer(minLength: 0)
+            Text(value)
+                .font(LumenType.display(size: 19, weight: .semibold))
+                .foregroundStyle(Lumen.textPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
         }
         .padding(14)
         .frame(maxWidth: .infinity)
-        .lumenCard(radius: 14)
+        .lumenCard(radius: 8)
         .accessibilityElement(children: .combine)
     }
 }
@@ -392,9 +464,14 @@ private struct GlobalLightingControl: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
+            Text("MASTER")
+                .font(LumenType.instrumentLabel(size: 9))
+                .tracking(1.2)
+                .foregroundStyle(Lumen.signal)
             HStack(spacing: 14) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("All lights").font(.title2.weight(.semibold))
+                    Text("All lights")
+                        .font(LumenType.display(size: 25, weight: .semibold))
                     Text("\(onCount) on · \(manager.devices.count - onCount) off")
                         .font(.callout).foregroundStyle(Lumen.textSecondary)
                 }
@@ -405,7 +482,7 @@ private struct GlobalLightingControl: View {
                     Label(onCount == 0 ? "Turn All On" : "Turn All Off",
                           systemImage: onCount == 0 ? "power.circle.fill" : "power")
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(LumenPrimaryButtonStyle())
             }
 
             HStack(spacing: 12) {
@@ -420,7 +497,7 @@ private struct GlobalLightingControl: View {
             }
         }
         .padding(18)
-        .lumenCard(fill: Lumen.surfaceRaised)
+        .lumenCard(fill: Lumen.surfaceRaised, highlighted: true)
     }
 }
 
@@ -902,8 +979,8 @@ struct LibraryWorkspaceView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                PageHeader(eyebrow: "Looks and motion", title: "Library",
-                           subtitle: "Saved scenes, curated palettes, and local effects in one durable destination.")
+                PageHeader(eyebrow: "Scenes · Color · Motion", title: "Library",
+                           subtitle: "Recall a room, build a mood, or put motion on cue.")
 
                 if !manager.activeEffects.isEmpty { runningEffects }
 
@@ -1190,8 +1267,8 @@ struct AutomationWorkspaceView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                PageHeader(eyebrow: "Local schedules", title: "Automation",
-                           subtitle: "Schedules stay distinct from temporary pauses, and missed actions wait for your decision.") {
+                PageHeader(eyebrow: "Cues and timing", title: "Automation",
+                           subtitle: "Let the house keep time. Pauses and missed cues stay visible until you decide.") {
                     Button { showingSolarSettings = true } label: {
                         Label("Solar Times", systemImage: "sunrise")
                     }
@@ -1349,8 +1426,8 @@ struct DevicesWorkspaceView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                PageHeader(eyebrow: "Local network", title: "Devices",
-                           subtitle: "Discovery, command confirmation, and recovery live together.") {
+                PageHeader(eyebrow: "Local link", title: "Devices",
+                           subtitle: "Discovery, command response, and recovery from this network in one place.") {
                     Button { manager.scan() } label: {
                         Label(manager.isScanning ? "Scanning" : "Scan", systemImage: "arrow.clockwise")
                     }
@@ -1478,7 +1555,7 @@ struct SettingsWorkspaceView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 PageHeader(eyebrow: "Preferences", title: "Settings",
-                           subtitle: "Appearance, confirmation, privacy, and safe demo controls.")
+                           subtitle: "Set the desk's density, confirmation, privacy, and demo behavior.")
 
                 SettingsSection(title: "Workspace", icon: "rectangle.3.group") {
                     SettingPickerRow(title: "Layout", selection: $layout) {
@@ -1613,11 +1690,12 @@ private struct PageHeader<Trailing: View>: View {
         HStack(alignment: .top, spacing: 16) {
             VStack(alignment: .leading, spacing: 5) {
                 Text(eyebrow.uppercased())
-                    .font(.caption2.weight(.semibold))
-                    .tracking(0.8)
-                    .foregroundStyle(Lumen.cyan)
+                    .font(LumenType.instrumentLabel(size: 9))
+                    .tracking(1.1)
+                    .foregroundStyle(Lumen.signal)
                 Text(title)
-                    .font(.largeTitle.weight(.bold))
+                    .font(LumenType.display(size: 36, weight: .semibold))
+                    .tracking(-0.6)
                     .foregroundStyle(Lumen.textPrimary)
                 Text(subtitle)
                     .font(.callout)
@@ -1626,6 +1704,12 @@ private struct PageHeader<Trailing: View>: View {
             }
             Spacer(minLength: 12)
             trailing
+        }
+        .padding(.leading, 16)
+        .overlay(alignment: .leading) {
+            Capsule()
+                .fill(Lumen.signal)
+                .frame(width: 3, height: 44)
         }
     }
 }
@@ -1642,8 +1726,12 @@ private struct SectionHeader: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(title).font(.title3.weight(.semibold))
-            Text(detail).font(.caption).foregroundStyle(Lumen.textSecondary)
+            Text(title).font(LumenType.display(size: 19, weight: .semibold))
+            Text(detail)
+                .font(LumenType.instrumentLabel(size: 9))
+                .textCase(.uppercase)
+                .tracking(0.5)
+                .foregroundStyle(Lumen.textTertiary)
         }
         .accessibilityElement(children: .combine)
     }
@@ -1700,8 +1788,9 @@ private struct ConnectionSummary: View {
                 .fill(manager.devices.contains(where: \.isStale) ? Lumen.warning : Lumen.success)
                 .frame(width: 8, height: 8)
             VStack(alignment: .leading, spacing: 1) {
-                Text(manager.devices.isEmpty ? "No lights" : "Local control")
-                    .font(.caption.weight(.semibold))
+                Text(manager.devices.isEmpty ? "NO LIGHTS" : "LOCAL LINK")
+                    .font(LumenType.instrumentLabel(size: 9))
+                    .tracking(0.6)
                 Text(manager.devices.isEmpty ? "Scan to connect" : "\(manager.devices.filter { !$0.isStale }.count) online")
                     .font(.caption2).foregroundStyle(Lumen.textSecondary)
             }

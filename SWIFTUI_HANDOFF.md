@@ -7,7 +7,7 @@ The first native implementation pass is now active in the app target:
 - `RootView` launches `LumenDeskShellView` after onboarding.
 - macOS uses a `NavigationSplitView` with Home, Library, Automation, Devices, and Settings.
 - iPhone uses native tabs for Home, Library, Automation, and Devices, with Settings presented from the toolbar.
-- The refined Aurora Noir semantic palette and app accent are active globally.
+- The Lighting Desk semantic palette, typography, aperture mark, and app accent are active globally.
 - Home includes global control, favorites, rooms, search/filtering, selection/bulk actions, compact device truth, and room/light detail.
 - Library, Automation, Devices, recovery, demo mode, scene preview/editing, schedules, and Segment Studio are wired to the existing `LightManager` behavior.
 - LAN protocols, discovery, command transport, persistence, scheduling semantics, and segment application behavior were not changed.
@@ -98,7 +98,7 @@ enum LumenToken {
 }
 ```
 
-Retain SF Pro through semantic SwiftUI fonts. Use `.rounded` only for `Display/Large` and a small set of brand headers; do not apply it to dense status and control text.
+Use New York through SwiftUI's `.serif` system design for the wordmark, page titles, and section orientation. Retain SF Pro for controls and body copy. Use SF Mono for short instrument labels and values; do not apply it to paragraph copy.
 
 ## Command-state model
 

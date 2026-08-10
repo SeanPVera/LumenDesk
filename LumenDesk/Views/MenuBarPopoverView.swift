@@ -99,12 +99,9 @@ struct MenuBarPopoverView: View {
 
     private var menuBarHeader: some View {
         HStack {
-            Image(systemName: "lightbulb.fill")
-                .foregroundStyle(Lumen.brandGradient)
-                .font(.caption)
-                .accessibilityHidden(true)
+            LumenMark(size: 18)
             VStack(alignment: .leading, spacing: 0) {
-                Text("LumenDesk").font(.caption.weight(.semibold))
+                Text("LumenDesk").font(LumenType.display(size: 13, weight: .semibold))
                 if manager.isDemoMode { Text("SAFE DEMO").font(.system(size: 8, weight: .bold)).foregroundStyle(.orange) }
             }
             Spacer()
@@ -151,7 +148,7 @@ struct MenuBarPopoverView: View {
             .toggleStyle(.switch)
             .labelsHidden()
             .controlSize(.small)
-            .tint(Lumen.pink)
+            .tint(Lumen.signal)
             .disabled(manager.devices.isEmpty)
             .accessibilityLabel("All lights power")
         }

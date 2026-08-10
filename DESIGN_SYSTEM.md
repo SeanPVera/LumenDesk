@@ -1,12 +1,12 @@
-# LumenDesk design system — Aurora Noir, refined
+# LumenDesk design system — The Lighting Desk
 
-This document is the shared source of truth for the responsive prototype, the prepared Figma foundations, and the native SwiftUI implementation.
+This document specifies the native product system. `BRAND_IDENTITY.md` explains the strategy, logo, voice, and the audit that led here.
 
 ## Design principles
 
 1. Control first; power, brightness, rooms, and favorites stay fastest.
 2. Show command truth near the control that caused it.
-3. Keep everyday surfaces calm and reserve expressive color for lighting previews and creative editing.
+3. Make the product look like a local lighting instrument: calm work surfaces, precise labels, and expressive color only where light is the content.
 4. Put one primary decision in each region; secondary actions belong in menus or disclosure.
 5. Reveal operational detail progressively.
 6. Never confuse Preview with Apply.
@@ -19,37 +19,37 @@ This document is the shared source of truth for the responsive prototype, the pr
 
 | Token | Value | Use |
 | --- | --- | --- |
-| `background/base` | `#090B12` | Window and application base |
-| `background/subtle` | `#0D1019` | Sidebar and grouped background |
-| `surface/default` | `#121722` | Standard cards and rows |
-| `surface/raised` | `#181E2C` | Hover, sheet, and raised controls |
-| `surface/emphasis` | `#20283A` | Selected or important surfaces |
-| `surface/hover` | `#242D40` | Hover-only fill |
-| `text/primary` | `#F5F7FB` | Headings and primary labels |
-| `text/secondary` | `#AEB8C9` | Supporting text |
-| `text/tertiary` | `#758096` | Metadata and quiet labels |
-| `border/default` | `#2A3040` | Hairlines and cards |
-| `border/strong` | `#3A4358` | Focused grouping and elevated dividers |
-| `accent/primary` | `#8B7BFF` | Primary actions and selection |
-| `accent/secondary` | `#45D8E8` | Local connection and links |
-| `accent/expressive` | `#EE68CB` | Creative editing only |
-| `accent/favorite` | `#F2B85B` | Favorites |
-| `status/success` | `#45D5A4` | Online and confirmed |
-| `status/warning` | `#F2B85B` | Stale, partial, and paused |
-| `status/error` | `#FF657D` | Failed commands |
-| `status/offline` | `#8992A6` | Offline/unreachable |
-| `focus/ring` | `#65DDFF` | Keyboard focus ring |
+| `background/base` | `#11120F` | Window and application base |
+| `background/subtle` | `#141611` | Sidebar and grouped background |
+| `surface/default` | `#191B17` | Standard panels and rows |
+| `surface/raised` | `#22251F` | Hover, sheet, and raised controls |
+| `surface/emphasis` | `#2B2F27` | Selected or important surfaces |
+| `surface/hover` | `#30342B` | Hover-only fill |
+| `text/primary` | `#F1EFE8` | Headings and primary labels |
+| `text/secondary` | `#B8B8AF` | Supporting text |
+| `text/tertiary` | `#858A80` | Metadata and quiet labels |
+| `border/default` | `#34382F` | Hairlines and panels |
+| `border/strong` | `#4C5345` | Focused grouping and elevated dividers |
+| `accent/primary` | `#E7B35A` | Direct control and selection |
+| `accent/high` | `#FFD68A` | Illuminated keys and focus |
+| `accent/network` | `#73B4BD` | Local connection and discovery |
+| `accent/creative` | `#C97852` | Music and motion only |
+| `status/success` | `#83B67A` | Online and confirmed |
+| `status/warning` | `#D6A24C` | Stale, partial, and paused |
+| `status/error` | `#D86E60` | Failed commands |
+| `status/offline` | `#858A80` | Offline/unreachable |
+| `focus/ring` | `#FFD68A` | Keyboard focus ring |
 
 Lighting colors are data, not semantic tokens. They belong in previews, swatches, segment cells, and restrained active-light indicators—not status labels.
 
 ### Typography
 
-Primary family is SF Pro. `Display/Large` uses SF Pro Rounded Bold for the brand and a small number of creative headers. SF Mono is used only for compact metadata and values.
+SF Pro handles controls and body copy. New York, accessed through SwiftUI's serif system design, handles the wordmark and orientation titles. SF Mono handles short uppercase instrument labels, compact metadata, and values.
 
 | Style | Size / line height | Use |
 | --- | --- | --- |
-| `Display/Large` | 48 / 54 | Cover and flagship creative title |
-| `Title/Large` | 32 / 38 | Page title |
+| `Display/Large` | 48 / 54 | Brand-led cover title, New York Semibold |
+| `Title/Large` | 36 / 42 | Page title, New York Semibold |
 | `Title/Medium` | 24 / 30 | Major section |
 | `Title/Small` | 18 / 23 | Card group and modal title |
 | `Body/Large` | 17 / 25 | Introductory copy |
@@ -62,7 +62,7 @@ Primary family is SF Pro. `Display/Large` uses SF Pro Rounded Bold for the brand
 ### Dimensions
 
 - Spacing: 4, 8, 12, 16, 20, 24, 32, 40.
-- Radius: 8, 12, 18, 24, full/pill.
+- Radius: 6, 8, 12, 18, full/pill. Pill is reserved for status and tags.
 - Controls: 32 pt desktop default; 44 pt mobile minimum.
 - Icons: 16, 20, 24 pt.
 - Responsive breakpoints: mobile composition at 650 px; compact desktop intent at approximately 1000 px.
@@ -70,10 +70,11 @@ Primary family is SF Pro. `Display/Large` uses SF Pro Rounded Bold for the brand
 
 ### Focus, transparency, and motion
 
-- Focus: 2 px cyan ring plus a 2 px base-color offset.
+- Focus: 2 px Lamp ring plus a 2 px base-color offset.
 - Reduced transparency: replace blur/translucency with opaque `background/subtle` or `surface/raised`.
 - Quick transition: 160 ms; standard: 250 ms; expressive/slow: 600 ms.
 - Reduced motion: remove drift, scale, parallax, and long crossfades; retain immediate opacity or state changes.
+- Shadows: short neutral separation only. Device color may create a restrained halo inside that device's control.
 
 ## Component inventory
 

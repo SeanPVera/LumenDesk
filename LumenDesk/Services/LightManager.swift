@@ -78,8 +78,12 @@ final class LightManager: ObservableObject {
     private let persistenceStore: ApplicationPersistence
     private let commandCoordinator: CommandCoordinator
     private var rehearsalSnapshot: [LightRuntimeSnapshot] = []
-    // Devices currently streaming a razer-mode segment preview.
+    // Devices with a live razer overlay, including both editor previews and
+    // applied layouts that must be held through the stream.
     private var razerActiveIDs: Set<String> = []
+    // The subset currently owned by an open Segment Studio preview. Refresh
+    // keepalives must not overwrite these frames with the last applied layout.
+    private var segmentPreviewIDs: Set<String> = []
 
     // Custom display names keyed by device id, persisted across sessions.
     private var customNames: [String: String] = [:]
@@ -396,9 +400,9 @@ final class LightManager: ObservableObject {
             case .lifx:  lifx?.refresh(macHex: d.backendID)
             case .govee:
                 govee?.refresh(deviceID: d.backendID)
-                // Doubles as the stream-hold keepalive: held layouts are
-                // re-pushed every tick so power cycles, reboots, and razer
-                // inactivity timeouts heal within one refresh interval.
+                // Doubles as a flicker-free stream keepalive: re-push the
+                // current frame without resetting razer mode. Known power-on,
+                // address changes, and stale recovery re-enable the mode.
                 reassertStreamHoldIfNeeded(d)
             }
         }
@@ -425,7 +429,7 @@ final class LightManager: ObservableObject {
             appendDiscoveryChange(device, kind: .backOnline, detail: "Responded again")
             // A light that dropped off and came back likely power-cycled,
             // which clears the razer overlay stream-hold layouts live in.
-            reassertStreamHoldIfNeeded(device)
+            reassertStreamHoldIfNeeded(device, forceModeEnable: true)
         }
     }
 
@@ -613,9 +617,6 @@ final class LightManager: ObservableObject {
         recordChange([device])
         device.isOn = on
         sendPower(device, on: on)
-        // Powering a stream-hold device back on restores its held segment
-        // layout immediately instead of waiting for the next refresh tick.
-        if on { reassertStreamHoldIfNeeded(device) }
     }
 
     func setBrightness(_ device: LightDevice, value: Double) {
@@ -1105,12 +1106,23 @@ final class LightManager: ObservableObject {
     // MARK: - Vendor send helpers
 
     private func sendPower(_ device: LightDevice, on: Bool) {
+        if device.brand == .govee, !on {
+            // Govee drops the volatile stream overlay when power turns off.
+            // Forget the local mode flag so the next power-on enables it once.
+            razerActiveIDs.remove(device.id)
+        }
         expectPower(device, on: on)
         enqueueCommand(for: device, coalescingKey: "power", summary: on ? "Turning on" : "Turning off") { [weak self, weak device] in
             guard let self, let device else { return }
             switch device.brand {
             case .lifx: self.lifx?.setPower(macHex: device.backendID, on: on)
-            case .govee: self.govee?.setPower(deviceID: device.backendID, on: on)
+            case .govee:
+                self.govee?.setPower(deviceID: device.backendID, on: on)
+                if on {
+                    // Queue the overlay after the power command. The Govee
+                    // client preserves per-device order and spacing.
+                    self.reassertStreamHoldIfNeeded(device)
+                }
             }
         }
     }
@@ -1306,7 +1318,10 @@ extension LightManager: LIFXClientDelegate {
                 self.scanResponseCount += 1
                 let oldAddress = existing.address
                 existing.address = address
-                if oldAddress != address { self.appendDiscoveryChange(existing, kind: .changed, detail: "Address changed from \(oldAddress) to \(address)") }
+                if oldAddress != address {
+                    self.razerActiveIDs.remove(existing.id)
+                    self.appendDiscoveryChange(existing, kind: .changed, detail: "Address changed from \(oldAddress) to \(address)")
+                }
                 self.markSeen(existing)
             } else {
                 let device = LightDevice(id: id, brand: .lifx, backendID: macHex,
@@ -1408,10 +1423,17 @@ extension LightManager: GoveeClientDelegate {
                 let oldAddress = existing.address
                 existing.address = address
                 if let sku, existing.sku != sku { existing.sku = sku }
-                if oldAddress != address { self.appendDiscoveryChange(existing, kind: .changed, detail: "Address changed from \(oldAddress) to \(address)") }
+                if oldAddress != address {
+                    // The client now targets a different endpoint. Treat the
+                    // volatile stream mode as unknown so it is enabled once
+                    // at the new address.
+                    self.razerActiveIDs.remove(existing.id)
+                    self.appendDiscoveryChange(existing, kind: .changed, detail: "Address changed from \(oldAddress) to \(address)")
+                }
                 self.markSeen(existing)
-                // Fresh discovery is the earliest moment after an app launch
-                // or a device reboot to restore a held layout.
+                // On app launch the in-memory mode set is empty, so this
+                // enables streaming once. Routine discovery responses then
+                // refresh only the frame and cannot create an H60B0 flash.
                 self.reassertStreamHoldIfNeeded(existing)
             } else {
                 let suffix = deviceID.split(separator: ":").suffix(2).joined(separator: "")
@@ -1420,7 +1442,7 @@ extension LightManager: GoveeClientDelegate {
                                          name: display, address: address, sku: sku)
                 self.upsert(device)
                 // First sighting after an app launch: restore any held layout.
-                self.reassertStreamHoldIfNeeded(device)
+                self.reassertStreamHoldIfNeeded(device, forceModeEnable: true)
             }
         }
     }
@@ -1432,6 +1454,7 @@ extension LightManager: GoveeClientDelegate {
             let id = "govee:\(deviceID)"
             guard let device = self.device(withID: id) else { return }
             if self.isScanning { self.scanResponseCount += 1 }
+            let wasOn = device.isOn
             let normalizedBrightness = Double(brightness) / 100.0
             let red = Double(r) / 255.0
             let green = Double(g) / 255.0
@@ -1453,6 +1476,12 @@ extension LightManager: GoveeClientDelegate {
                 if kelvin > 0, device.kelvin != kelvin { device.kelvin = kelvin }
                 let reportedColor = Color(red: red, green: green, blue: blue)
                 if device.color.rgbDistance(to: reportedColor) > 0.005 { device.color = reportedColor }
+            }
+            if !isOn {
+                // A physical or externally initiated power-off clears razer mode.
+                self.razerActiveIDs.remove(id)
+            } else if !wasOn {
+                self.reassertStreamHoldIfNeeded(device)
             }
             self.markSeen(device, confirmsPendingCommand: matches)
         }
@@ -1559,8 +1588,10 @@ extension LightManager {
 
     /// The device's saved layout, or a fresh one seeded from its current color.
     func segmentState(for device: LightDevice) -> GoveeSegmentState {
-        if let saved = goveeSegmentStates[device.id] { return saved }
         let profile = segmentStudioProfile(for: device) ?? .generic
+        if let saved = goveeSegmentStates[device.id] {
+            return profile.normalizedEditorState(saved)
+        }
         return .seed(count: profile.defaultSegmentCount,
                      color: device.color,
                      gradient: false)
@@ -1578,6 +1609,7 @@ extension LightManager {
     /// state (or, on stream-hold families, snaps back to the applied layout).
     func previewSegments(_ device: LightDevice, state: GoveeSegmentState) {
         guard device.brand == .govee, demoWorkspaceController.allowsLiveNetworking else { return }
+        segmentPreviewIDs.insert(device.id)
         if !razerActiveIDs.contains(device.id) {
             razerActiveIDs.insert(device.id)
             govee?.setRazerMode(deviceID: device.backendID, on: true)
@@ -1591,6 +1623,7 @@ extension LightManager {
     /// applied layout, because the overlay IS their persistence.
     func endSegmentPreview(_ device: LightDevice) {
         guard demoWorkspaceController.allowsLiveNetworking else { return }
+        segmentPreviewIDs.remove(device.id)
         guard razerActiveIDs.contains(device.id) else { return }
         if segmentStudioProfile(for: device)?.appliesViaStream == true,
            let held = activeSegmentState(for: device.id) {
@@ -1615,27 +1648,33 @@ extension LightManager {
         govee?.sendRazerFrame(deviceID: device.backendID, colors: colors, blend: state.gradient)
     }
 
-    /// Puts a stream-hold device's applied layout on the light and leaves
-    /// the overlay up. Razer-on is sent unconditionally so this also repairs
-    /// an overlay the firmware dropped (power cycle, timeout, reboot).
-    private func assertStreamHold(_ device: LightDevice, state: GoveeSegmentState) {
+    /// Puts a stream-hold device's applied layout on the light and leaves the
+    /// overlay up. Re-sending `razer-on` briefly clears the existing frame on
+    /// H60B0, so ordinary keepalives send only the atomic color frame. Mode is
+    /// enabled once per session, or explicitly after a known reconnect.
+    private func assertStreamHold(_ device: LightDevice, state: GoveeSegmentState,
+                                  forceModeEnable: Bool = false) {
         guard demoWorkspaceController.allowsLiveNetworking else { return }
+        let shouldEnableMode = forceModeEnable || !razerActiveIDs.contains(device.id)
         razerActiveIDs.insert(device.id)
-        govee?.setRazerMode(deviceID: device.backendID, on: true)
+        if shouldEnableMode {
+            govee?.setRazerMode(deviceID: device.backendID, on: true)
+        }
         sendRazerLayout(device, state: state)
     }
 
-    /// Stream-hold layouts live only in the razer overlay, which a power
-    /// cycle or firmware timeout clears. Called from the 30-second refresh
-    /// tick, discovery, stale-recovery, and power-on so held layouts come
-    /// back on their own while LumenDesk is running. Skipped while the light
-    /// is off — pushing a frame must never light up a light the user
-    /// switched off.
-    func reassertStreamHoldIfNeeded(_ device: LightDevice) {
-        guard device.brand == .govee, device.isOn, demoWorkspaceController.allowsLiveNetworking,
+    /// Stream-hold layouts live only in the razer overlay. Called from the
+    /// 30-second refresh tick, discovery, stale recovery, and power-on so held
+    /// layouts stay current while LumenDesk is running. Ordinary refreshes
+    /// send only a frame; known reconnects can explicitly re-enable the mode.
+    /// Skipped while the light is off — a frame must never light up a light
+    /// the user switched off.
+    func reassertStreamHoldIfNeeded(_ device: LightDevice, forceModeEnable: Bool = false) {
+        guard device.brand == .govee, device.isOn, !segmentPreviewIDs.contains(device.id),
+              demoWorkspaceController.allowsLiveNetworking,
               segmentStudioProfile(for: device)?.appliesViaStream == true,
               let held = activeSegmentState(for: device.id) else { return }
-        assertStreamHold(device, state: held)
+        assertStreamHold(device, state: held, forceModeEnable: forceModeEnable)
     }
 
     /// Saves the studio's draft without commanding the light, so a half
@@ -1645,6 +1684,12 @@ extension LightManager {
     /// state to scenes and undo.
     func storeSegmentState(_ state: GoveeSegmentState, for device: LightDevice) {
         let previous = goveeSegmentStates[device.id]
+        let changedFromAppliedState = previous?.isActive == true
+            && (previous?.colors != state.colors || previous?.gradient != state.gradient)
+        if segmentStudioProfile(for: device)?.appliesViaStream == true,
+           changedFromAppliedState {
+            return
+        }
         var stored = state
         stored.isActive = previous?.isActive == true
             && previous?.colors == state.colors
@@ -1752,6 +1797,7 @@ extension LightManager {
         // A live razer overlay — studio preview or stream-hold — shadows
         // every static command; bring it down ahead of the solid color,
         // white, or effect frame that triggered this call.
+        segmentPreviewIDs.remove(device.id)
         if razerActiveIDs.contains(device.id) {
             razerActiveIDs.remove(device.id)
             govee?.setRazerMode(deviceID: device.backendID, on: false)
@@ -2991,6 +3037,7 @@ extension LightManager {
             redoStack: redoStack,
             lastChangeTime: lastChangeTime,
             razerActiveIDs: razerActiveIDs,
+            segmentPreviewIDs: segmentPreviewIDs,
             scanStartingIDs: scanStartingIDs,
             scanStartingAddresses: scanStartingAddresses
         )
@@ -3052,6 +3099,7 @@ extension LightManager {
         redoStack = workspace.redoStack
         lastChangeTime = workspace.lastChangeTime
         razerActiveIDs = workspace.razerActiveIDs
+        segmentPreviewIDs = workspace.segmentPreviewIDs
         scanStartingIDs = workspace.scanStartingIDs
         scanStartingAddresses = workspace.scanStartingAddresses
     }

@@ -4,19 +4,23 @@ import SwiftUI
 // MARK: - Segment capability catalog
 
 /// Physical layout of a segmented Govee light. Drives how the Segment Studio
-/// draws the device (continuous COB bar, bulbs on a wire, or lamp zones) and which
+/// draws the device (continuous strip, COB bar, bulbs on a wire, or lamp zones) and which
 /// controls make sense (only blended strips expose the gradient toggle).
 enum GoveeSegmentLayout: String, Codable {
+    case stripLight    // flexible RGBIC/RGBICW tape strip
     case cobStrip      // continuous chip-on-board strip; colors can blend
     case stringLights  // discrete bulbs or clusters along a wire
+    case curtain       // vertical curtain strands edited as LAN-addressable columns
     case neonRope      // flexible neon tube; behaves like a fine-grained strip
     case lamp          // independently addressable lighting zones in a lamp
     case generic       // unrecognized RGBIC device
 
     var displayName: String {
         switch self {
+        case .stripLight: return "Strip light"
         case .cobStrip: return "COB strip"
         case .stringLights: return "String lights"
+        case .curtain: return "Curtain lights"
         case .neonRope: return "Neon rope"
         case .lamp: return "Segmented lamp"
         case .generic: return "RGBIC light"
@@ -25,11 +29,34 @@ enum GoveeSegmentLayout: String, Codable {
 
     var icon: String {
         switch self {
+        case .stripLight: return "lightswitch.on"
         case .cobStrip: return "rectangle.split.3x1.fill"
         case .stringLights: return "party.popper.fill"
+        case .curtain: return "rectangle.grid.3x2.fill"
         case .neonRope: return "scribble.variable"
         case .lamp: return "lamp.floor.fill"
         case .generic: return "lightbulb.led.fill"
+        }
+    }
+}
+
+/// The physical unit drawn for a string-light profile. Christmas strings use
+/// dense LED beads; patio strings use larger, individually addressable bulbs.
+enum GoveeStringLightStyle: Equatable {
+    case bead
+    case bulb
+
+    var unitName: String {
+        switch self {
+        case .bead: return "bead"
+        case .bulb: return "bulb"
+        }
+    }
+
+    var unitsPerEditorRow: Int {
+        switch self {
+        case .bead: return 20
+        case .bulb: return 15
         }
     }
 }
@@ -50,6 +77,27 @@ struct GoveeSegmentProfile {
     /// and LumenDesk re-asserts the held frame on refresh ticks and device
     /// recovery.
     var appliesViaStream: Bool = false
+    /// Hardware-defined topologies, such as the H60B0's three lamps, cannot
+    /// be resized by the user.
+    var hasFixedSegmentCount: Bool = false
+    /// Physical labels in transport order. Empty for interchangeable strip
+    /// segments and other fixtures whose units do not need individual names.
+    var zoneNames: [String] = []
+    /// Physical presentation for string lights. Nil for every other layout.
+    var stringLightStyle: GoveeStringLightStyle?
+
+    var editorUnitName: String {
+        if let stringLightStyle { return stringLightStyle.unitName }
+        switch layout {
+        case .lamp: return "zone"
+        case .curtain: return "column"
+        default: return "segment"
+        }
+    }
+
+    var maximumEditorSegmentCount: Int {
+        max(defaultSegmentCount, GoveeProtocol.maxSegments)
+    }
 
     /// Known segmented families. Exact SKUs first, then prefix families.
     /// Sources: Govee Home app segment editors and the community LAN/BLE
@@ -70,9 +118,25 @@ struct GoveeSegmentProfile {
 
     private static let exactMatches: [String: GoveeSegmentProfile] = {
         var rows: [String: GoveeSegmentProfile] = [:]
-        func add(_ sku: String, _ layout: GoveeSegmentLayout, _ count: Int, _ gradient: Bool, stream: Bool = false) {
-            rows[sku] = GoveeSegmentProfile(layout: layout, defaultSegmentCount: count, supportsGradient: gradient, recognized: true, appliesViaStream: stream)
+        func add(_ sku: String, _ layout: GoveeSegmentLayout, _ count: Int, _ gradient: Bool,
+                 stream: Bool = false, fixed: Bool = false, zoneNames: [String] = [],
+                 stringStyle: GoveeStringLightStyle? = nil) {
+            rows[sku] = GoveeSegmentProfile(
+                layout: layout,
+                defaultSegmentCount: count,
+                supportsGradient: gradient,
+                recognized: true,
+                appliesViaStream: stream,
+                hasFixedSegmentCount: fixed,
+                zoneNames: zoneNames,
+                stringLightStyle: stringStyle
+            )
         }
+        // Flexible RGBIC / RGBICW interior strips
+        // Strip Light S H612B is the 24.6-foot/7.5-metre variant. Govee Home
+        // exposes ten addressable sections per metre, for 75 editable zones.
+        // Its segment layout is held through the real-time stream.
+        add("H612B", .stripLight, 75, true, stream: true)
         // RGBIC / COB interior strips
         add("H619A", .cobStrip, 15, true)
         add("H619B", .cobStrip, 15, true)
@@ -92,24 +156,43 @@ struct GoveeSegmentProfile {
         add("H61A3", .neonRope, 20, true)
         add("H61A5", .neonRope, 20, true)
         add("H61D0", .neonRope, 20, true)
-        // Uplighter floor lamp: upper ripple, middle RGBIC, and task-light
+        // Uplighter floor lamp: upper ripple, middle ambient, and lower daily
         // zones are independently addressable and held through streaming.
-        add("H60B0", .lamp, 3, false, stream: true)
-        // String / curtain lights: no static segment write in firmware,
-        // layouts are held via the razer stream.
-        add("H70C1", .stringLights, 20, false, stream: true)
-        add("H70C2", .stringLights, 20, false, stream: true)
-        add("H70C4", .stringLights, 20, false, stream: true)
-        add("H70B1", .stringLights, 20, false, stream: true)
-        add("H7021", .stringLights, 12, false, stream: true)
-        add("H7028", .stringLights, 12, false, stream: true)
+        add("H60B0", .lamp, 3, false, stream: true, fixed: true,
+            zoneNames: ["Upper Ripple", "Middle Ambient", "Lower Daily Illumination"])
+        // Christmas String Lights: Govee's Uni-IC controller addresses every
+        // physical bead. H70C1 is 33 ft / 100 beads; H70C2 and H70C4 are
+        // 66 ft / 200 beads. Their fixed topology is held via streaming.
+        add("H70C1", .stringLights, 100, false, stream: true, fixed: true, stringStyle: .bead)
+        add("H70C2", .stringLights, 200, false, stream: true, fixed: true, stringStyle: .bead)
+        add("H70C4", .stringLights, 200, false, stream: true, fixed: true, stringStyle: .bead)
+        // Outdoor bulb strings. H7028 can accept an optional second 15-bulb
+        // strand, so its count remains adjustable; H7021 ships with 30 bulbs.
+        add("H7020", .stringLights, 15, false, stream: true, stringStyle: .bulb)
+        add("H7021", .stringLights, 30, false, stream: true, stringStyle: .bulb)
+        add("H7028", .stringLights, 15, false, stream: true, stringStyle: .bulb)
+        // H70B1 is a 20-column curtain, not a one-dimensional string. The LAN
+        // stream addresses columns; the 520-bead pixel canvas remains a Govee
+        // Home feature.
+        add("H70B1", .curtain, 20, false, stream: true, fixed: true)
+        add("H70BC", .curtain, 20, false, stream: true, fixed: true)
         return rows
     }()
 
     private static let prefixMatches: [(prefix: String, profile: GoveeSegmentProfile)] = {
         var rows: [(prefix: String, profile: GoveeSegmentProfile)] = []
-        func add(_ prefix: String, _ layout: GoveeSegmentLayout, _ count: Int, _ gradient: Bool, stream: Bool = false) {
-            rows.append((prefix, GoveeSegmentProfile(layout: layout, defaultSegmentCount: count, supportsGradient: gradient, recognized: true, appliesViaStream: stream)))
+        func add(_ prefix: String, _ layout: GoveeSegmentLayout, _ count: Int, _ gradient: Bool,
+                 stream: Bool = false, fixed: Bool = false,
+                 stringStyle: GoveeStringLightStyle? = nil) {
+            rows.append((prefix, GoveeSegmentProfile(
+                layout: layout,
+                defaultSegmentCount: count,
+                supportsGradient: gradient,
+                recognized: true,
+                appliesViaStream: stream,
+                hasFixedSegmentCount: fixed,
+                stringLightStyle: stringStyle
+            )))
         }
         add("H619", .cobStrip, 15, true)
         add("H61C", .cobStrip, 15, true)
@@ -117,15 +200,17 @@ struct GoveeSegmentProfile {
         add("H61A", .neonRope, 20, true)
         add("H61B", .neonRope, 20, true)
         add("H61D", .neonRope, 20, true)
-        add("H70C", .stringLights, 20, false, stream: true)
-        add("H70B", .stringLights, 20, false, stream: true)
-        add("H702", .stringLights, 12, false, stream: true)
-        add("H705", .stringLights, 15, false, stream: true) // permanent outdoor lights
+        add("H70C", .stringLights, 20, false, stream: true, stringStyle: .bead)
+        add("H70B", .curtain, 20, false, stream: true, fixed: true)
+        add("H702", .stringLights, 15, false, stream: true, stringStyle: .bulb)
+        add("H705", .stringLights, 15, false, stream: true, stringStyle: .bulb) // permanent outdoor nodes
         return rows
     }()
 
     /// Fallback shown when the user opens the studio for an unrecognized SKU.
-    static let generic = GoveeSegmentProfile(layout: .generic, defaultSegmentCount: 15, supportsGradient: true, recognized: false)
+    static let generic = GoveeSegmentProfile(layout: .generic, defaultSegmentCount: 15,
+                                             supportsGradient: true, recognized: false,
+                                             stringLightStyle: nil)
 }
 
 // MARK: - Per-segment state
@@ -272,6 +357,19 @@ struct GoveeSegmentState: Codable, Equatable {
             groups[percent]?.append(index)
         }
         return order.map { ($0, groups[$0] ?? []) }
+    }
+}
+
+extension GoveeSegmentProfile {
+    /// Repairs saved drafts created before a fixture's hardware topology was
+    /// known. Adjustable strips keep the user's chosen segment count.
+    func normalizedEditorState(_ state: GoveeSegmentState) -> GoveeSegmentState {
+        guard hasFixedSegmentCount, state.segmentCount != defaultSegmentCount else {
+            return state
+        }
+        var normalized = state
+        normalized.resize(to: defaultSegmentCount)
+        return normalized
     }
 }
 

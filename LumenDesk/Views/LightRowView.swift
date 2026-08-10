@@ -330,9 +330,13 @@ struct LightRowView: View {
             HStack(spacing: 8) {
                 SegmentMiniStripView(colors: segmentPreviewColors)
                     .frame(width: 64, height: 12)
-                Text(segmentRowTitle)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(segmentStudioName)
+                        .font(.caption.weight(.semibold))
+                    Text(segmentRowTitle)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
                 Spacer()
                 Image(systemName: "paintpalette")
                     .font(.caption)
@@ -343,8 +347,8 @@ struct LightRowView: View {
         }
         .buttonStyle(.plain)
         .disabled(selectionMode)
-        .help("Open Segment Studio — paint each segment individually")
-        .accessibilityLabel("Segment Studio for \(device.label)")
+        .help(segmentStudioHelp)
+        .accessibilityLabel("\(segmentStudioName) for \(device.label)")
     }
 
     private var segmentPreviewColors: [Color] {
@@ -354,7 +358,31 @@ struct LightRowView: View {
     private var segmentRowTitle: String {
         let state = manager.segmentState(for: device)
         let showing = manager.activeSegmentState(for: device.id) != nil
-        return "Segments · \(state.segmentCount)\(showing ? " · showing" : "")"
+        let unit = manager.segmentProfile(for: device)?.editorUnitName ?? "segment"
+        let units = state.segmentCount == 1 ? unit : "\(unit)s"
+        return "\(state.segmentCount) \(units)\(showing ? " · showing" : "")"
+    }
+
+    private var segmentStudioName: String {
+        switch manager.segmentProfile(for: device)?.layout {
+        case .lamp: return "Uplighter Color Studio"
+        case .stringLights: return "String Light Studio"
+        case .curtain: return "Curtain Column Studio"
+        default: return "Segment Studio"
+        }
+    }
+
+    private var segmentStudioHelp: String {
+        switch manager.segmentProfile(for: device)?.layout {
+        case .lamp:
+            return "Open Uplighter Color Studio — edit the three physical lighting zones"
+        case .stringLights:
+            return "Open String Light Studio — paint each physical bulb or bead individually"
+        case .curtain:
+            return "Open Curtain Column Studio — paint the locally addressable vertical columns"
+        default:
+            return "Open Segment Studio — paint each strip segment individually"
+        }
     }
 
     private var modePicker: some View {
@@ -527,7 +555,7 @@ struct LightRowView: View {
         Button("Device Inspector\u{2026}") { showingInspector = true }
         Button("Precise Color\u{2026}") { showingPreciseColor = true }
         if device.brand == .govee {
-            Button("Segment Studio\u{2026}") { showingSegmentStudio = true }
+            Button("\(segmentStudioName)\u{2026}") { showingSegmentStudio = true }
         }
         if device.isLIFXLuna {
             Button("Luna Color Studio\u{2026}") { showingLunaStudio = true }

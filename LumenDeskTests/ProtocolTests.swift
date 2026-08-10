@@ -188,6 +188,25 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(brightness[19], brightness.prefix(19).reduce(0, ^))
     }
 
+    func testRazerFrameCarriesTwoHundredStringLightBeads() throws {
+        let colors = (0..<200).map { index in
+            (r: index, g: 255 - index, b: index % 32)
+        }
+        let message = try message(in: GoveeProtocol.razerFrameRequest(colors: colors, blend: false))
+        let payload = try XCTUnwrap(message["data"] as? [String: Any])
+        let encoded = try XCTUnwrap(payload["pt"] as? String)
+        let packet = try XCTUnwrap(Data(base64Encoded: encoded))
+
+        XCTAssertEqual(packet.count, 607)
+        XCTAssertEqual(packet[0], 0xBB)
+        XCTAssertEqual((Int(packet[1]) << 8) | Int(packet[2]), 602)
+        XCTAssertEqual(packet[3], 0xB0)
+        XCTAssertEqual(packet[5], 200)
+        XCTAssertEqual(packet[6], 0)
+        XCTAssertEqual(packet[7], 255)
+        XCTAssertEqual(packet[packet.count - 1], packet.dropLast().reduce(0, ^))
+    }
+
     func testMalformedResponsesAreRejected() {
         XCTAssertNil(LIFXProtocol.parse(Data(repeating: 0, count: 35)))
         var badLength = LIFXProtocol.packet(type: .getService, source: 1, target: Data(), payload: Data())

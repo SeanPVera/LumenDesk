@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the LumenDesk Open Aperture app-icon family.
+"""Generate the LumenDesk Lighting Desk app-icon family.
 
 The small macOS sizes use hand-tuned geometry instead of mechanically shrinking
 one 1024 px source. Run from the repository root with Pillow installed.
@@ -19,29 +19,29 @@ REPO = BRAND / "Repository"
 OPTIONAL = BRAND / "AppIcons" / "OptionalAppearances"
 
 COLORS = {
-    "black": "#090B12",
-    "graphite": "#171B26",
-    "ivory": "#FFF0C2",
-    "amber": "#F5A33B",
-    "rose": "#D84982",
-    "violet": "#7357E8",
-    "blue": "#3977E8",
-    "cyan": "#30B9C8",
+    "black": "#0B0C0A",
+    "graphite": "#191B17",
+    "ivory": "#F1EFE8",
+    "amber": "#E7B35A",
+    "amber_light": "#FFD68A",
+    "copper": "#C97852",
+    "cyan": "#73B4BD",
+    "green": "#83B67A",
 }
 
 MASTER = {
-    "left": [(183, 782), (424, 168), (365, 782)],
-    "center": [(483, 148), (541, 148), (620, 704), (404, 704)],
-    "right": [(841, 782), (600, 168), (659, 782)],
-    "base": [(157, 764, 238, 42), (416, 764, 192, 42), (629, 764, 238, 42)],
+    "beam": [(440, 246), (584, 246), (788, 700), (236, 700)],
+    "slot": (388, 184, 248, 70),
+    "desk": (180, 716, 664, 92),
+    "nodes": [(449, 752, 24), (500, 752, 24), (551, 752, 24)],
 }
 
 MICRO = {
-    16: {"left": [(2,13),(7,2),(6,13)], "center": [(7,2),(9,2),(10,12),(6,12)], "right": [(14,13),(9,2),(10,13)], "base": [(2,13,4,1),(6,13,4,1),(10,13,4,1)]},
-    24: {"left": [(3,20),(10,3),(8,20)], "center": [(11,3),(13,3),(15,18),(9,18)], "right": [(21,20),(14,3),(16,20)], "base": [(3,20,6,2),(9,20,6,2),(15,20,6,2)]},
-    32: {"left": [(4,27),(13,4),(11,27)], "center": [(15,4),(17,4),(20,24),(12,24)], "right": [(28,27),(19,4),(21,27)], "base": [(4,26,8,2),(12,26,8,2),(20,26,8,2)]},
-    48: {"left": [(7,40),(20,7),(17,40)], "center": [(22,6),(26,6),(30,36),(18,36)], "right": [(41,40),(28,7),(31,40)], "base": [(7,39,12,3),(20,39,8,3),(29,39,12,3)]},
-    64: {"left": [(9,53),(27,9),(23,53)], "center": [(30,8),(34,8),(40,47),(24,47)], "right": [(55,53),(37,9),(41,53)], "base": [(9,51,16,4),(26,51,12,4),(39,51,16,4)]},
+    16: {"beam": [(7,4),(9,4),(12,11),(4,11)], "slot": (6,3,4,1), "desk": (3,12,10,2), "nodes": [(7,12),(8,12),(9,12)]},
+    24: {"beam": [(10,6),(14,6),(19,17),(5,17)], "slot": (9,4,6,2), "desk": (4,18,16,3), "nodes": [(10,19),(12,19),(14,19)]},
+    32: {"beam": [(14,8),(18,8),(24,22),(8,22)], "slot": (12,6,8,2), "desk": (6,23,20,3), "nodes": [(13,24),(16,24),(19,24)]},
+    48: {"beam": [(20,12),(28,12),(37,33),(11,33)], "slot": (18,9,12,3), "desk": (9,35,30,5), "nodes": [(20,37),(24,37),(28,37)]},
+    64: {"beam": [(27,15),(37,15),(49,43),(15,43)], "slot": (24,11,16,5), "desk": (11,45,42,7), "nodes": [(26,48),(32,48),(38,48)]},
 }
 
 
@@ -67,23 +67,22 @@ def gradient(size: int, points, top: str, bottom: str) -> Image.Image:
 def scaled_master(size: int, monochrome: bool = False) -> Image.Image:
     scale = size / 1024
     image = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    shapes = {
-        key: [(round(x * scale), round(y * scale)) for x, y in MASTER[key]]
-        for key in ("left", "center", "right")
-    }
+    beam = [(round(x * scale), round(y * scale)) for x, y in MASTER["beam"]]
+    slot = tuple(round(value * scale) for value in MASTER["slot"])
+    desk = tuple(round(value * scale) for value in MASTER["desk"])
     if monochrome:
         draw = ImageDraw.Draw(image)
-        for key in ("left", "center", "right"):
-            draw.polygon(shapes[key], fill="white")
-        for x, y, w, h in MASTER["base"]:
-            draw.rounded_rectangle((round(x*scale), round(y*scale), round((x+w)*scale), round((y+h)*scale)), radius=max(1, round(h*scale/2)), fill="white")
+        draw.polygon(beam, fill="white")
+        for x, y, w, h in (slot, desk):
+            draw.rounded_rectangle((x, y, x + w, y + h), radius=max(1, h // 3), fill="white")
         return image
-    image.alpha_composite(gradient(size, shapes["left"], "#A187FF", COLORS["rose"]))
-    image.alpha_composite(gradient(size, shapes["center"], "#FFFFFF", COLORS["amber"]))
-    image.alpha_composite(gradient(size, shapes["right"], "#78DEFF", COLORS["cyan"]))
+    image.alpha_composite(gradient(size, beam, COLORS["amber_light"], COLORS["amber"]))
     draw = ImageDraw.Draw(image)
-    for (x, y, w, h), color in zip(MASTER["base"], (COLORS["violet"], COLORS["ivory"], COLORS["blue"])):
-        draw.rounded_rectangle((round(x*scale), round(y*scale), round((x+w)*scale), round((y+h)*scale)), radius=max(1, round(h*scale/2)), fill=color)
+    for x, y, w, h in (slot, desk):
+        draw.rounded_rectangle((x, y, x + w, y + h), radius=max(1, h // 3), fill=COLORS["ivory"])
+    for (x, y, diameter), color in zip(MASTER["nodes"], (COLORS["cyan"], COLORS["amber"], COLORS["green"])):
+        left, top, d = round(x * scale), round(y * scale), max(2, round(diameter * scale))
+        draw.ellipse((left, top, left + d, top + d), fill=color)
     return image
 
 
@@ -92,16 +91,17 @@ def micro_mark(size: int, monochrome: bool = False) -> Image.Image:
     image = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
     if monochrome:
-        for key in ("left", "center", "right"):
-            draw.polygon(spec[key], fill="white")
-        for x, y, w, h in spec["base"]:
+        draw.polygon(spec["beam"], fill="white")
+        for key in ("slot", "desk"):
+            x, y, w, h = spec[key]
             draw.rectangle((x, y, x+w-1, y+h-1), fill="white")
         return image
-    image.alpha_composite(gradient(size, spec["left"], "#A187FF", COLORS["rose"]))
-    image.alpha_composite(gradient(size, spec["center"], "#FFFFFF", COLORS["amber"]))
-    image.alpha_composite(gradient(size, spec["right"], "#78DEFF", COLORS["cyan"]))
-    for (x, y, w, h), color in zip(spec["base"], (COLORS["violet"], COLORS["ivory"], COLORS["blue"])):
-        draw.rectangle((x, y, x+w-1, y+h-1), fill=color)
+    image.alpha_composite(gradient(size, spec["beam"], COLORS["amber_light"], COLORS["amber"]))
+    for key in ("slot", "desk"):
+        x, y, w, h = spec[key]
+        draw.rectangle((x, y, x+w-1, y+h-1), fill=COLORS["ivory"])
+    for (x, y), color in zip(spec["nodes"], (COLORS["cyan"], COLORS["amber"], COLORS["green"])):
+        draw.point((x, y), fill=color)
     return image
 
 
@@ -115,7 +115,7 @@ def app_icon(size: int, platform: str, appearance: str = "default") -> Image.Ima
     supersample = 4 if size <= 64 else 1
     canvas_size = size * supersample
     if platform == "ios":
-        canvas = Image.new("RGBA", (canvas_size, canvas_size), rgb("#24104F" if appearance == "tinted" else COLORS["black"]) + (255,))
+        canvas = Image.new("RGBA", (canvas_size, canvas_size), rgb("#3B321F" if appearance == "tinted" else COLORS["black"]) + (255,))
         tile_origin = (0, 0)
         tile_size = canvas_size
     else:
@@ -123,7 +123,7 @@ def app_icon(size: int, platform: str, appearance: str = "default") -> Image.Ima
         inset = round(canvas_size * 0.055)
         tile_size = canvas_size - inset * 2
         tile_origin = (inset, inset)
-        tile = Image.new("RGBA", (tile_size, tile_size), rgb("#24104F" if appearance == "tinted" else COLORS["black"]) + (255,))
+        tile = Image.new("RGBA", (tile_size, tile_size), rgb("#3B321F" if appearance == "tinted" else COLORS["black"]) + (255,))
         tile.putalpha(rounded_mask(tile_size))
         canvas.alpha_composite(tile, tile_origin)
     mark_size = round(tile_size * 0.79)
@@ -134,12 +134,12 @@ def app_icon(size: int, platform: str, appearance: str = "default") -> Image.Ima
     else:
         mark = scaled_master(mark_size, monochrome)
     if appearance == "dark":
-        overlay = Image.new("RGBA", canvas.size, (26, 11, 64, 28))
+        overlay = Image.new("RGBA", canvas.size, (18, 20, 15, 32))
         canvas.alpha_composite(overlay)
     x = tile_origin[0] + (tile_size - mark_size) // 2
     y = tile_origin[1] + round(tile_size * 0.47 - mark_size * 0.48)
-    glow = mark.filter(ImageFilter.GaussianBlur(max(1, round(canvas_size * 0.012))))
-    glow.putalpha(glow.getchannel("A").point(lambda alpha: round(alpha * 0.42)))
+    glow = mark.filter(ImageFilter.GaussianBlur(max(1, round(canvas_size * 0.009))))
+    glow.putalpha(glow.getchannel("A").point(lambda alpha: round(alpha * 0.18)))
     canvas.alpha_composite(glow, (x, y))
     canvas.alpha_composite(mark, (x, y))
     if supersample > 1:

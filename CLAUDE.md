@@ -86,7 +86,7 @@ Documented in `MUSIC_MODE_ARCHITECTURE.md`; read it before touching the pipeline
 
 `RootView` (in `LumenDeskApp.swift`) chooses `OnboardingView` on first run, then `LumenDeskShellView` (`Views/ProductShellView.swift`): on macOS a `NavigationSplitView` with Home, Library, Automation, Devices, and Settings destinations; on iOS a `TabView` with the first four as tabs and Settings presented as a sheet from the toolbar. The Home workspace (search, filters, bulk selection) is `HomeWorkspaceView`, also in `ProductShellView.swift`. The top-level `ContentView` in `ContentView.swift` is legacy — the running app never instantiates it (even its preview renders the shell) — but the file still hosts components the shell does use (`CommandToastView`, `BulkActionBar`, `DiscoveryDiagnosticsCard`), so make workspace changes in `HomeWorkspaceView`, not there. macOS-only surfaces — command menus with keyboard shortcuts, the Settings scene, configuration import/export, and the `MenuBarExtra` controller — live behind `#if os(macOS)`, a pattern used throughout.
 
-The app is locked to dark mode. Visual styling comes from the "Aurora Noir" design system: the `Lumen` token namespace in `Theme.swift` is the source of truth in code, `DESIGN_SYSTEM.md` documents the palette/typography/state matrix, and `SWIFTUI_HANDOFF.md` maps the redesign onto existing views.
+The app is locked to dark mode. Visual styling comes from "The Lighting Desk" brand system: the `Lumen` token namespace in `Theme.swift` is the source of truth in code, `BRAND_IDENTITY.md` documents strategy and voice, `DESIGN_SYSTEM.md` documents the palette/typography/state matrix, and `SWIFTUI_HANDOFF.md` maps the redesign onto existing views.
 
 ## Conventions and invariants
 

@@ -1,6 +1,8 @@
 # LumenDesk
 
-LumenDesk is a native SwiftUI smart-lighting controller for **macOS** and **iOS**. It controls supported **LIFX** and **Govee** bulbs directly on your local network, without cloud accounts, vendor API keys, bridge hardware, or an internet round trip.
+**One desk for every local light.**
+
+LumenDesk is a native SwiftUI smart-lighting controller for **macOS** and **iOS**. It controls supported **LIFX** and **Govee** bulbs directly on your local network, without cloud accounts, vendor API keys, bridge hardware, or an internet round trip. See [the brand identity](BRAND_IDENTITY.md) for the product strategy, mark, color, typography, and voice.
 
 The app is designed for day-to-day lighting control as well as richer home-lighting workflows: discovery, rooms, favorites, scenes, color themes, animated effects, schedules, command recovery, diagnostics, import/export, and a macOS menu bar controller.
 

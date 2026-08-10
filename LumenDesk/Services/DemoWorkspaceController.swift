@@ -74,6 +74,7 @@ final class DemoWorkspaceController {
         var redoStack: [[LightRuntimeSnapshot]]
         var lastChangeTime: [String: Date]
         var razerActiveIDs: Set<String>
+        var segmentPreviewIDs: Set<String>
         var scanStartingIDs: Set<String>
         var scanStartingAddresses: [String: String]
     }
@@ -220,6 +221,7 @@ final class DemoWorkspaceController {
         workspace.customBrightnessPresets = [0.1, 0.35, 0.7]
         workspace.goveeSegmentStates = [:]
         workspace.goveeSegmentPresets = []
+        workspace.segmentPreviewIDs = []
         workspace.lifxMatrixStates = [
             workspace.devices[0].id: .demoLuna(brightness: workspace.devices[0].brightness)
         ]

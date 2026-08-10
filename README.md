@@ -138,26 +138,28 @@ LumenDesk recognizes LIFX Luna product IDs 219 and 220 and reads the lamp's matr
 
 The demo workspace includes a simulated Luna, so the editor can be explored without the physical lamp.
 
-### Segment Studio (Govee COB strips, string lights, neon ropes)
+### Segment Studio (Govee strip lights, COB strips, string lights, neon ropes, and uplighters)
 
 Govee RGBIC devices are individually addressable in zones, and the Govee Home app lets you color each zone separately. LumenDesk's **Segment Studio** brings that same specificity to the LAN:
 
-- A visual strip editor drawn to match the hardware: contiguous cells for COB strips and neon ropes, bulbs on a wire for string lights.
+- A hardware-aware editor: continuous segmented tape for Strip Light S and COB models, numbered bead or bulb strands for string lights, curtain columns, and named physical-zone cards for the H60B0 uplighter.
+- **String Light Studio** follows the physical strand from the controller in numbered rows. H70C1 exposes all 100 Uni-IC beads; H70C2 and H70C4 expose all 200. Outdoor bulb strings use their actual bulb counts, including 30 for H7021 and 15 for H7020/H7028, with expandable models remaining adjustable.
+- H70B1 is treated as a curtain instead of a one-dimensional string. LumenDesk edits its 20 locally addressable vertical column groups; per-bead pixel artwork remains in Govee Home.
 - Tap or drag across segments to select them; paint the selection with swatches, recent colors, or the system color picker. With nothing selected, painting fills the whole strip.
 - Selection tools: All, None, Invert, Every Other, and shift-left/right to rotate the layout along the strip.
 - **Per-segment brightness** — dim any selection independently of the rest of the strip.
 - **Blend Across Selection** — fade from one color to another across the selected segments.
-- **Gradient blending** toggle on COB hardware, matching the Govee app's gradient switch.
+- **Gradient blending** on supported RGBIC and RGBICW strips, matching the Govee app's gradient switch.
 - **Live preview** streams edits to the light in real time (razer mode). The preview is volatile, so closing the studio without applying is a true cancel.
-- **Apply to Light** makes the layout durable. COB strips and neon ropes store it in their own firmware (via the app-native Bluetooth-format commands relayed over the LAN), so it survives power cycles on its own. Multi-zone lamps such as H60B0, along with string, curtain, and permanent-outdoor lights, have **no firmware-side segment storage exposed through the local protocol** — so LumenDesk holds their layout through the live streaming channel and re-applies it automatically every 30 seconds, when a light reconnects, when it's powered back on, and at app launch. Held layouts persist as long as LumenDesk is running.
+- **Apply to Light** makes the layout durable. Supported COB strips and neon ropes store it in their own firmware through app-native commands relayed over the LAN. H612B Strip Light S, multi-zone lamps such as H60B0, string lights, curtain lights, and permanent-outdoor lights expose their editable layouts through the live streaming channel, so LumenDesk holds and restores those layouts while it runs.
 - 12 built-in segment presets (Rainbow Flow, Sunset Glow, Candy Cane, Fairy Dust, …) plus your own saved presets, automatically re-rendered to each device's segment count.
-- A per-device segment-count stepper for models the catalog doesn't recognize — set it to whatever the Govee Home app shows.
+- An adjustable unit count for expandable and unrecognized models. Fixed hardware such as H60B0 and H70C Christmas strings stays locked to its real physical topology.
 
-Known SKU families (H619x/H61Cx COB strips, H61Ax/H61Dx neon ropes, H60B0 three-zone uplighter lamps, H70Cx/H70Bx/H702x string and curtain lights, and more) are detected from discovery and get the right layout and defaults automatically. Any other Govee light can still open the studio from its context menu.
+Known SKU families (H612B Strip Light S, H619x/H61Cx COB strips, H61Ax/H61Dx neon ropes, H60B0 three-zone uplighter lamps, H70Cx Christmas strings, H702x outdoor bulb strings, H70Bx curtains, and more) are detected from discovery and get the right layout and defaults automatically. Any other Govee light can still open the studio from its context menu.
 
 Segment layouts are captured into scenes, restored by undo/redo, re-applied after Identify flashes, and survive stopping an animated effect. The demo workspace includes a simulated COB strip and string lights so the studio can be explored without hardware.
 
-Open the studio from the segment row on a light, or right-click → **Segment Studio…**.
+Open the studio from the editor row on a light, or right-click its hardware-specific studio command. H60B0 uses **Uplighter Color Studio…**, string lights use **String Light Studio…**, and curtains use **Curtain Column Studio…**.
 
 ### Rooms
 
@@ -613,9 +615,9 @@ If LumenDesk reports a bind failure for Govee, another app may already be listen
 
 ### Segment colors do not change
 
-- Confirm the device is a segmented RGBIC model (COB strip, string lights, neon rope, curtain). Single-zone bulbs and plain RGB strips ignore segment commands.
+- Confirm the device is a segmented RGBIC or RGBICW model (including H612B Strip Light S, COB strips, string lights, neon ropes, curtains, and supported multi-zone lamps). Single-zone bulbs and plain RGB strips ignore segment commands.
 - Make sure **LAN Control** is enabled and normal color changes from LumenDesk already work.
-- If the strip's zones don't line up with the editor, adjust the segment-count stepper in the Segment Studio to match what the Govee Home app shows for the device.
+- If an adjustable strip or expandable bulb string does not line up with the editor, set its unit count to match Govee Home. H60B0 and H70C Christmas strings use their fixed hardware counts.
 - Live preview and applied layouts are separate: preview uses a volatile streaming mode, while **Apply to Light** writes the durable state. If a layout disappears when the studio closes, it was previewed but never applied.
 - On string, curtain, and permanent-outdoor lights (H70Cx, H70Bx, H702x, H705x), applied layouts are **held by LumenDesk**, not stored in the light — their firmware has no segment memory. The layout re-applies automatically while LumenDesk runs; if LumenDesk quits, the lights fall back to their built-in state until it next launches.
 - A firmware update in the Govee Home app can help on devices that predate LAN segment support.

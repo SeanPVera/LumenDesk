@@ -389,6 +389,10 @@ Demo Mode lets you explore LumenDesk without controlling physical lights. In dem
 
 Demo Mode is useful for screenshots, testing UI flows, or learning the app before scanning your real network.
 
+### Interface
+
+LumenDesk draws its own controls. Brightness and colour temperature use a console fader with an engraved scale and a monospaced readout rather than a system slider; a light's power is an illuminated key rather than a switch; modes are chosen with a machined selector rather than a segmented picker; and a light's colour is shown as a lens plate rather than a coloured dot. Interface chrome stays achromatic so that on any screen, the coloured thing is the light. Every one of these controls is keyboard reachable and exposes a VoiceOver label, value, and adjustable action where relevant. Window chrome, toolbars, menus, alerts, and sheets remain platform-native.
+
 ### Accessibility and interface preferences
 
 The UI honors system accessibility settings where applicable, including reduced motion and reduced transparency. Interface preferences include:
@@ -553,7 +557,8 @@ design-prototype/                   # Simulated UX mockup, published under /prot
 LumenDesk/
 ├── LumenDeskApp.swift              # App entry point, macOS commands, settings scene, menu bar extra
 ├── ContentView.swift               # Main workspace, header, search, filters, bulk actions, shortcut sheet
-├── Theme.swift                     # Shared colors, materials, shape helpers, and visual styling
+├── Theme.swift                     # Spectral Bench tokens, panel geometry, backdrop, button styles, mark
+├── DesignControls.swift            # Instrument controls: fader, power key, rocker, chips, selector, lens, meters
 ├── Info.plist                      # Local network and platform privacy metadata
 ├── LumenDesk.entitlements          # Sandbox and network entitlements
 ├── Models/

@@ -1,80 +1,118 @@
-# LumenDesk design system — The Lighting Desk
+# LumenDesk design system — Spectral Bench
 
 This document specifies the native product system. `BRAND_IDENTITY.md` explains the strategy, logo, voice, and the audit that led here.
 
 ## Design principles
 
-1. Control first; power, brightness, rooms, and favorites stay fastest.
-2. Show command truth near the control that caused it.
-3. Make the product look like a local lighting instrument: calm work surfaces, precise labels, and expressive color only where light is the content.
-4. Put one primary decision in each region; secondary actions belong in menus or disclosure.
-5. Reveal operational detail progressively.
-6. Never confuse Preview with Apply.
-7. Compose deliberately for macOS and iPhone.
-8. Pair every semantic color with text, icon, shape, or accessible announcement.
+1. Chrome is achromatic; colour means light. Everything else follows from this.
+2. Control first; power, brightness, rooms, and favorites stay fastest.
+3. Show command truth near the control that caused it.
+4. Draw the instrument. Where the platform's control would make the product look like every other app, LumenDesk supplies its own.
+5. Put one primary decision in each region; secondary actions belong in menus or disclosure.
+6. Reveal operational detail progressively.
+7. Never confuse Preview with Apply.
+8. Compose deliberately for macOS and iPhone; keep window, toolbar, and menu chrome native.
+9. Pair every semantic colour with text, icon, shape, or accessible announcement.
 
 ## Token reference
 
-### Semantic color
+### Neutrals — the bench
 
 | Token | Value | Use |
 | --- | --- | --- |
-| `background/base` | `#11120F` | Window and application base |
-| `background/subtle` | `#141611` | Sidebar and grouped background |
-| `surface/default` | `#191B17` | Standard panels and rows |
-| `surface/raised` | `#22251F` | Hover, sheet, and raised controls |
-| `surface/emphasis` | `#2B2F27` | Selected or important surfaces |
-| `surface/hover` | `#30342B` | Hover-only fill |
-| `text/primary` | `#F1EFE8` | Headings and primary labels |
-| `text/secondary` | `#B8B8AF` | Supporting text |
-| `text/tertiary` | `#858A80` | Metadata and quiet labels |
-| `border/default` | `#34382F` | Hairlines and panels |
-| `border/strong` | `#4C5345` | Focused grouping and elevated dividers |
-| `accent/primary` | `#E7B35A` | Direct control and selection |
-| `accent/high` | `#FFD68A` | Illuminated keys and focus |
-| `accent/network` | `#73B4BD` | Local connection and discovery |
-| `accent/creative` | `#C97852` | Music and motion only |
-| `status/success` | `#83B67A` | Online and confirmed |
-| `status/warning` | `#D6A24C` | Stale, partial, and paused |
-| `status/error` | `#D86E60` | Failed commands |
-| `status/offline` | `#858A80` | Offline/unreachable |
-| `focus/ring` | `#FFD68A` | Keyboard focus ring |
+| `background/void` | `#04060A` | Window well, wells, key legends |
+| `background/base` | `#080B11` | Window and application base |
+| `background/subtle` | `#0A0D14` | Sidebar and grouped background |
+| `surface/default` | `#0E1219` | Standard panels and rows |
+| `surface/raised` | `#151A23` | Hover, sheet, and raised controls |
+| `surface/emphasis` | `#1E2530` | Selected or important surfaces |
+| `surface/hover` | `#262E3B` | Hover-only fill |
+| `text/primary` | `#E8EEF7` | Headings and primary labels |
+| `text/secondary` | `#9AA6B5` | Supporting text |
+| `text/tertiary` | `#64707F` | Metadata and quiet labels |
+| `border/default` | `#1F2732` | Hairlines and panels |
+| `border/strong` | `#333D4B` | Focused grouping and elevated dividers |
+| `edge/highlight` | `#FFFFFF` @ 5% | The lit top edge of a raised panel |
 
-Lighting colors are data, not semantic tokens. They belong in previews, swatches, segment cells, and restrained active-light indicators—not status labels.
+### Beam — illumination
+
+| Token | Value | Use |
+| --- | --- | --- |
+| `beam/default` | `#DCE7F6` | Direct control and selection |
+| `beam/bright` | `#F6FAFF` | Illuminated keys, focus ring, live values |
+| `beam/dim` | `#8C99AB` | Unlit legends and inactive labels |
+
+### The dispersion ramp
+
+Every semantic colour in the product is one of these eight samples; nothing else is coloured.
+
+| Token | Value | Semantic role |
+| --- | --- | --- |
+| `wave/400` | `#6C4BF0` | LIFX fixtures, mid-band energy |
+| `wave/460` | `#3D7BF5` | Ramp continuity |
+| `wave/490` | `#21C4DE` | `accent/network` — local connection and discovery |
+| `wave/530` | `#46D08A` | `status/success` — online and confirmed |
+| `wave/570` | `#D9D45F` | Ramp continuity |
+| `wave/590` | `#FFB13D` | `status/warning` — stale, partial, paused |
+| `wave/620` | `#FF7A38` | `accent/creative` — music and motion only |
+| `wave/660` | `#F1495C` | `status/error` — failed commands |
+
+`status/offline` is `#64707F`; `focus/ring` is `beam/bright`. Drawn whole as `Lumen.spectrum`, the ramp is the product's one ornament.
+
+Lighting colours are data, not semantic tokens. They belong in previews, swatches, segment cells, and the `LumenLens` plate — never in status labels.
 
 ### Typography
 
-SF Pro handles controls and body copy. New York, accessed through SwiftUI's serif system design, handles the wordmark and orientation titles. SF Mono handles short uppercase instrument labels, compact metadata, and values.
+There is no serif in the system. SF Pro Condensed carries titles and names, SF Mono carries labels and every measured value, and standard SF Pro carries body copy and controls.
 
-| Style | Size / line height | Use |
-| --- | --- | --- |
-| `Display/Large` | 48 / 54 | Brand-led cover title, New York Semibold |
-| `Title/Large` | 36 / 42 | Page title, New York Semibold |
-| `Title/Medium` | 24 / 30 | Major section |
-| `Title/Small` | 18 / 23 | Card group and modal title |
-| `Body/Large` | 17 / 25 | Introductory copy |
-| `Body/Medium` | 15 / 22 | Standard copy |
-| `Body/Small` | 13 / 18 | Supporting copy |
-| `Label/Large` | 13 / 18 | Buttons and important labels |
-| `Label/Medium` | 12 / 16 | Controls and badges |
-| `Label/Small` | 10 / 14 | Metadata and eyebrows |
+| Style | Face | Size / line height | Use |
+| --- | --- | --- | --- |
+| `Display/Large` | SF Pro Condensed Bold | 38 / 42 | Page title, uppercase, tracked +1.4 |
+| `Display/Title` | SF Pro Condensed Bold | 22 / 26 | Major section and sheet title |
+| `Display/Small` | SF Pro Condensed Semibold | 15 / 20 | Card group title, device name |
+| `Readout/Hero` | SF Mono Semibold | 50 / 54 | The master value on Home |
+| `Readout/Value` | SF Mono Semibold | 12–17 | Percentages, kelvin, counts, timings |
+| `Label/Instrument` | SF Mono Semibold | 9–11 | Engraved uppercase labels, tracked +1.2 |
+| `Body/Medium` | SF Pro | 15 / 22 | Standard copy |
+| `Body/Small` | SF Pro | 13 / 18 | Supporting copy |
 
 ### Dimensions
 
 - Spacing: 4, 8, 12, 16, 20, 24, 32, 40.
-- Radius: 6, 8, 12, 18, full/pill. Pill is reserved for status and tags.
+- Radius: 5 (panel), 4 (tile), 3 (control), 2 (chip, swatch, badge). No pills.
+- Chamfer: 14 pt on the top-trailing corner of every panel — the system's silhouette.
 - Controls: 32 pt desktop default; 44 pt mobile minimum.
-- Icons: 16, 20, 24 pt.
+- Icons: 12, 14, 18 pt.
 - Responsive breakpoints: mobile composition at 650 px; compact desktop intent at approximately 1000 px.
-- Elevation: `Elevation/Card` for restrained separation; `Elevation/Floating` for modal, toast, menu, and bulk-action overlays.
+- Elevation: 1 px lit top edge plus a hairline for panels; short neutral shadow for modal, toast, menu, and bulk-action overlays.
 
 ### Focus, transparency, and motion
 
-- Focus: 2 px Lamp ring plus a 2 px base-color offset.
-- Reduced transparency: replace blur/translucency with opaque `background/subtle` or `surface/raised`.
+- Focus: 2 px beam-bright ring plus a 2 px base-colour offset.
+- Reduced transparency: replace the bench rail and beam glow with opaque `background/void` or `surface/raised`.
 - Quick transition: 160 ms; standard: 250 ms; expressive/slow: 600 ms.
 - Reduced motion: remove drift, scale, parallax, and long crossfades; retain immediate opacity or state changes.
-- Shadows: short neutral separation only. Device color may create a restrained halo inside that device's control.
+- Shadows: short neutral separation only. Device colour may create a restrained halo inside that device's control.
+
+## Instrument controls
+
+Defined in `LumenDesk/DesignControls.swift`. These are presentation only — every one is driven by a binding the existing views already own, and none of them talks to a device.
+
+| Control | Replaces | Behaviour |
+| --- | --- | --- |
+| `LumenFader` | `Slider` | 20-division engraved scale (every fifth major), machined 5 × 20 cap, monospaced readout. Drag anywhere on the track to jump; arrow keys nudge on macOS; VoiceOver gets an adjustable action. `onEditingChanged` preserves commit-on-release. Tracks: `.beam`, `.spectrum`, `.kelvin`, `.tint(Color)` |
+| `LumenPowerKeyStyle` | `.toggleStyle(.switch)` for light power | Illuminated key; `spokenLabel` supplies the VoiceOver label a `ToggleStyle` cannot read from its own configuration |
+| `LumenRockerStyle` | `.toggleStyle(.switch)` elsewhere | Squared rocker; `showsLabel: false` for bare `Toggle("", isOn:)` rows |
+| `LumenChipStyle` | `.toggleStyle(.button)` | Filter and day-of-week chips |
+| `LumenSelector` | `.pickerStyle(.segmented)` | Recessed well, uppercase mono legends, spectrum underline on the live option |
+| `LumenPrimary/SecondaryButtonStyle` | `.borderedProminent` / `.bordered` | Console keys; `compact: true` matches the old `.controlSize(.small)` footprint |
+| `LumenDangerButtonStyle` | destructive buttons | Ramp red on a tinted face |
+| `LumenIconButtonStyle` | bordered glyph buttons | Compact square key |
+| `LumenLens` | coloured `Circle()` swatches | A fixture's lens plate, with catchlight, halo when lit, and a dashed edge when stale |
+| `LumenMeter` | ad-hoc capsule bars | Segmented LED meter for watched values |
+| `LumenReadout`, `LumenEyebrow`, `LumenStatusDot`, `LumenIconTile`, `SpectrumRule`, `LumenPanelShape` | — | The shared vocabulary the screens are built from |
+
+Native toolbars, menus, alerts, confirmation dialogs, sheets, and `DatePicker` stay native.
 
 ## Component inventory
 
@@ -91,7 +129,7 @@ SF Pro handles controls and body copy. New York, accessed through SwiftUI's seri
 - Room Card: all-on, all-off, mixed, partial-offline, effect-running, automation-paused.
 - Light Card/Row: comfortable/compact; selected; online/offline/stale; pending/applied/failed.
 - Expanded Light Control: color/white mode, brightness, favorite, device truth, Segment Studio entry.
-- Power Switch, Brightness Slider, Color Swatch, White Temperature Slider.
+- Power Key, Brightness Fader, Colour Swatch, White-Balance Fader (`.kelvin` track).
 - Status Badge and Command State Indicator.
 
 ### Library and automation
@@ -121,14 +159,14 @@ SF Pro handles controls and body copy. New York, accessed through SwiftUI's seri
 | --- | --- | --- |
 | Default | Base surface and label | Normal name/role/value |
 | Hover | Raised surface or stronger border | No state announced |
-| Focused | Cyan ring with dark offset | Keyboard focus remains visible |
+| Focused | Beam-bright ring with dark offset | Keyboard focus remains visible |
 | Pressed | Small darkening or scale on non-reduced motion | Native pressed state |
 | Selected | Strong border, checkmark, and “Selected” text | `aria-pressed`/selected trait |
 | Expanded | Disclosure arrow and visible detail region | Expanded/collapsed state |
 | Disabled | Reduced contrast plus explanatory label/help | Disabled state and reason |
 | Loading/Scanning | Progress icon and phase text | Polite live announcement |
 | Empty | Icon, reason, and recovery action | Heading summarizes state |
-| Online | Green dot + “Online” | Text always present |
+| Online | Green indicator square + “Online” | Text always present |
 | Offline | Slashed icon + “Offline” + recovery | Retry and Rescan available |
 | Stale | Clock icon + “Stale” + last seen | Warn that control may still work |
 | Pending/Queued | Clock and “Queued” | Announces command queued |

@@ -1,10 +1,10 @@
-# LumenDesk brand identity — The Lighting Desk
+# LumenDesk brand identity — Spectral Bench
 
 ## Brand idea
 
 LumenDesk is the local lighting instrument for a home. It gives mixed LIFX and Govee lights one dependable place to be found, grouped, cued, and controlled.
 
-The product should feel closer to a small architectural-lighting console than a lifestyle dashboard. It is precise, calm, tactile, and honest about what the hardware did.
+The product should feel closer to an optical bench than to a lifestyle dashboard: precise, cold, machined, and honest about what the hardware did. A beam enters, it separates, and every light on the network lands somewhere along that spectrum.
 
 **Positioning:** direct local control for people whose lights outgrew one vendor app.
 
@@ -12,90 +12,134 @@ The product should feel closer to a small architectural-lighting console than a 
 
 **Signature line:** One desk for every local light.
 
+## The one rule
+
+> **Chrome is achromatic. Colour means light.**
+
+Everything below follows from it. Interface surfaces are cool obsidian neutrals with no hue of their own. The only colour authored into the product is a single dispersion ramp — the visible spectrum — sampled at fixed wavelengths for every semantic role the app needs, and drawn whole as the sole branded ornament. Illumination is rendered in beam white, so a lit control reads as *lit* rather than as *branded*. A physical light's own colour is data and appears only inside the controls that show or edit it.
+
+The payoff: on any screen, the coloured thing is the light. Nothing competes with it.
+
 ## Audit of the previous identity
 
-The previous “Aurora Noir” direction had a strong dark-mode foundation and acceptable contrast. Several choices made it feel assembled from current interface trends instead of authored for this product:
+“The Lighting Desk” fixed the right problem — it replaced a generic cyan/violet/pink gradient system with something calmer and more specific. What it did not fix was the layer underneath:
 
-- Cyan, violet, and pink gradients appeared in the wordmark, primary buttons, borders, backgrounds, and decorative glow. The same treatment could brand an AI assistant, crypto dashboard, meditation app, or audio tool.
-- A stock filled-lightbulb symbol represented the product inside the interface, while a separate abstract three-beam mark represented it in app assets. That split weakened recognition.
-- Rounded type, capsules, radial glows, oversized corner radii, and repeated “aurora” language stacked several familiar generative-design defaults at once.
-- Most cards shared the same fill, radius, shadow, and icon treatment. Status, navigation, control, and creative content had too little visual distinction.
-- Copy such as “Beautiful, local control,” “Choose your interface energy,” and “durable destination” described a mood around the product. It rarely sounded like a lighting controller.
-- SF Symbols carried nearly the entire icon language. They worked functionally, though the product had no recurring proprietary shape inside its own chrome.
+- The palette was authored, but the *controls* were stock. `Slider`, `.toggleStyle(.switch)`, `.pickerStyle(.segmented)`, and `.toggleStyle(.button)` carried the product's primary interactions. A themed stock control still reads as a themed stock app.
+- Warm graphite and signal amber are a well-worn pairing for anything wanting to look like professional equipment. It was tasteful, and it was not ours.
+- Amber marked interface action while device colour marked lights, so two different colour languages competed for the same attention on every row.
+- Soft 12–16 pt radii, capsules, and circular status dots gave every card the same silhouette as every other card in every other dark-mode app.
+- The serif display voice read editorial rather than instrumental — closer to a magazine than to a console.
 
-The redesign keeps the useful information architecture, command-state clarity, accessibility, and platform-native controls. It replaces the ornamental identity around them.
+This direction keeps the information architecture, command-state clarity, accessibility work, and platform-native navigation. It replaces the palette, the type, the geometry, and — most importantly — the controls.
 
 ## Logo system
 
-The LumenDesk mark is an aperture casting one warm beam onto a desk rail. Three small indicators on the rail represent a mixed local network under one control surface.
+The mark keeps the geometry LumenDesk has always had and changes what the beam is made of. Light leaves a source slot white and lands on the desk rail as the full visible spectrum.
 
 ### Mark construction
 
-- The upper slot is the light source.
-- The tapered center is the controllable beam.
+- The upper slot is the source.
+- The tapered centre is the controllable beam. Colour runs *across* it and saturation runs *down* it, so the mark reads as light separating rather than as a gradient poured into a shape.
 - The lower rail is the desk and the stable control plane.
-- Blue, amber, and green indicators suggest connected devices without copying a vendor palette.
+- The three vendor indicator dots are gone. The beam now carries that meaning: many colours, one surface.
 
 ### Lockups
 
-- **Primary lockup:** color mark with the LumenDesk wordmark in New York Semibold.
-- **Compact mark:** color aperture for onboarding, the menu-bar popover, repository avatar, and app icon.
-- **Monochrome mark:** one-color version for the macOS menu bar, small utilities, print, and constrained surfaces.
-- **App icon:** warm beam on a near-black tile. Small macOS sizes use hand-tuned geometry from `scripts/generate_brand_assets.py`.
+- **Primary lockup:** colour mark with the LumenDesk wordmark in SF Pro Condensed Bold, uppercase, over a spectrum rule.
+- **Compact mark:** colour aperture for onboarding, the menu-bar popover, repository avatar, and app icon.
+- **Monochrome mark:** one-colour version for the macOS menu bar, small utilities, print, and constrained surfaces.
+- **App icon:** the dispersing beam on a near-black tile. Small macOS sizes use hand-tuned geometry from `scripts/generate_brand_assets.py`.
 
-Do not substitute a stock lightbulb, sparkle, orb, or gradient letterform for the brand mark. Device controls may continue using SF Symbols when they communicate a standard action.
+Do not substitute a stock lightbulb, sparkle, orb, prism, or gradient letterform for the brand mark. A literal glass prism throwing a rainbow is specifically off-limits: it belongs to an album cover, not to this product.
 
-## Color system
+## Colour system
+
+### The bench — neutrals
 
 | Role | Name | Value | Use |
 | --- | --- | --- | --- |
-| Window | Blackout | `#0B0C0A` | Window well, high-contrast controls |
-| Base | Worktop | `#11120F` | Main application background |
-| Surface | Console | `#191B17` | Rows and standard panels |
-| Raised | Fader | `#22251F` | Sheets, hover, elevated controls |
-| Emphasis | Patch | `#2B2F27` | Selection and important control groups |
-| Border | Rule | `#34382F` | Default hairlines |
-| Strong border | Rail | `#4C5345` | Focused grouping and raised dividers |
-| Primary | Signal amber | `#E7B35A` | Selection, primary control, signal rail |
-| Primary high | Lamp | `#FFD68A` | Illuminated key and aperture source |
-| Network | Local blue | `#73B4BD` | Discovery, links, local-network truth |
-| Creative | Copper | `#C97852` | Music, motion, restrained creative emphasis |
-| Success | Circuit green | `#83B67A` | Online and confirmed |
-| Warning | Hold amber | `#D6A24C` | Stale, partial, paused |
-| Error | Trip red | `#D86E60` | Failure and destructive feedback |
-| Primary text | Chalk | `#F1EFE8` | Headings and primary labels |
-| Secondary text | Meter | `#B8B8AF` | Supporting copy |
-| Tertiary text | Muted | `#858A80` | Metadata and quiet labels |
+| Window well | Void | `#04060A` | Deepest ground, key legends, wells |
+| Base | Bench | `#080B11` | Main application background |
+| Surface | Panel | `#0E1219` | Rows and standard panels |
+| Raised | Faceplate | `#151A23` | Sheets, hover, elevated controls |
+| Emphasis | Machined | `#1E2530` | Selection and important control groups |
+| Border | Rule | `#1F2732` | Default hairlines |
+| Strong border | Rail | `#333D4B` | Focused grouping and raised dividers |
+| Primary text | Chalk | `#E8EEF7` | Headings and primary labels |
+| Secondary text | Meter | `#9AA6B5` | Supporting copy |
+| Tertiary text | Muted | `#64707F` | Metadata and quiet labels |
 
-Signal amber owns interface action. Local blue owns the network. A physical light’s color remains data and belongs in swatches, previews, segment cells, and restrained live-state indicators.
+### The beam — illumination
+
+| Role | Name | Value | Use |
+| --- | --- | --- | --- |
+| Interaction | Beam | `#DCE7F6` | Selection, lit keys, primary control |
+| Illuminated | Beam bright | `#F6FAFF` | Key faces, focus ring, live readouts |
+| At rest | Beam dim | `#8C99AB` | Unlit legends, inactive instrument labels |
+
+### The ramp — every semantic colour in the product
+
+Eight samples along the visible spectrum, short wavelength first. Nothing outside this list is coloured.
+
+| Sample | Value | Semantic role |
+| --- | --- | --- |
+| 400 nm violet | `#6C4BF0` | LIFX fixtures, mid-band energy |
+| 460 nm blue | `#3D7BF5` | Ramp continuity |
+| 490 nm cyan | `#21C4DE` | Local link, discovery, network truth |
+| 530 nm green | `#46D08A` | Online, confirmed, success |
+| 570 nm yellow | `#D9D45F` | Ramp continuity |
+| 590 nm amber | `#FFB13D` | Stale, partial, paused, warning |
+| 620 nm orange | `#FF7A38` | Music, motion, creative energy |
+| 660 nm red | `#F1495C` | Failure and destructive feedback |
+
+Magenta `#E2569E` closes the ramp where a colour wheel must wrap.
+
+Drawn whole, the ramp is the brand: a `SpectrumRule` under a page title, the underline on the live segment of a selector, the rail down a panel the user is working in, the fill of a music fader.
 
 ## Typography
 
-- **New York / serif system design:** brand wordmark, page titles, section titles, and high-level numeric orientation. It gives the interface an editorial, architectural voice.
-- **SF Pro:** controls, body copy, forms, device names, and standard platform navigation.
-- **SF Mono:** short uppercase instrument labels, network metadata, timings, values, and state readouts.
+No serif. Three voices:
 
-Serif type should orient the user. Mono should label the instrument. Dense control copy stays in SF Pro for legibility.
+- **SF Pro Condensed** (`LumenType.display`) — titles, page headers, device names. Condensed grotesque reads technical rather than editorial, and it holds up in the uppercase, wide-tracked settings the product uses for orientation.
+- **SF Mono** (`LumenType.readout`, `LumenType.instrumentLabel`) — every measured value and every engraved label. If the user reads it as a number that changes, it is monospaced.
+- **SF Pro** — body copy, controls, and platform navigation.
+
+Rule of thumb: condensed names things, mono measures things, and SF Pro explains things.
 
 ## Shape and composition
 
-- Standard panels use 8–12 point corner radii and one-pixel rules.
-- Primary buttons resemble illuminated console keys with 8-point corners.
-- Capsules are reserved for statuses, tags, and controls whose behavior benefits from the shape.
-- A three-point amber signal rail marks selection or a principal control panel.
-- Shadows stay short and neutral. A physical light may cast a restrained color halo inside its own control.
-- The aperture beam may appear once as a faint background device on brand-led surfaces such as onboarding.
-- Palette artwork and Segment Studio may use full color. Routine controls remain quiet.
+- Radii collapse to 5 pt for panels, 4 pt for tiles, 3 pt for controls. The bench is machined, not moulded.
+- **One corner is cut.** `LumenPanelShape` chamfers the top-trailing corner of every panel, which is what makes a stack of them read as one rack. It is the product's silhouette; use it rather than inventing another.
+- Panels carry a 1 px lit top edge, a hairline stroke, and — when the user is working in them — a 2 px spectrum rail down the leading edge.
+- Pills are reserved for nothing. Status indicators are small squares, because every round dot in every dashboard looks the same.
+- Shadows stay short and neutral. A physical light may cast a restrained colour halo inside its own control.
+- The backdrop is an optical-bench rail: faint graduated rules, not wallpaper.
+
+## Controls
+
+The controls a lighting desk needs do not ship with the platform, so LumenDesk draws its own in `DesignControls.swift`:
+
+| Control | Replaces | Notes |
+| --- | --- | --- |
+| `LumenFader` | `Slider` | Engraved 20-division scale, machined cap, monospaced readout, drag / arrow keys / VoiceOver adjustable |
+| `LumenPowerKeyStyle` | `.toggleStyle(.switch)` on light power | Illuminated console key |
+| `LumenRockerStyle` | `.toggleStyle(.switch)` elsewhere | Squared rocker for settings and options |
+| `LumenChipStyle` | `.toggleStyle(.button)` | Filter and day-of-week chips |
+| `LumenSelector` | `.pickerStyle(.segmented)` | Recessed well, spectrum underline on the live option |
+| `LumenIconButtonStyle` | `.buttonStyle(.bordered)` on glyphs | Compact square key |
+| `LumenLens` | coloured `Circle()` | A fixture's lens plate — the one place arbitrary colour is allowed |
+| `LumenMeter` | ad-hoc capsule bars | Segmented LED meter for watched values |
+
+Native toolbars, menus, alerts, and sheets stay native. Bespoke means the instrument, not the window chrome.
 
 ## Iconography
 
 The aperture mark is proprietary. Functional icons remain platform-native SF Symbols so actions keep their learned meaning.
 
-- Use consistent 14, 18, and 22 point optical sizes in navigation, controls, and summaries.
-- Pair state icons with text. Color never carries device or command truth alone.
-- Use filled variants for an active state and line variants for rest when the symbol family supports both.
+- Use consistent 12, 14, and 18 point optical sizes in navigation, controls, and summaries.
+- Pair state icons with text. Colour never carries device or command truth alone.
 - Reserve sparkles, wands, and decorative bulbs for content that literally concerns a scene, preset, or light.
-- Place navigation symbols on the same baseline and use an amber rail for selection.
+- Navigation destinations are numbered like console channels (`01`–`05`) so the sidebar is scannable without reading.
 
 ## Voice
 
@@ -122,19 +166,20 @@ LumenDesk speaks like a good instrument label: short, concrete, and close to the
 
 ## Key surfaces
 
-- **Onboarding:** the strongest brand moment. It introduces the aperture, local promise, mixed-vendor value, and precise setup language.
-- **macOS sidebar:** persistent wordmark, proprietary selection rail, native destination symbols, and a local-link panel.
-- **Home:** serif orientation, instrument-label summaries, and a highlighted Master panel.
-- **Library:** controlled chrome around expressive, user-created lighting color.
-- **Devices:** local blue for network truth and explicit command-state language.
+- **Onboarding:** the strongest brand moment. It introduces the aperture, the local promise, mixed-vendor value, and precise setup language.
+- **macOS sidebar:** persistent wordmark, channel numbers, spectrum selection rail, and a local-link panel.
+- **Home:** a master panel built around a 50 pt monospaced readout, with the fader beneath it.
+- **Library:** controlled chrome around expressive, user-created lighting colour.
+- **Devices:** spectrum cyan for network truth and explicit command-state language.
+- **Music Mode:** the one place the whole ramp appears at once, on faders and segmented meters.
 - **Menu bar:** compact aperture mark, current device count, and immediate all-off control.
-- **App icon and repository avatar:** the same aperture geometry at every size.
+- **App icon and repository avatar:** the same dispersing beam at every size.
 
-## Accessibility and platform behavior
+## Accessibility and platform behaviour
 
-- Body text targets WCAG 4.5:1 contrast; meaningful non-text controls target 3:1.
-- The focus color is Lamp `#FFD68A`, paired with native focus behavior and a dark offset where custom focus appears.
-- Reduced Transparency uses opaque Blackout or Fader surfaces.
-- Quiet Interface removes the faint aperture beam and ornamental color activity.
+- Body text targets WCAG 4.5:1 contrast; meaningful non-text controls target 3:1. The neutral stack is darker than the previous one, which widens the margin on every text pairing.
+- The focus colour is Beam bright `#F6FAFF`, paired with native focus behaviour and a dark offset where custom focus appears.
+- Every bespoke control is keyboard reachable and exposes a VoiceOver label, value, and — for faders — an adjustable action.
+- Reduced Transparency uses opaque Void or Faceplate surfaces. Quiet Interface removes the bench rail and the beam glow.
 - Primary mobile targets remain at least 44 × 44 points.
-- macOS retains native window, toolbar, menu, keyboard, and sidebar behavior. iOS retains native tabs, navigation, sheets, and touch controls.
+- macOS retains native window, toolbar, menu, keyboard, and sidebar behaviour. iOS retains native tabs, navigation, sheets, and touch controls.

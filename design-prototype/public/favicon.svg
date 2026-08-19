@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="beam" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFD68A"/>
+      <stop offset="100%" stop-color="#E7B35A"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="228" fill="#0B0C0A"/>
+  <polygon points="440,246 584,246 788,700 236,700" fill="url(#beam)"/>
+  <rect x="388" y="184" width="248" height="70" rx="23" fill="#FFD68A"/>
+  <rect x="180" y="716" width="664" height="92" rx="31" fill="#F1EFE8"/>
+  <circle cx="461" cy="764" r="12" fill="#73B4BD"/>
+  <circle cx="512" cy="764" r="12" fill="#E7B35A"/>
+  <circle cx="563" cy="764" r="12" fill="#83B67A"/>
+</svg>

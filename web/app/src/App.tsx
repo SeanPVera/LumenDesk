@@ -304,16 +304,36 @@ function BridgeSetup({
 
         <ol className="steps">
           <li>
-            Install <a href="https://nodejs.org/">Node.js 20 or newer</a>.
+            Install <a href="https://nodejs.org/">Node.js 20 or newer</a>, if you do not have it.
+            Check with <code>node --version</code>.
           </li>
           <li>
-            Clone the repository and run:
+            Open a terminal and run these three commands:
             <pre>
-              <code>cd web/bridge{'\n'}npm start</code>
+              <code>{`git clone --depth 1 https://github.com/SeanPVera/LumenDesk.git
+cd LumenDesk/web/bridge
+npm start`}</code>
             </pre>
+            <span className="note">
+              No <code>npm install</code> needed — the bridge has no dependencies. It prints{' '}
+              <code>listening on http://127.0.0.1:8765</code> when it is ready.
+            </span>
           </li>
-          <li>Leave it running and come back to this page.</li>
+          <li>
+            <strong>Leave that terminal open</strong> and come back here. The bridge only runs while
+            the terminal does.
+          </li>
         </ol>
+
+        <details className="alt">
+          <summary>No git installed?</summary>
+          <p>Download and unpack the repository instead:</p>
+          <pre>
+            <code>{`curl -L https://github.com/SeanPVera/LumenDesk/archive/refs/heads/main.tar.gz | tar xz
+cd LumenDesk-main/web/bridge
+npm start`}</code>
+          </pre>
+        </details>
 
         <div className="setup-actions">
           <label className="port">

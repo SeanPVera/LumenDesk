@@ -15,15 +15,34 @@ telemetry. The bridge binds loopback only (`127.0.0.1`) by default.
 
 ## Run it
 
-Requires Node.js 20 or newer. No dependencies to install.
+Requires [Node.js](https://nodejs.org/) 20 or newer — check with
+`node --version`. There is nothing to install beyond that: the bridge has no
+dependencies, so there is no `npm install` step.
 
 ```sh
-cd web/bridge
+git clone --depth 1 https://github.com/SeanPVera/LumenDesk.git
+cd LumenDesk/web/bridge
 npm start
 ```
 
-Then open the web app — <https://seanpvera.github.io/LumenDesk/> — and it will
-find the bridge on port 8765.
+Without git, download and unpack the repository instead:
+
+```sh
+curl -L https://github.com/SeanPVera/LumenDesk/archive/refs/heads/main.tar.gz | tar xz
+cd LumenDesk-main/web/bridge
+npm start
+```
+
+Either way it prints:
+
+```
+[bridge] listening on http://127.0.0.1:8765
+```
+
+Leave that terminal open — the bridge only runs while it does — and open the
+web app at <https://seanpvera.github.io/LumenDesk/>, which will find it on port
+8765. If you already have the repository checked out, just
+`cd web/bridge && npm start`.
 
 ```
 --port <n>            listen port (default 8765)

@@ -56,7 +56,7 @@ struct LIFXLunaEditorView: View {
     private var header: some View {
         HStack {
             Label("Luna Color Studio — \(device.label)", systemImage: "circle.grid.3x3.fill")
-                .font(.title3.weight(.semibold))
+                .font(LumenType.display(size: 19, weight: .bold))
             Spacer()
             Button("Done") { dismiss() }
         }
@@ -185,10 +185,13 @@ struct LIFXLunaEditorView: View {
                         paintColor = swatch.color
                         paintTargets(swatch.color)
                     } label: {
-                        Circle()
+                        RoundedRectangle(cornerRadius: 2, style: .continuous)
                             .fill(swatch.color)
-                            .frame(width: 28, height: 28)
-                            .overlay(Circle().stroke(Lumen.hairlineStrong, lineWidth: 0.5))
+                            .frame(width: 30, height: 24)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                                    .stroke(Lumen.hairlineStrong, lineWidth: 1)
+                            )
                     }
                     .buttonStyle(.plain)
                     .help(swatch.label)
@@ -227,7 +230,7 @@ struct LIFXLunaEditorView: View {
             HStack(spacing: 8) {
                 ForEach(LunaLook.allCases) { look in
                     Button(look.title) { apply(look) }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(LumenSecondaryButtonStyle())
                         .tint(look.tint)
                 }
             }
@@ -248,7 +251,7 @@ struct LIFXLunaEditorView: View {
                 manager.applyLIFXMatrix(device, state: state)
                 hasEdits = false
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(LumenPrimaryButtonStyle())
             .keyboardShortcut(.defaultAction)
         }
     }

@@ -61,7 +61,7 @@ struct FavoriteOrganizerView: View {
     @Environment(\.dismiss) private var dismiss
     var body: some View {
         VStack(spacing: 12) {
-            HStack { Text("Organize Favorites").font(.title3.weight(.semibold)); Spacer(); Button("Done") { dismiss() } }
+            HStack { Text("Organize Favorites").font(LumenType.display(size: 19, weight: .bold)); Spacer(); Button("Done") { dismiss() } }
             Text("Drag favorites into the order you want. Lights, rooms, and scenes remain clearly labeled.").font(.caption).foregroundStyle(.secondary)
             List {
                 ForEach(manager.favoriteOrder) { reference in
@@ -90,16 +90,16 @@ private struct FavoriteRoomTile: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Image(systemName: "rectangle.stack.fill")
-                    .foregroundStyle(Color.accentColor)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Lumen.beamDim)
                 Text(room.name).lineLimit(1).help(room.name)
                 Toggle("", isOn: Binding(
                     get: { !lights.isEmpty && lights.allSatisfy { $0.isOn } },
                     set: { manager.setPower(in: room, on: $0) }
                 ))
-                .toggleStyle(.switch)
                 .labelsHidden()
-                .controlSize(.mini)
-                .tint(Lumen.pink)
+                .toggleStyle(LumenPowerKeyStyle(
+                    size: 24, spokenLabel: "All lights in \(room.name)"))
                 .disabled(lights.isEmpty)
             }
             Text(lights.isEmpty ? "No lights" : "\(onCount) of \(lights.count) on")
@@ -153,11 +153,7 @@ private struct FavoriteTileView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
-                Circle()
-                    .fill(device.isOn ? device.color : Color.gray.opacity(0.35))
-                    .frame(width: 18, height: 18)
-                    .overlay(Circle().stroke(.secondary.opacity(0.4), lineWidth: 0.5))
-                    .accessibilityHidden(true)
+                LumenLens(color: device.color, isOn: device.isOn, size: 18, isStale: device.isStale)
                 Text(device.label)
                     .font(.caption.weight(.medium))
                     .lineLimit(1)
@@ -165,11 +161,10 @@ private struct FavoriteTileView: View {
                     .frame(maxWidth: 110, alignment: .leading)
                     .help(device.label)
                 Toggle("", isOn: powerBinding)
-                    .toggleStyle(.switch)
                     .labelsHidden()
-                    .controlSize(.mini)
-                    .tint(Lumen.pink)
-                    .accessibilityLabel(device.isOn ? "Turn off \(device.label)" : "Turn on \(device.label)")
+                    .toggleStyle(LumenPowerKeyStyle(
+                        size: 24,
+                        spokenLabel: device.isOn ? "Turn off \(device.label)" : "Turn on \(device.label)"))
             }
         }
         .favoriteTileStyle()
@@ -187,13 +182,7 @@ private extension View {
         self
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Lumen.surfaceRaised)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(Lumen.hairline, lineWidth: 1)
-            )
+            .background(LumenPanelShape(radius: 3, chamfer: 10).fill(Lumen.surfaceRaised))
+            .overlay(LumenPanelShape(radius: 3, chamfer: 10).stroke(Lumen.hairline, lineWidth: 1))
     }
 }

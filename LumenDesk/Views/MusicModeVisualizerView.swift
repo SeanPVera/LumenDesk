@@ -12,8 +12,12 @@ struct MusicModeVisualizerView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Label("Choreography preview", systemImage: "waveform.path.ecg.rectangle")
-                    .font(.headline)
+                HStack(spacing: 8) {
+                    Image(systemName: "waveform.path.ecg.rectangle")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Lumen.beamDim)
+                    LumenEyebrow(text: "Choreography preview", tint: Lumen.beamDim, size: 10)
+                }
                 Spacer()
                 if frame?.sustainedEnergyEvent == true {
                     Label("Sustained energy", systemImage: "bolt.fill")
@@ -33,7 +37,7 @@ struct MusicModeVisualizerView: View {
             }
         }
         .padding(16)
-        .lumenCard(radius: 16, fill: Lumen.surfaceRaised)
+        .lumenCard(fill: Lumen.surfaceRaised)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Music Mode fixture preview")
     }
@@ -42,7 +46,7 @@ struct MusicModeVisualizerView: View {
         let states = frame?.states.filter { $0.fixtureID == fixture.id } ?? []
         return HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(fixture.label).font(.subheadline.weight(.semibold))
+                Text(fixture.label).font(LumenType.display(size: 14, weight: .semibold))
                 Text(fixture.segmentCount > 0 ? "\(fixture.segmentCount) RGBIC segments" : transportLabel(fixture.transport))
                     .font(.caption2)
                     .foregroundStyle(Lumen.textTertiary)

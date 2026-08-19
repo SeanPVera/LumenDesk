@@ -1,18 +1,24 @@
 # SwiftUI implementation handoff
 
-## Implementation status — applied July 14, 2026
+## Implementation status — Spectral Bench applied
 
-The first native implementation pass is now active in the app target:
+The visual system was replaced wholesale. `Theme.swift` holds the tokens, geometry, backdrop, panel treatment, button styles, and the mark; `DesignControls.swift` holds the instrument layer that replaces the platform's stock controls.
 
-- `RootView` launches `LumenDeskShellView` after onboarding.
-- macOS uses a `NavigationSplitView` with Home, Library, Automation, Devices, and Settings.
-- iPhone uses native tabs for Home, Library, Automation, and Devices, with Settings presented from the toolbar.
-- The Lighting Desk semantic palette, typography, aperture mark, and app accent are active globally.
-- Home includes global control, favorites, rooms, search/filtering, selection/bulk actions, compact device truth, and room/light detail.
-- Library, Automation, Devices, recovery, demo mode, scene preview/editing, schedules, and Segment Studio are wired to the existing `LightManager` behavior.
-- LAN protocols, discovery, command transport, persistence, scheduling semantics, and segment application behavior were not changed.
+- The palette moved from warm graphite and signal amber to cool obsidian neutrals plus one sampled dispersion ramp. Interface chrome is achromatic; colour means light.
+- Typography dropped the serif voice. `LumenType.display` is SF Pro Condensed, `LumenType.readout` is SF Mono for every measured value, and `LumenType.instrumentLabel` engraves uppercase labels.
+- Panels are `LumenPanelShape`: 5 pt radii with a 14 pt chamfer on the top-trailing corner, a lit top edge, a hairline, and a spectrum rail when active. `lumenCard(...)` keeps its old signature and now applies this treatment, so existing call sites did not need to change shape.
+- Every `Slider`, `.toggleStyle(.switch)`, `.pickerStyle(.segmented)`, and `.toggleStyle(.button)` in the app target was replaced by `LumenFader`, `LumenPowerKeyStyle`, `LumenRockerStyle`, `LumenSelector`, and `LumenChipStyle`. `.bordered` and `.borderedProminent` became the console key styles.
+- Coloured `Circle()` device swatches became `LumenLens` plates; capsule status badges became squared badges with indicator squares.
+- The mark was redrawn: the beam now leaves the aperture white and lands on the desk rail as the full spectrum. `scripts/generate_brand_assets.py` was rewritten to match and the icon family regenerated.
 
-Verification completed with a successful macOS Debug build and a clean direct type-check against the iOS 16 device SDK. A full iOS asset-catalog build remains environment-dependent because the attached Xcode installation currently reports no available simulator runtimes to `actool`.
+LAN protocols, discovery, command transport, persistence, scheduling semantics, and segment application behaviour were not changed.
+
+### Working on this system
+
+- Reach for `DesignControls.swift` before reaching for a stock control. If a screen needs something the library does not have, add it there rather than styling one call site.
+- A `ButtonStyle` or `ToggleStyle` is not part of the view hierarchy, so `@Environment` inside one is never populated. Both key styles extract an inner `View` (`LumenKeyFace`, `LumenPowerKeyFace`) to read `isEnabled` correctly — follow that pattern.
+- A custom style cannot read `.tint()` or `.controlSize()`. If a call site used either to express state, express it in the style instead: that is why the schedule day picker is a chip toggle rather than tinted buttons.
+- A `ToggleStyle` cannot read the text out of its own configuration label, which is why `LumenPowerKeyStyle` takes `spokenLabel` for VoiceOver.
 
 ## Recommended navigation change
 

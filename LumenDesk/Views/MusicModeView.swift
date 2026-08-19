@@ -43,13 +43,20 @@ struct MusicModeView: View {
     private var intro: some View {
         HStack(alignment: .top, spacing: 16) {
             ZStack {
-                RoundedRectangle(cornerRadius: 15).fill(Lumen.brandGradient)
-                Image(systemName: "music.note.list").font(LumenType.display(size: 26, weight: .semibold)).foregroundStyle(.white)
+                LumenPanelShape(radius: 3, chamfer: 16).fill(Lumen.surfaceLoud)
+                LumenPanelShape(radius: 3, chamfer: 16).stroke(Lumen.hairlineStrong, lineWidth: 1)
+                Image(systemName: "music.note.list")
+                    .font(.system(size: 22, weight: .medium))
+                    .foregroundStyle(Lumen.beamBright)
             }
-            .frame(width: 58, height: 58)
+            .frame(width: 56, height: 56)
 
-            VStack(alignment: .leading, spacing: 5) {
-                Text("Music Mode").font(LumenType.display(size: 22, weight: .bold))
+            VStack(alignment: .leading, spacing: 6) {
+                Text("MUSIC MODE")
+                    .font(LumenType.display(size: 22, weight: .bold))
+                    .tracking(1.3)
+                    .foregroundStyle(Lumen.textPrimary)
+                SpectrumRule(height: 2, tapered: true).frame(width: 120)
                 #if os(macOS)
                 Text("LumenDesk analyzes system audio locally and choreographs your lights without recording or retaining audio.")
                 #else
@@ -98,14 +105,14 @@ struct MusicModeView: View {
     private var presetPicker: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("Preset").font(LumenType.display(size: 15, weight: .semibold))
+                LumenEyebrow(text: "Preset", tint: Lumen.beamDim, size: 10)
                 Spacer()
                 Text(configuration.preset.summary)
                     .font(.caption)
                     .foregroundStyle(Lumen.textSecondary)
                     .lineLimit(2)
             }
-            Picker("Preset", selection: Binding(
+            LumenSelector(label: "Preset", selection: Binding(
                 get: { configuration.preset },
                 set: { preset in
                     if preset == .custom {
@@ -118,10 +125,9 @@ struct MusicModeView: View {
                     }
                     commitConfiguration()
                 }
-            )) {
-                ForEach(MusicModePreset.allCases) { preset in Text(preset.displayName).tag(preset) }
-            }
-            .pickerStyle(.segmented)
+            ), options: MusicModePreset.allCases.map {
+                LumenOption(value: $0, title: $0.displayName)
+            })
         }
         .padding(16)
         .lumenCard()
@@ -129,7 +135,7 @@ struct MusicModeView: View {
 
     private var primaryControls: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Show balance").font(LumenType.display(size: 15, weight: .semibold))
+            LumenEyebrow(text: "Show balance", tint: Lumen.beamDim, size: 10)
             musicSlider("Master brightness", value: binding(\.masterBrightness), icon: "sun.max.fill")
             musicSlider("Effect intensity", value: binding(\.effectIntensity), icon: "waveform")
             musicSlider("Beat sensitivity", value: binding(\.beatSensitivity), icon: "metronome.fill")
@@ -200,14 +206,15 @@ struct MusicModeView: View {
 
                 Divider().overlay(Lumen.hairline)
                 Toggle("Allow controlled flashes", isOn: binding(\.allowsFlashes))
+                    .toggleStyle(LumenRockerStyle())
                 musicSlider("Flash intensity", value: binding(\.flashIntensity), icon: "bolt.fill")
                     .disabled(configuration.photosensitivitySafeMode || !configuration.allowsFlashes)
-                HStack {
-                    Label("Maximum flash frequency", systemImage: "gauge.with.dots.needle.50percent")
-                    Slider(value: frequencyBinding, in: 0...FlashSafetyLimiter.hardMaximumFrequency, step: 0.25)
-                    Text(String(format: "%.2f/s", configuration.maximumFlashFrequency))
-                        .font(.caption.monospacedDigit()).frame(width: 48, alignment: .trailing)
-                }
+                LumenFader(label: "Maximum flash frequency",
+                           value: frequencyBinding,
+                           range: 0...FlashSafetyLimiter.hardMaximumFrequency,
+                           step: 0.25,
+                           track: .tint(Lumen.warning),
+                           format: { String(format: "%.2f/s", $0) })
                 .disabled(configuration.photosensitivitySafeMode || !configuration.allowsFlashes)
 
                 Toggle("Photosensitivity-safe mode", isOn: Binding(
@@ -253,11 +260,13 @@ struct MusicModeView: View {
     }
 
     private func musicSlider(_ title: String, value: Binding<Double>, icon: String) -> some View {
-        HStack(spacing: 12) {
-            Label(title, systemImage: icon).frame(width: 190, alignment: .leading)
-            Slider(value: value, in: 0...1)
-            Text("\(Int(value.wrappedValue * 100))%")
-                .font(.caption.monospacedDigit()).frame(width: 38, alignment: .trailing)
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Lumen.beamDim)
+                .frame(width: 18)
+                .accessibilityHidden(true)
+            LumenFader(label: title, value: value, track: .spectrum, showsScale: false)
         }
     }
 
@@ -345,19 +354,18 @@ private struct MusicModeInputStatusView: View {
                         .font(.caption.weight(.semibold)).foregroundStyle(Lumen.success)
                 }
             }
-            meter("Input", value: controller.latestSnapshot.level, color: Lumen.pinkBright)
-            HStack(spacing: 12) {
-                meter("Bass", value: controller.latestSnapshot.bass, color: Lumen.coral)
-                meter("Mids", value: controller.latestSnapshot.mids, color: Lumen.violetBright)
-                meter("Highs", value: controller.latestSnapshot.highs, color: Lumen.cyan)
-                VStack(spacing: 4) {
-                    Circle()
-                        .fill(controller.latestSnapshot.beat > 0.25 ? Lumen.goldBright : Lumen.hairlineStrong)
-                        .frame(width: 22, height: 22)
-                        .shadow(color: Lumen.gold.opacity(controller.latestSnapshot.beat), radius: 8)
-                    Text("Beat").font(.caption2).foregroundStyle(Lumen.textTertiary)
+            meter("Input", value: controller.latestSnapshot.level, color: Lumen.beamBright, segments: 32)
+            HStack(alignment: .bottom, spacing: 12) {
+                meter("Bass", value: controller.latestSnapshot.bass, color: Lumen.wave660, segments: 12)
+                meter("Mids", value: controller.latestSnapshot.mids, color: Lumen.wave530, segments: 12)
+                meter("Highs", value: controller.latestSnapshot.highs, color: Lumen.wave490, segments: 12)
+                VStack(spacing: 5) {
+                    LumenStatusDot(color: Lumen.beamBright,
+                                   size: 18,
+                                   lit: controller.latestSnapshot.beat > 0.25)
+                    LumenEyebrow(text: "Beat")
                 }
-                .frame(width: 50)
+                .frame(width: 46)
             }
             if controller.sourceStatus == .permissionDenied {
                 Text(permissionMessage)
@@ -371,16 +379,10 @@ private struct MusicModeInputStatusView: View {
         .lumenCard(fill: Lumen.surfaceRaised)
     }
 
-    private func meter(_ label: String, value: Double, color: Color) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            GeometryReader { proxy in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(Lumen.hairline)
-                    Capsule().fill(color.gradient).frame(width: proxy.size.width * max(0, min(1, value)))
-                }
-            }
-            .frame(height: 8)
-            Text(label).font(.caption2).foregroundStyle(Lumen.textTertiary)
+    private func meter(_ label: String, value: Double, color: Color, segments: Int) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            LumenMeter(value: value, tint: color, segments: segments, height: 9)
+            LumenEyebrow(text: label)
         }
         .frame(maxWidth: .infinity)
     }

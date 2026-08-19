@@ -88,7 +88,11 @@ struct ContentView: View {
                 VStack(spacing: 6) {
                     if !selectedIDs.subtracting(visibleDeviceIDs).isEmpty {
                         Text("\(selectedIDs.count) selected · \(selectedIDs.subtracting(visibleDeviceIDs).count) hidden by filters")
-                            .font(.caption).padding(.horizontal, 10).padding(.vertical, 5).background(Lumen.warning.opacity(0.18), in: Capsule())
+                            .font(.caption)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(Lumen.warning.opacity(0.16),
+                                        in: RoundedRectangle(cornerRadius: 2, style: .continuous))
                     }
                     BulkActionBar(selectedIDs: $selectedIDs, selectionMode: $selectionMode)
                     .padding(.bottom, manager.commandError == nil ? 16 : 72)
@@ -102,8 +106,10 @@ struct ContentView: View {
                     Button("Undo") { manager.undo() }.disabled(!manager.canUndo)
                     Button { manager.dismissLastActionSummary() } label: { Image(systemName: "xmark") }.buttonStyle(.plain)
                 }
-                .font(.caption).padding(.horizontal, 12).padding(.vertical, 8)
-                .background(reduceTransparency ? Color.black : Color.black.opacity(0.8), in: Capsule())
+                .font(.caption).padding(.horizontal, 14).padding(.vertical, 9)
+                .background(reduceTransparency ? Lumen.void : Lumen.void.opacity(0.9),
+                            in: LumenPanelShape(radius: 3, chamfer: 12))
+                .overlay(LumenPanelShape(radius: 3, chamfer: 12).stroke(Lumen.hairlineStrong, lineWidth: 1))
                 .padding(.bottom, manager.commandError == nil ? 16 : 70)
                 .accessibilityElement(children: .combine)
             }
@@ -276,18 +282,12 @@ struct ContentView: View {
                     .tint(manager.devices.contains(where: \.isOn) ? Lumen.pink : .secondary)
                     .help("Aggregate power state — mixed rooms are shown explicitly")
                     .accessibilityLabel("All lights: \(manager.aggregatePowerState(for: manager.devices).title)")
-                    Image(systemName: "sun.min").foregroundStyle(.secondary).font(.caption)
-                        .accessibilityHidden(true)
-                    Slider(value: globalBrightnessBinding, in: 0...1)
+                    LumenFader(label: "All lights",
+                               value: globalBrightnessBinding,
+                               track: .beam,
+                               showsScale: false)
                         .disabled(manager.devices.allSatisfy { !$0.isOn })
                         .accessibilityLabel("Global brightness")
-                        .accessibilityValue("\(Int(globalBrightnessBinding.wrappedValue * 100)) percent")
-                    Image(systemName: "sun.max").foregroundStyle(.secondary).font(.caption)
-                        .accessibilityHidden(true)
-                    Text("All Lights")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.secondary)
-                        .accessibilityHidden(true)
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
@@ -551,10 +551,13 @@ struct ContentView: View {
                 Text(manager.rooms.isEmpty ? "All Lights" : "Unassigned")
                     .font(LumenType.display(size: 22, weight: .black))
                 Text("\(visibleUnassigned.count)")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 6).padding(.vertical, 1)
-                    .background(Capsule().fill(Lumen.cyan.opacity(0.20)))
+                    .font(LumenType.readout(size: 11))
+                    .foregroundStyle(Lumen.cyan)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(
+                        RoundedRectangle(cornerRadius: 2, style: .continuous)
+                            .fill(Lumen.cyan.opacity(0.16))
+                    )
                 Spacer()
             }
             VStack(spacing: 10) {
@@ -840,12 +843,12 @@ struct CommandToastView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Lumen.surfaceRaised))
+        .background(LumenPanelShape(radius: 3, chamfer: 12).fill(Lumen.surfaceRaised))
         .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(Lumen.warning.opacity(0.5), lineWidth: 1)
+            LumenPanelShape(radius: 3, chamfer: 12)
+                .stroke(Lumen.warning.opacity(0.55), lineWidth: 1)
         )
-        .shadow(color: .black.opacity(0.4), radius: 12, y: 6)
+        .shadow(color: .black.opacity(0.5), radius: 14, y: 6)
         .frame(maxWidth: 420)
     }
 }
@@ -878,15 +881,22 @@ struct BulkActionBar: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Text("\(selectedIDs.count) selected")
-                .font(.callout.weight(.medium))
-                .accessibilityLabel("\(selectedIDs.count) light\(selectedIDs.count == 1 ? "" : "s") selected")
+            HStack(spacing: 7) {
+                Text("\(selectedIDs.count)")
+                    .font(LumenType.readout(size: 16, weight: .semibold))
+                    .foregroundStyle(Lumen.beamBright)
+                LumenEyebrow(text: "Selected")
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(selectedIDs.count) light\(selectedIDs.count == 1 ? "" : "s") selected")
 
-            Divider().frame(height: 16).accessibilityHidden(true)
+            Rectangle().fill(Lumen.hairline).frame(width: 1, height: 20).accessibilityHidden(true)
 
             Button("Turn On") { pendingAction = .power(true) }
+                .buttonStyle(LumenSecondaryButtonStyle(compact: true))
                 .accessibilityHint("Turns on \(selectedIDs.count) selected light\(selectedIDs.count == 1 ? "" : "s")")
             Button("Turn Off") { pendingAction = .power(false) }
+                .buttonStyle(LumenSecondaryButtonStyle(compact: true))
                 .accessibilityHint("Turns off \(selectedIDs.count) selected light\(selectedIDs.count == 1 ? "" : "s")")
 
             Menu("Move to\u{2026}") {
@@ -924,16 +934,16 @@ struct BulkActionBar: View {
             Spacer(minLength: 8)
 
             Button("Done") { exitSelection() }
-                .buttonStyle(LumenPrimaryButtonStyle())
+                .buttonStyle(LumenPrimaryButtonStyle(compact: true))
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Lumen.surfaceRaised))
+        .background(LumenPanelShape(radius: 3, chamfer: 14).fill(Lumen.surfaceRaised))
         .overlay(
-            RoundedRectangle(cornerRadius: 10)
+            LumenPanelShape(radius: 3, chamfer: 14)
                 .stroke(Lumen.hairlineStrong, lineWidth: 1)
         )
-        .shadow(color: .black.opacity(0.4), radius: 12, y: 6)
+        .shadow(color: .black.opacity(0.5), radius: 14, y: 6)
         .frame(maxWidth: 640)
         .confirmationDialog(
             pendingAction?.title ?? "Apply bulk action?",
@@ -985,16 +995,23 @@ struct DiscoveryDiagnosticsCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Label("Discovery diagnostics", systemImage: "wave.3.right.circle")
-                .font(.callout.weight(.semibold))
+            HStack(spacing: 8) {
+                Image(systemName: "wave.3.right.circle")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Lumen.cyan)
+                Text("DISCOVERY DIAGNOSTICS")
+                    .font(LumenType.instrumentLabel(size: 10))
+                    .tracking(1.1)
+            }
             HStack {
                 Text(manager.scanPhase)
+                    .font(.caption)
                 Spacer()
-                Text("Responses: \(manager.scanResponseCount)")
+                Text("RESPONSES \(manager.scanResponseCount)")
+                    .font(LumenType.readout(size: 11))
                     .monospacedDigit()
             }
-            .font(.caption)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(Lumen.textSecondary)
             if let date = manager.lastScanDate {
                 Text("Last scan: \(date.formatted(.relative(presentation: .named)))")
                     .font(.caption2).foregroundStyle(.tertiary)
@@ -1004,11 +1021,13 @@ struct DiscoveryDiagnosticsCard: View {
                     .font(.caption).foregroundStyle(Lumen.warning)
             }
             HStack {
-                Button("Open Local Network Privacy") {
+                Button("Local Network") {
                     PlatformOpener.openSettings(macPane: "x-apple.systempreferences:com.apple.preference.security?Privacy_LocalNetwork")
-                }.font(.caption)
+                }
+                .buttonStyle(LumenSecondaryButtonStyle(compact: true))
                 Spacer()
-                Button("Scan Again") { manager.scan() }.font(.caption)
+                Button("Scan Again") { manager.scan() }
+                    .buttonStyle(LumenSecondaryButtonStyle(compact: true))
             }
         }
         .padding(12)
@@ -1030,7 +1049,10 @@ struct KeyboardShortcutsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Keyboard Shortcuts").font(LumenType.display(size: 19, weight: .bold))
+            Text("KEYBOARD SHORTCUTS")
+                .font(LumenType.display(size: 18, weight: .bold))
+                .tracking(1.2)
+            SpectrumRule(height: 2, tapered: true).frame(width: 120)
             ForEach(shortcuts, id: \.0) { item in
                 HStack {
                     Text(item.0)
@@ -1040,11 +1062,22 @@ struct KeyboardShortcutsView: View {
                         .foregroundStyle(Lumen.textSecondary)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 3)
-                        .background(Capsule().fill(Lumen.surfaceRaised))
-                        .overlay(Capsule().stroke(Lumen.hairline, lineWidth: 1))
+                        .background(
+                            RoundedRectangle(cornerRadius: 3, style: .continuous)
+                                .fill(Lumen.surfaceRaised)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 3, style: .continuous)
+                                .stroke(Lumen.hairlineStrong, lineWidth: 1)
+                        )
                 }
             }
-            HStack { Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.defaultAction) }
+            HStack {
+                Spacer()
+                Button("Done") { dismiss() }
+                    .buttonStyle(LumenPrimaryButtonStyle(compact: true))
+                    .keyboardShortcut(.defaultAction)
+            }
         }
         .padding(20)
         .frame(width: 360)

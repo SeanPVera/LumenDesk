@@ -66,26 +66,28 @@ struct LightRowView: View {
         .accessibilityAction(named: "Open Inspector") { if !selectionMode { showingInspector = true } }
         .focusableCompat()
         .padding(16)
+        .background(panelShape.fill(device.isOn ? Lumen.surfaceRaised : Lumen.surface))
         .background(
-            RoundedRectangle(cornerRadius: Lumen.cardRadius, style: .continuous)
-                .fill(device.isOn ? Lumen.surfaceRaised : Lumen.surface)
+            panelShape.fill(
+                LinearGradient(colors: [Lumen.edgeHighlight, .clear],
+                               startPoint: .top, endPoint: .bottom)
+            )
         )
-        .overlay(
-            RoundedRectangle(cornerRadius: Lumen.cardRadius, style: .continuous)
-                .stroke(borderColor, lineWidth: borderWidth)
-        )
+        .clipShape(panelShape)
+        .overlay(panelShape.stroke(borderColor, lineWidth: borderWidth))
         .overlay(alignment: .leading) {
-            RoundedRectangle(cornerRadius: 3, style: .continuous)
-                .fill(device.isOn ? device.color : Lumen.textTertiary.opacity(0.35))
-                .frame(width: 5)
-                .padding(.vertical, 14)
+            // The fixture's own light, run down the leading edge of its panel.
+            Rectangle()
+                .fill(device.isOn ? device.color : Lumen.textTertiary.opacity(0.3))
+                .frame(width: 3)
+                .padding(.vertical, 10)
                 .shadow(color: device.color.opacity(device.isOn ? 0.8 : 0), radius: 10)
         }
-        .shadow(color: device.isOn ? device.color.opacity(0.28) : .black.opacity(0.24), radius: device.isOn ? 18 : 10, y: 8)
+        .shadow(color: device.isOn ? device.color.opacity(0.22) : .black.opacity(0.35), radius: device.isOn ? 16 : 8, y: 6)
         .overlay {
             if manager.newlyDiscoveredIDs.contains(device.id) {
-                RoundedRectangle(cornerRadius: Lumen.cardRadius, style: .continuous)
-                    .stroke(Color.accentColor, lineWidth: 2)
+                panelShape
+                    .stroke(Lumen.beamBright, lineWidth: 2)
                     .transition(.opacity.animation(.easeOut(duration: 1.5)))
             }
         }
@@ -123,27 +125,24 @@ struct LightRowView: View {
     }
 
     private var selectionIndicator: some View {
-        Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-            .font(LumenType.display(size: 22, weight: .black))
-            .foregroundStyle(selected ? Lumen.acid : Color.secondary)
+        Image(systemName: selected ? "checkmark.square.fill" : "square")
+            .font(.system(size: 19, weight: .medium))
+            .foregroundStyle(selected ? Lumen.beamBright : Lumen.textTertiary)
             .accessibilityHidden(true)
     }
 
     private var statusCircle: some View {
-        Circle()
-            .fill(device.isOn ? device.color : Color.gray.opacity(0.35))
-            .frame(width: Lumen.iconBubble, height: Lumen.iconBubble)
-            .overlay(Circle().stroke(.secondary.opacity(0.4), lineWidth: 1))
+        LumenLens(color: device.color,
+                  isOn: device.isOn,
+                  size: Lumen.iconBubble,
+                  isStale: device.isStale)
             .overlay(alignment: .bottomTrailing) {
                 if device.isStale {
                     Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 11))
+                        .font(.system(size: 10))
                         .foregroundStyle(Lumen.warning)
-                        .background(
-                            Circle()
-                                .fill(Lumen.surface)
-                                .frame(width: 13, height: 13)
-                        )
+                        .padding(1)
+                        .background(Lumen.surface)
                         .accessibilityLabel("Device may be offline")
                 }
             }
@@ -183,7 +182,8 @@ struct LightRowView: View {
                 renameField
             } else {
                 Text(device.label)
-                    .font(.system(size: 19, weight: .black, design: .rounded))
+                    .font(LumenType.display(size: 20, weight: .bold))
+                    .tracking(0.3)
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .help(device.label)
@@ -212,15 +212,23 @@ struct LightRowView: View {
 
     private var metadataRow: some View {
         HStack(spacing: 6) {
-            Text(device.brand.displayName)
-                .font(.caption.weight(.black))
+            Text(device.brand.displayName.uppercased())
+                .font(LumenType.instrumentLabel(size: 9))
+                .tracking(0.9)
                 .padding(.horizontal, 6).padding(.vertical, 2)
-                .background(device.brand.tint.opacity(0.18))
+                .background(
+                    RoundedRectangle(cornerRadius: 2, style: .continuous)
+                        .fill(device.brand.tint.opacity(0.16))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 2, style: .continuous)
+                        .stroke(device.brand.tint.opacity(0.4), lineWidth: 1)
+                )
                 .foregroundStyle(device.brand.tint)
-                .clipShape(Capsule())
                 .accessibilityHidden(true)
             Text(device.address)
-                .font(.caption).foregroundStyle(.secondary)
+                .font(LumenType.readout(size: 10))
+                .foregroundStyle(Lumen.textTertiary)
                 .accessibilityHidden(true)
             let command = manager.commandState(for: device.id)
             if command.phase != .idle {
@@ -239,11 +247,11 @@ struct LightRowView: View {
     private var staleRecoveryRow: some View {
         HStack(spacing: 6) {
             Button("Troubleshoot") { showingInspector = true }
-                .controlSize(.mini)
+                .buttonStyle(LumenSecondaryButtonStyle(compact: true))
             Button("Retry") { manager.retry(device) }
-                .controlSize(.mini)
+                .buttonStyle(LumenSecondaryButtonStyle(compact: true))
             Button("Rescan") { manager.scan() }
-                .controlSize(.mini)
+                .buttonStyle(LumenSecondaryButtonStyle(compact: true))
             Text(device.brand == .govee ? "Check LAN Control, bulb power, and Wi‑Fi." : "Check bulb power and same Wi‑Fi/subnet.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
@@ -262,17 +270,18 @@ struct LightRowView: View {
 
     private var powerToggle: some View {
         Toggle("", isOn: powerBinding)
-            .toggleStyle(.switch)
             .labelsHidden()
-            .tint(Lumen.pink)
+            .toggleStyle(LumenPowerKeyStyle(
+                size: 38,
+                spokenLabel: device.isOn ? "Turn off \(device.label)" : "Turn on \(device.label)"
+            ))
             .disabled(selectionMode)
-            .accessibilityLabel(device.isOn ? "Turn off \(device.label)" : "Turn on \(device.label)")
     }
 
     // MARK: - Controls
 
     private var controlsSection: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 12) {
             modePicker
             if colorModeBinding.wrappedValue == .color {
                 colorRow
@@ -386,14 +395,15 @@ struct LightRowView: View {
     }
 
     private var modePicker: some View {
-        Picker("Light mode", selection: colorModeBinding) {
-            ForEach(LightColorMode.allCases, id: \.self) { mode in
-                Text(mode.rawValue).tag(mode)
+        LumenSelector(
+            label: "\(device.label) light mode",
+            selection: colorModeBinding,
+            options: LightColorMode.allCases.map {
+                LumenOption(value: $0, title: $0.rawValue,
+                            symbol: $0 == .color ? "paintpalette" : "thermometer.medium")
             }
-        }
-        .pickerStyle(.segmented)
+        )
         .disabled(selectionMode || !device.isOn)
-        .accessibilityLabel("\(device.label) light mode")
     }
 
     private var colorRow: some View {
@@ -402,7 +412,10 @@ struct LightRowView: View {
                 swatchButton(swatch)
             }
             Spacer(minLength: 0)
-            Text(colorDescription).font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+            Text(colorDescription.uppercased())
+                .font(LumenType.instrumentLabel(size: 9))
+                .tracking(0.7)
+                .foregroundStyle(Lumen.textTertiary)
             ColorPicker("", selection: colorBinding, supportsOpacity: false)
                 .labelsHidden()
                 .disabled(controlsDisabled)
@@ -411,53 +424,45 @@ struct LightRowView: View {
     }
 
     private var brightnessRow: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "sun.min").foregroundStyle(.secondary)
-                .accessibilityHidden(true)
-            Slider(value: brightnessBinding, in: 0...1, onEditingChanged: { editing in
+        LumenFader(
+            label: "Brightness",
+            value: brightnessBinding,
+            track: .tint(device.isOn ? device.color : Lumen.beamDim),
+            onEditingChanged: { editing in
                 if !editing { manager.commitBrightness(device, value: device.brightness) }
-            })
-                .disabled(controlsDisabled)
-                .accessibilityLabel("\(device.label) brightness")
-                .accessibilityValue("\(Int(device.brightness * 100)) percent")
-            Image(systemName: "sun.max").foregroundStyle(.secondary)
-                .accessibilityHidden(true)
-        }
+            }
+        )
+        .disabled(controlsDisabled)
+        .accessibilityLabel("\(device.label) brightness")
     }
 
     // Colour-temperature slider — relevant when using white-light mode.
     private var kelvinRow: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "thermometer.low")
-                .foregroundStyle(.orange.opacity(0.7))
-                .font(.caption)
-                .accessibilityHidden(true)
-            Slider(value: kelvinBinding, in: 2500...9000, step: 100)
-                .disabled(controlsDisabled)
-                .accessibilityLabel("\(device.label) colour temperature")
-                .accessibilityValue("\(device.kelvin) Kelvin")
-            Image(systemName: "thermometer.high")
-                .foregroundStyle(.blue.opacity(0.7))
-                .font(.caption)
-                .accessibilityHidden(true)
-            Text("\(device.kelvin)K")
-                .font(.caption2.monospacedDigit())
-                .foregroundStyle(.secondary)
-                .frame(width: 40, alignment: .trailing)
-                .accessibilityHidden(true)
-        }
+        LumenFader(
+            label: "White balance",
+            value: kelvinBinding,
+            range: 2500...9000,
+            step: 100,
+            track: .kelvin,
+            format: { "\(Int($0))K" }
+        )
+        .disabled(controlsDisabled)
+        .accessibilityLabel("\(device.label) colour temperature")
+    }
+
+    private var panelShape: LumenPanelShape {
+        LumenPanelShape(radius: Lumen.cardRadius, chamfer: Lumen.chamfer)
     }
 
     private var borderColor: Color {
-        if selected { return Color.accentColor }
+        if selected { return Lumen.beamBright }
         if device.isStale { return Lumen.warning.opacity(0.6) }
         return Lumen.hairline
     }
 
     private var borderWidth: CGFloat {
-        if selected { return 2 }
-        if device.isStale { return 1 }
-        return 0.5
+        if selected { return 1.5 }
+        return 1
     }
 
     // MARK: - Inline rename
@@ -512,11 +517,14 @@ struct LightRowView: View {
         return Button {
             manager.setColor(device, color: swatch.color)
         } label: {
-            Circle()
+            RoundedRectangle(cornerRadius: 2, style: .continuous)
                 .fill(swatch.color)
-                .frame(width: 24, height: 24)
-                .overlay(Circle().stroke(active ? Color.white.opacity(0.9) : Color.primary.opacity(0.25),
-                                         lineWidth: active ? 1.5 : 0.5))
+                .frame(width: 26, height: 22)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 2, style: .continuous)
+                        .stroke(active ? Color.white.opacity(0.95) : Lumen.hairlineStrong,
+                                lineWidth: active ? 1.5 : 1)
+                )
                 .overlay(alignment: .center) {
                     if active {
                         Image(systemName: "checkmark")
@@ -524,8 +532,7 @@ struct LightRowView: View {
                             .foregroundStyle(.white)
                     }
                 }
-                .scaleEffect(active ? 1.2 : 1.0)
-                .animation(.spring(duration: 0.2), value: active)
+                .shadow(color: active ? swatch.color.opacity(0.55) : .clear, radius: 6)
                 .accessibilityHidden(true)
         }
         .buttonStyle(.plain)

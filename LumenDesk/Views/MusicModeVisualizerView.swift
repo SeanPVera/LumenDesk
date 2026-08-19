@@ -12,8 +12,12 @@ struct MusicModeVisualizerView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Label("Choreography preview", systemImage: "waveform.path.ecg.rectangle")
-                    .font(LumenType.display(size: 15, weight: .semibold))
+                HStack(spacing: 8) {
+                    Image(systemName: "waveform.path.ecg.rectangle")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Lumen.beamDim)
+                    LumenEyebrow(text: "Choreography preview", tint: Lumen.beamDim, size: 10)
+                }
                 Spacer()
                 if frame?.sustainedEnergyEvent == true {
                     Label("Sustained energy", systemImage: "bolt.fill")

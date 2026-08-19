@@ -291,37 +291,39 @@ struct RoomSectionView: View {
         switch roomPowerState {
         case .allOn:
             Toggle("", isOn: masterPowerBinding)
-                .toggleStyle(.switch)
                 .labelsHidden()
-                .controlSize(.small)
-                .tint(Lumen.pink)
+                .toggleStyle(LumenPowerKeyStyle(
+                    size: 32, spokenLabel: "All lights in \(room.name) on"))
                 .help("Turn off all lights in \(room.name)")
-                .accessibilityLabel("All lights in \(room.name) on")
         case .allOff:
             Toggle("", isOn: masterPowerBinding)
-                .toggleStyle(.switch)
                 .labelsHidden()
-                .controlSize(.small)
-                .tint(Lumen.pink)
+                .toggleStyle(LumenPowerKeyStyle(
+                    size: 32, spokenLabel: "All lights in \(room.name) off"))
                 .help("Turn on all lights in \(room.name)")
-                .accessibilityLabel("All lights in \(room.name) off")
         case .mixed:
+            // A half-lit key: the room disagrees with itself, and the control
+            // says so rather than rounding to on or off.
             Button {
                 // Tap when mixed: turn all ON (clarifies state, then user can toggle off)
                 manager.setPower(in: room, on: true)
             } label: {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color.secondary.opacity(0.25))
-                        .frame(width: 38, height: 22)
-                    RoundedRectangle(cornerRadius: 7)
-                        .stroke(Color.secondary.opacity(0.4), lineWidth: 1)
-                        .frame(width: 38, height: 22)
-                    Rectangle()
-                        .fill(Color.secondary)
-                        .frame(width: 10, height: 2)
-                        .cornerRadius(1)
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .fill(Lumen.surfaceRaised)
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .fill(Lumen.beamBright.opacity(0.85))
+                        .mask(alignment: .top) {
+                            Rectangle().frame(height: 16)
+                        }
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .stroke(Lumen.hairlineStrong, lineWidth: 1)
+                    Image(systemName: "power")
+                        .font(.system(size: 14, weight: .heavy))
+                        .foregroundStyle(Lumen.beamDim)
                 }
+                .frame(width: 32, height: 32)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .help("Some lights on \u{2014} tap to turn all on")
@@ -332,22 +334,12 @@ struct RoomSectionView: View {
     // MARK: - Master brightness row
 
     private var masterBrightnessRow: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "sun.min").foregroundStyle(.tertiary).font(.caption)
-                .accessibilityHidden(true)
-            Slider(value: masterBrightnessBinding, in: 0...1)
-                .disabled(selectionMode || allLights.allSatisfy { !$0.isOn })
-                .accessibilityLabel("\(room.name) brightness")
-                .accessibilityValue("\(Int(masterBrightnessBinding.wrappedValue * 100)) percent")
-            Image(systemName: "sun.max").foregroundStyle(.tertiary).font(.caption)
-                .accessibilityHidden(true)
-            Text("\(Int(masterBrightnessBinding.wrappedValue * 100))%")
-                .font(.caption2.monospacedDigit())
-                .foregroundStyle(.tertiary)
-                .frame(width: 32, alignment: .trailing)
-                .accessibilityHidden(true)
-        }
-        .padding(.horizontal, 4)
+        LumenFader(label: "\(room.name) brightness",
+                   value: masterBrightnessBinding,
+                   track: .beam,
+                   showsScale: false)
+            .disabled(selectionMode || allLights.allSatisfy { !$0.isOn })
+            .padding(.horizontal, 4)
     }
 
     // MARK: - Room color row

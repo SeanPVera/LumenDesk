@@ -143,6 +143,7 @@ The demo workspace includes a simulated Luna, so the editor can be explored with
 Govee RGBIC devices are individually addressable in zones, and the Govee Home app lets you color each zone separately. LumenDesk's **Segment Studio** brings that same specificity to the LAN:
 
 - A hardware-aware editor: continuous segmented tape for Strip Light S and COB models, numbered bead or bulb strands for string lights, curtain columns, and named physical-zone cards for the H60B0 uplighter.
+- **Uplighter Color Studio** knows the H60B0 lights only two of its three zones at a time. Each zone card has its own switch, one-tap combinations (Upper + Middle, Upper + Lower, Middle + Lower) pick a pair outright, and switching a third zone on hands the slot over from whichever has been lit longest and says so. A switched-off zone keeps the color it is holding, so turning it back on restores it. Scenes, undo, Music Mode, and the held-layout re-apply all follow the same choice, and no LumenDesk path asks the lamp for three lit zones.
 - **String Light Studio** follows the physical strand from the controller in numbered rows. H70C1 exposes all 100 Uni-IC beads; H70C2 and H70C4 expose all 200. Outdoor bulb strings use their actual bulb counts, including 30 for H7021 and 15 for H7020/H7028, with expandable models remaining adjustable.
 - H70B1 is treated as a curtain instead of a one-dimensional string. LumenDesk edits its 20 locally addressable vertical column groups; per-bead pixel artwork remains in Govee Home.
 - Tap or drag across segments to select them; paint the selection with swatches, recent colors, or the system color picker. With nothing selected, painting fills the whole strip.
@@ -153,11 +154,11 @@ Govee RGBIC devices are individually addressable in zones, and the Govee Home ap
 - **Live preview** streams edits to the light in real time (razer mode). The preview is volatile, so closing the studio without applying is a true cancel.
 - **Apply to Light** makes the layout durable. Supported COB strips and neon ropes store it in their own firmware through app-native commands relayed over the LAN. H612B Strip Light S, multi-zone lamps such as H60B0, string lights, curtain lights, and permanent-outdoor lights expose their editable layouts through the live streaming channel, so LumenDesk holds and restores those layouts while it runs.
 - 12 built-in segment presets (Rainbow Flow, Sunset Glow, Candy Cane, Fairy Dust, …) plus your own saved presets, automatically re-rendered to each device's segment count.
-- An adjustable unit count for expandable and unrecognized models. Fixed hardware such as H60B0 and H70C Christmas strings stays locked to its real physical topology.
+- An adjustable unit count for expandable and unrecognized models. Fixed hardware such as H60B0 and H70C Christmas strings stays locked to its real physical topology, including how many zones can be lit together.
 
 Known SKU families (H612B Strip Light S, H619x/H61Cx COB strips, H61Ax/H61Dx neon ropes, H60B0 three-zone uplighter lamps, H70Cx Christmas strings, H702x outdoor bulb strings, H70Bx curtains, and more) are detected from discovery and get the right layout and defaults automatically. Any other Govee light can still open the studio from its context menu.
 
-Segment layouts are captured into scenes, restored by undo/redo, re-applied after Identify flashes, and survive stopping an animated effect. The demo workspace includes a simulated COB strip and string lights so the studio can be explored without hardware.
+Segment layouts are captured into scenes, restored by undo/redo, re-applied after Identify flashes, and survive stopping an animated effect. The demo workspace includes a simulated COB strip, string lights, and an H60B0 uplighter so the studio — zone limit included — can be explored without hardware.
 
 Open the studio from the editor row on a light, or right-click its hardware-specific studio command. H60B0 uses **Uplighter Color Studio…**, string lights use **String Light Studio…**, and curtains use **Curtain Column Studio…**.
 

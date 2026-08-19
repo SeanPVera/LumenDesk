@@ -15,6 +15,131 @@ final class DomainTests: XCTestCase {
         XCTAssertEqual(profile.zoneNames, ["Upper Ripple", "Middle Ambient", "Lower Daily Illumination"])
     }
 
+    func testH60B0LightsOnlyTwoOfItsThreeZonesAtOnce() throws {
+        let profile = try XCTUnwrap(GoveeSegmentProfile.detect(sku: "H60B0"))
+
+        XCTAssertEqual(profile.simultaneousZoneLimit, 2)
+        XCTAssertTrue(profile.limitsSimultaneousZones)
+        XCTAssertEqual(profile.zoneShortNames, ["Upper", "Middle", "Lower"])
+        XCTAssertEqual(profile.zoneName(2), "Lower Daily Illumination")
+        XCTAssertEqual(profile.zoneShortName(2), "Lower")
+        XCTAssertEqual(profile.zoneCombinations, [[0, 1], [0, 2], [1, 2]])
+    }
+
+    func testZoneLimitSwitchesOffTheZoneLitLongest() throws {
+        let profile = try XCTUnwrap(GoveeSegmentProfile.detect(sku: "H60B0"))
+        let allThree = GoveeSegmentState(colors: [
+            .init(hex: 0xFF0000),
+            .init(hex: 0x00FF00),
+            .init(hex: 0x0000FF)
+        ])
+
+        // Nothing to go on: transport order decides.
+        XCTAssertEqual(profile.enforcingZoneLimit(allThree).poweredSegments, [0, 1])
+
+        // The studio hands over the zones newest-first, so the one switched on
+        // longest ago is the one that gives way.
+        let withHistory = profile.enforcingZoneLimit(allThree, keeping: [2, 1])
+        XCTAssertEqual(withHistory.poweredSegments, [1, 2])
+        XCTAssertFalse(withHistory.colors[0].isOn)
+        // The zone that went dark keeps the color it was holding.
+        XCTAssertEqual(withHistory.colors[0].rgb255.r, 255)
+
+        // A layout the lamp can already show is left alone.
+        var twoLit = allThree
+        twoLit.setPoweredSegments([0, 2])
+        XCTAssertEqual(profile.enforcingZoneLimit(twoLit), twoLit)
+    }
+
+    func testSegmentedStripsHaveNoZoneLimit() throws {
+        let profile = try XCTUnwrap(GoveeSegmentProfile.detect(sku: "H619A"))
+        let state = GoveeSegmentState(colors: Array(
+            repeating: GoveeSegmentColor(hex: 0x44FF88),
+            count: 15
+        ))
+
+        XCTAssertNil(profile.simultaneousZoneLimit)
+        XCTAssertFalse(profile.limitsSimultaneousZones)
+        XCTAssertTrue(profile.zoneCombinations.isEmpty)
+        XCTAssertEqual(profile.enforcingZoneLimit(state).poweredCount, 15)
+    }
+
+    func testSwitchedOffSegmentRendersDarkAndKeepsItsColor() throws {
+        let lit = GoveeSegmentColor(hex: 0xFF8800, brightness: 0.5)
+        let dark = lit.settingPower(false)
+
+        XCTAssertEqual(dark.rgb255.r, 255)
+        XCTAssertEqual(dark.rgb255.g, 136)
+        XCTAssertEqual(dark.brightness, 0.5, accuracy: 0.0001)
+        XCTAssertEqual(dark.renderedRGB255.r, 0)
+        XCTAssertEqual(dark.renderedRGB255.g, 0)
+        XCTAssertEqual(dark.renderedRGB255.b, 0)
+        XCTAssertEqual(lit.renderedRGB255.r, 255)
+        // Switched-off segments share one packet whatever colors they hold.
+        XCTAssertEqual(dark.packetKey, GoveeSegmentColor(hex: 0x1122FF, isOn: false).packetKey)
+        XCTAssertNotEqual(dark.packetKey, lit.packetKey)
+    }
+
+    func testSegmentStateReportsAndSetsZonePower() throws {
+        var state = GoveeSegmentState(colors: [
+            .init(hex: 0xFF0000),
+            .init(hex: 0x00FF00),
+            .init(hex: 0x0000FF)
+        ])
+
+        XCTAssertEqual(state.poweredCount, 3)
+        XCTAssertFalse(state.isFullyDark)
+
+        state.setPower(false, at: 1)
+        XCTAssertEqual(state.poweredSegments, [0, 2])
+
+        state.setPoweredSegments([1])
+        XCTAssertEqual(state.poweredSegments, [1])
+        XCTAssertEqual(state.poweredCount, 1)
+
+        state.setPoweredSegments([])
+        XCTAssertTrue(state.isFullyDark)
+    }
+
+    func testBlendedColorIgnoresSwitchedOffZones() throws {
+        var state = GoveeSegmentState(colors: [
+            .init(hex: 0xFF0000),
+            .init(hex: 0xFF0000),
+            .init(hex: 0x0000FF)
+        ])
+        state.setPower(false, at: 2)
+
+        let rgb = state.blendedColor.rgbComponents
+        XCTAssertEqual(rgb.r, 1, accuracy: 0.001)
+        XCTAssertEqual(rgb.b, 0, accuracy: 0.001)
+    }
+
+    func testSegmentColorArchivedBeforeZonePowerDecodesAsLit() throws {
+        let legacy = Data(#"{"red":1,"green":0.5,"blue":0,"brightness":0.4}"#.utf8)
+
+        let decoded = try JSONDecoder().decode(GoveeSegmentColor.self, from: legacy)
+
+        XCTAssertTrue(decoded.isOn)
+        XCTAssertEqual(decoded.brightness, 0.4, accuracy: 0.0001)
+
+        let dark = decoded.settingPower(false)
+        let roundTripped = try JSONDecoder().decode(GoveeSegmentColor.self,
+                                                    from: JSONEncoder().encode(dark))
+        XCTAssertEqual(roundTripped, dark)
+        XCTAssertFalse(roundTripped.isOn)
+    }
+
+    func testSegmentPresetsCarryColorsWithoutZonePower() throws {
+        let preset = GoveeSegmentPreset(
+            name: "Held Power",
+            stops: [GoveeSegmentColor(hex: 0xFF0000, isOn: false),
+                    GoveeSegmentColor(hex: 0x0000FF, isOn: false)],
+            fill: .repeating
+        )
+
+        XCTAssertTrue(preset.colors(for: 4).allSatisfy(\.isOn))
+    }
+
     func testH612BUsesSeventyFiveZoneStripEditor() throws {
         let profile = try XCTUnwrap(GoveeSegmentProfile.detect(sku: "h612b"))
 
@@ -92,7 +217,11 @@ final class DomainTests: XCTestCase {
 
         XCTAssertEqual(normalized.segmentCount, 3)
         XCTAssertEqual(normalized.colors.first, legacy.colors.first)
-        XCTAssertEqual(normalized.colors.last, legacy.colors.last)
+        // Grown to the lamp's three zones, the layout would light all of them,
+        // so normalizing also trims it to the two the lamp can run — keeping
+        // the colors it was holding.
+        XCTAssertEqual(normalized.colors.last, legacy.colors.last?.settingPower(false))
+        XCTAssertEqual(normalized.poweredSegments, [0, 1])
         XCTAssertTrue(normalized.isActive)
     }
 
@@ -112,14 +241,15 @@ final class DomainTests: XCTestCase {
             address: "192.0.2.10",
             sku: "H60B0"
         )
+        // Two lit zones and one dark one: what the lamp can actually show.
         let applied = GoveeSegmentState(colors: [
             .init(hex: 0xFF6600),
             .init(hex: 0x6633FF),
-            .init(hex: 0xFFF2CC)
+            .init(hex: 0xFFF2CC, isOn: false)
         ])
         let draft = GoveeSegmentState(colors: [
             .init(hex: 0xFF0000),
-            .init(hex: 0x00FF00),
+            .init(hex: 0x00FF00, isOn: false),
             .init(hex: 0x0000FF)
         ])
 
@@ -130,6 +260,96 @@ final class DomainTests: XCTestCase {
         expected.isActive = true
         XCTAssertEqual(manager.segmentState(for: device), expected)
         XCTAssertEqual(manager.activeSegmentState(for: device.id), expected)
+    }
+
+    @MainActor
+    func testApplyingUplighterLayoutStoresOnlyWhatTheLampCanLight() throws {
+        let manager = LightManager(
+            defaults: isolatedDefaults(),
+            persistenceStore: temporaryPersistenceStore()
+        )
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+        let device = LightDevice(
+            id: "govee:uplighter",
+            brand: .govee,
+            backendID: "AA:BB:CC:DD:EE:FF",
+            name: "Uplighter",
+            address: "192.0.2.10",
+            sku: "H60B0"
+        )
+
+        manager.applySegments(device, state: GoveeSegmentState(colors: [
+            .init(hex: 0xFF6600),
+            .init(hex: 0x6633FF),
+            .init(hex: 0xFFF2CC)
+        ]))
+
+        let stored = try XCTUnwrap(manager.activeSegmentState(for: device.id))
+        XCTAssertEqual(stored.poweredCount, 2)
+        XCTAssertEqual(stored.poweredSegments, [0, 1])
+        XCTAssertEqual(manager.segmentState(for: device).poweredSegments, [0, 1])
+    }
+
+    @MainActor
+    func testUplighterWithEveryZoneOffDoesNotSwitchTheLampOn() throws {
+        let manager = LightManager(
+            defaults: isolatedDefaults(),
+            persistenceStore: temporaryPersistenceStore()
+        )
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+        let device = LightDevice(
+            id: "govee:uplighter",
+            brand: .govee,
+            backendID: "AA:BB:CC:DD:EE:FF",
+            name: "Uplighter",
+            address: "192.0.2.10",
+            sku: "H60B0",
+            isOn: false
+        )
+        var dark = GoveeSegmentState(colors: [
+            .init(hex: 0xFF6600),
+            .init(hex: 0x6633FF),
+            .init(hex: 0xFFF2CC)
+        ])
+        dark.setPoweredSegments([])
+
+        manager.applySegments(device, state: dark)
+
+        XCTAssertFalse(device.isOn)
+        XCTAssertTrue(try XCTUnwrap(manager.activeSegmentState(for: device.id)).isFullyDark)
+
+        // A layout that lights something still switches the lamp on.
+        var lit = dark
+        lit.setPoweredSegments([1, 2])
+        manager.applySegments(device, state: lit)
+        XCTAssertTrue(device.isOn)
+    }
+
+    @MainActor
+    func testStripLayoutsKeepEverySegmentLitOnApply() throws {
+        let manager = LightManager(
+            defaults: isolatedDefaults(),
+            persistenceStore: temporaryPersistenceStore()
+        )
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+        let device = LightDevice(
+            id: "govee:strip",
+            brand: .govee,
+            backendID: "AA:BB:CC:DD:EE:01",
+            name: "Desk Strip",
+            address: "192.0.2.11",
+            sku: "H619A"
+        )
+
+        manager.applySegments(device, state: GoveeSegmentState(colors: Array(
+            repeating: GoveeSegmentColor(hex: 0x33CCFF),
+            count: 15
+        )))
+
+        XCTAssertEqual(try XCTUnwrap(manager.activeSegmentState(for: device.id)).poweredCount, 15)
     }
 
     func testSceneSerialization() throws {

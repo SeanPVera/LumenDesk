@@ -192,7 +192,10 @@ test('Govee paces commands at least 100ms apart per device', async () => {
   }
 })
 
-test('CORS and Private Network Access headers allow the Pages origin', async () => {
+// Kept for older Chrome versions that still run the PNA preflight. Current
+// Chrome gates this behind the Local Network Access permission prompt instead,
+// which no server header can satisfy.
+test('CORS and legacy Private Network Access headers allow the Pages origin', async () => {
   const res = await fetch(`${base}/devices`, {
     method: 'OPTIONS',
     headers: {

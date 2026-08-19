@@ -2,11 +2,15 @@ import http from 'node:http'
 import { clampPercent } from './color.js'
 
 // A page served from https://<user>.github.io may call this bridge because
-// 127.0.0.1 is a "potentially trustworthy" origin, so it is exempt from mixed
-// content blocking. Chrome additionally gates public -> private requests behind
-// Private Network Access: the preflight carries
-// Access-Control-Request-Private-Network and only proceeds if we answer
-// Access-Control-Allow-Private-Network: true.
+// 127.0.0.1 is a "potentially trustworthy" origin, exempt from mixed content
+// blocking.
+//
+// Reaching it is then gated by the browser. Chrome 142+ ships Local Network
+// Access, which asks the *user* for permission and replaced the earlier
+// Private Network Access design; nothing the server sends can grant it. The
+// Access-Control-Allow-Private-Network answer below is kept only for older
+// Chrome versions that still run the PNA preflight — it is harmless elsewhere,
+// but it is not what unlocks a modern browser.
 function applyCORS(req, res, allowedOrigins) {
   const origin = req.headers.origin
   const allowAll = allowedOrigins.includes('*')

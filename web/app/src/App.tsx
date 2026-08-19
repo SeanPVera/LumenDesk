@@ -5,6 +5,7 @@ import {
   type RGB,
   checkHealth,
   fetchDevices,
+  healthURL,
   hexToRGB,
   rgbToHex,
   setBrightness,
@@ -28,6 +29,15 @@ const PRESETS: { label: string; rgb: RGB }[] = [
   { label: 'Cool', rgb: { r: 220, g: 232, b: 255 } },
 ]
 
+/** A blocked local-network request and a bridge that is not running both
+ *  surface as an opaque TypeError, so the message stays honest about that. */
+function describeFailure(err: unknown): string {
+  if (err instanceof DOMException && err.name === 'TimeoutError') {
+    return 'The bridge did not answer in time.'
+  }
+  return 'Could not reach the bridge.'
+}
+
 function readStoredPort(): number {
   const raw = window.localStorage.getItem(PORT_KEY)
   const value = Number(raw)
@@ -40,6 +50,7 @@ export default function App() {
   const [devices, setDevices] = useState<Device[]>([])
   const [error, setError] = useState<string | null>(null)
   const [scanning, setScanning] = useState(false)
+  const [attempts, setAttempts] = useState(0)
   // Ids with a command in flight, so the poll does not overwrite the
   // optimistic value with a stale reading mid-flight.
   const inFlight = useRef(new Set<string>())
@@ -60,8 +71,9 @@ export default function App() {
       )
       setState('connected')
       setError(null)
-    } catch {
+    } catch (err) {
       setState('unavailable')
+      setError(describeFailure(err))
     }
   }, [port])
 
@@ -105,6 +117,19 @@ export default function App() {
     [poll],
   )
 
+  const connect = useCallback(async () => {
+    setState('checking')
+    setError(null)
+    try {
+      await checkHealth(port)
+      await poll()
+    } catch (err) {
+      setState('unavailable')
+      setError(describeFailure(err))
+      setAttempts(n => n + 1)
+    }
+  }, [port, poll])
+
   const scan = useCallback(async () => {
     setScanning(true)
     try {
@@ -120,7 +145,16 @@ export default function App() {
   }, [port, poll])
 
   if (state !== 'connected') {
-    return <BridgeSetup state={state} port={port} onPort={setPort} onRetry={poll} />
+    return (
+      <BridgeSetup
+        state={state}
+        port={port}
+        error={error}
+        attempts={attempts}
+        onPort={setPort}
+        onRetry={connect}
+      />
+    )
   }
 
   const reachable = devices.filter(d => d.reachable)
@@ -283,14 +317,19 @@ function EmptyState({ scanning, onScan }: { scanning: boolean; onScan: () => voi
 function BridgeSetup({
   state,
   port,
+  error,
+  attempts,
   onPort,
   onRetry,
 }: {
   state: BridgeState
   port: number
+  error: string | null
+  attempts: number
   onPort: (value: number) => void
   onRetry: () => void
 }) {
+  const checking = state === 'checking'
   return (
     <div className="shell centered">
       <div className="panel wide">
@@ -343,18 +382,59 @@ npm start`}</code>
               value={port}
               min={1}
               max={65535}
+              disabled={checking}
               onChange={event => onPort(Number(event.target.value) || DEFAULT_PORT)}
             />
           </label>
-          <button className="primary" onClick={onRetry}>
-            {state === 'checking' ? 'Checking…' : 'Connect'}
+          <button className="primary" onClick={onRetry} disabled={checking}>
+            {checking ? 'Connecting…' : 'Connect'}
           </button>
         </div>
 
-        <p className="hint">
-          Still not connecting? Check the bridge window for errors, and make sure the port above
-          matches the one it printed.
-        </p>
+        {attempts > 0 && !checking && (
+          <div className="diagnostic" role="alert">
+            <p className="diagnostic-head">
+              {error ?? 'Could not reach the bridge.'} Tried{' '}
+              <code>{healthURL(port)}</code>
+              {attempts > 1 && ` · ${attempts} attempts`}
+            </p>
+
+            <p>
+              <strong>1. Check whether the bridge is running.</strong> Open{' '}
+              <a href={healthURL(port)} target="_blank" rel="noreferrer">
+                {healthURL(port)}
+              </a>{' '}
+              in a new tab.
+            </p>
+            <ul>
+              <li>
+                If that tab shows <code>{'{"ok":true,…}'}</code>, the bridge is fine and your
+                browser is blocking this page from reaching it — see step 2.
+              </li>
+              <li>
+                If the tab fails to load, the bridge is not running. Start it with the commands
+                above, and check the port here matches the one it printed.
+              </li>
+            </ul>
+
+            <p>
+              <strong>2. Allow local network access.</strong> Chrome 142 and later ask permission
+              before a website may reach your local network. Look for that prompt, or click the
+              icon to the left of the address bar → <em>Site settings</em> → allow{' '}
+              <em>Local network access</em>, then press Connect again.
+            </p>
+
+            <p>
+              <strong>Still stuck?</strong> Run this page from your own machine instead — same
+              bridge, no permission needed:
+            </p>
+            <pre>
+              <code>{`cd LumenDesk/web/app
+npm install
+npm run dev`}</code>
+            </pre>
+          </div>
+        )}
       </div>
     </div>
   )

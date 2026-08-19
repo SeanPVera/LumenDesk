@@ -33,7 +33,7 @@ CI additionally runs, before the build steps:
 Other tooling:
 
 - **Brand assets**: `python scripts/generate_brand_assets.py` (needs Pillow) regenerates app icons. The icon geometry and palette are hard-coded in the script's `MASTER`/`MICRO`/`COLORS` constants — it does not read the SVGs in `BrandAssets/Logo/`, so a logo redesign means editing the script, not just the SVGs. A separate workflow (triggered by changes to the logo files, the script, or the appiconset) reruns the script on PRs and fails if the committed outputs under `LumenDesk/Assets.xcassets/AppIcon.appiconset`, `BrandAssets/AppIcons`, or `BrandAssets/Repository` don't match what it generates.
-- **Design prototype** (`design-prototype/`): standalone React/TypeScript/Vite UX mockup with no backend and no real lighting commands. `npm install && npm run dev` (port 4173); `npm run build` type-checks and builds. It is not part of the app build.
+- **Design prototype** (`design-prototype/`): standalone React/TypeScript/Vite UX mockup with no backend and no real lighting commands. `npm install && npm run dev` (port 4173); `npm run build` type-checks and builds. It is not part of the app build. It is published to GitHub Pages (`.github/workflows/deploy-pages.yml`) on pushes to `main` that touch `design-prototype/**`, and the same build runs on pull requests without deploying. Because a project site is served from a subpath, `vite.config.ts` takes `base` from the `BASE_PATH` environment variable (supplied by `actions/configure-pages`) and defaults to `/` when unset — keep asset references relative or bundler-resolved so both layouts work.
 
 ## Adding, renaming, or deleting Swift files
 

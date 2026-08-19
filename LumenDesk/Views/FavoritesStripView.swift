@@ -61,7 +61,7 @@ struct FavoriteOrganizerView: View {
     @Environment(\.dismiss) private var dismiss
     var body: some View {
         VStack(spacing: 12) {
-            HStack { Text("Organize Favorites").font(.title3.weight(.semibold)); Spacer(); Button("Done") { dismiss() } }
+            HStack { Text("Organize Favorites").font(LumenType.display(size: 19, weight: .bold)); Spacer(); Button("Done") { dismiss() } }
             Text("Drag favorites into the order you want. Lights, rooms, and scenes remain clearly labeled.").font(.caption).foregroundStyle(.secondary)
             List {
                 ForEach(manager.favoriteOrder) { reference in

@@ -44,12 +44,12 @@ struct MusicModeView: View {
         HStack(alignment: .top, spacing: 16) {
             ZStack {
                 RoundedRectangle(cornerRadius: 15).fill(Lumen.brandGradient)
-                Image(systemName: "music.note.list").font(.title).foregroundStyle(.white)
+                Image(systemName: "music.note.list").font(LumenType.display(size: 26, weight: .semibold)).foregroundStyle(.white)
             }
             .frame(width: 58, height: 58)
 
             VStack(alignment: .leading, spacing: 5) {
-                Text("Music Mode").font(.title2.bold())
+                Text("Music Mode").font(LumenType.display(size: 22, weight: .bold))
                 #if os(macOS)
                 Text("LumenDesk analyzes system audio locally and choreographs your lights without recording or retaining audio.")
                 #else
@@ -72,7 +72,7 @@ struct MusicModeView: View {
                 .fixedSize()
                 if isRunning {
                     Button("Stop", role: .destructive) { manager.stopEffect(scope: scope) }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(LumenSecondaryButtonStyle())
                 } else {
                     Button("Start Music Mode") {
                         commitConfiguration()
@@ -88,7 +88,7 @@ struct MusicModeView: View {
             }
         }
         .padding(18)
-        .lumenCard(radius: 18, highlighted: isRunning, glowColor: isRunning ? Lumen.pink : nil)
+        .lumenCard(highlighted: isRunning, glowColor: isRunning ? Lumen.pink : nil)
     }
 
     private var sourceAndInput: some View {
@@ -98,7 +98,7 @@ struct MusicModeView: View {
     private var presetPicker: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("Preset").font(.headline)
+                Text("Preset").font(LumenType.display(size: 15, weight: .semibold))
                 Spacer()
                 Text(configuration.preset.summary)
                     .font(.caption)
@@ -124,12 +124,12 @@ struct MusicModeView: View {
             .pickerStyle(.segmented)
         }
         .padding(16)
-        .lumenCard(radius: 16)
+        .lumenCard()
     }
 
     private var primaryControls: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Show balance").font(.headline)
+            Text("Show balance").font(LumenType.display(size: 15, weight: .semibold))
             musicSlider("Master brightness", value: binding(\.masterBrightness), icon: "sun.max.fill")
             musicSlider("Effect intensity", value: binding(\.effectIntensity), icon: "waveform")
             musicSlider("Beat sensitivity", value: binding(\.beatSensitivity), icon: "metronome.fill")
@@ -137,14 +137,14 @@ struct MusicModeView: View {
             musicSlider("Percussion sensitivity", value: binding(\.percussionSensitivity), icon: "hands.clap.fill")
         }
         .padding(16)
-        .lumenCard(radius: 16)
+        .lumenCard()
     }
 
     private var topologyEditor: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Spatial topology").font(.headline)
+                    Text("Spatial topology").font(LumenType.display(size: 15, weight: .semibold))
                     Text("Position is explicit and never inferred from discovery order. RGBIC segments continue the path inside their fixture.")
                         .font(.caption).foregroundStyle(Lumen.textSecondary)
                 }
@@ -183,7 +183,7 @@ struct MusicModeView: View {
             }
         }
         .padding(16)
-        .lumenCard(radius: 16)
+        .lumenCard()
     }
 
     private var advancedControls: some View {
@@ -246,10 +246,10 @@ struct MusicModeView: View {
             }
             .padding(.top, 14)
         } label: {
-            Text("Advanced controls").font(.headline)
+            Text("Advanced controls").font(LumenType.display(size: 15, weight: .semibold))
         }
         .padding(16)
-        .lumenCard(radius: 16)
+        .lumenCard()
     }
 
     private func musicSlider(_ title: String, value: Binding<Double>, icon: String) -> some View {
@@ -334,7 +334,7 @@ private struct MusicModeInputStatusView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Label(controller.sourceStatus.displayName, systemImage: sourceIcon)
-                    .font(.headline)
+                    .font(LumenType.display(size: 15, weight: .semibold))
                     .foregroundStyle(statusColor)
                 Spacer()
                 if isRunning && !controller.isAudioPlaying {
@@ -368,7 +368,7 @@ private struct MusicModeInputStatusView: View {
             }
         }
         .padding(16)
-        .lumenCard(radius: 16, fill: Lumen.surfaceRaised)
+        .lumenCard(fill: Lumen.surfaceRaised)
     }
 
     private func meter(_ label: String, value: Double, color: Color) -> some View {

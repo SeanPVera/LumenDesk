@@ -85,7 +85,7 @@ struct RoomSectionView: View {
             return !ids.isEmpty
         }
         .padding(18)
-        .lumenCard(radius: 26, fill: Lumen.surface.opacity(0.88), highlighted: manager.isFavoriteRoom(room.id), glowColor: allLights.contains(where: \.isOn) ? dominantRoomColor.opacity(0.6) : nil)
+        .lumenCard(fill: Lumen.surface.opacity(0.88), highlighted: manager.isFavoriteRoom(room.id), glowColor: allLights.contains(where: \.isOn) ? dominantRoomColor.opacity(0.6) : nil)
         .sheet(isPresented: $showingSchedules) {
             ScheduleEditorView(room: room)
                 .environmentObject(manager)

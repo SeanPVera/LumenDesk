@@ -124,7 +124,7 @@ struct LightRowView: View {
 
     private var selectionIndicator: some View {
         Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-            .font(.title2.weight(.black))
+            .font(LumenType.display(size: 22, weight: .black))
             .foregroundStyle(selected ? Lumen.acid : Color.secondary)
             .accessibilityHidden(true)
     }
@@ -199,7 +199,7 @@ struct LightRowView: View {
         VStack(alignment: .leading, spacing: 2) {
             TextField("Name", text: $nameDraft)
                 .textFieldStyle(.roundedBorder)
-                .font(.headline)
+                .font(LumenType.display(size: 15, weight: .semibold))
                 .focused($nameFocused)
                 .onSubmit(commitRename)
                 .onExitCommandCompat(perform: cancelRename)

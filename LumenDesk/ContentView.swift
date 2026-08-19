@@ -272,7 +272,7 @@ struct ContentView: View {
                         let state = manager.aggregatePowerState(for: manager.devices)
                         Label(state.title, systemImage: state.symbol).font(.caption.weight(.medium))
                     }
-                    .buttonStyle(.bordered).controlSize(.small)
+                    .buttonStyle(LumenSecondaryButtonStyle(compact: true))
                     .tint(manager.devices.contains(where: \.isOn) ? Lumen.pink : .secondary)
                     .help("Aggregate power state — mixed rooms are shown explicitly")
                     .accessibilityLabel("All lights: \(manager.aggregatePowerState(for: manager.devices).title)")
@@ -372,14 +372,14 @@ struct ContentView: View {
                 Label("On only", systemImage: "lightbulb.fill")
                     .font(.caption.weight(.medium))
             }
-            .toggleStyle(.button)
+            .toggleStyle(LumenChipStyle())
             .controlSize(.small)
             .tint(Lumen.gold)
             .help("Show only lights that are currently on")
             .accessibilityLabel("Filter to on lights only")
 
             Toggle(isOn: $showOfflineOnly) { Label("Offline", systemImage: "wifi.slash").font(.caption.weight(.medium)) }
-                .toggleStyle(.button).controlSize(.small).tint(Lumen.warning)
+                .toggleStyle(LumenChipStyle()).controlSize(.small).tint(Lumen.warning)
             Menu {
                 Button("All Vendors") { vendorFilter = nil }
                 Button("LIFX") { vendorFilter = .lifx }
@@ -516,7 +516,7 @@ struct ContentView: View {
     private var sceneSearchResults: some View {
         let matches = manager.scenes.filter { searchText.isEmpty || $0.name.localizedCaseInsensitiveContains(searchText) }
         return VStack(alignment: .leading, spacing: 12) {
-            HStack { Text("Scene Results").font(.headline); Text("\(matches.count)").foregroundStyle(.secondary); Spacer(); Button("Open Scene Library") { showingScenes = true } }
+            HStack { Text("Scene Results").font(LumenType.display(size: 15, weight: .semibold)); Text("\(matches.count)").foregroundStyle(.secondary); Spacer(); Button("Open Scene Library") { showingScenes = true } }
             if matches.isEmpty { Spacer(); Text("No scenes match your search.").foregroundStyle(.secondary).frame(maxWidth: .infinity); Spacer() }
             else { List(matches) { scene in HStack { Label(scene.name, systemImage: "wand.and.stars"); Spacer(); Text("\(scene.snapshots.count) lights").foregroundStyle(.secondary); Button("Preview & Apply") { previewScene = scene }.disabled(manager.availableDeviceIDs(for: scene).isEmpty) } }.listStyle(.inset) }
         }.padding(16)
@@ -549,7 +549,7 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Text(manager.rooms.isEmpty ? "All Lights" : "Unassigned")
-                    .font(.title2.weight(.black))
+                    .font(LumenType.display(size: 22, weight: .black))
                 Text("\(visibleUnassigned.count)")
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
@@ -599,7 +599,7 @@ struct ContentView: View {
 
     private var newRoomSheet: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("New Room").font(.title3.weight(.semibold))
+            Text("New Room").font(LumenType.display(size: 19, weight: .bold))
             Text("Group lights from any brand into a single custom room.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
@@ -611,7 +611,7 @@ struct ContentView: View {
                 Button("Cancel") { showingNewRoom = false }
                     .keyboardShortcut(.cancelAction)
                 Button("Create", action: createRoom)
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(LumenPrimaryButtonStyle())
                     .keyboardShortcut(.defaultAction)
                     .disabled(newRoomName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
@@ -636,7 +636,7 @@ struct ContentView: View {
             Image(systemName: "lightbulb.slash")
                 .font(.system(size: 44))
                 .foregroundStyle(.secondary)
-            Text("No lights found yet").font(.headline)
+            Text("No lights found yet").font(LumenType.display(size: 15, weight: .semibold))
             Text("Run through this checklist, then scan again.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
@@ -699,7 +699,7 @@ struct ContentView: View {
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: checked ? "checkmark.circle.fill" : "circle")
                     .foregroundStyle(checked ? Color.accentColor : Color.secondary)
-                    .font(.title3)
+                    .font(LumenType.display(size: 18, weight: .semibold))
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title).font(.callout.weight(.medium))
                     Text(detail).font(.caption).foregroundStyle(.secondary)
@@ -764,7 +764,7 @@ struct IdentifyLightsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Label("Identify Lights", systemImage: "lightbulb.2").font(.title3.weight(.semibold))
+                Label("Identify Lights", systemImage: "lightbulb.2").font(LumenType.display(size: 19, weight: .bold))
                 Spacer()
                 Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
             }
@@ -776,15 +776,15 @@ struct IdentifyLightsView: View {
                     ForEach(Array(manager.devices.enumerated()), id: \.element.id) { index, device in
                         VStack(alignment: .leading, spacing: 10) {
                             HStack {
-                                Text("\(index + 1)").font(.title2.bold()).foregroundStyle(Lumen.gold)
+                                Text("\(index + 1)").font(LumenType.display(size: 22, weight: .bold)).foregroundStyle(Lumen.gold)
                                 VStack(alignment: .leading) {
-                                    Text(device.label).font(.headline).lineLimit(1)
+                                    Text(device.label).font(LumenType.display(size: 15, weight: .semibold)).lineLimit(1)
                                     Text("\(device.brand.displayName) · \(device.address)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
                                 }
                                 Spacer()
                             }
                             HStack {
-                                Button("Flash") { manager.identify(device) }.buttonStyle(.borderedProminent)
+                                Button("Flash") { manager.identify(device) }.buttonStyle(LumenPrimaryButtonStyle())
                                 Button("Retry") { manager.retry(device) }
                                 Menu("Move") {
                                     Button("Unassigned") { manager.assign(lightID: device.id, toRoom: nil) }
@@ -798,7 +798,7 @@ struct IdentifyLightsView: View {
                             }
                         }
                         .padding(12)
-                        .lumenCard(radius: 10)
+                        .lumenCard()
                     }
                 }
                 .padding(.vertical, 4)
@@ -827,8 +827,7 @@ struct CommandToastView: View {
             Spacer(minLength: 0)
             if let undo = undoAction {
                 Button("Undo") { undo() }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
+                    .buttonStyle(LumenSecondaryButtonStyle(compact: true))
                     .accessibilityLabel("Undo last action")
             }
             Button(action: dismiss) {
@@ -925,7 +924,7 @@ struct BulkActionBar: View {
             Spacer(minLength: 8)
 
             Button("Done") { exitSelection() }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(LumenPrimaryButtonStyle())
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -1031,13 +1030,13 @@ struct KeyboardShortcutsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Keyboard Shortcuts").font(.title3.weight(.semibold))
+            Text("Keyboard Shortcuts").font(LumenType.display(size: 19, weight: .bold))
             ForEach(shortcuts, id: \.0) { item in
                 HStack {
                     Text(item.0)
                     Spacer()
                     Text(item.1)
-                        .font(.callout.monospaced())
+                        .font(LumenType.readout(size: 13))
                         .foregroundStyle(Lumen.textSecondary)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 3)

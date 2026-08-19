@@ -26,7 +26,7 @@ struct DiagnosticsCenterView: View {
                 Button("Open Settings") { PlatformOpener.openSettings(macPane: "") }
                 #endif
                 Spacer()
-                Button("Scan Again") { manager.scan() }.buttonStyle(.borderedProminent)
+                Button("Scan Again") { manager.scan() }.buttonStyle(LumenPrimaryButtonStyle())
             }
         }
         .padding(20).sheetFrame(minWidth: 520, idealWidth: 640)
@@ -45,7 +45,7 @@ struct DeviceInspectorView: View {
             HStack {
                 Circle().fill(device.isOn ? device.color : .gray).frame(width: 34, height: 34)
                 VStack(alignment: .leading) {
-                    Text(device.brand.displayName).font(.headline)
+                    Text(device.brand.displayName).font(LumenType.display(size: 15, weight: .semibold))
                     Text(device.isStale ? "Recovery recommended" : "Responding normally")
                         .font(.caption).foregroundStyle(device.isStale ? Lumen.warning : Color.green)
                 }
@@ -57,7 +57,7 @@ struct DeviceInspectorView: View {
             let command = manager.commandState(for: device.id)
             if command.phase != .idle || manager.confirmedStates[device.id] != nil {
                 VStack(alignment: .leading, spacing: 6) {
-                    Label("Desired vs. confirmed state", systemImage: command.phase.symbol).font(.headline)
+                    Label("Desired vs. confirmed state", systemImage: command.phase.symbol).font(LumenType.display(size: 15, weight: .semibold))
                     HStack {
                         VStack(alignment: .leading) { Text("Desired").font(.caption).foregroundStyle(.secondary); Text("\(device.isOn ? "On" : "Off") · \(Int(device.brightness * 100))% · \(device.kelvin) K") }
                         Spacer()
@@ -81,7 +81,7 @@ struct DeviceInspectorView: View {
                     #endif
                 }
                 Spacer()
-                if device.isStale { Button("Rescan Network") { manager.scan() }.buttonStyle(.borderedProminent) }
+                if device.isStale { Button("Rescan Network") { manager.scan() }.buttonStyle(LumenPrimaryButtonStyle()) }
             }
         }
         .padding(20).sheetFrame(minWidth: 480, idealWidth: 580)
@@ -186,7 +186,7 @@ struct PreciseColorEditorView: View {
                 Text("Recent colors").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                 HStack { ForEach(manager.recentColors) { recent in Button { set(recent.color) } label: { Circle().fill(recent.color).frame(width: 22, height: 22) }.buttonStyle(.plain).help("\(recent.name) · \(recent.hex)") } }
             }
-            HStack { Spacer(); Button("Apply White") { manager.setKelvin(device, kelvin: Int(kelvin)); dismiss() }; Button("Apply Color") { manager.setColor(device, color: candidate); dismiss() }.buttonStyle(.borderedProminent) }
+            HStack { Spacer(); Button("Apply White") { manager.setKelvin(device, kelvin: Int(kelvin)); dismiss() }; Button("Apply Color") { manager.setColor(device, color: candidate); dismiss() }.buttonStyle(LumenPrimaryButtonStyle()) }
         }
         .padding(20).sheetFrame(minWidth: 440, idealWidth: 540).background(LumenBackground(glow: false))
         .onAppear { set(device.color); kelvin = Double(device.kelvin) }
@@ -210,9 +210,9 @@ struct LightingParliamentView: View {
         VStack(spacing: 14) {
             sheetHeader("Democratic Lighting Parliament", icon: "building.columns.fill", dismiss: dismiss)
             Text("Every discovered bulb has a party affiliation and a completely unnecessary vote. Unreachable members abstain.").font(.callout).foregroundStyle(.secondary)
-            HStack { TextField("Motion before the chamber", text: $motion).textFieldStyle(.roundedBorder); Button("Call the Vote") { latest = manager.conveneParliament(motion: motion) }.buttonStyle(.borderedProminent); Button("Executive Order") { manager.executiveIlluminationOrder(motion: motion) } }
+            HStack { TextField("Motion before the chamber", text: $motion).textFieldStyle(.roundedBorder); Button("Call the Vote") { latest = manager.conveneParliament(motion: motion) }.buttonStyle(LumenPrimaryButtonStyle()); Button("Executive Order") { manager.executiveIlluminationOrder(motion: motion) } }
             if let latest {
-                HStack { result("Ayes", latest.ayes, .green); result("Noes", latest.noes, .red); result("Abstentions", latest.abstentions, .secondary); Spacer(); Text(latest.verdict).font(.headline) }.padding(12).lumenCard(radius: 10)
+                HStack { result("Ayes", latest.ayes, .green); result("Noes", latest.noes, .red); result("Abstentions", latest.abstentions, .secondary); Spacer(); Text(latest.verdict).font(LumenType.display(size: 15, weight: .semibold)) }.padding(12).lumenCard()
             }
             List(manager.parliamentMembers) { member in
                 HStack { Image(systemName: "lightbulb.fill").foregroundStyle(partyColor(member.party)); VStack(alignment: .leading) { Text(member.parliamentaryName); Text(member.party.rawValue).font(.caption).foregroundStyle(.secondary) }; Spacer(); Text(member.lastVote).font(.caption); Gauge(value: Double(member.approval), in: 0...100) { Text("Approval") }.gaugeStyle(.accessoryLinear).frame(width: 90) }
@@ -220,7 +220,7 @@ struct LightingParliamentView: View {
         }.padding(20).sheetFrame(minWidth: 680, idealWidth: 800, minHeight: 500, idealHeight: 640).background(LumenBackground(glow: false)).onAppear { manager.ensureParliament() }
     }
 
-    private func result(_ name: String, _ value: Int, _ color: Color) -> some View { VStack { Text("\(value)").font(.title2.bold()).foregroundStyle(color); Text(name).font(.caption) } }
+    private func result(_ name: String, _ value: Int, _ color: Color) -> some View { VStack { Text("\(value)").font(LumenType.display(size: 22, weight: .bold)).foregroundStyle(color); Text(name).font(.caption) } }
     private func partyColor(_ party: ParliamentMember.Party) -> Color { switch party { case .warmCoalition: return .orange; case .chromaticLeft: return .pink; case .efficiencyBloc: return .green; case .nocturnalCaucus: return .indigo } }
 }
 
@@ -234,18 +234,18 @@ struct ComplianceSuiteView: View {
         VStack(spacing: 14) {
             sheetHeader("International Bureau of Lumens", icon: "checkmark.seal.fill", dismiss: dismiss)
             Text("Certify scenes against fictional treaties, moth-attraction limits, naming law, and wall-paint diplomacy.").font(.callout).foregroundStyle(.secondary)
-            HStack { Picker("Scene", selection: $selectedSceneID) { Text("Choose a scene").tag(UUID?.none); ForEach(manager.scenes) { Text($0.name).tag(Optional($0.id)) } }.frame(maxWidth: 320); Button("Begin 47-Point Inspection") { if let id = selectedSceneID, let scene = manager.scenes.first(where: { $0.id == id }) { certification = manager.certify(scene) } }.buttonStyle(.borderedProminent).disabled(selectedSceneID == nil); Spacer() }
+            HStack { Picker("Scene", selection: $selectedSceneID) { Text("Choose a scene").tag(UUID?.none); ForEach(manager.scenes) { Text($0.name).tag(Optional($0.id)) } }.frame(maxWidth: 320); Button("Begin 47-Point Inspection") { if let id = selectedSceneID, let scene = manager.scenes.first(where: { $0.id == id }) { certification = manager.certify(scene) } }.buttonStyle(LumenPrimaryButtonStyle()).disabled(selectedSceneID == nil); Spacer() }
             if let certification {
                 VStack(alignment: .leading, spacing: 12) {
-                    HStack { Image(systemName: "seal.fill").font(.system(size: 52)).foregroundStyle(sealColor(certification.seal)); VStack(alignment: .leading) { Text("\(certification.seal.rawValue.capitalized) Seal").font(.title2.bold()); Text("Score \(certification.score)/100 · \(certification.treatyCode)").foregroundStyle(.secondary) }; Spacer()
+                    HStack { Image(systemName: "seal.fill").font(.system(size: 52)).foregroundStyle(sealColor(certification.seal)); VStack(alignment: .leading) { Text("\(certification.seal.rawValue.capitalized) Seal").font(LumenType.display(size: 22, weight: .bold)); Text("Score \(certification.score)/100 · \(certification.treatyCode)").foregroundStyle(.secondary) }; Spacer()
                         #if os(macOS)
                         Button("Export 47-Page Dossier…") { exportPDF(certification) }
                         #endif
                     }
                     ForEach(certification.findings, id: \.self) { Label($0, systemImage: "doc.text.magnifyingglass") }
                     Text("Certification is legally meaningless in every known jurisdiction.").font(.caption).foregroundStyle(.tertiary)
-                }.padding(16).lumenCard(radius: 12)
-            } else { Spacer(); VStack(spacing: 8) { Image(systemName: "checkmark.seal").font(.system(size: 36)).foregroundStyle(.secondary); Text("Awaiting Inspection").font(.headline); Text("Select a scene to begin an entirely unnecessary compliance process.").foregroundStyle(.secondary) }; Spacer() }
+                }.padding(16).lumenCard()
+            } else { Spacer(); VStack(spacing: 8) { Image(systemName: "checkmark.seal").font(.system(size: 36)).foregroundStyle(.secondary); Text("Awaiting Inspection").font(LumenType.display(size: 15, weight: .semibold)); Text("Select a scene to begin an entirely unnecessary compliance process.").foregroundStyle(.secondary) }; Spacer() }
         }.padding(20).sheetFrame(minWidth: 620, idealWidth: 760, minHeight: 440, idealHeight: 580).background(LumenBackground(glow: false))
     }
 
@@ -272,7 +272,7 @@ struct ComplianceSuiteView: View {
 
 @ViewBuilder
 private func sheetHeader(_ title: String, icon: String, dismiss: DismissAction) -> some View {
-    HStack { Label(title, systemImage: icon).font(.title3.weight(.semibold)); Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.defaultAction) }
+    HStack { Label(title, systemImage: icon).font(LumenType.display(size: 19, weight: .bold)); Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.defaultAction) }
 }
 
 struct ScenePreviewView: View {
@@ -329,7 +329,7 @@ struct ScenePreviewView: View {
                     manager.applyScene(scene, allowTurningOff: allowTurningOff, reviewed: true)
                     dismiss()
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(LumenPrimaryButtonStyle())
                 .disabled(availableIDs.isEmpty)
             }
         }
@@ -338,7 +338,7 @@ struct ScenePreviewView: View {
         .background(LumenBackground(glow: false))
         .onDisappear { stopRehearsal(restore: true) }
     }
-    private func previewMetric(_ title: String, _ value: Int, _ color: Color) -> some View { VStack { Text("\(value)").font(.title2.bold()).foregroundStyle(color); Text(title).font(.caption) }.frame(maxWidth: .infinity).padding(8).lumenCard(radius: 8) }
+    private func previewMetric(_ title: String, _ value: Int, _ color: Color) -> some View { VStack { Text("\(value)").font(LumenType.display(size: 22, weight: .bold)).foregroundStyle(color); Text(title).font(.caption) }.frame(maxWidth: .infinity).padding(8).lumenCard() }
 
     private func startRehearsal() {
         guard !availableIDs.isEmpty else { return }
@@ -423,12 +423,12 @@ struct DiscoveryInboxView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack { Label("Discovery Review", systemImage: "dot.radiowaves.left.and.right").font(.title2.bold()); Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.defaultAction) }
+            HStack { Label("Discovery Review", systemImage: "dot.radiowaves.left.and.right").font(LumenType.display(size: 22, weight: .bold)); Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.defaultAction) }
             Text("Review what changed during the latest scan instead of silently accepting network changes.").foregroundStyle(.secondary)
             if manager.discoveryChanges.isEmpty {
                 VStack(spacing: 8) {
                     Spacer(); Image(systemName: "checkmark.circle").font(.system(size: 36)).foregroundStyle(.secondary)
-                    Text("No discovery changes").font(.headline)
+                    Text("No discovery changes").font(LumenType.display(size: 15, weight: .semibold))
                     Text("Run a scan to compare new, returning, changed, and missing lights.").foregroundStyle(.secondary)
                     Spacer()
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -489,12 +489,12 @@ struct MissedAutomationsView: View {
     @Environment(\.dismiss) private var dismiss
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack { Label("Missed Automations", systemImage: "clock.badge.exclamationmark").font(.title2.bold()); Spacer(); Button("Done") { dismiss() } }
+            HStack { Label("Missed Automations", systemImage: "clock.badge.exclamationmark").font(LumenType.display(size: 22, weight: .bold)); Spacer(); Button("Done") { dismiss() } }
             Text("LumenDesk found actions that were scheduled while the Mac was asleep or unavailable. Nothing runs until you choose.").foregroundStyle(.secondary)
             List(manager.missedAutomations) { item in
                 HStack {
-                    VStack(alignment: .leading) { Text(item.roomName).font(.headline); Text("\(item.entry.action.displayName) · \(item.scheduledAt.formatted(date: .abbreviated, time: .shortened)) · \(TimeZone.current.identifier)").font(.caption).foregroundStyle(.secondary) }
-                    Spacer(); Button("Skip") { manager.skipMissedAutomation(item) }; Button("Run Now") { manager.runMissedAutomation(item) }.buttonStyle(.borderedProminent)
+                    VStack(alignment: .leading) { Text(item.roomName).font(LumenType.display(size: 15, weight: .semibold)); Text("\(item.entry.action.displayName) · \(item.scheduledAt.formatted(date: .abbreviated, time: .shortened)) · \(TimeZone.current.identifier)").font(.caption).foregroundStyle(.secondary) }
+                    Spacer(); Button("Skip") { manager.skipMissedAutomation(item) }; Button("Run Now") { manager.runMissedAutomation(item) }.buttonStyle(LumenPrimaryButtonStyle())
                 }
             }
         }.padding(20).sheetFrame(minWidth: 560, minHeight: 360)
@@ -520,7 +520,7 @@ struct SceneEditorView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Label("Edit Scene Draft", systemImage: "pencil.and.outline").font(.title2.bold())
+                Label("Edit Scene Draft", systemImage: "pencil.and.outline").font(LumenType.display(size: 22, weight: .bold))
                 if dirty { Text("Unsaved").font(.caption.bold()).padding(.horizontal, 7).padding(.vertical, 3).background(.orange.opacity(0.18), in: Capsule()) }
                 Spacer(); Button("History") { showingHistory = true }; Button("Close") { attemptDismiss() }
             }
@@ -547,7 +547,7 @@ struct SceneEditorView: View {
             HStack {
                 if manager.rehearsalSceneID == draft.id { Button("End & Restore") { manager.stopSceneRehearsal() }.tint(.orange) }
                 else { Button("Rehearse Selected") { manager.startSceneRehearsal(draft, deviceIDs: availableRehearsalIDs) }.disabled(availableRehearsalIDs.isEmpty) }
-                Spacer(); Button("Discard") { showingDiscard = true }.disabled(!dirty); Button("Save Draft") { manager.updateScene(draft, revisionLabel: restorePointLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Before edit" : restorePointLabel); dismiss() }.buttonStyle(.borderedProminent).disabled(!dirty || draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Spacer(); Button("Discard") { showingDiscard = true }.disabled(!dirty); Button("Save Draft") { manager.updateScene(draft, revisionLabel: restorePointLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Before edit" : restorePointLabel); dismiss() }.buttonStyle(LumenPrimaryButtonStyle()).disabled(!dirty || draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .padding(20).sheetFrame(minWidth: 650, idealWidth: 760, minHeight: 460, idealHeight: 600)
@@ -575,7 +575,7 @@ struct SceneHistoryView: View {
     let sceneID: UUID
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack { Text("Scene Version History").font(.title2.bold()); Spacer(); Button("Done") { dismiss() } }
+            HStack { Text("Scene Version History").font(LumenType.display(size: 22, weight: .bold)); Spacer(); Button("Done") { dismiss() } }
             List(manager.revisions(for: sceneID)) { revision in
                 HStack { VStack(alignment: .leading) { Text(revision.label); Text(revision.savedAt.formatted(date: .abbreviated, time: .shortened)).font(.caption).foregroundStyle(.secondary) }; Spacer(); Button("Restore") { manager.restoreSceneRevision(revision); dismiss() } }
             }
@@ -612,7 +612,7 @@ struct TodayLightingTimelineView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Label("Today’s Lighting Timeline", systemImage: "timeline.selection")
-                    .font(.headline)
+                    .font(LumenType.display(size: 15, weight: .semibold))
                 Spacer()
                 Button("Open Cockpit") { showingExperienceCenter = true }
                     .controlSize(.small)
@@ -728,13 +728,13 @@ struct ExperienceCenterView: View {
     private var hero: some View {
         HStack(spacing: 14) {
             VStack(alignment: .leading, spacing: 6) {
-                Text("A lighting cockpit, not a bulb list.").font(.title2.bold())
+                Text("A lighting cockpit, not a bulb list.").font(LumenType.display(size: 22, weight: .bold))
                 Text("Timeline, intent controls, spatial map, confidence badges, safety scenes, health explanations, tactile segment tools, and a diary make LumenDesk feel personal and trustworthy.")
                     .foregroundStyle(.secondary)
             }
             Spacer()
             VStack(alignment: .trailing) {
-                Text("\(manager.devices.filter(\.isOn).count)/\(manager.devices.count)").font(.largeTitle.bold()).foregroundStyle(Lumen.brandGradient)
+                Text("\(manager.devices.filter(\.isOn).count)/\(manager.devices.count)").font(LumenType.display(size: 34, weight: .bold)).foregroundStyle(Lumen.brandGradient)
                 Text("lights on").font(.caption).foregroundStyle(.secondary)
             }
         }.padding(16).lumenCard(highlighted: true, glowColor: Lumen.pink.opacity(0.35))
@@ -742,7 +742,7 @@ struct ExperienceCenterView: View {
 
     private func section<Content: View>(_ title: String, _ subtitle: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) { Text(title).font(.headline); Text(subtitle).font(.caption).foregroundStyle(.secondary) }
+            VStack(alignment: .leading, spacing: 2) { Text(title).font(LumenType.display(size: 15, weight: .semibold)); Text(subtitle).font(.caption).foregroundStyle(.secondary) }
             content()
         }
     }
@@ -771,7 +771,7 @@ struct ExperienceCenterView: View {
                         Spacer()
                         Button("Explain") { manager.commandError = lights.isEmpty ? "\(room.name) has no assigned lights." : "\(room.name): \(lights.filter(\.isStale).count) stale · \(lights.filter(\.isOn).count) on · automation \(manager.automationOverrides[room.id] == nil ? "active" : "paused")" }
                     }
-                }.padding(12).lumenCard(radius: 12)
+                }.padding(12).lumenCard()
             }
         }
     }
@@ -793,7 +793,7 @@ struct ExperienceCenterView: View {
                         previewScene = scene
                     }
                     .disabled(manager.availableDeviceIDs(for: scene).isEmpty)
-                }.padding(12).lumenCard(radius: 12, highlighted: selectedScene?.id == scene.id)
+                }.padding(12).lumenCard(highlighted: selectedScene?.id == scene.id)
             }
         }
     }
@@ -803,7 +803,7 @@ struct ExperienceCenterView: View {
             ForEach(Array(manager.devices.prefix(12)), id: \.id) { device in
                 let state = manager.commandState(for: device.id)
                 HStack { Image(systemName: state.phase.symbol).foregroundStyle(state.phase == .failed ? Lumen.danger : state.phase == .idle ? .green : Lumen.gold); VStack(alignment: .leading) { Text(device.label).lineLimit(1); Text(state.summary).font(.caption).foregroundStyle(.secondary).lineLimit(1) }; Spacer(); if state.phase == .failed { Button("Retry") { manager.retryCommand(for: device) } } }
-                    .padding(10).lumenCard(radius: 10)
+                    .padding(10).lumenCard()
             }
         }
     }
@@ -820,7 +820,7 @@ struct ExperienceCenterView: View {
     private var brushBoard: some View {
         LazyVGrid(columns: columns, spacing: 10) {
             ForEach([("Mirror", "rectangle.split.2x1", "Paint symmetric segment layouts."), ("Sparkle", "sparkles", "Random accent pixels."), ("Wave", "water.waves", "Sine-gradient sweep."), ("Eyedropper", "eyedropper", "Sample any segment."), ("Eraser", "eraser", "Restore neutral cells."), ("Locks", "lock.fill", "Protect finished segments.")], id: \.0) { item in
-                VStack(alignment: .leading, spacing: 6) { Label(item.0, systemImage: item.1).font(.headline); Text(item.2).font(.caption).foregroundStyle(.secondary) }.padding(12).lumenCard(radius: 12)
+                VStack(alignment: .leading, spacing: 6) { Label(item.0, systemImage: item.1).font(LumenType.display(size: 15, weight: .semibold)); Text(item.2).font(.caption).foregroundStyle(.secondary) }.padding(12).lumenCard()
             }
         }
     }
@@ -829,7 +829,7 @@ struct ExperienceCenterView: View {
         VStack(spacing: 8) {
             ForEach(Array(manager.activityEvents.prefix(8)), id: \.id) { event in
                 HStack { Image(systemName: event.isFailure ? "exclamationmark.triangle.fill" : "checkmark.circle").foregroundStyle(event.isFailure ? Lumen.warning : .green); VStack(alignment: .leading) { Text(event.title); Text("\(event.date.formatted(date: .omitted, time: .shortened)) · \(event.detail)").font(.caption).foregroundStyle(.secondary).lineLimit(1) }; Spacer() }
-                    .padding(10).lumenCard(radius: 10)
+                    .padding(10).lumenCard()
             }
         }
     }
@@ -839,7 +839,7 @@ struct ExperienceCenterView: View {
             ForEach(Array(differentiators.enumerated()), id: \.offset) { index, text in
                 Label("\(index + 1). \(text)", systemImage: "checkmark.seal.fill")
                     .font(.caption.weight(.medium)).foregroundStyle(index < 5 ? Lumen.gold : Lumen.textSecondary)
-                    .padding(10).frame(maxWidth: .infinity, alignment: .leading).lumenCard(radius: 10)
+                    .padding(10).frame(maxWidth: .infinity, alignment: .leading).lumenCard()
             }
         }
     }
@@ -847,8 +847,8 @@ struct ExperienceCenterView: View {
     private var differentiators: [String] { ["Today timeline", "Intent buttons", "Home map", "Before/after previews", "Scene confidence", "Actionable mood ring", "Command tracker", "Smart undo previews", "Quiet evening cockpit", "Room personalities", "Adaptive suggestions", "Segment brushes", "Identify choreography", "Network health lens", "Safety scenes", "Explain state cards", "Palette generator concepts", "Timed rehearsals", "Offline room states", "Lighting diary"] }
 
     private func intentCard(_ title: String, _ detail: String, _ icon: String, _ id: String) -> some View { safetyCard(title, detail, icon) { if let theme = LightingCatalog.themes.first(where: { $0.id == id }) { manager.applyTheme(theme) } else if let effect = LightingCatalog.effects.first(where: { $0.id == id }) { manager.startEffect(effect) } } }
-    private func safetyCard(_ title: String, _ detail: String, _ icon: String, action: @escaping () -> Void) -> some View { Button(action: action) { VStack(alignment: .leading, spacing: 8) { Label(title, systemImage: icon).font(.headline); Text(detail).font(.caption).foregroundStyle(.secondary) }.frame(maxWidth: .infinity, alignment: .leading).padding(12).lumenCard(radius: 12, highlighted: title == "All Off") }.buttonStyle(.plain).disabled(manager.devices.isEmpty) }
-    private func healthCard(_ title: String, _ detail: String, _ color: Color, _ icon: String, action: @escaping () -> Void) -> some View { Button(action: action) { VStack(alignment: .leading, spacing: 8) { Label(title, systemImage: icon).font(.headline).foregroundStyle(color); Text(detail).font(.caption).foregroundStyle(.secondary) }.frame(maxWidth: .infinity, alignment: .leading).padding(12).lumenCard(radius: 12) }.buttonStyle(.plain) }
+    private func safetyCard(_ title: String, _ detail: String, _ icon: String, action: @escaping () -> Void) -> some View { Button(action: action) { VStack(alignment: .leading, spacing: 8) { Label(title, systemImage: icon).font(LumenType.display(size: 15, weight: .semibold)); Text(detail).font(.caption).foregroundStyle(.secondary) }.frame(maxWidth: .infinity, alignment: .leading).padding(12).lumenCard(highlighted: title == "All Off") }.buttonStyle(.plain).disabled(manager.devices.isEmpty) }
+    private func healthCard(_ title: String, _ detail: String, _ color: Color, _ icon: String, action: @escaping () -> Void) -> some View { Button(action: action) { VStack(alignment: .leading, spacing: 8) { Label(title, systemImage: icon).font(LumenType.display(size: 15, weight: .semibold)).foregroundStyle(color); Text(detail).font(.caption).foregroundStyle(.secondary) }.frame(maxWidth: .infinity, alignment: .leading).padding(12).lumenCard() }.buttonStyle(.plain) }
     private func confidenceBadge(missing: Int, stale: Int) -> some View { Text(missing + stale == 0 ? "Ready" : "Partial").font(.caption2.bold()).padding(.horizontal, 7).padding(.vertical, 3).background(Capsule().fill((missing + stale == 0 ? Color.green : Lumen.warning).opacity(0.2))) }
     private func explain(_ device: LightDevice) -> String { device.isStale ? "last seen earlier — scan or check power" : device.isOn ? "on at \(Int(device.brightness * 100))%" : "off and ready" }
 }

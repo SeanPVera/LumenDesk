@@ -77,7 +77,7 @@ struct GoveeSegmentEditorView: View {
     private var header: some View {
         HStack {
             Label("\(studioName) — \(device.label)", systemImage: layout.icon)
-                .font(.title3.weight(.semibold))
+                .font(LumenType.display(size: 19, weight: .bold))
             Spacer()
             Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
         }
@@ -649,7 +649,7 @@ struct GoveeSegmentEditorView: View {
                 Button("Revert") { revert() }
                     .disabled(openingState == nil || openingState == draft)
                 Button("Apply to Light") { applyToLight() }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(LumenPrimaryButtonStyle())
             }
         }
     }

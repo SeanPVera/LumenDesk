@@ -64,7 +64,7 @@ struct MenuBarPopoverView: View {
                 Label("All Off", systemImage: "power")
                     .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(LumenPrimaryButtonStyle())
             .tint(.red)
             .disabled(manager.devices.isEmpty)
             ForEach([0.1, 0.3, 0.6, 1.0], id: \.self) { value in

@@ -91,7 +91,7 @@ struct OnboardingView: View {
             Spacer(minLength: 12)
             LumenWordmark(size: 44)
             Text("One desk for every local light.")
-                .font(.title3)
+                .font(LumenType.display(size: 18, weight: .semibold))
                 .foregroundStyle(Lumen.textSecondary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
@@ -108,7 +108,7 @@ struct OnboardingView: View {
 
             VStack(alignment: .leading, spacing: 10) {
                 Toggle("Quiet interface", isOn: $quietInterface)
-                    .font(.headline)
+                    .font(LumenType.display(size: 15, weight: .semibold))
                 Text("Keeps the work surface flat and removes the faint brand beam. You can change it later in Settings.")
                     .font(.caption)
                     .foregroundStyle(Lumen.textSecondary)
@@ -122,12 +122,12 @@ struct OnboardingView: View {
     private func valueRow(_ icon: String, _ tint: Color, _ title: String, _ detail: String) -> some View {
         HStack(spacing: 14) {
             Image(systemName: icon)
-                .font(.title2)
+                .font(LumenType.display(size: 21, weight: .semibold))
                 .foregroundStyle(tint)
                 .frame(width: 34)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.headline).foregroundStyle(Lumen.textPrimary)
+                Text(title).font(LumenType.display(size: 15, weight: .semibold)).foregroundStyle(Lumen.textPrimary)
                 Text(detail).font(.callout).foregroundStyle(Lumen.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -172,12 +172,12 @@ struct OnboardingView: View {
     private func checklistCard(_ icon: String, _ tint: Color, _ title: String, _ detail: String) -> some View {
         HStack(alignment: .top, spacing: 14) {
             Image(systemName: icon)
-                .font(.title3)
+                .font(LumenType.display(size: 18, weight: .semibold))
                 .foregroundStyle(tint)
                 .frame(width: 28)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.headline).foregroundStyle(Lumen.textPrimary)
+                Text(title).font(LumenType.display(size: 15, weight: .semibold)).foregroundStyle(Lumen.textPrimary)
                 Text(detail).font(.callout).foregroundStyle(Lumen.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -217,7 +217,7 @@ struct OnboardingView: View {
                         .font(.system(size: 40))
                         .foregroundStyle(Lumen.textTertiary)
                     Text("No lights found yet.")
-                        .font(.headline)
+                        .font(LumenType.display(size: 15, weight: .semibold))
                         .foregroundStyle(Lumen.textPrimary)
                     Text("Re-check the steps before, then scan again. You can also finish setup and scan later.")
                         .font(.callout)
@@ -348,7 +348,7 @@ struct OnboardingView: View {
                 .foregroundStyle(Lumen.textPrimary)
 
             Text(doneRecap)
-                .font(.title3)
+                .font(LumenType.display(size: 18, weight: .semibold))
                 .foregroundStyle(Lumen.textSecondary)
                 .multilineTextAlignment(.center)
 
@@ -565,7 +565,7 @@ private struct AssignChip: View {
                     }
                     Spacer(minLength: 0)
                     Image(systemName: inActiveRoom ? "checkmark.circle.fill" : "plus.circle")
-                        .font(.title3)
+                        .font(LumenType.display(size: 18, weight: .semibold))
                         .foregroundStyle(inActiveRoom ? Lumen.signal : Lumen.textTertiary)
                         .accessibilityHidden(true)
                 }

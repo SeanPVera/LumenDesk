@@ -28,6 +28,7 @@
 		B100000000000000000016 /* MenuBarPopoverView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000016 /* MenuBarPopoverView.swift */; };
 		B100000000000000000017 /* ScheduleEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000017 /* ScheduleEditorView.swift */; };
 		B100000000000000000018 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000018 /* Theme.swift */; };
+		B10000000000000000002E /* DesignControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000002E /* DesignControls.swift */; };
 		B100000000000000000019 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000019 /* OnboardingView.swift */; };
 		B10000000000000000001A /* LightingCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000001A /* LightingCatalog.swift */; };
 		B10000000000000000001B /* AudioLevelMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000001B /* AudioLevelMonitor.swift */; };
@@ -94,6 +95,7 @@
 		A100000000000000000016 /* MenuBarPopoverView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarPopoverView.swift; sourceTree = "<group>"; };
 		A100000000000000000017 /* ScheduleEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleEditorView.swift; sourceTree = "<group>"; };
 		A100000000000000000018 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
+		A10000000000000000002E /* DesignControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignControls.swift; sourceTree = "<group>"; };
 		A100000000000000000019 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		A10000000000000000001A /* LightingCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LightingCatalog.swift; sourceTree = "<group>"; };
 		A10000000000000000001B /* AudioLevelMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioLevelMonitor.swift; sourceTree = "<group>"; };
@@ -162,6 +164,7 @@
 				A100000000000000000001 /* LumenDeskApp.swift */,
 				A100000000000000000002 /* ContentView.swift */,
 				A100000000000000000018 /* Theme.swift */,
+				A10000000000000000002E /* DesignControls.swift */,
 				C100000000000000000003 /* Models */,
 				C100000000000000000004 /* Services */,
 				C100000000000000000007 /* Views */,
@@ -390,6 +393,7 @@
 				B100000000000000000016 /* MenuBarPopoverView.swift in Sources */,
 				B100000000000000000017 /* ScheduleEditorView.swift in Sources */,
 				B100000000000000000018 /* Theme.swift in Sources */,
+				B10000000000000000002E /* DesignControls.swift in Sources */,
 				B100000000000000000019 /* OnboardingView.swift in Sources */,
 				B10000000000000000001A /* LightingCatalog.swift in Sources */,
 				B10000000000000000001B /* AudioLevelMonitor.swift in Sources */,

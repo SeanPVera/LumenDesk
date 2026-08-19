@@ -87,7 +87,7 @@ struct ScenesView: View {
                 Image(systemName: "wand.and.stars").foregroundStyle(.white)
             }
             VStack(alignment: .leading, spacing: 2) {
-                Text("Lighting Library").font(.title3.weight(.semibold))
+                Text("Lighting Library").font(LumenType.display(size: 19, weight: .bold))
                 Text("Color and motion designed for both LIFX and Govee bulbs.")
                     .font(.caption).foregroundStyle(.secondary)
             }
@@ -102,14 +102,14 @@ struct ScenesView: View {
                             Text(manager.scopeDisplayName(runScope)).font(.caption2).foregroundStyle(.secondary)
                         }
                         Button("Stop") { manager.stopEffect(scope: runScope) }
-                            .buttonStyle(.bordered).controlSize(.small)
+                            .buttonStyle(LumenSecondaryButtonStyle(compact: true))
                     }
                     .padding(6)
                     .background(Capsule().fill(Lumen.pink.opacity(0.14)))
                 }
             }
             if activeEffectScopes.count > 1 {
-                Button("Stop All") { manager.stopAllEffects() }.buttonStyle(.bordered)
+                Button("Stop All") { manager.stopAllEffects() }.buttonStyle(LumenSecondaryButtonStyle())
             }
             Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
         }
@@ -207,13 +207,13 @@ struct ScenesView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Image(systemName: theme.icon)
-                    .font(.title2).foregroundStyle(theme.colors.first?.color ?? Lumen.violetBright)
+                    .font(LumenType.display(size: 21, weight: .semibold)).foregroundStyle(theme.colors.first?.color ?? Lumen.violetBright)
                 Spacer()
                 Text(theme.category.rawValue.uppercased())
                     .font(.system(size: 9, weight: .bold)).tracking(0.7)
                     .foregroundStyle(.secondary)
             }
-            Text(theme.name).font(.headline)
+            Text(theme.name).font(LumenType.display(size: 15, weight: .semibold))
             Text(theme.summary)
                 .font(.caption).foregroundStyle(.secondary)
                 .lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
@@ -229,7 +229,7 @@ struct ScenesView: View {
                     .font(.caption2).foregroundStyle(.secondary)
                 Spacer()
                 Button("Apply") { manager.applyTheme(theme, scope: scope) }
-                    .buttonStyle(.borderedProminent).controlSize(.small)
+                    .buttonStyle(LumenPrimaryButtonStyle(compact: true))
                     .disabled(scopedDeviceCount == 0)
                     .help(scopedDeviceCount == 0
                           ? "No lights in \(manager.scopeDisplayName(scope))"
@@ -237,7 +237,7 @@ struct ScenesView: View {
             }
         }
         .padding(12)
-        .lumenCard(radius: 10)
+        .lumenCard()
     }
 
     private var effectsContent: some View {
@@ -248,7 +248,7 @@ struct ScenesView: View {
                     Text("Effects run locally using common RGB and brightness commands. High-energy effects may not be suitable for people sensitive to flashing light.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
-                .padding(10).lumenCard(radius: 8, fill: Lumen.surfaceRaised)
+                .padding(10).lumenCard(fill: Lumen.surfaceRaised)
 
                 if visibleEffects.isEmpty {
                     noResults
@@ -267,7 +267,7 @@ struct ScenesView: View {
         let isActive = manager.activeEffects[scope] == effect.id
         return VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Image(systemName: effect.icon).font(.title2)
+                Image(systemName: effect.icon).font(LumenType.display(size: 21, weight: .semibold))
                     .foregroundStyle(isActive ? Lumen.pinkBright : Lumen.violetBright)
                 Spacer()
                 if effect.isAudioReactive {
@@ -278,7 +278,7 @@ struct ScenesView: View {
                         .foregroundStyle(Lumen.warning)
                 }
             }
-            Text(effect.name).font(.headline)
+            Text(effect.name).font(LumenType.display(size: 15, weight: .semibold))
             Text(effect.summary).font(.caption).foregroundStyle(.secondary)
                 .lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
             HStack(spacing: 4) {
@@ -289,13 +289,13 @@ struct ScenesView: View {
                 Spacer()
                 if isActive {
                     Button("Stop") { manager.stopEffect(scope: scope) }
-                        .buttonStyle(.bordered).controlSize(.small)
+                        .buttonStyle(LumenSecondaryButtonStyle(compact: true))
                 } else {
                     Button("Start") {
                         if effect.isAudioReactive && !UserDefaults.standard.bool(forKey: AppPreferenceKey.audioPrivacyAcknowledged) { pendingAudioEffect = effect }
                         else { manager.startEffect(effect, scope: scope) }
                     }
-                        .buttonStyle(.borderedProminent).controlSize(.small)
+                        .buttonStyle(LumenPrimaryButtonStyle(compact: true))
                         .disabled(scopedDeviceCount == 0)
                         .help(scopedDeviceCount == 0
                               ? "No lights in \(manager.scopeDisplayName(scope))"
@@ -304,7 +304,7 @@ struct ScenesView: View {
             }
         }
         .padding(12)
-        .lumenCard(radius: 10, highlighted: isActive, glowColor: isActive ? Lumen.pink : nil)
+        .lumenCard(highlighted: isActive, glowColor: isActive ? Lumen.pink : nil)
     }
 
     private var scenesContent: some View {
@@ -336,7 +336,7 @@ struct ScenesView: View {
                 if let warning = manager.duplicateSceneNameMessage(newSceneName) { Text(warning).font(.caption2).foregroundStyle(Lumen.warning) }
             }
             Button("Capture Current State", action: capture)
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(LumenPrimaryButtonStyle())
                 .disabled(newSceneName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || manager.devices.isEmpty)
         }
     }
@@ -345,7 +345,7 @@ struct ScenesView: View {
         VStack(spacing: 8) {
             Spacer()
             Image(systemName: "sparkles").font(.system(size: 32)).foregroundStyle(.secondary)
-            Text("No scenes yet").font(.headline)
+            Text("No scenes yet").font(LumenType.display(size: 15, weight: .semibold))
             Text("Set the lights how you like them, then capture the moment above.")
                 .font(.callout).foregroundStyle(.secondary)
             Spacer()
@@ -366,7 +366,7 @@ struct ScenesView: View {
             }
             .buttonStyle(.plain)
             .lumenInteractiveTarget()
-            Image(systemName: "wand.and.stars").foregroundStyle(Lumen.violetBright).font(.title3)
+            Image(systemName: "wand.and.stars").foregroundStyle(Lumen.violetBright).font(LumenType.display(size: 18, weight: .semibold))
             VStack(alignment: .leading, spacing: 4) {
                 if renamingID == scene.id {
                     TextField("Scene name", text: $renameDraft).textFieldStyle(.roundedBorder)
@@ -385,7 +385,7 @@ struct ScenesView: View {
             Spacer()
 
             Button("Preview & Apply") { previewScene = scene }
-                .buttonStyle(.bordered)
+                .buttonStyle(LumenSecondaryButtonStyle())
                 .disabled(manager.availableDeviceIDs(for: scene).isEmpty)
                 .accessibilityLabel("Preview and apply \(scene.name)")
                 .accessibilityHint(manager.availableDeviceIDs(for: scene).isEmpty
@@ -406,7 +406,7 @@ struct ScenesView: View {
             .fixedSize()
             .lumenInteractiveTarget()
         }
-        .padding(12).lumenCard(radius: 8)
+        .padding(12).lumenCard()
     }
 
     private func sceneSwatches(_ scene: LightingScene) -> [(color: Color, isOn: Bool)] {

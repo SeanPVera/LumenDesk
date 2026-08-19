@@ -34,6 +34,19 @@ The app is designed for day-to-day lighting control as well as richer home-light
 
 The same `LumenDesk` target is multiplatform and can be built for Mac or iPhone from the same scheme.
 
+### In a browser
+
+There is also a web client at <https://seanpvera.github.io/LumenDesk/> that controls the same LIFX and Govee lights.
+
+Browsers cannot open the raw UDP sockets these protocols need, so the web client pairs with a small local bridge that does the networking for you:
+
+```sh
+cd web/bridge
+npm start
+```
+
+Leave it running and open the site. Everything still stays on your own network — the page talks only to the bridge on `127.0.0.1`, with no account and no cloud. The web client currently covers discovery, power, brightness, colour and white; scenes, schedules, effects, Music Mode and segment control remain native-app features. See [`web/README.md`](web/README.md) for details.
+
 ## Supported lighting systems
 
 ### LIFX
@@ -532,6 +545,10 @@ This rewrites `LumenDesk.xcodeproj` from the declarative project configuration.
 ## Project layout
 
 ```text
+web/                                # Browser client and the local bridge it talks to
+├── app/                            # React web client, published to GitHub Pages
+└── bridge/                         # Node UDP bridge: LIFX/Govee LAN protocols over a loopback HTTP API
+design-prototype/                   # Simulated UX mockup, published under /prototype/
 LumenDesk/
 ├── LumenDeskApp.swift              # App entry point, macOS commands, settings scene, menu bar extra
 ├── ContentView.swift               # Main workspace, header, search, filters, bulk actions, shortcut sheet

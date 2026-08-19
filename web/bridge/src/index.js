@@ -1,0 +1,111 @@
+#!/usr/bin/env node
+import { Registry } from './registry.js'
+import { LifxClient } from './lifx-client.js'
+import { GoveeClient } from './govee-client.js'
+import { createServer } from './server.js'
+
+const VERSION = '1.0.0'
+
+// Only the published web app and local development origins may talk to the
+// bridge by default; --allow-origin adds more, --allow-any-origin opens it up.
+const DEFAULT_ORIGINS = [
+  'https://seanpvera.github.io',
+  'http://localhost:4173',
+  'http://127.0.0.1:4173',
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+]
+
+function parseArgs(argv) {
+  const options = {
+    port: 8765,
+    host: '127.0.0.1',
+    origins: [...DEFAULT_ORIGINS],
+    discoverEvery: 15_000,
+    refreshEvery: 5_000,
+    quiet: false,
+  }
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i]
+    if (arg === '--port') options.port = Number(argv[++i])
+    else if (arg === '--host') options.host = argv[++i]
+    else if (arg === '--allow-origin') options.origins.push(argv[++i])
+    else if (arg === '--allow-any-origin') options.origins = ['*']
+    else if (arg === '--quiet') options.quiet = true
+    else if (arg === '--help' || arg === '-h') options.help = true
+  }
+  return options
+}
+
+const options = parseArgs(process.argv.slice(2))
+
+if (options.help) {
+  console.log(`LumenDesk bridge ${VERSION}
+
+Discovers LIFX and Govee lights on this network over UDP and exposes them to
+the LumenDesk web app on a loopback HTTP API.
+
+  --port <n>            listen port (default 8765)
+  --host <addr>         bind address (default 127.0.0.1, loopback only)
+  --allow-origin <url>  additional browser origin allowed to connect
+  --allow-any-origin    allow any origin (development only)
+  --quiet               suppress discovery logging
+`)
+  process.exit(0)
+}
+
+const log = options.quiet ? () => {} : (...args) => console.log('[bridge]', ...args)
+
+const registry = new Registry()
+const lifx = new LifxClient({ registry, log })
+const govee = new GoveeClient({ registry, log })
+
+await lifx.start()
+await govee.start()
+
+const server = createServer({
+  registry,
+  lifx,
+  govee,
+  allowedOrigins: options.origins,
+  version: VERSION,
+})
+
+server.listen(options.port, options.host, () => {
+  log(`listening on http://${options.host}:${options.port}`)
+  log(`allowed origins: ${options.origins.join(', ')}`)
+  lifx.discover()
+  govee.discover()
+})
+
+const discoverTimer = setInterval(() => {
+  lifx.discover()
+  govee.discover()
+}, options.discoverEvery)
+
+const refreshTimer = setInterval(() => {
+  lifx.refresh()
+  govee.refresh()
+}, options.refreshEvery)
+
+let known = 0
+const reportTimer = setInterval(() => {
+  const devices = registry.list().filter(d => d.reachable)
+  if (devices.length !== known) {
+    known = devices.length
+    log(`${known} device(s) reachable: ${devices.map(d => d.name).join(', ') || 'none'}`)
+  }
+}, 2_000)
+
+function shutdown() {
+  clearInterval(discoverTimer)
+  clearInterval(refreshTimer)
+  clearInterval(reportTimer)
+  lifx.stop()
+  govee.stop()
+  server.close(() => process.exit(0))
+  setTimeout(() => process.exit(0), 500).unref()
+}
+
+process.on('SIGINT', shutdown)
+process.on('SIGTERM', shutdown)

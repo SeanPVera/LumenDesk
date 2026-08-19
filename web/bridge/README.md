@@ -59,20 +59,31 @@ device in the Govee Home app. LIFX bulbs need no setup.
 
 A page served from `https://seanpvera.github.io` can call `http://127.0.0.1`
 because loopback is a [potentially trustworthy origin][spec], so it is exempt
-from mixed-content blocking. Chrome additionally gates public → private
-requests behind Private Network Access: the preflight carries
-`Access-Control-Request-Private-Network`, and the bridge answers
-`Access-Control-Allow-Private-Network: true`.
+from mixed-content blocking.
 
-Browser behaviour here differs by vendor and changes over time. If the hosted
-page cannot reach the bridge in your browser, run the app locally instead —
-same bridge, no cross-origin hop:
+Whether the request is *allowed* is then up to the browser, and this is the
+part most likely to bite:
+
+- **Chrome 142 and later** ship [Local Network Access][lna], which asks the
+  user for permission before any site may reach the local network. LNA replaced
+  the earlier Private Network Access design, so **no header the bridge sends
+  can grant this** — only the person at the keyboard can, via the prompt or the
+  site settings icon in the address bar. A denied or dismissed prompt fails as
+  an ordinary network error, indistinguishable from the bridge being down.
+- The bridge still answers `Access-Control-Allow-Private-Network: true` for
+  older Chrome versions that run the PNA preflight. Harmless, but not the
+  mechanism on current browsers.
+- Other browsers differ and change over time.
+
+If the hosted page cannot reach the bridge, run the app from your own machine
+instead — same bridge, no cross-origin hop and no permission needed:
 
 ```sh
 cd web/app && npm install && npm run dev
 ```
 
 [spec]: https://w3c.github.io/webappsec-secure-contexts/#is-origin-trustworthy
+[lna]: https://developer.chrome.com/blog/local-network-access
 
 ## API
 

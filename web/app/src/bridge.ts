@@ -28,9 +28,19 @@ export function bridgeURL(port: number): string {
   return `http://127.0.0.1:${port}`
 }
 
+/** The URL a user can open in a tab to check the bridge themselves. */
+export function healthURL(port: number): string {
+  return `${bridgeURL(port)}/health`
+}
+
+// A blocked local-network request can hang rather than fail fast, so every
+// call is bounded instead of leaving the UI waiting forever.
+const TIMEOUT_MS = 5000
+
 async function request<T>(port: number, path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${bridgeURL(port)}${path}`, {
     ...init,
+    signal: AbortSignal.timeout(TIMEOUT_MS),
     headers: init?.body ? { 'Content-Type': 'application/json' } : undefined,
   })
   if (!response.ok) {

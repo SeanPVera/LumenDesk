@@ -405,3 +405,45 @@ code {
     transition: none !important;
   }
 }
+
+.diagnostic {
+  margin-top: 18px;
+  padding: 16px;
+  border-radius: 10px;
+  border: 1px solid var(--copper);
+  background: rgba(201, 120, 82, 0.1);
+  font-size: 0.85rem;
+}
+
+.diagnostic p {
+  margin: 0 0 10px;
+  color: var(--ivory);
+}
+
+.diagnostic-head {
+  font-weight: 600;
+}
+
+.diagnostic-head code {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.diagnostic ul {
+  margin: 0 0 12px;
+  padding-left: 20px;
+  color: var(--muted);
+}
+
+.diagnostic li {
+  margin-bottom: 6px;
+}
+
+.diagnostic a {
+  color: var(--cyan);
+  overflow-wrap: anywhere;
+}
+
+.diagnostic pre {
+  margin-top: 0;
+}

@@ -448,21 +448,9 @@ private struct SummaryMetric: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 7) {
-                    LumenStatusDot(color: tint, size: 6)
-                    Text(label.uppercased())
-                        .font(LumenType.instrumentLabel(size: 9))
-                        .tracking(1.1)
-                        .foregroundStyle(Lumen.textTertiary)
-                        .lineLimit(1)
-                }
-                Text(value)
-                    .font(LumenType.readout(size: 17, weight: .semibold))
-                    .foregroundStyle(Lumen.textPrimary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-            }
+            LumenStatusDot(color: tint, size: 6)
+                .padding(.top, 5)
+            LumenReadout(value: value, caption: label, size: 17)
             Spacer(minLength: 0)
             Image(systemName: icon)
                 .font(.system(size: 13, weight: .semibold))
@@ -1733,20 +1721,7 @@ private struct PageHeader<Trailing: View>: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 16) {
-            VStack(alignment: .leading, spacing: 7) {
-                LumenEyebrow(text: eyebrow, tint: Lumen.beamDim)
-                Text(title.uppercased())
-                    .font(LumenType.display(size: 38, weight: .bold))
-                    .tracking(1.4)
-                    .foregroundStyle(Lumen.textPrimary)
-                SpectrumRule(height: 2, tapered: true)
-                    .frame(width: 190)
-                    .padding(.bottom, 2)
-                Text(subtitle)
-                    .font(.callout)
-                    .foregroundStyle(Lumen.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            LumenTitleBlock(eyebrow: eyebrow, title: title, subtitle: subtitle, size: 38)
             Spacer(minLength: 12)
             trailing
         }

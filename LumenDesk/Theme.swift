@@ -367,13 +367,16 @@ struct LumenPanelModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .background(shape.fill(fill))
-            .background(
-                shape.fill(
-                    LinearGradient(colors: [Lumen.edgeHighlight, .clear],
-                                   startPoint: .top, endPoint: .bottom)
-                )
-            )
+            .background {
+                // The lit edge sits on top of the fill, not behind it.
+                ZStack {
+                    shape.fill(fill)
+                    shape.fill(
+                        LinearGradient(colors: [Lumen.edgeHighlight, .clear],
+                                       startPoint: .top, endPoint: .bottom)
+                    )
+                }
+            }
             .clipShape(shape)
             .overlay(
                 shape.stroke(highlighted ? Lumen.hairlineStrong : Lumen.hairline,

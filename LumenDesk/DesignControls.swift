@@ -459,14 +459,14 @@ struct LumenReadout: View {
     var size: CGFloat = 20
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 8) {
+            LumenEyebrow(text: caption)
             Text(value)
                 .font(LumenType.readout(size: size, weight: .semibold))
                 .foregroundStyle(tint)
                 .monospacedDigit()
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
-            LumenEyebrow(text: caption)
         }
         .accessibilityElement(children: .combine)
     }
@@ -548,12 +548,13 @@ struct LumenTitleBlock: View {
             if let eyebrow {
                 LumenEyebrow(text: eyebrow, tint: Lumen.beamDim)
             }
-            Text(title)
+            Text(title.uppercased())
                 .font(LumenType.display(size: size, weight: .bold))
-                .tracking(0.4)
+                .tracking(size * 0.037)
                 .foregroundStyle(Lumen.textPrimary)
             SpectrumRule(height: 2, tapered: true)
-                .frame(width: max(120, size * 4))
+                .frame(width: max(120, size * 5))
+                .padding(.bottom, 2)
             if let subtitle {
                 Text(subtitle)
                     .font(.system(size: 13))

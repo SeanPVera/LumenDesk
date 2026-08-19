@@ -66,13 +66,15 @@ struct LightRowView: View {
         .accessibilityAction(named: "Open Inspector") { if !selectionMode { showingInspector = true } }
         .focusableCompat()
         .padding(16)
-        .background(panelShape.fill(device.isOn ? Lumen.surfaceRaised : Lumen.surface))
-        .background(
-            panelShape.fill(
-                LinearGradient(colors: [Lumen.edgeHighlight, .clear],
-                               startPoint: .top, endPoint: .bottom)
-            )
-        )
+        .background {
+            ZStack {
+                panelShape.fill(device.isOn ? Lumen.surfaceRaised : Lumen.surface)
+                panelShape.fill(
+                    LinearGradient(colors: [Lumen.edgeHighlight, .clear],
+                                   startPoint: .top, endPoint: .bottom)
+                )
+            }
+        }
         .clipShape(panelShape)
         .overlay(panelShape.stroke(borderColor, lineWidth: borderWidth))
         .overlay(alignment: .leading) {

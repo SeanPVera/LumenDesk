@@ -369,9 +369,15 @@ struct LightRowView: View {
     private var segmentRowTitle: String {
         let state = manager.segmentState(for: device)
         let showing = manager.activeSegmentState(for: device.id) != nil
-        let unit = manager.segmentProfile(for: device)?.editorUnitName ?? "segment"
+        let profile = manager.segmentProfile(for: device)
+        let unit = profile?.editorUnitName ?? "segment"
         let units = state.segmentCount == 1 ? unit : "\(unit)s"
-        return "\(state.segmentCount) \(units)\(showing ? " · showing" : "")"
+        // Fixtures that can only run some of their zones at once are better
+        // described by which ones are lit than by how many they have.
+        let summary = profile?.limitsSimultaneousZones == true
+            ? "\(state.poweredCount) of \(state.segmentCount) \(units) on"
+            : "\(state.segmentCount) \(units)"
+        return "\(summary)\(showing ? " · showing" : "")"
     }
 
     private var segmentStudioName: String {
@@ -386,7 +392,7 @@ struct LightRowView: View {
     private var segmentStudioHelp: String {
         switch manager.segmentProfile(for: device)?.layout {
         case .lamp:
-            return "Open Uplighter Color Studio — edit the three physical lighting zones"
+            return "Open Uplighter Color Studio — color the physical lighting zones and choose which ones are lit"
         case .stringLights:
             return "Open String Light Studio — paint each physical bulb or bead individually"
         case .curtain:

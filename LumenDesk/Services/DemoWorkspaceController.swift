@@ -155,8 +155,11 @@ final class DemoWorkspaceController {
         var workspace = current
         let timestamp = now()
         let palette: [Color] = [.orange, .cyan, .purple, .mint, .pink, .yellow]
-        let names = ["Luna Lamp", "Desk COB Strip", "Window Wash", "Shelf String Lights", "Floor Lamp", "Ceiling"]
-        let skus: [String?] = [LIFXProductCatalog.lunaSKU, "H619A", nil, "H70C1", nil, nil]
+        let names = ["Luna Lamp", "Desk COB Strip", "Window Wash", "Shelf String Lights", "Floor Lamp", "Corner Uplighter"]
+        // The simulated uplighter carries a real H60B0 SKU so the studio's
+        // zone rules — including lighting only two zones at a time — can be
+        // explored without the lamp.
+        let skus: [String?] = [LIFXProductCatalog.lunaSKU, "H619A", nil, "H70C1", nil, "H60B0"]
         let productIDs: [UInt32?] = [219, nil, nil, nil, nil, nil]
 
         workspace.devices = (0..<6).map { index in

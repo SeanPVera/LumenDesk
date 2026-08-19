@@ -181,10 +181,26 @@ struct PreciseColorEditorView: View {
             channel("Red", value: $red, tint: .red)
             channel("Green", value: $green, tint: .green)
             channel("Blue", value: $blue, tint: .blue)
-            HStack { Text("White temperature"); Slider(value: $kelvin, in: 2500...9000, step: 50); Text("\(Int(kelvin)) K").monospacedDigit().frame(width: 70) }
+            LumenFader(label: "White temperature", value: $kelvin,
+                       range: 2500...9000, step: 50, track: .kelvin,
+                       format: { "\(Int($0))K" })
             if !manager.recentColors.isEmpty {
                 Text("Recent colors").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                HStack { ForEach(manager.recentColors) { recent in Button { set(recent.color) } label: { Circle().fill(recent.color).frame(width: 22, height: 22) }.buttonStyle(.plain).help("\(recent.name) · \(recent.hex)") } }
+                HStack {
+                    ForEach(manager.recentColors) { recent in
+                        Button { set(recent.color) } label: {
+                            RoundedRectangle(cornerRadius: 2, style: .continuous)
+                                .fill(recent.color)
+                                .frame(width: 26, height: 20)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 2, style: .continuous)
+                                        .stroke(Lumen.hairlineStrong, lineWidth: 1)
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .help("\(recent.name) · \(recent.hex)")
+                    }
+                }
             }
             HStack { Spacer(); Button("Apply White") { manager.setKelvin(device, kelvin: Int(kelvin)); dismiss() }; Button("Apply Color") { manager.setColor(device, color: candidate); dismiss() }.buttonStyle(LumenPrimaryButtonStyle()) }
         }
@@ -194,7 +210,10 @@ struct PreciseColorEditorView: View {
     }
 
     private var candidate: Color { Color(red: red / 255, green: green / 255, blue: blue / 255) }
-    private func channel(_ name: String, value: Binding<Double>, tint: Color) -> some View { HStack { Text(name).frame(width: 48, alignment: .leading); Slider(value: value, in: 0...255, step: 1).tint(tint); Text("\(Int(value.wrappedValue))").monospacedDigit().frame(width: 34) } }
+    private func channel(_ name: String, value: Binding<Double>, tint: Color) -> some View {
+        LumenFader(label: name, value: value, range: 0...255, step: 1,
+                   track: .tint(tint), format: { "\(Int($0))" })
+    }
     private func updateHex() { hex = String(format: "#%02X%02X%02X", Int(red), Int(green), Int(blue)) }
     private func set(_ color: Color) { let rgb = color.rgbComponents; red = rgb.r * 255; green = rgb.g * 255; blue = rgb.b * 255; updateHex() }
     private func parseHex() { let clean = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted); guard clean.count == 6, let value = Int(clean, radix: 16) else { return }; red = Double((value >> 16) & 255); green = Double((value >> 8) & 255); blue = Double(value & 255); updateHex() }
@@ -539,13 +558,19 @@ struct SceneEditorView: View {
                                 if selected { selectedForRehearsal.insert(id) } else { selectedForRehearsal.remove(id) }
                             })).labelsHidden().disabled(device.isStale)
                             VStack(alignment: .leading) { Text(device.label); Text(device.isStale ? "Offline · unavailable for rehearsal" : diffText(id: id, value: binding.wrappedValue)).font(.caption2).foregroundStyle(device.isStale ? Lumen.warning : .secondary) }
-                            Spacer(); Toggle("On", isOn: binding.isOn).labelsHidden(); Slider(value: binding.brightness, in: 0.01...1).frame(width: 130); Text("\(Int(binding.wrappedValue.brightness * 100))%").monospacedDigit().frame(width: 38)
+                            Spacer()
+                            Toggle("On", isOn: binding.isOn)
+                                .labelsHidden()
+                                .toggleStyle(LumenPowerKeyStyle(size: 26, spokenLabel: "\(device.label) power"))
+                            LumenFader(label: "Brightness", value: binding.brightness,
+                                       range: 0.01...1, track: .beam, showsScale: false)
+                                .frame(width: 150)
                         }
                     }
                 }
             }
             HStack {
-                if manager.rehearsalSceneID == draft.id { Button("End & Restore") { manager.stopSceneRehearsal() }.tint(.orange) }
+                if manager.rehearsalSceneID == draft.id { Button("End & Restore") { manager.stopSceneRehearsal() }.buttonStyle(LumenSecondaryButtonStyle(compact: true)) }
                 else { Button("Rehearse Selected") { manager.startSceneRehearsal(draft, deviceIDs: availableRehearsalIDs) }.disabled(availableRehearsalIDs.isEmpty) }
                 Spacer(); Button("Discard") { showingDiscard = true }.disabled(!dirty); Button("Save Draft") { manager.updateScene(draft, revisionLabel: restorePointLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Before edit" : restorePointLabel); dismiss() }.buttonStyle(LumenPrimaryButtonStyle()).disabled(!dirty || draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
@@ -675,14 +700,22 @@ struct LightingIntentDockView: View {
                         Label(intent.0, systemImage: intent.1)
                             .font(.caption.weight(.semibold))
                             .padding(.horizontal, 10).padding(.vertical, 7)
-                            .background(Capsule().fill(Lumen.surfaceRaised))
+                            .background(
+                                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                                    .fill(Lumen.surfaceRaised)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                                    .stroke(Lumen.hairline, lineWidth: 1)
+                            )
                     }
                     .buttonStyle(.plain)
                     .disabled(manager.devices.isEmpty)
                     .help("Apply the \(intent.0) lighting intent")
                 }
                 Button { manager.setAllPower(on: false) } label: { Label("All Off", systemImage: "power") }
-                    .controlSize(.small).tint(.red).disabled(manager.devices.isEmpty)
+                    .buttonStyle(LumenDangerButtonStyle())
+                    .disabled(manager.devices.isEmpty)
             }
         }
     }

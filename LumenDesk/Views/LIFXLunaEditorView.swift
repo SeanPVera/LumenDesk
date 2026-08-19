@@ -185,10 +185,13 @@ struct LIFXLunaEditorView: View {
                         paintColor = swatch.color
                         paintTargets(swatch.color)
                     } label: {
-                        Circle()
+                        RoundedRectangle(cornerRadius: 2, style: .continuous)
                             .fill(swatch.color)
-                            .frame(width: 28, height: 28)
-                            .overlay(Circle().stroke(Lumen.hairlineStrong, lineWidth: 0.5))
+                            .frame(width: 30, height: 24)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                                    .stroke(Lumen.hairlineStrong, lineWidth: 1)
+                            )
                     }
                     .buttonStyle(.plain)
                     .help(swatch.label)

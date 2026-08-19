@@ -205,7 +205,7 @@ struct ContentView: View {
                 .help(manager.napPhase == .inactive
                       ? "Nap Mode — dims all lights over 20 minutes, holds, then brightens gently to wake you"
                       : "Cancel Nap Mode")
-                .tint(manager.napPhase == .inactive ? .indigo : .orange)
+                .tint(manager.napPhase == .inactive ? Lumen.beam : Lumen.warning)
                 if !manager.devices.isEmpty {
                     Button {
                         selectionMode.toggle()
@@ -279,7 +279,6 @@ struct ContentView: View {
                         Label(state.title, systemImage: state.symbol).font(.caption.weight(.medium))
                     }
                     .buttonStyle(LumenSecondaryButtonStyle(compact: true))
-                    .tint(manager.devices.contains(where: \.isOn) ? Lumen.pink : .secondary)
                     .help("Aggregate power state — mixed rooms are shown explicitly")
                     .accessibilityLabel("All lights: \(manager.aggregatePowerState(for: manager.devices).title)")
                     LumenFader(label: "All lights",
@@ -373,13 +372,11 @@ struct ContentView: View {
                     .font(.caption.weight(.medium))
             }
             .toggleStyle(LumenChipStyle())
-            .controlSize(.small)
-            .tint(Lumen.gold)
             .help("Show only lights that are currently on")
             .accessibilityLabel("Filter to on lights only")
 
             Toggle(isOn: $showOfflineOnly) { Label("Offline", systemImage: "wifi.slash").font(.caption.weight(.medium)) }
-                .toggleStyle(LumenChipStyle()).controlSize(.small).tint(Lumen.warning)
+                .toggleStyle(LumenChipStyle())
             Menu {
                 Button("All Vendors") { vendorFilter = nil }
                 Button("LIFX") { vendorFilter = .lifx }

@@ -65,12 +65,12 @@ struct OnboardingView: View {
     private var topBar: some View {
         HStack(spacing: 10) {
             ForEach(Step.allCases, id: \.self) { s in
-                Capsule()
+                Rectangle()
                     .fill(s.rawValue <= step.rawValue
-                          ? AnyShapeStyle(Lumen.signal)
+                          ? AnyShapeStyle(Lumen.beamBright)
                           : AnyShapeStyle(Lumen.hairlineStrong))
-                    .frame(width: s == step ? 26 : 16, height: 5)
-                    .animation(.spring(duration: 0.3), value: step)
+                    .frame(width: s == step ? 30 : 16, height: 3)
+                    .animation(.easeOut(duration: 0.25), value: step)
             }
             Spacer()
             if step != .done {
@@ -108,7 +108,7 @@ struct OnboardingView: View {
 
             VStack(alignment: .leading, spacing: 10) {
                 Toggle("Quiet interface", isOn: $quietInterface)
-                    .font(LumenType.display(size: 15, weight: .semibold))
+                    .toggleStyle(LumenRockerStyle())
                 Text("Keeps the work surface flat and removes the faint brand beam. You can change it later in Settings.")
                     .font(.caption)
                     .foregroundStyle(Lumen.textSecondary)
@@ -306,16 +306,19 @@ struct OnboardingView: View {
                 Text(room.name).font(.callout.weight(.medium))
                 if count > 0 {
                     Text("\(count)")
-                        .font(.caption2.monospacedDigit())
+                        .font(LumenType.readout(size: 10))
                         .padding(.horizontal, 5).padding(.vertical, 1)
-                        .background(Capsule().fill(Color.black.opacity(0.25)))
+                        .background(
+                            RoundedRectangle(cornerRadius: 1, style: .continuous)
+                                .fill(Color.black.opacity(0.3))
+                        )
                 }
             }
-            .foregroundStyle(active ? Lumen.inkDeep : Lumen.textSecondary)
+            .foregroundStyle(active ? Lumen.void : Lumen.textSecondary)
             .padding(.horizontal, 12).padding(.vertical, 7)
             .background(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(active ? AnyShapeStyle(Lumen.signal) : AnyShapeStyle(Lumen.surface))
+                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                    .fill(active ? AnyShapeStyle(Lumen.beamBright) : AnyShapeStyle(Lumen.surface))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 7, style: .continuous)
@@ -493,11 +496,7 @@ private struct DiscoverChip: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Circle()
-                .fill(device.isOn ? device.color : Color.gray.opacity(0.4))
-                .frame(width: 16, height: 16)
-                .shadow(color: device.isOn ? device.color.opacity(0.7) : .clear, radius: 5)
-                .accessibilityHidden(true)
+            LumenLens(color: device.color, isOn: device.isOn, size: 18, isStale: device.isStale)
             VStack(alignment: .leading, spacing: 1) {
                 Text(device.label)
                     .font(.callout.weight(.medium))
@@ -509,12 +508,11 @@ private struct DiscoverChip: View {
             }
             Spacer(minLength: 0)
             Toggle("", isOn: powerBinding)
-                .toggleStyle(.switch)
                 .labelsHidden()
-                .controlSize(.mini)
-                .tint(Lumen.signal)
+                .toggleStyle(LumenPowerKeyStyle(
+                    size: 26,
+                    spokenLabel: device.isOn ? "Turn off \(device.label)" : "Turn on \(device.label)"))
                 .help("Turn this light on or off to identify it")
-                .accessibilityLabel(device.isOn ? "Turn off \(device.label)" : "Turn on \(device.label)")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
@@ -539,21 +537,17 @@ private struct AssignChip: View {
         let inActiveRoom = room?.id == activeRoomID && activeRoomID != nil
         return HStack(spacing: 10) {
             Toggle("", isOn: powerBinding)
-                .toggleStyle(.switch)
                 .labelsHidden()
-                .controlSize(.mini)
-                .tint(Lumen.signal)
+                .toggleStyle(LumenPowerKeyStyle(
+                    size: 26,
+                    spokenLabel: device.isOn ? "Turn off \(device.label)" : "Turn on \(device.label)"))
                 .help("Turn this light on or off to identify it")
-                .accessibilityLabel(device.isOn ? "Turn off \(device.label)" : "Turn on \(device.label)")
 
             Button {
                 toggleAssign()
             } label: {
                 HStack(spacing: 10) {
-                    Circle()
-                        .fill(device.isOn ? device.color : Color.gray.opacity(0.4))
-                        .frame(width: 15, height: 15)
-                        .accessibilityHidden(true)
+                    LumenLens(color: device.color, isOn: device.isOn, size: 16)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(device.label)
                             .font(.callout.weight(.medium))

@@ -82,12 +82,12 @@ struct ScenesView: View {
 
     private var header: some View {
         HStack(spacing: 12) {
-            ZStack {
-                Circle().fill(Lumen.brandGradient).frame(width: 38, height: 38)
-                Image(systemName: "wand.and.stars").foregroundStyle(.white)
-            }
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Lighting Library").font(LumenType.display(size: 19, weight: .bold))
+            LumenIconTile(systemName: "wand.and.stars", tint: Lumen.beamBright, size: 38)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("LIGHTING LIBRARY")
+                    .font(LumenType.display(size: 19, weight: .bold))
+                    .tracking(1.2)
+                SpectrumRule(height: 2, tapered: true).frame(width: 110)
                 Text("Color and motion designed for both LIFX and Govee bulbs.")
                     .font(.caption).foregroundStyle(.secondary)
             }
@@ -105,7 +105,14 @@ struct ScenesView: View {
                             .buttonStyle(LumenSecondaryButtonStyle(compact: true))
                     }
                     .padding(6)
-                    .background(Capsule().fill(Lumen.pink.opacity(0.14)))
+                    .background(
+                        RoundedRectangle(cornerRadius: 2, style: .continuous)
+                            .fill(Lumen.surfaceRaised)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 2, style: .continuous)
+                            .stroke(Lumen.hairlineStrong, lineWidth: 1)
+                    )
                 }
             }
             if activeEffectScopes.count > 1 {
@@ -118,10 +125,11 @@ struct ScenesView: View {
 
     private var toolbar: some View {
         VStack(spacing: 10) {
-            Picker("Library section", selection: $section) {
-                ForEach(LibrarySection.allCases) { Text($0.rawValue).tag($0) }
-            }
-            .pickerStyle(.segmented)
+            LumenSelector(label: "Library section",
+                          selection: $section,
+                          options: LibrarySection.allCases.map {
+                              LumenOption(value: $0, title: $0.rawValue)
+                          })
 
             HStack(spacing: 10) {
                 HStack {
@@ -283,8 +291,13 @@ struct ScenesView: View {
                 .lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
             HStack(spacing: 4) {
                 ForEach(Array(effect.colors.enumerated()), id: \.offset) { _, swatch in
-                    Circle().fill(swatch.color).frame(width: 18, height: 18)
-                        .overlay(Circle().stroke(Color.white.opacity(0.16), lineWidth: 1))
+                    RoundedRectangle(cornerRadius: 2, style: .continuous)
+                        .fill(swatch.color)
+                        .frame(width: 20, height: 16)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 2, style: .continuous)
+                                .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                        )
                 }
                 Spacer()
                 if isActive {
@@ -376,7 +389,10 @@ struct ScenesView: View {
                 }
                 HStack(spacing: 3) {
                     ForEach(Array(sceneSwatches(scene).enumerated()), id: \.offset) { _, swatch in
-                        Circle().fill(swatch.color).opacity(swatch.isOn ? 1 : 0.25).frame(width: 10, height: 10)
+                        RoundedRectangle(cornerRadius: 1, style: .continuous)
+                            .fill(swatch.color)
+                            .opacity(swatch.isOn ? 1 : 0.25)
+                            .frame(width: 11, height: 9)
                     }
                 }
                 Text("\(scene.snapshots.count) light\(scene.snapshots.count == 1 ? "" : "s") · captured \(scene.createdAt.formatted(.relative(presentation: .named)))")

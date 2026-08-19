@@ -336,7 +336,7 @@ struct HomeWorkspaceView: View {
                         Spacer()
                         if selectionMode {
                             Button("Select Visible") { selectedIDs = Set(visibleDevices.map(\.id)) }
-                                .controlSize(.small)
+                                .buttonStyle(LumenSecondaryButtonStyle(compact: true))
                         }
                     }
 
@@ -912,6 +912,7 @@ private struct RoomDetailSheet: View {
                         Button { showingSchedules = true } label: {
                             Label("Schedules", systemImage: "clock")
                         }
+                        .buttonStyle(LumenSecondaryButtonStyle())
                     }
                     .disabled(lights.isEmpty)
 
@@ -1310,6 +1311,7 @@ struct AutomationWorkspaceView: View {
                     Button { showingSolarSettings = true } label: {
                         Label("Solar Times", systemImage: "sunrise")
                     }
+                    .buttonStyle(LumenSecondaryButtonStyle())
                 }
 
                 if !manager.missedAutomations.isEmpty {
@@ -1470,6 +1472,7 @@ struct DevicesWorkspaceView: View {
                     Button { manager.scan() } label: {
                         Label(manager.isScanning ? "Scanning" : "Scan", systemImage: "arrow.clockwise")
                     }
+                    .buttonStyle(LumenPrimaryButtonStyle())
                     .disabled(manager.isScanning)
                 }
 

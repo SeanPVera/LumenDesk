@@ -460,7 +460,7 @@ struct GoveeSegmentEditorView: View {
             }
             HStack(spacing: 8) {
                 Button("Blend Across Selection", action: blendAcrossSelection)
-                    .controlSize(.small)
+                    .buttonStyle(LumenSecondaryButtonStyle(compact: true))
                     .disabled(targetIndexes.count < 2)
                     .help("Fades from the paint color to the end color across the selected \(unitName)s")
                 ColorPicker("", selection: $blendEndColor, supportsOpacity: false)
@@ -473,19 +473,16 @@ struct GoveeSegmentEditorView: View {
     }
 
     private var brightnessSection: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "sun.min").foregroundStyle(.secondary).accessibilityHidden(true)
-            Slider(value: selectionBrightness, in: 0.05...1, onEditingChanged: { editing in
+        LumenFader(
+            label: selection.isEmpty ? "All \(unitName)s" : "Selected \(unitName)s",
+            value: selectionBrightness,
+            range: 0.05...1,
+            track: .tint(paintColor),
+            onEditingChanged: { editing in
                 if !editing { manager.storeSegmentState(draft, for: device) }
-            })
-            .accessibilityLabel("Brightness for \(selection.isEmpty ? "all \(unitName)s" : "selected \(unitName)s")")
-            .accessibilityValue("\(Int(selectionBrightness.wrappedValue * 100)) percent")
-            Image(systemName: "sun.max").foregroundStyle(.secondary).accessibilityHidden(true)
-            Text("\(Int(selectionBrightness.wrappedValue * 100))%")
-                .font(.caption2.monospacedDigit())
-                .foregroundStyle(.secondary)
-                .frame(width: 38, alignment: .trailing)
-        }
+            }
+        )
+        .accessibilityLabel("Brightness for \(selection.isEmpty ? "all \(unitName)s" : "selected \(unitName)s")")
     }
 
     private var gradientSection: some View {
@@ -497,8 +494,7 @@ struct GoveeSegmentEditorView: View {
                     .foregroundStyle(.tertiary)
             }
         }
-        .toggleStyle(.switch)
-        .tint(Lumen.pink)
+        .toggleStyle(LumenRockerStyle())
     }
 
     // MARK: - Presets
@@ -598,8 +594,7 @@ struct GoveeSegmentEditorView: View {
                     .foregroundStyle(.tertiary)
             }
             Toggle("Live preview on the light while editing", isOn: $livePreview)
-                .toggleStyle(.switch)
-                .tint(Lumen.pink)
+                .toggleStyle(LumenRockerStyle())
                 .disabled(manager.isDemoMode)
                 .onChange(of: livePreview) { enabled in
                     if enabled {

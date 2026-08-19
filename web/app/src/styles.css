@@ -310,6 +310,32 @@ pre {
   padding: 10px 12px;
   overflow-x: auto;
   margin: 8px 0 0;
+  /* Clone URLs are long; wrap them rather than scrolling the setup card. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.7;
+}
+
+.note {
+  display: block;
+  margin-top: 8px;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.alt {
+  margin-bottom: 20px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.alt summary {
+  cursor: pointer;
+  color: var(--cyan);
+}
+
+.alt p {
+  margin: 10px 0 0;
 }
 
 code {

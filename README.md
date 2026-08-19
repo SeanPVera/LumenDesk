@@ -38,15 +38,17 @@ The same `LumenDesk` target is multiplatform and can be built for Mac or iPhone 
 
 There is also a web client at <https://seanpvera.github.io/LumenDesk/> that controls the same LIFX and Govee lights.
 
-Browsers cannot open the raw UDP sockets these protocols need, so the web client pairs with a small local bridge that does the networking for you. It needs [Node.js](https://nodejs.org/) 20 or newer and has no dependencies to install:
+Browsers cannot open the raw UDP sockets these protocols need, so the web client pairs with a small local bridge that does the networking for you. It needs [Node.js](https://nodejs.org/) 20 or newer:
 
 ```sh
 git clone --depth 1 https://github.com/SeanPVera/LumenDesk.git
 cd LumenDesk/web/bridge
-npm start
+npm run app
 ```
 
-Leave that terminal open and open the site. Everything still stays on your own network — the page talks only to the bridge on `127.0.0.1`, with no account and no cloud. The web client currently covers discovery, power, brightness, colour and white; scenes, schedules, effects, Music Mode and segment control remain native-app features. See [`web/README.md`](web/README.md) for details.
+That serves the app from the bridge itself at <http://127.0.0.1:8765> — one origin for the page and the lights, so no browser permission is involved. Leave the terminal open while you use it.
+
+The published page at <https://seanpvera.github.io/LumenDesk/> can also drive the bridge (`npm start`, API only), but current browsers gate a website's access to your local network behind a permission prompt, so that route may be blocked. Everything still stays on your own network — the page talks only to the bridge on `127.0.0.1`, with no account and no cloud. The web client currently covers discovery, power, brightness, colour and white; scenes, schedules, effects, Music Mode and segment control remain native-app features. See [`web/README.md`](web/README.md) for details.
 
 ## Supported lighting systems
 

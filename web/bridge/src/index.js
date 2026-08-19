@@ -1,8 +1,11 @@
 #!/usr/bin/env node
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { Registry } from './registry.js'
 import { LifxClient } from './lifx-client.js'
 import { GoveeClient } from './govee-client.js'
 import { createServer } from './server.js'
+import { isBuiltApp } from './static.js'
 
 const VERSION = '1.0.0'
 
@@ -24,6 +27,8 @@ function parseArgs(argv) {
     discoverEvery: 15_000,
     refreshEvery: 5_000,
     quiet: false,
+    serve: true,
+    appDir: null,
   }
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i]
@@ -31,6 +36,8 @@ function parseArgs(argv) {
     else if (arg === '--host') options.host = argv[++i]
     else if (arg === '--allow-origin') options.origins.push(argv[++i])
     else if (arg === '--allow-any-origin') options.origins = ['*']
+    else if (arg === '--app-dir') options.appDir = argv[++i]
+    else if (arg === '--no-serve') options.serve = false
     else if (arg === '--quiet') options.quiet = true
     else if (arg === '--help' || arg === '-h') options.help = true
   }
@@ -49,6 +56,8 @@ the LumenDesk web app on a loopback HTTP API.
   --host <addr>         bind address (default 127.0.0.1, loopback only)
   --allow-origin <url>  additional browser origin allowed to connect
   --allow-any-origin    allow any origin (development only)
+  --app-dir <path>      directory of the built web client to serve
+  --no-serve            expose only the API, do not serve the web client
   --quiet               suppress discovery logging
 `)
   process.exit(0)
@@ -63,16 +72,38 @@ const govee = new GoveeClient({ registry, log })
 await lifx.start()
 await govee.start()
 
+const here = path.dirname(fileURLToPath(import.meta.url))
+const appDir = options.appDir
+  ? path.resolve(options.appDir)
+  : path.resolve(here, '..', '..', 'app', 'dist')
+const staticDir = options.serve && isBuiltApp(appDir) ? appDir : null
+
 const server = createServer({
   registry,
   lifx,
   govee,
   allowedOrigins: options.origins,
   version: VERSION,
+  staticDir,
 })
 
 server.listen(options.port, options.host, () => {
-  log(`listening on http://${options.host}:${options.port}`)
+  const base = `http://${options.host}:${options.port}`
+  if (staticDir) {
+    // Same-origin: no CORS, and no local-network permission prompt.
+    console.log(`\n  LumenDesk is running. Open ${base}\n`)
+  } else if (options.serve) {
+    console.log(
+      `\n  API only on ${base} — the web client is not built yet.\n` +
+        `  Build it once to control your lights from this address:\n\n` +
+        `      npm run app\n\n` +
+        `  Until then the published page at\n` +
+        `  https://seanpvera.github.io/LumenDesk/ can use this bridge, if your\n` +
+        `  browser allows it to reach the local network.\n`,
+    )
+  } else {
+    log(`API only on ${base} (--no-serve)`)
+  }
   log(`allowed origins: ${options.origins.join(', ')}`)
   lifx.discover()
   govee.discover()

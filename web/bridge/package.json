@@ -4,10 +4,15 @@
   "private": true,
   "description": "Local LAN bridge that lets the LumenDesk web app control real LIFX and Govee lights over UDP.",
   "type": "module",
-  "bin": { "lumendesk-bridge": "src/index.js" },
+  "bin": {
+    "lumendesk-bridge": "src/index.js"
+  },
   "scripts": {
     "start": "node src/index.js",
+    "app": "npm --prefix ../app install && npm --prefix ../app run build && node src/index.js",
     "test": "node --test test/*.test.js"
   },
-  "engines": { "node": ">=20" }
+  "engines": {
+    "node": ">=20"
+  }
 }

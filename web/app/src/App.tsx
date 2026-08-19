@@ -4,6 +4,7 @@ import {
   type Device,
   type RGB,
   checkHealth,
+  detectSameOrigin,
   fetchDevices,
   healthURL,
   hexToRGB,
@@ -13,6 +14,7 @@ import {
   setKelvin,
   setPower,
   startDiscovery,
+  useSameOrigin,
 } from './bridge'
 
 type BridgeState = 'checking' | 'connected' | 'unavailable'
@@ -51,6 +53,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null)
   const [scanning, setScanning] = useState(false)
   const [attempts, setAttempts] = useState(0)
+  const [servedByBridge, setServedByBridge] = useState(false)
   // Ids with a command in flight, so the poll does not overwrite the
   // optimistic value with a stale reading mid-flight.
   const inFlight = useRef(new Set<string>())
@@ -80,7 +83,12 @@ export default function App() {
   useEffect(() => {
     let cancelled = false
     setState('checking')
-    checkHealth(port)
+    detectSameOrigin()
+      .then(same => {
+        useSameOrigin(same)
+        if (same) setServedByBridge(true)
+        return checkHealth(port)
+      })
       .then(() => {
         if (!cancelled) poll()
       })
@@ -151,6 +159,7 @@ export default function App() {
         port={port}
         error={error}
         attempts={attempts}
+        servedByBridge={servedByBridge}
         onPort={setPort}
         onRetry={connect}
       />
@@ -319,6 +328,7 @@ function BridgeSetup({
   port,
   error,
   attempts,
+  servedByBridge,
   onPort,
   onRetry,
 }: {
@@ -326,6 +336,7 @@ function BridgeSetup({
   port: number
   error: string | null
   attempts: number
+  servedByBridge: boolean
   onPort: (value: number) => void
   onRetry: () => void
 }) {
@@ -337,8 +348,13 @@ function BridgeSetup({
         <h1>Start the LumenDesk bridge</h1>
         <p>
           Browsers cannot open the raw UDP sockets that LIFX and Govee lights speak, so a small
-          helper runs on your machine and does it for you. This page talks only to that helper on
-          <code> 127.0.0.1</code> — no account, no cloud, nothing leaves your network.
+          helper runs on your machine and does it for you — no account, no cloud, nothing leaves
+          your network.
+        </p>
+        <p>
+          The helper can also <strong>serve this app itself</strong>, which is the route that
+          always works: the page and the lights are then the same local service, so no browser
+          permission is involved.
         </p>
 
         <ol className="steps">
@@ -351,18 +367,24 @@ function BridgeSetup({
             <pre>
               <code>{`git clone --depth 1 https://github.com/SeanPVera/LumenDesk.git
 cd LumenDesk/web/bridge
-npm start`}</code>
+npm run app`}</code>
             </pre>
             <span className="note">
-              No <code>npm install</code> needed — the bridge has no dependencies. It prints{' '}
-              <code>listening on http://127.0.0.1:8765</code> when it is ready.
+              It prints <code>LumenDesk is running. Open http://127.0.0.1:8765</code> when ready.
             </span>
           </li>
           <li>
-            <strong>Leave that terminal open</strong> and come back here. The bridge only runs while
-            the terminal does.
+            <strong>Open <code>http://127.0.0.1:8765</code></strong> — that address is this same
+            app, served by the bridge, and it can always reach your lights. Keep the terminal open;
+            the bridge only runs while it does.
           </li>
         </ol>
+
+        <p className="hint">
+          Prefer to keep using this published page instead? Run <code>npm start</code> rather than{' '}
+          <code>npm run app</code> to expose only the API, then press Connect below — that route
+          needs your browser to allow local network access.
+        </p>
 
         <details className="alt">
           <summary>No git installed?</summary>
@@ -417,22 +439,25 @@ npm start`}</code>
               </li>
             </ul>
 
-            <p>
-              <strong>2. Allow local network access.</strong> Chrome 142 and later ask permission
-              before a website may reach your local network. Look for that prompt, or click the
-              icon to the left of the address bar → <em>Site settings</em> → allow{' '}
-              <em>Local network access</em>, then press Connect again.
-            </p>
+            {!servedByBridge && (
+              <>
+                <p>
+                  <strong>2. Allow local network access.</strong> Chrome 142 and later ask
+                  permission before a website may reach your local network. Look for that prompt,
+                  or click the icon to the left of the address bar → <em>Site settings</em> → allow{' '}
+                  <em>Local network access</em>, then press Connect again.
+                </p>
 
-            <p>
-              <strong>Still stuck?</strong> Run this page from your own machine instead — same
-              bridge, no permission needed:
-            </p>
-            <pre>
-              <code>{`cd LumenDesk/web/app
-npm install
-npm run dev`}</code>
-            </pre>
+                <p>
+                  <strong>Still stuck?</strong> Skip the permission entirely by letting the bridge
+                  serve the app, then use the address it prints:
+                </p>
+                <pre>
+                  <code>{`cd LumenDesk/web/bridge
+npm run app`}</code>
+                </pre>
+              </>
+            )}
           </div>
         )}
       </div>

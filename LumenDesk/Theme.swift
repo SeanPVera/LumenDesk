@@ -518,8 +518,9 @@ struct LumenDangerButtonStyle: ButtonStyle {
 
 // MARK: - Wordmark
 
-/// A beam enters a prism and leaves as the spectrum, landing on the desk rail.
-/// The mark is the product's thesis: one input, every colour, one surface.
+/// Light leaves the aperture white and lands on the desk rail as the full
+/// visible spectrum. The mark is the product's thesis: one input, every
+/// colour, one control surface.
 struct LumenMark: View {
     var size: CGFloat = 30
     var monochrome = false
@@ -529,56 +530,54 @@ struct LumenMark: View {
             let w = proxy.size.width
             let h = proxy.size.height
             ZStack {
-                // Incoming beam, entering the prism from the upper left.
-                Path { path in
-                    path.move(to: CGPoint(x: w * 0.04, y: h * 0.235))
-                    path.addLine(to: CGPoint(x: w * 0.40, y: h * 0.235))
-                    path.addLine(to: CGPoint(x: w * 0.40, y: h * 0.325))
-                    path.addLine(to: CGPoint(x: w * 0.04, y: h * 0.325))
-                    path.closeSubpath()
-                }
-                .fill(monochrome ? Color.primary : Lumen.beamBright)
+                // The source slot.
+                RoundedRectangle(cornerRadius: h * 0.02, style: .continuous)
+                    .fill(monochrome ? Color.primary : Lumen.beamBright)
+                    .frame(width: w * 0.24, height: h * 0.062)
+                    .position(x: w * 0.5, y: h * 0.178)
 
-                // The prism.
-                Path { path in
-                    path.move(to: CGPoint(x: w * 0.50, y: h * 0.09))
-                    path.addLine(to: CGPoint(x: w * 0.83, y: h * 0.62))
-                    path.addLine(to: CGPoint(x: w * 0.17, y: h * 0.62))
-                    path.closeSubpath()
-                }
-                .fill(monochrome ? AnyShapeStyle(Color.primary.opacity(0.32))
-                                 : AnyShapeStyle(Color(hex: 0xFFFFFF, alpha: 0.10)))
-                .overlay {
-                    Path { path in
-                        path.move(to: CGPoint(x: w * 0.50, y: h * 0.09))
-                        path.addLine(to: CGPoint(x: w * 0.83, y: h * 0.62))
-                        path.addLine(to: CGPoint(x: w * 0.17, y: h * 0.62))
-                        path.closeSubpath()
+                // The beam, dispersing as it falls.
+                LumenBeamShape()
+                    .fill(monochrome ? AnyShapeStyle(Color.primary) : AnyShapeStyle(Lumen.spectrum))
+                    .overlay {
+                        if !monochrome {
+                            LumenBeamShape()
+                                .fill(
+                                    LinearGradient(
+                                        stops: [
+                                            .init(color: Lumen.beamBright, location: 0),
+                                            .init(color: Lumen.beamBright, location: 0.12),
+                                            .init(color: Lumen.beamBright.opacity(0), location: 0.86)
+                                        ],
+                                        startPoint: .top,
+                                        endPoint: .bottom
+                                    )
+                                )
+                        }
                     }
-                    .stroke(monochrome ? Color.primary : Lumen.beam, lineWidth: max(1, h * 0.045))
-                }
-
-                // Dispersion: the fan of light leaving the prism.
-                if !monochrome {
-                    Path { path in
-                        path.move(to: CGPoint(x: w * 0.46, y: h * 0.62))
-                        path.addLine(to: CGPoint(x: w * 0.86, y: h * 0.62))
-                        path.addLine(to: CGPoint(x: w * 0.97, y: h * 0.80))
-                        path.addLine(to: CGPoint(x: w * 0.30, y: h * 0.80))
-                        path.closeSubpath()
-                    }
-                    .fill(Lumen.spectrum)
-                }
 
                 // The desk rail.
                 RoundedRectangle(cornerRadius: h * 0.02, style: .continuous)
                     .fill(monochrome ? Color.primary : Lumen.textPrimary)
-                    .frame(width: w * 0.86, height: h * 0.10)
-                    .position(x: w * 0.5, y: h * 0.86)
+                    .frame(width: w * 0.727, height: h * 0.094)
+                    .position(x: w * 0.5, y: h * 0.79)
             }
         }
         .frame(width: size, height: size)
         .accessibilityHidden(true)
+    }
+}
+
+/// The tapered beam, in the mark's own proportions.
+private struct LumenBeamShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX + rect.width * 0.430, y: rect.minY + rect.height * 0.244))
+        path.addLine(to: CGPoint(x: rect.minX + rect.width * 0.570, y: rect.minY + rect.height * 0.244))
+        path.addLine(to: CGPoint(x: rect.minX + rect.width * 0.793, y: rect.minY + rect.height * 0.703))
+        path.addLine(to: CGPoint(x: rect.minX + rect.width * 0.207, y: rect.minY + rect.height * 0.703))
+        path.closeSubpath()
+        return path
     }
 }
 

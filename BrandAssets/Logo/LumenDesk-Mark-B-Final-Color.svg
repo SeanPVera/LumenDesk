@@ -1,14 +1,23 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <defs>
-    <linearGradient id="beam" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#FFD68A"/>
-      <stop offset="100%" stop-color="#E7B35A"/>
+    <linearGradient id="dispersion" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#6C4BF0"/>
+      <stop offset="14.3%" stop-color="#3D7BF5"/>
+      <stop offset="28.6%" stop-color="#21C4DE"/>
+      <stop offset="42.9%" stop-color="#46D08A"/>
+      <stop offset="57.1%" stop-color="#D9D45F"/>
+      <stop offset="71.4%" stop-color="#FFB13D"/>
+      <stop offset="85.7%" stop-color="#FF7A38"/>
+      <stop offset="100%" stop-color="#F1495C"/>
+    </linearGradient>
+    <linearGradient id="fall" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#F6FAFF" stop-opacity="1"/>
+      <stop offset="12%" stop-color="#F6FAFF" stop-opacity="1"/>
+      <stop offset="86%" stop-color="#F6FAFF" stop-opacity="0"/>
     </linearGradient>
   </defs>
-  <polygon points="440,246 584,246 788,700 236,700" fill="url(#beam)"/>
-  <rect x="388" y="184" width="248" height="70" rx="23" fill="#FFD68A"/>
-  <rect x="180" y="716" width="664" height="92" rx="31" fill="#F1EFE8"/>
-  <circle cx="461" cy="764" r="12" fill="#73B4BD"/>
-  <circle cx="512" cy="764" r="12" fill="#E7B35A"/>
-  <circle cx="563" cy="764" r="12" fill="#83B67A"/>
+  <polygon points="440,250 584,250 812,720 212,720" fill="url(#dispersion)"/>
+  <polygon points="440,250 584,250 812,720 212,720" fill="url(#fall)"/>
+  <rect x="388" y="150" width="248" height="64" rx="6" fill="#F6FAFF"/>
+  <rect x="140" y="762" width="744" height="96" rx="6" fill="#E8EEF7"/>
 </svg>

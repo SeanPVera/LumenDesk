@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Generate the LumenDesk Lighting Desk app-icon family.
+"""Generate the LumenDesk Spectral Bench app-icon family.
+
+The mark keeps the geometry LumenDesk has always had — a source slot, a beam
+widening onto a desk rail — and changes what the beam is made of. Light leaves
+the aperture white and lands on the desk as the full visible spectrum: one
+input, every colour, one control surface.
 
 The small macOS sizes use hand-tuned geometry instead of mechanically shrinking
 one 1024 px source. Run from the repository root with Pillow installed.
@@ -8,8 +13,8 @@ one 1024 px source. Run from the repository root with Pillow installed.
 from __future__ import annotations
 
 import json
-import math
 from pathlib import Path
+
 from PIL import Image, ImageDraw, ImageFilter
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -19,29 +24,29 @@ REPO = BRAND / "Repository"
 OPTIONAL = BRAND / "AppIcons" / "OptionalAppearances"
 
 COLORS = {
-    "black": "#0B0C0A",
-    "graphite": "#191B17",
-    "ivory": "#F1EFE8",
-    "amber": "#E7B35A",
-    "amber_light": "#FFD68A",
-    "copper": "#C97852",
-    "cyan": "#73B4BD",
-    "green": "#83B67A",
+    "void": "#04060A",
+    "ink": "#080B11",
+    "beam": "#F6FAFF",
+    "rail": "#E8EEF7",
 }
 
+# The dispersion ramp, short wavelength first. These are the same eight samples
+# the app uses for every semantic colour in the interface.
+SPECTRUM = ["#6C4BF0", "#3D7BF5", "#21C4DE", "#46D08A",
+            "#D9D45F", "#FFB13D", "#FF7A38", "#F1495C"]
+
 MASTER = {
-    "beam": [(440, 246), (584, 246), (788, 700), (236, 700)],
-    "slot": (388, 184, 248, 70),
-    "desk": (180, 716, 664, 92),
-    "nodes": [(449, 752, 24), (500, 752, 24), (551, 752, 24)],
+    "slot": (388, 150, 248, 64),
+    "beam": [(440, 250), (584, 250), (812, 720), (212, 720)],
+    "rail": (140, 762, 744, 96),
 }
 
 MICRO = {
-    16: {"beam": [(7,4),(9,4),(12,11),(4,11)], "slot": (6,3,4,1), "desk": (3,12,10,2), "nodes": [(7,12),(8,12),(9,12)]},
-    24: {"beam": [(10,6),(14,6),(19,17),(5,17)], "slot": (9,4,6,2), "desk": (4,18,16,3), "nodes": [(10,19),(12,19),(14,19)]},
-    32: {"beam": [(14,8),(18,8),(24,22),(8,22)], "slot": (12,6,8,2), "desk": (6,23,20,3), "nodes": [(13,24),(16,24),(19,24)]},
-    48: {"beam": [(20,12),(28,12),(37,33),(11,33)], "slot": (18,9,12,3), "desk": (9,35,30,5), "nodes": [(20,37),(24,37),(28,37)]},
-    64: {"beam": [(27,15),(37,15),(49,43),(15,43)], "slot": (24,11,16,5), "desk": (11,45,42,7), "nodes": [(26,48),(32,48),(38,48)]},
+    16: {"slot": (6, 3, 4, 1), "beam": [(7, 4), (9, 4), (12, 11), (4, 11)], "rail": (3, 12, 10, 2)},
+    24: {"slot": (9, 4, 6, 2), "beam": [(10, 6), (14, 6), (19, 17), (5, 17)], "rail": (4, 18, 16, 3)},
+    32: {"slot": (12, 6, 8, 2), "beam": [(14, 8), (18, 8), (24, 22), (8, 22)], "rail": (6, 23, 20, 3)},
+    48: {"slot": (18, 9, 12, 3), "beam": [(20, 12), (28, 12), (37, 33), (11, 33)], "rail": (9, 35, 30, 5)},
+    64: {"slot": (24, 11, 16, 5), "beam": [(27, 15), (37, 15), (49, 43), (15, 43)], "rail": (11, 45, 42, 7)},
 }
 
 
@@ -50,58 +55,85 @@ def rgb(value: str) -> tuple[int, int, int]:
     return tuple(int(value[index:index + 2], 16) for index in (0, 2, 4))
 
 
-def gradient(size: int, points, top: str, bottom: str) -> Image.Image:
+def spectrum_at(t: float) -> tuple[int, int, int]:
+    """Sample the dispersion ramp, interpolating between stops."""
+    t = min(1.0, max(0.0, t))
+    span = (len(SPECTRUM) - 1) * t
+    low = int(span)
+    high = min(low + 1, len(SPECTRUM) - 1)
+    local = span - low
+    start, end = rgb(SPECTRUM[low]), rgb(SPECTRUM[high])
+    return tuple(round(start[i] + (end[i] - start[i]) * local) for i in range(3))
+
+
+def dispersing_beam(size: int, points) -> Image.Image:
+    """The beam: white where it leaves the aperture, dispersed where it lands.
+
+    Colour runs across the beam and saturation runs down it, so the mark reads
+    as light separating rather than as a gradient applied to a shape.
+    """
     mask = Image.new("L", (size, size), 0)
     ImageDraw.Draw(mask).polygon(points, fill=255)
+
+    xs = [point[0] for point in points]
+    ys = [point[1] for point in points]
+    left, right = min(xs), max(xs)
+    top, bottom = min(ys), max(ys)
+    width = max(1, right - left)
+    height = max(1, bottom - top)
+    white = rgb(COLORS["beam"])
+
     image = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    start, end = rgb(top), rgb(bottom)
     draw = ImageDraw.Draw(image)
     for y in range(size):
-        t = y / max(1, size - 1)
-        color = tuple(round(start[i] + (end[i] - start[i]) * t) for i in range(3)) + (255,)
-        draw.line((0, y, size, y), fill=color)
+        fall = min(1.0, max(0.0, (y - top) / height))
+        # Hold the beam white briefly, then let it separate.
+        mix = min(1.0, max(0.0, (fall - 0.12) / 0.75))
+        for x in range(left, right + 1):
+            hue = spectrum_at((x - left) / width)
+            colour = tuple(round(white[i] + (hue[i] - white[i]) * mix) for i in range(3))
+            draw.point((x, y), fill=colour + (255,))
     image.putalpha(mask)
     return image
 
 
 def scaled_master(size: int, monochrome: bool = False) -> Image.Image:
     scale = size / 1024
+
+    def s(value):
+        return round(value * scale)
+
     image = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    beam = [(round(x * scale), round(y * scale)) for x, y in MASTER["beam"]]
-    slot = tuple(round(value * scale) for value in MASTER["slot"])
-    desk = tuple(round(value * scale) for value in MASTER["desk"])
+    beam = [(s(x), s(y)) for x, y in MASTER["beam"]]
+    sx, sy, sw, sh = (s(value) for value in MASTER["slot"])
+    rx, ry, rw, rh = (s(value) for value in MASTER["rail"])
+
     if monochrome:
         draw = ImageDraw.Draw(image)
         draw.polygon(beam, fill="white")
-        for x, y, w, h in (slot, desk):
-            draw.rounded_rectangle((x, y, x + w, y + h), radius=max(1, h // 3), fill="white")
-        return image
-    image.alpha_composite(gradient(size, beam, COLORS["amber_light"], COLORS["amber"]))
+    else:
+        image.alpha_composite(dispersing_beam(size, beam))
+
     draw = ImageDraw.Draw(image)
-    for x, y, w, h in (slot, desk):
-        draw.rounded_rectangle((x, y, x + w, y + h), radius=max(1, h // 3), fill=COLORS["ivory"])
-    for (x, y, diameter), color in zip(MASTER["nodes"], (COLORS["cyan"], COLORS["amber"], COLORS["green"])):
-        left, top, d = round(x * scale), round(y * scale), max(2, round(diameter * scale))
-        draw.ellipse((left, top, left + d, top + d), fill=color)
+    face = "white" if monochrome else COLORS["beam"]
+    draw.rounded_rectangle((sx, sy, sx + sw, sy + sh), radius=max(1, s(6)), fill=face)
+    draw.rounded_rectangle((rx, ry, rx + rw, ry + rh), radius=max(1, s(6)),
+                           fill="white" if monochrome else COLORS["rail"])
     return image
 
 
 def micro_mark(size: int, monochrome: bool = False) -> Image.Image:
     spec = MICRO[size]
     image = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(image)
     if monochrome:
-        draw.polygon(spec["beam"], fill="white")
-        for key in ("slot", "desk"):
-            x, y, w, h = spec[key]
-            draw.rectangle((x, y, x+w-1, y+h-1), fill="white")
-        return image
-    image.alpha_composite(gradient(size, spec["beam"], COLORS["amber_light"], COLORS["amber"]))
-    for key in ("slot", "desk"):
+        ImageDraw.Draw(image).polygon(spec["beam"], fill="white")
+    else:
+        image.alpha_composite(dispersing_beam(size, spec["beam"]))
+    draw = ImageDraw.Draw(image)
+    for key in ("slot", "rail"):
         x, y, w, h = spec[key]
-        draw.rectangle((x, y, x+w-1, y+h-1), fill=COLORS["ivory"])
-    for (x, y), color in zip(spec["nodes"], (COLORS["cyan"], COLORS["amber"], COLORS["green"])):
-        draw.point((x, y), fill=color)
+        draw.rectangle((x, y, x + w - 1, y + h - 1),
+                       fill="white" if monochrome else COLORS["beam"])
     return image
 
 
@@ -115,7 +147,7 @@ def app_icon(size: int, platform: str, appearance: str = "default") -> Image.Ima
     supersample = 4 if size <= 64 else 1
     canvas_size = size * supersample
     if platform == "ios":
-        canvas = Image.new("RGBA", (canvas_size, canvas_size), rgb("#3B321F" if appearance == "tinted" else COLORS["black"]) + (255,))
+        canvas = Image.new("RGBA", (canvas_size, canvas_size), rgb("#1B2430" if appearance == "tinted" else COLORS["void"]) + (255,))
         tile_origin = (0, 0)
         tile_size = canvas_size
     else:
@@ -123,7 +155,7 @@ def app_icon(size: int, platform: str, appearance: str = "default") -> Image.Ima
         inset = round(canvas_size * 0.055)
         tile_size = canvas_size - inset * 2
         tile_origin = (inset, inset)
-        tile = Image.new("RGBA", (tile_size, tile_size), rgb("#3B321F" if appearance == "tinted" else COLORS["black"]) + (255,))
+        tile = Image.new("RGBA", (tile_size, tile_size), rgb("#1B2430" if appearance == "tinted" else COLORS["void"]) + (255,))
         tile.putalpha(rounded_mask(tile_size))
         canvas.alpha_composite(tile, tile_origin)
     mark_size = round(tile_size * 0.79)
@@ -134,7 +166,7 @@ def app_icon(size: int, platform: str, appearance: str = "default") -> Image.Ima
     else:
         mark = scaled_master(mark_size, monochrome)
     if appearance == "dark":
-        overlay = Image.new("RGBA", canvas.size, (18, 20, 15, 32))
+        overlay = Image.new("RGBA", canvas.size, (4, 6, 10, 32))
         canvas.alpha_composite(overlay)
     x = tile_origin[0] + (tile_size - mark_size) // 2
     y = tile_origin[1] + round(tile_size * 0.47 - mark_size * 0.48)

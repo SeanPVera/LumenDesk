@@ -109,9 +109,29 @@ and must be URL-encoded in paths.
 | `POST` | `/devices/{id}/power` | `{"on":true}` | Power on/off |
 | `POST` | `/devices/{id}/brightness` | `{"value":0-100}` | Brightness percent |
 | `POST` | `/devices/{id}/color` | `{"rgb":{"r":0,"g":0,"b":0}}` or `{"kelvin":2700}` | Colour or white |
+| `GET` | `/state` | — | Devices, rooms, scenes and favourites in one call |
+| `GET`/`POST` | `/rooms` | `{"name":"Studio"}` | List or create rooms |
+| `POST` | `/rooms/{id}` | `{"name":…}` or `?delete=1` | Rename or delete a room |
+| `POST` | `/rooms/{id}/schedules` | `{"hour":7,"minute":30,"action":"turnOn"}` | Add a schedule |
+| `POST` | `/rooms/{id}/schedules/{sid}` | patch, or `?delete=1` | Update or delete a schedule |
+| `GET`/`POST` | `/scenes` | `{"name":"Evening"}` | List, or capture current state as a scene |
+| `POST` | `/scenes/{id}/apply` | — | Restore a scene |
+| `POST` | `/devices/{id}/favorite` \| `/rename` \| `/room` | — / `{"name":…}` / `{"roomID":…}` | Organise a light |
 
 Commands apply optimistically and are corrected by the next poll, mirroring the
 native app's command lifecycle.
+
+### Stored state and schedules
+
+Rooms, scenes, schedules, favourites and custom device names are kept in
+`~/.lumendesk/bridge-state.json`, written atomically. They live here rather than
+in the browser so they survive a reload, are shared by every browser on the
+machine, and — crucially for schedules — keep working with no page open.
+
+**Schedules are evaluated by the bridge**, on a half-open time window, so a
+missed tick (a laptop waking from sleep) still runs an entry once rather than
+skipping or repeating it. Evaluation itself is pure and clock-injected, like the
+native `ScheduleEngine`, so it is tested without waiting on real time.
 
 ## Tests
 

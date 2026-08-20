@@ -1,6 +1,8 @@
 import http from 'node:http'
 import { clampPercent } from './color.js'
 import { serveStatic } from './static.js'
+import { applyScene, snapshot } from './actions.js'
+import { ACTIONS } from './schedules.js'
 
 // A page served from https://<user>.github.io may call this bridge because
 // 127.0.0.1 is a "potentially trustworthy" origin, exempt from mixed content
@@ -57,7 +59,15 @@ function isValidRGB(rgb) {
   )
 }
 
-export function createServer({ registry, lifx, govee, allowedOrigins, version, staticDir = null }) {
+export function createServer({
+  registry,
+  lifx,
+  govee,
+  allowedOrigins,
+  version,
+  staticDir = null,
+  store = null,
+}) {
   const dispatch = {
     power: (device, body) => {
       const on = Boolean(body.on)
@@ -87,6 +97,115 @@ export function createServer({ registry, lifx, govee, allowedOrigins, version, s
     },
   }
 
+  const decorate = devices => {
+    if (!store) return devices
+    const favorites = new Set(store.state.favorites)
+    const rooms = store.listRooms()
+    return devices.map(device => ({
+      ...device,
+      name: store.state.deviceNames[device.id] ?? device.name,
+      favorite: favorites.has(device.id),
+      roomID: rooms.find(r => r.lightIDs.includes(device.id))?.id ?? null,
+    }))
+  }
+
+  /** Store-backed routes. Returns true when it handled the request. */
+  const handleStore = async ({ req, res, path, url }) => {
+    const body = req.method === 'POST' ? await readJSON(req) : {}
+
+    if (req.method === 'GET' && path === '/rooms') {
+      json(res, 200, { rooms: store.listRooms() })
+      return true
+    }
+    if (req.method === 'POST' && path === '/rooms') {
+      json(res, 200, { room: store.addRoom(body.name) })
+      return true
+    }
+
+    let match = path.match(/^\/rooms\/([^/]+)$/)
+    if (match && req.method === 'POST') {
+      if (url.searchParams.get('delete') === '1') {
+        json(res, store.removeRoom(match[1]) ? 200 : 404, { ok: true })
+        return true
+      }
+      const room = store.updateRoom(match[1], body)
+      json(res, room ? 200 : 404, room ? { room } : { error: 'unknown room' })
+      return true
+    }
+
+    match = path.match(/^\/rooms\/([^/]+)\/schedules$/)
+    if (match && req.method === 'POST') {
+      const schedule = store.addSchedule(match[1], body)
+      json(res, schedule ? 200 : 404, schedule ? { schedule } : { error: 'unknown room' })
+      return true
+    }
+
+    match = path.match(/^\/rooms\/([^/]+)\/schedules\/([^/]+)$/)
+    if (match && req.method === 'POST') {
+      const [, roomID, scheduleID] = match
+      if (url.searchParams.get('delete') === '1') {
+        json(res, store.removeSchedule(roomID, scheduleID) ? 200 : 404, { ok: true })
+        return true
+      }
+      const schedule = store.updateSchedule(roomID, scheduleID, body)
+      json(res, schedule ? 200 : 404, schedule ? { schedule } : { error: 'unknown schedule' })
+      return true
+    }
+
+    if (req.method === 'GET' && path === '/scenes') {
+      json(res, 200, { scenes: store.listScenes() })
+      return true
+    }
+    if (req.method === 'POST' && path === '/scenes') {
+      // Capture the devices asked for, or every known device.
+      const ids = Array.isArray(body.deviceIDs) ? body.deviceIDs : null
+      const devices = registry.list().filter(d => (ids ? ids.includes(d.id) : true))
+      if (!devices.length) {
+        json(res, 400, { error: 'no devices to capture' })
+        return true
+      }
+      json(res, 200, { scene: store.addScene(body.name, snapshot(devices)) })
+      return true
+    }
+
+    match = path.match(/^\/scenes\/([^/]+)\/apply$/)
+    if (match && req.method === 'POST') {
+      const scene = store.listScenes().find(s => s.id === match[1])
+      if (!scene) {
+        json(res, 404, { error: 'unknown scene' })
+        return true
+      }
+      const result = applyScene({ scene, registry, lifx, govee })
+      json(res, 200, { ...result, devices: decorate(registry.list()) })
+      return true
+    }
+
+    match = path.match(/^\/scenes\/([^/]+)$/)
+    if (match && req.method === 'POST' && url.searchParams.get('delete') === '1') {
+      json(res, store.removeScene(match[1]) ? 200 : 404, { ok: true })
+      return true
+    }
+
+    match = path.match(/^\/devices\/(.+)\/(favorite|rename|room)$/)
+    if (match && req.method === 'POST') {
+      const deviceID = decodeURIComponent(match[1])
+      if (!registry.get(deviceID)) {
+        json(res, 404, { error: 'unknown device' })
+        return true
+      }
+      if (match[2] === 'favorite') store.toggleFavorite(deviceID)
+      if (match[2] === 'rename') store.renameDevice(deviceID, body.name)
+      if (match[2] === 'room' && !store.assignLight(deviceID, body.roomID ?? null)) {
+        json(res, 404, { error: 'unknown room' })
+        return true
+      }
+      json(res, 200, { devices: decorate(registry.list()), rooms: store.listRooms() })
+      return true
+    }
+
+    return false
+  }
+
   return http.createServer(async (req, res) => {
     applyCORS(req, res, allowedOrigins)
 
@@ -107,7 +226,18 @@ export function createServer({ registry, lifx, govee, allowedOrigins, version, s
       }
 
       if (req.method === 'GET' && path === '/devices') {
-        return json(res, 200, { devices: registry.list() })
+        return json(res, 200, { devices: decorate(registry.list()) })
+      }
+
+      // Everything the client needs for a first paint, in one round trip.
+      if (req.method === 'GET' && path === '/state') {
+        return json(res, 200, {
+          devices: decorate(registry.list()),
+          rooms: store ? store.listRooms() : [],
+          scenes: store ? store.listScenes() : [],
+          favorites: store ? store.state.favorites : [],
+          actions: ACTIONS,
+        })
       }
 
       if (req.method === 'POST' && path === '/discover') {
@@ -134,6 +264,11 @@ export function createServer({ registry, lifx, govee, allowedOrigins, version, s
         if (result && result.error) return json(res, 400, result)
         if (!result) return json(res, 503, { error: 'device is not addressable yet' })
         return json(res, 200, { device: registry.get(device.id) })
+      }
+
+      if (store) {
+        const stored = await handleStore({ req, res, path, url })
+        if (stored) return undefined
       }
 
       // Anything that is not an API route is the web client, when the bridge

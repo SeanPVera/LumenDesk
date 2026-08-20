@@ -7,7 +7,9 @@ Two pieces that together let a browser control real lights:
   loopback HTTP API. See [bridge/README.md](bridge/README.md).
 - **`app/`** — the React web client, published to GitHub Pages at
   <https://seanpvera.github.io/LumenDesk/>. It holds no protocol logic; it
-  talks only to the bridge on `127.0.0.1`.
+  talks only to the bridge. Five destinations mirroring the native shell: Home
+  (favourites, rooms, search, filters, bulk actions), Library (scenes),
+  Automation (schedules), Devices (rooms and naming) and Settings.
 
 The split exists because browsers cannot open raw UDP sockets, and GitHub Pages
 has no server to relay through. Keeping the UDP in a local helper preserves

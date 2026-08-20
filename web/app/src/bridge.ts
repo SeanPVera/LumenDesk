@@ -20,6 +20,49 @@ export interface Device {
   brightness: number
   color: RGB | null
   kelvin: number | null
+  favorite?: boolean
+  roomID?: string | null
+  sku?: string
+}
+
+export type ScheduleAction =
+  | 'turnOn'
+  | 'turnOff'
+  | 'dim10'
+  | 'dim25'
+  | 'dim50'
+  | 'dim75'
+  | 'applyScene'
+
+export interface Schedule {
+  id: string
+  isEnabled: boolean
+  hour: number
+  minute: number
+  action: ScheduleAction
+  weekdays: number[]
+  sceneID: string | null
+}
+
+export interface Room {
+  id: string
+  name: string
+  lightIDs: string[]
+  schedules: Schedule[]
+}
+
+export interface Scene {
+  id: string
+  name: string
+  snapshots: Record<string, unknown>
+  createdAt: string
+}
+
+export interface BridgeState {
+  devices: Device[]
+  rooms: Room[]
+  scenes: Scene[]
+  favorites: string[]
 }
 
 export const DEFAULT_PORT = 8765
@@ -120,3 +163,83 @@ export function rgbToHex({ r, g, b }: RGB): string {
   const part = (v: number) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0')
   return `#${part(r)}${part(g)}${part(b)}`
 }
+
+// MARK: rooms, scenes, schedules
+
+export const fetchState = (port: number) => request<BridgeState>(port, '/state')
+
+export const createRoom = (port: number, name: string) =>
+  request<{ room: Room }>(port, '/rooms', { method: 'POST', body: JSON.stringify({ name }) })
+
+export const renameRoom = (port: number, roomID: string, name: string) =>
+  request<{ room: Room }>(port, `/rooms/${roomID}`, {
+    method: 'POST',
+    body: JSON.stringify({ name }),
+  })
+
+export const deleteRoom = (port: number, roomID: string) =>
+  request<{ ok: boolean }>(port, `/rooms/${roomID}?delete=1`, { method: 'POST', body: '{}' })
+
+export const assignRoom = (port: number, deviceID: string, roomID: string | null) =>
+  request<{ devices: Device[]; rooms: Room[] }>(
+    port,
+    `/devices/${encodeURIComponent(deviceID)}/room`,
+    { method: 'POST', body: JSON.stringify({ roomID }) },
+  )
+
+export const toggleFavorite = (port: number, deviceID: string) =>
+  request<{ devices: Device[]; rooms: Room[] }>(
+    port,
+    `/devices/${encodeURIComponent(deviceID)}/favorite`,
+    { method: 'POST', body: '{}' },
+  )
+
+export const renameDevice = (port: number, deviceID: string, name: string) =>
+  request<{ devices: Device[]; rooms: Room[] }>(
+    port,
+    `/devices/${encodeURIComponent(deviceID)}/rename`,
+    { method: 'POST', body: JSON.stringify({ name }) },
+  )
+
+export const saveScene = (port: number, name: string, deviceIDs?: string[]) =>
+  request<{ scene: Scene }>(port, '/scenes', {
+    method: 'POST',
+    body: JSON.stringify({ name, deviceIDs }),
+  })
+
+export const applyScene = (port: number, sceneID: string) =>
+  request<{ applied: string[]; skipped: string[]; devices: Device[] }>(
+    port,
+    `/scenes/${sceneID}/apply`,
+    { method: 'POST', body: '{}' },
+  )
+
+export const deleteScene = (port: number, sceneID: string) =>
+  request<{ ok: boolean }>(port, `/scenes/${sceneID}?delete=1`, { method: 'POST', body: '{}' })
+
+export const addSchedule = (
+  port: number,
+  roomID: string,
+  entry: Partial<Schedule>,
+) =>
+  request<{ schedule: Schedule }>(port, `/rooms/${roomID}/schedules`, {
+    method: 'POST',
+    body: JSON.stringify(entry),
+  })
+
+export const updateSchedule = (
+  port: number,
+  roomID: string,
+  scheduleID: string,
+  patch: Partial<Schedule>,
+) =>
+  request<{ schedule: Schedule }>(port, `/rooms/${roomID}/schedules/${scheduleID}`, {
+    method: 'POST',
+    body: JSON.stringify(patch),
+  })
+
+export const deleteSchedule = (port: number, roomID: string, scheduleID: string) =>
+  request<{ ok: boolean }>(port, `/rooms/${roomID}/schedules/${scheduleID}?delete=1`, {
+    method: 'POST',
+    body: '{}',
+  })

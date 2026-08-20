@@ -276,6 +276,7 @@ Themes can be applied to all lights or to a specific room.
 
 Music Mode is a first-class section of the Lighting Library. It turns the existing `music-pulse` effect into a configurable choreography session while preserving that identifier for saved-state compatibility.
 
+- Real beat tracking. LumenDesk estimates the tempo of what is playing and choreographs to the beat grid it predicts, rather than reacting to every transient: brightness swells into each beat and accents the downbeat, sweeps travel the room once per bar, and colours change on bar lines. The detected tempo is shown in BPM next to the beat indicator once it locks; music with no clear pulse falls back to the onset-driven show automatically.
 - Built-in presets: Ambient, Balanced, Concert, Cinematic, and Soundcheck, plus a persisted Custom configuration.
 - Beat, bass, percussion, color-change, brightness, movement, silence, palette, and restoration controls.
 - Explicit left-to-right, front-to-back, circular, or custom fixture topology. Rooms with no saved topology use deterministic label-and-ID ordering rather than discovery order.
@@ -655,6 +656,13 @@ If LumenDesk reports a bind failure for Govee, another app may already be listen
 - Open **Lighting Library → Music Mode**, choose a preset and scope, then select **Start**.
 - Confirm the audio is loud enough for the input being monitored.
 - Stop and restart Music Mode after changing permissions.
+
+### Music Mode is not in time with the music
+
+- Watch the readout under the beat indicator. It shows **BPM** once the tempo locks, which normally takes about four seconds of steady rhythm, and reads **Beat** while no tempo is detected.
+- While it reads **Beat**, the show is reacting to onsets instead of following a grid. That is expected for ambient, spoken word, freely-timed acoustic material, and the opening seconds of a track.
+- Rubato, heavy tempo drift, and dense percussion with no clear pulse are the usual reasons a tempo never locks.
+- The show follows the tempo, not your preset: raise **Beat sensitivity** for a deeper pulse and **Color change** for more frequent colour changes on bar lines.
 
 ### Music Mode and system audio (Screen Recording, macOS)
 

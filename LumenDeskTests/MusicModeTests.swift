@@ -15,10 +15,12 @@ final class MusicModeTests: XCTestCase {
 
     func testSteadyToneCreatesOneOnsetThenSettles() throws {
         let analyzer = MusicFeatureAnalyzer(sourceDescription: "Test")
-        let first = try XCTUnwrap(analyzer.analyze(buffer(frequency: 880, amplitude: 0.5)))
+        var sample = 0
+        let first = try XCTUnwrap(analyzer.analyze(buffer(frequency: 880, amplitude: 0.5, startSample: sample)))
         var last = first
         for _ in 0..<10 {
-            last = try XCTUnwrap(analyzer.analyze(buffer(frequency: 880, amplitude: 0.5)))
+            sample += 1024
+            last = try XCTUnwrap(analyzer.analyze(buffer(frequency: 880, amplitude: 0.5, startSample: sample)))
         }
         XCTAssertGreaterThan(first.snare + first.percussion, last.snare + last.percussion)
         XCTAssertLessThanOrEqual(last.beatCount, 1)
@@ -52,15 +54,131 @@ final class MusicModeTests: XCTestCase {
 
     func testAdaptiveNormalizationMakesQuietSignalUsefulAndAlwaysBounded() throws {
         let analyzer = MusicFeatureAnalyzer(sourceDescription: "Test")
-        var quiet = try XCTUnwrap(analyzer.analyze(buffer(frequency: 440, amplitude: 0.08)))
+        var sample = 0
+        var quiet = try XCTUnwrap(analyzer.analyze(buffer(frequency: 440, amplitude: 0.08, startSample: sample)))
         for _ in 0..<8 {
-            quiet = try XCTUnwrap(analyzer.analyze(buffer(frequency: 440, amplitude: 0.08)))
+            sample += 1024
+            quiet = try XCTUnwrap(analyzer.analyze(buffer(frequency: 440, amplitude: 0.08, startSample: sample)))
         }
-        let loud = try XCTUnwrap(analyzer.analyze(buffer(frequency: 440, amplitude: 0.9)))
+        sample += 1024
+        let loud = try XCTUnwrap(analyzer.analyze(buffer(frequency: 440, amplitude: 0.9, startSample: sample)))
         XCTAssertGreaterThan(quiet.level, 0.15)
         for value in [quiet.level, quiet.bass, quiet.mids, quiet.highs, loud.level, loud.energy] {
             XCTAssertTrue((0...1).contains(value))
         }
+    }
+
+    func testAnalyzerTracksTheMusicalBeatRatherThanEveryTransient() throws {
+        let analyzer = MusicFeatureAnalyzer(sourceDescription: "Test")
+        let sampleRate = 48_000.0
+        let period = 0.5
+        let frames: AVAudioFrameCount = 1_024
+        var sample = 0
+        var lockPoint: (time: TimeInterval, beatCount: Int)?
+        var latest: AudioReactiveSnapshot?
+        var latestTime: TimeInterval = 0
+
+        while sample < Int(sampleRate * 14) {
+            let time = Double(sample) / sampleRate
+            let buffer = rhythmBuffer(
+                startSample: sample,
+                frames: frames,
+                sampleRate: sampleRate,
+                beatPeriod: period,
+                includeHiHats: true
+            )
+            if let snapshot = analyzer.analyze(buffer, hostTime: time) {
+                latest = snapshot
+                latestTime = time
+                if snapshot.isTempoLocked, lockPoint == nil {
+                    lockPoint = (time, snapshot.beatCount)
+                }
+            }
+            sample += Int(frames)
+        }
+
+        let snapshot = try XCTUnwrap(latest)
+        let lock = try XCTUnwrap(lockPoint, "the analyzer never locked onto a 120 BPM pattern")
+        XCTAssertEqual(snapshot.tempo, 120, accuracy: 6)
+        XCTAssertEqual(snapshot.beatInterval, period, accuracy: 0.03)
+        XCTAssertLessThan(lock.time, 8)
+
+        // Sixteenth-note hats arrive eight times a second. Counting onsets, as
+        // the analyzer used to, reports roughly that many "beats" a second and
+        // the show cuts colour on every one of them. A beat grid reports two —
+        // the pulse a listener would clap to.
+        let expectedBeats = (latestTime - lock.time) / period
+        XCTAssertEqual(Double(snapshot.beatCount - lock.beatCount), expectedBeats, accuracy: 2.5)
+    }
+
+    func testChoreographyPulsesOnTheBeatWhenTempoIsLocked() {
+        let engine = MusicChoreographyEngine()
+        let fixture = MusicFixtureDescriptor(id: "f", label: "Fixture", transport: .lifxLAN)
+        var config = MusicModeConfiguration.configuration(for: .balanced)
+        // Isolate the beat: no spatial movement, no flashes.
+        config.movementAmount = 0
+        config.allowsFlashes = false
+
+        let interval = 0.5
+        let reference = 100.0
+        var onBeat: [Double] = []
+        var offBeat: [Double] = []
+        for frame in 0..<160 {
+            let timestamp = reference + Double(frame) * 0.025
+            let state = engine.makeFrame(
+                snapshot: lockedSnapshot(at: timestamp, reference: reference, interval: interval),
+                configuration: config,
+                topology: FixtureTopology(),
+                fixtures: [fixture],
+                timestamp: timestamp,
+                sequenceNumber: UInt64(frame)
+            ).states.first
+            // The engine renders slightly ahead to pay for transport latency,
+            // so phase is measured the same way it chooses to render.
+            let beats = (timestamp + 0.045 - reference) / interval
+            let phase = beats - floor(beats)
+            guard let brightness = state?.brightness, frame > 20 else { continue }
+            if phase < 0.15 { onBeat.append(brightness) }
+            if (0.4...0.6).contains(phase) { offBeat.append(brightness) }
+        }
+
+        XCTAssertGreaterThan(onBeat.count, 5)
+        XCTAssertGreaterThan(offBeat.count, 5)
+        let onBeatMean = onBeat.reduce(0, +) / Double(onBeat.count)
+        let offBeatMean = offBeat.reduce(0, +) / Double(offBeat.count)
+        XCTAssertGreaterThan(
+            onBeatMean, offBeatMean * 1.25,
+            "brightness should swell on the beat (\(onBeatMean)) versus between beats (\(offBeatMean))"
+        )
+    }
+
+    func testPaletteHoldsThroughABarInsteadOfChasingTransients() {
+        let engine = MusicChoreographyEngine()
+        let fixture = MusicFixtureDescriptor(id: "f", label: "Fixture", transport: .lifxLAN)
+        let config = MusicModeConfiguration.configuration(for: .balanced)
+        let interval = 0.5
+        let reference = 50.0
+
+        var hues: [Int] = []
+        for frame in 0..<200 {
+            let timestamp = reference + Double(frame) * 0.025
+            let state = engine.makeFrame(
+                snapshot: lockedSnapshot(at: timestamp, reference: reference, interval: interval),
+                configuration: config,
+                topology: FixtureTopology(),
+                fixtures: [fixture],
+                timestamp: timestamp,
+                sequenceNumber: UInt64(frame)
+            ).states.first
+            if let hue = state?.hue { hues.append(Int((hue * 1_000).rounded())) }
+        }
+
+        let distinct = Set(hues)
+        XCTAssertGreaterThan(distinct.count, 1, "the palette should still move across bars")
+        // Five seconds is two and a half bars. Colour is held for each musical
+        // division and only crosses over at its boundary, so the overwhelming
+        // majority of frames repeat the colour of the frame before them.
+        XCTAssertLessThan(distinct.count, hues.count / 3)
     }
 
     func testTopologyUsesDeterministicFallbackAndExplicitOrder() throws {
@@ -250,10 +368,15 @@ final class MusicModeTests: XCTestCase {
         XCTAssertTrue(migrated.musicModeConfiguration.photosensitivitySafeMode)
     }
 
+    /// `startSample` continues the waveform across successive buffers. Analysis
+    /// is gapless and its windows straddle buffer boundaries, so restarting the
+    /// phase every buffer would put a broadband click at each seam and a "steady
+    /// tone" would not be steady.
     private func buffer(
         frequency: Double? = nil,
         amplitude: Float = 0,
         impulse: Bool = false,
+        startSample: Int = 0,
         frames: AVAudioFrameCount = 1024
     ) -> AVAudioPCMBuffer {
         let format = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1)!
@@ -264,12 +387,64 @@ final class MusicModeTests: XCTestCase {
             if impulse {
                 samples[index] = index < 12 ? (index.isMultiple(of: 2) ? 1 : -1) : 0
             } else if let frequency {
-                samples[index] = amplitude * sin(Float(2 * Double.pi * frequency * Double(index) / 48_000))
+                let position = Double(startSample + index)
+                samples[index] = amplitude * sin(Float(2 * Double.pi * frequency * position / 48_000))
             } else {
                 samples[index] = 0
             }
         }
         return buffer
+    }
+
+    /// A kick on every beat, optionally with sixteenth-note hats, so onset
+    /// density and musical pulse are deliberately different rates.
+    private func rhythmBuffer(
+        startSample: Int,
+        frames: AVAudioFrameCount,
+        sampleRate: Double,
+        beatPeriod: Double,
+        includeHiHats: Bool
+    ) -> AVAudioPCMBuffer {
+        let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1)!
+        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames)!
+        buffer.frameLength = frames
+        let samples = buffer.floatChannelData![0]
+        for index in 0..<Int(frames) {
+            let time = Double(startSample + index) / sampleRate
+            let beatPhase = time.truncatingRemainder(dividingBy: beatPeriod)
+            var value = 0.9 * exp(-beatPhase / 0.06) * sin(2 * Double.pi * 55 * beatPhase)
+            if includeHiHats {
+                let hatPhase = time.truncatingRemainder(dividingBy: beatPeriod / 4)
+                let decay = exp(-hatPhase / 0.01)
+                value += 0.3 * decay * (sin(2 * Double.pi * 8_000 * hatPhase)
+                    + 0.7 * sin(2 * Double.pi * 11_500 * hatPhase))
+            }
+            samples[index] = Float(max(-1, min(1, value)))
+        }
+        return buffer
+    }
+
+    /// The snapshot a locked live session publishes: a beat reference that
+    /// advances with the music, which the engine extrapolates its own phase
+    /// from.
+    private func lockedSnapshot(
+        at time: TimeInterval,
+        reference: TimeInterval,
+        interval: TimeInterval
+    ) -> AudioReactiveSnapshot {
+        let beats = floor((time - reference) / interval)
+        return AudioReactiveSnapshot(
+            level: 0.7, beat: 0, kick: 0, snare: 0, percussion: 0,
+            bass: 0.5, mids: 0.5, highs: 0.4, energy: 0.6, mood: 0.5,
+            confidence: 1, pulse: 0, drop: 0, beatCount: Int(beats),
+            tempo: 60 / interval,
+            beatInterval: interval,
+            beatConfidence: 1,
+            beatReferenceTime: reference + beats * interval,
+            beatInBar: Int(beats) % BeatTracker.beatsPerBar,
+            isTempoLocked: true,
+            sourceDescription: "Test"
+        )
     }
 
     private func temporaryStore() -> PersistenceStore {

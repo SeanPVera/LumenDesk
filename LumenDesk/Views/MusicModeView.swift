@@ -363,9 +363,16 @@ private struct MusicModeInputStatusView: View {
                     LumenStatusDot(color: Lumen.beamBright,
                                    size: 18,
                                    lit: controller.latestSnapshot.beat > 0.25)
-                    LumenEyebrow(text: "Beat")
+                    LumenEyebrow(
+                        text: tempoLabel,
+                        tint: controller.latestSnapshot.isTempoLocked ? Lumen.textSecondary : Lumen.textTertiary
+                    )
                 }
-                .frame(width: 46)
+                .frame(width: 58)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(controller.latestSnapshot.isTempoLocked
+                    ? "Tempo locked at \(tempoLabel)"
+                    : "Beat indicator, no tempo detected")
             }
             if controller.sourceStatus == .permissionDenied {
                 Text(permissionMessage)
@@ -385,6 +392,15 @@ private struct MusicModeInputStatusView: View {
             LumenEyebrow(text: label)
         }
         .frame(maxWidth: .infinity)
+    }
+
+    /// Reads out the detected tempo once the beat tracker locks, so it is
+    /// visible whether the show is choreographing to a grid or reacting to
+    /// onsets alone.
+    private var tempoLabel: String {
+        let snapshot = controller.latestSnapshot
+        guard snapshot.isTempoLocked, snapshot.tempo > 0 else { return "Beat" }
+        return "\(Int(snapshot.tempo.rounded())) BPM"
     }
 
     private var sourceIcon: String {

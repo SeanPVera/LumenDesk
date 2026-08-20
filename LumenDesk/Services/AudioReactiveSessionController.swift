@@ -204,7 +204,7 @@ final class AudioReactiveSessionController: ObservableObject {
         sequenceNumber &+= 1
         for (scope, session) in sessions {
             let snapshot = session.synthetic
-                ? syntheticSnapshot(elapsed: max(0, timestamp - session.startedAt))
+                ? syntheticSnapshot(startedAt: session.startedAt, timestamp: timestamp)
                 : analysisSnapshot
             if session.synthetic {
                 analysisSnapshot = snapshot
@@ -236,7 +236,11 @@ final class AudioReactiveSessionController: ObservableObject {
         }
     }
 
-    private func syntheticSnapshot(elapsed: TimeInterval) -> AudioReactiveSnapshot {
+    /// A deterministic 120 BPM pattern for Demo Mode. It reports the same beat
+    /// grid a locked live session would, so demo choreography exercises the
+    /// beat-synchronized path rather than a separate one.
+    private func syntheticSnapshot(startedAt: TimeInterval, timestamp: TimeInterval) -> AudioReactiveSnapshot {
+        let elapsed = max(0, timestamp - startedAt)
         let beatLength = 0.5
         let beatIndex = Int(floor(elapsed / beatLength))
         let beatPhase = elapsed.truncatingRemainder(dividingBy: beatLength)
@@ -264,6 +268,12 @@ final class AudioReactiveSessionController: ObservableObject {
             pulse: pulse,
             drop: energy > 0.72 ? 0.7 : 0,
             beatCount: beatIndex,
+            tempo: 60 / beatLength,
+            beatInterval: beatLength,
+            beatConfidence: 1,
+            beatReferenceTime: startedAt + Double(beatIndex) * beatLength,
+            beatInBar: beatIndex % BeatTracker.beatsPerBar,
+            isTempoLocked: true,
             sourceDescription: "Synthetic demo rhythm"
         )
     }

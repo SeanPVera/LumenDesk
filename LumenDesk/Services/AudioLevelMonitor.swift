@@ -18,14 +18,32 @@ struct AudioReactiveSnapshot: Equatable {
     var mood: Double = 0.5
     var confidence: Double = 0
     // Fast-attack / slow-decay envelope that spikes on every onset — the
-    // "heartbeat" the light show pulses brightness to.
+    // "heartbeat" the light show pulses brightness to. Once a tempo is locked
+    // its decay is a fraction of the beat interval, so the pulse breathes with
+    // the song instead of at one fixed rate.
     var pulse: Double = 0
     // 0…1 strength of a sustained high-intensity section. Choreography treats
     // this as evidence, not as a guaranteed musical "drop."
     var drop: Double = 0
-    // Monotonic count of detected beats. The renderer steps colors by the
-    // delta so no beat is dropped even when frames are throttled.
+    // Monotonic count of beats. Once the tempo is locked these come from the
+    // predicted beat grid, not from raw onsets, so choreography steps once per
+    // musical beat rather than once per hi-hat.
     var beatCount: Int = 0
+    /// Detected tempo in BPM, or 0 when no tempo is locked.
+    var tempo: Double = 0
+    /// Seconds per beat, or 0 when no tempo is locked.
+    var beatInterval: TimeInterval = 0
+    /// 0…1 confidence in the tempo estimate, reported even when unlocked so
+    /// choreography can cross-fade between musical and energy-driven behavior.
+    var beatConfidence: Double = 0
+    /// Host-clock time of the most recent beat on the predicted grid, or 0.
+    /// Renderers extrapolate their own beat phase from this and `beatInterval`
+    /// so beat timing is limited by their frame clock, not by analysis latency.
+    var beatReferenceTime: TimeInterval = 0
+    /// Position of `beatReferenceTime` inside an assumed four-beat bar.
+    var beatInBar: Int = 0
+    /// True once the grid is trustworthy enough to choreograph against.
+    var isTempoLocked: Bool = false
     var sourceDescription: String = "Microphone input"
 }
 
@@ -35,19 +53,25 @@ final class AudioCaptureService {
     }
 
     private let engine = AVAudioEngine()
+    // Touched only on `analysisQueue`, which both owns the analyzer's mutable
+    // state and serializes it against the capture callbacks.
     private var analyzer = MusicFeatureAnalyzer(sourceDescription: "Microphone input")
     // Mic taps deliver on the AVAudioEngine render thread while system-audio
     // taps deliver on their own capture queue; serialize both onto this queue
     // before touching the analyzer's mutable state.
     private let analysisQueue = DispatchQueue(label: "LumenDesk.audioAnalysis")
-    // Audio callbacks can arrive faster than spectral analysis during a CPU
-    // spike. A single-slot pipeline drops superseded buffers instead of
-    // retaining an unbounded queue of stale audio. Twenty analyses per second
-    // is enough to catch onsets while leaving substantially more CPU headroom
-    // for the UI and network transports.
+    // A single-slot guard sheds buffers only when analysis is genuinely behind,
+    // instead of dropping most of the audio on a fixed timer. Beat tracking
+    // needs a gapless signal: the previous 20 Hz throttle analyzed 1024 samples
+    // out of every 50 ms and never saw the other 60% of the music, so onsets
+    // landing in the gaps were invisible and beat times could only ever be
+    // accurate to ±25 ms.
     private let analysisSlot = DispatchSemaphore(value: 1)
-    private var nextAnalysisUptime: UInt64 = 0
-    private let analysisIntervalNanoseconds: UInt64 = 50_000_000
+    // Analysis produces a snapshot per hop (~90 Hz). The main thread only needs
+    // the newest one, so publication is throttled independently — except for
+    // beats, which are published immediately.
+    private let publicationInterval: TimeInterval = 0.04
+    private var lastPublishedHostTime = -Double.greatestFiniteMagnitude
     // Several rooms can run the same audio-reactive effect. They share one
     // capture session instead of starting a ScreenCaptureKit/AVAudioEngine
     // pipeline per room.
@@ -100,7 +124,7 @@ final class AudioCaptureService {
         isStarting = true
         startGeneration += 1
         let generation = startGeneration
-        analyzer = MusicFeatureAnalyzer(sourceDescription: preferredSourceDescription)
+        resetAnalyzer(sourceDescription: preferredSourceDescription)
         #if os(macOS)
         // macOS: system audio (Apple Music / other apps) is the SOLE source.
         // The microphone is never started here, so room noise can't pollute the
@@ -120,14 +144,14 @@ final class AudioCaptureService {
             let startResult: AudioStartResult
             switch result {
             case .started:
-                self.analyzer.sourceDescription = "System audio"
+                self.setSourceDescription("System audio")
                 startResult = .started
             case .needsScreenRecording:
-                self.analyzer.sourceDescription = "System audio unavailable — Screen Recording off"
+                self.setSourceDescription("System audio unavailable — Screen Recording off")
                 self.systemAudioCapture = nil
                 startResult = .needsScreenRecording
             case .unavailable:
-                self.analyzer.sourceDescription = "System audio unavailable"
+                self.setSourceDescription("System audio unavailable")
                 self.systemAudioCapture = nil
                 startResult = .unavailable
             }
@@ -148,6 +172,23 @@ final class AudioCaptureService {
         let completions = startCompletions
         startCompletions.removeAll(keepingCapacity: true)
         for completion in completions { completion(result) }
+    }
+
+    /// The analyzer and its publication clock live on the analysis queue, so
+    /// replacing or relabelling them is scheduled there rather than racing a
+    /// capture callback that is already analyzing a buffer.
+    private func resetAnalyzer(sourceDescription: String) {
+        analysisQueue.async { [weak self] in
+            guard let self else { return }
+            self.analyzer = MusicFeatureAnalyzer(sourceDescription: sourceDescription)
+            self.lastPublishedHostTime = -Double.greatestFiniteMagnitude
+        }
+    }
+
+    private func setSourceDescription(_ description: String) {
+        analysisQueue.async { [weak self] in
+            self?.analyzer.sourceDescription = description
+        }
     }
 
     private var preferredSourceDescription: String {
@@ -200,12 +241,7 @@ final class AudioCaptureService {
 
     private func consume(_ buffer: AVAudioPCMBuffer, requiresOwnedCopy: Bool = true) {
         guard analysisSlot.wait(timeout: .now()) == .success else { return }
-        let now = DispatchTime.now().uptimeNanoseconds
-        guard now >= nextAnalysisUptime else {
-            analysisSlot.signal()
-            return
-        }
-        nextAnalysisUptime = now &+ analysisIntervalNanoseconds
+        let hostTime = ProcessInfo.processInfo.systemUptime
         let analysisBuffer: AVAudioPCMBuffer
         if requiresOwnedCopy {
             guard let ownedBuffer = buffer.ownedFloatCopy() else {
@@ -219,7 +255,9 @@ final class AudioCaptureService {
         analysisQueue.async { [weak self] in
             guard let self else { return }
             defer { self.analysisSlot.signal() }
-            guard let snapshot = self.analyzer.analyze(analysisBuffer) else { return }
+            guard let snapshot = self.analyzer.analyze(analysisBuffer, hostTime: hostTime) else { return }
+            guard snapshot.beat > 0 || hostTime - self.lastPublishedHostTime >= self.publicationInterval else { return }
+            self.lastPublishedHostTime = hostTime
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 self.onLevel?(snapshot.level)
@@ -253,8 +291,7 @@ typealias AudioLevelMonitor = AudioCaptureService
 
 private extension AVAudioPCMBuffer {
     /// AVAudioEngine tap memory is only valid for the duration of the callback.
-    /// Copying the accepted (already throttled) buffer makes the asynchronous
-    /// analyzer safe without retaining every callback under load.
+    /// Copying the accepted buffer makes the asynchronous analyzer safe.
     func ownedFloatCopy() -> AVAudioPCMBuffer? {
         guard !format.isInterleaved,
               let source = floatChannelData,
@@ -269,54 +306,121 @@ private extension AVAudioPCMBuffer {
     }
 }
 
+/// Turns captured audio into the musical features Music Mode choreographs to.
+///
+/// The analyzer runs a gapless short-time Fourier transform: incoming buffers
+/// of any size are accumulated into a ring and analyzed on a fixed 512-sample
+/// hop, so every sample is examined and onset times are accurate to about one
+/// hop (~11 ms at 48 kHz). Every time constant is expressed in seconds and
+/// applied against the hop duration, so envelopes decay at the rate they claim
+/// to regardless of the capture buffer size the OS happens to choose.
+///
+/// Onsets are measured as half-wave-rectified flux of *log* magnitudes across
+/// log-spaced bands. Working in the log domain makes onset strength
+/// independent of playback volume, and giving each band equal weight keeps a
+/// kick drum visible against a wall of cymbals.
+///
+/// Onsets are not beats. They are fed to `BeatTracker`, which estimates tempo
+/// and beat phase; while a tempo is locked, `beatCount` advances on the
+/// predicted grid instead of on every transient.
 final class MusicFeatureAnalyzer {
     var sourceDescription: String
+
+    private static let windowSize = 2_048
+    private static let hopSize = 512
+    private static let logCompression = 1_000.0
+    /// Floor for the onset auto-gain. Real onsets measure roughly 0.1…0.8 in
+    /// these units while a steady tone leaves numerical ripple around 1e-4, so
+    /// a floor two orders of magnitude above the ripple keeps a decaying gain
+    /// from amplifying a held note back up into phantom onsets, and still lets
+    /// genuinely quiet material drive a full show.
+    private static let minimumOnsetScale = 0.01
+
+    private struct BinRange {
+        let first: Int
+        let last: Int
+        var count: Int { max(1, last - first + 1) }
+    }
+
+    // Gapless STFT plumbing.
+    private var ring = [Float](repeating: 0, count: MusicFeatureAnalyzer.windowSize)
+    private var ringWriteIndex = 0
+    private var samplesUntilHop = MusicFeatureAnalyzer.hopSize
+    private var processedSamples: Int64 = 0
+    private var monoSamples: [Float] = []
+    private var chronologicalSamples = [Float](repeating: 0, count: MusicFeatureAnalyzer.windowSize)
+    private var windowedSamples = [Float](repeating: 0, count: MusicFeatureAnalyzer.windowSize)
+    private var hannWindow = [Float](repeating: 0, count: MusicFeatureAnalyzer.windowSize)
+
+    // One reusable Accelerate real FFT.
+    private var fftSetup: FFTSetup?
+    private var fftLog2Size: vDSP_Length = 0
+    private var fftReal = [Float](repeating: 0, count: MusicFeatureAnalyzer.windowSize / 2)
+    private var fftImaginary = [Float](repeating: 0, count: MusicFeatureAnalyzer.windowSize / 2)
+    private var fftMagnitudes = [Float](repeating: 0, count: MusicFeatureAnalyzer.windowSize / 2)
+    private var logMagnitudes = [Double](repeating: 0, count: MusicFeatureAnalyzer.windowSize / 2)
+    private var previousLogMagnitudes = [Double](repeating: 0, count: MusicFeatureAnalyzer.windowSize / 2)
+
+    // Band layout, rebuilt when the capture format changes.
+    private var configuredSampleRate: Double = 0
+    private var bassBins = BinRange(first: 1, last: 1)
+    private var midsBins = BinRange(first: 1, last: 1)
+    private var highsBins = BinRange(first: 1, last: 1)
+    private var kickBins = BinRange(first: 1, last: 1)
+    private var snareBins = BinRange(first: 1, last: 1)
+    private var hatBins = BinRange(first: 1, last: 1)
+    private var fluxBands: [BinRange] = []
+
+    // Automatic gain. Everything the show reacts to is normalized against a
+    // fast-attack / slow-decay peak so the choreography looks the same whether
+    // the music is quiet or cranked.
     private var noiseFloor: Double = 0.01
-    private var previousBass: Double = 0
-    private var previousHighs: Double = 0
-    private var previousMids: Double = 0
-    // Refractory period, in seconds, before another beat can be counted.
-    // Measured in time (via `dt`) rather than a fixed number of analyze()
-    // calls: the OS's audio buffer size (and therefore how often analyze()
-    // runs) isn't under this code's control, and a buffer-count cooldown let
-    // one drum transient's multi-frame decay re-cross the onset threshold
-    // and get counted as several beats — the show would then cut colors and
-    // flash several times per real hit instead of once, reading as
-    // indiscriminately fast rather than on the beat.
-    private var beatCooldownRemaining: Double = 0
-    // Slowly-decaying peak for automatic gain: keeps the show looking the same
-    // whether the music is quiet or cranked.
     private var peakLevel: Double = 0.02
-    // Slowly-decaying peak of the loudest frequency band; bass/mids/highs are
-    // normalized against it (spectral AGC) so the beat/onset detectors see the
-    // same 0…1 dynamics at any source volume.
-    private var spectralPeak: Double = 0.05
-    // Adaptive onset threshold and persistent show envelopes / counters.
+    private var bandPeak: Double = 0.0005
+    private var odfScale = MusicFeatureAnalyzer.minimumOnsetScale
+    private var kickScale = MusicFeatureAnalyzer.minimumOnsetScale
+    private var snareScale = MusicFeatureAnalyzer.minimumOnsetScale
+    private var hatScale = MusicFeatureAnalyzer.minimumOnsetScale
+
+    // Show envelopes and onset gating.
     private var noveltyBaseline: Double = 0
-    private var energyBaseline: Double = 0
+    private var noveltyDeviation: Double = 0
+    private var beatCooldownRemaining: Double = 0
     private var pulseEnv: Double = 0
     private var dropEnv: Double = 0
-    private var beatCount: Int = 0
-    // One Accelerate real FFT replaces three nested per-bin/per-sample DFTs.
-    // The setup and scratch buffers are reused on the serial analysis queue.
-    private var fftSetup: FFTSetup?
-    private var fftSize = 0
-    private var fftLog2Size: vDSP_Length = 0
-    private var fftReal: [Float] = []
-    private var fftImaginary: [Float] = []
-    private var fftMagnitudes: [Float] = []
-    private var monoSamples: [Float] = []
+    private var energyBaseline: Double = 0
+    private var beatCount = 0
 
-    init(sourceDescription: String) { self.sourceDescription = sourceDescription }
+    // Beat tracking runs on the analyzer's own sample clock — immune to
+    // callback jitter — and is converted to host time for renderers through a
+    // slowly-corrected anchor.
+    private let beatTracker = BeatTracker()
+    private var hostTimeOffset: TimeInterval = 0
+    private var hasHostAnchor = false
+
+    init(sourceDescription: String) {
+        self.sourceDescription = sourceDescription
+        vDSP_hann_window(&hannWindow, vDSP_Length(Self.windowSize), Int32(vDSP_HANN_DENORM))
+        fftLog2Size = vDSP_Length(round(log2(Double(Self.windowSize))))
+        fftSetup = vDSP_create_fftsetup(fftLog2Size, FFTRadix(kFFTRadix2))
+    }
 
     deinit {
         if let fftSetup { vDSP_destroy_fftsetup(fftSetup) }
     }
 
-    func analyze(_ buffer: AVAudioPCMBuffer) -> AudioReactiveSnapshot? {
-        guard let channelData = buffer.floatChannelData else { return nil }
+    /// Consumes one capture buffer and returns the most recent hop's features,
+    /// or nil when the buffer did not complete a hop.
+    ///
+    /// - Parameter hostTime: When the buffer was captured, on the same clock
+    ///   the renderer uses. Beat times are reported on that clock.
+    func analyze(_ buffer: AVAudioPCMBuffer, hostTime: TimeInterval? = nil) -> AudioReactiveSnapshot? {
+        guard let channelData = buffer.floatChannelData, fftSetup != nil else { return nil }
         let frameCount = Int(buffer.frameLength)
-        guard frameCount > 0 else { return nil }
+        let sampleRate = buffer.format.sampleRate
+        guard frameCount > 0, sampleRate > 0 else { return nil }
+        configureIfNeeded(sampleRate: sampleRate)
+
         let channels = Int(buffer.format.channelCount)
         if monoSamples.count != frameCount {
             monoSamples = [Float](repeating: 0, count: frameCount)
@@ -334,119 +438,184 @@ final class MusicFeatureAnalyzer {
                 )
             }
         }
-        let divisor = Float(max(1, channels))
-        var divisorValue = divisor
+        var divisorValue = Float(max(1, channels))
         vDSP_vsdiv(monoSamples, 1, &divisorValue, &monoSamples, 1, vDSP_Length(frameCount))
 
-        var meanSquare: Float = 0
-        vDSP_measqv(monoSamples, 1, &meanSquare, vDSP_Length(frameCount))
-        let rms = Double(sqrt(meanSquare))
-        let sampleRate = buffer.format.sampleRate
-        let dt = Double(frameCount) / max(1, sampleRate)
+        updateHostAnchor(
+            hostTime: hostTime ?? ProcessInfo.processInfo.systemUptime,
+            streamTime: Double(processedSamples + Int64(frameCount)) / sampleRate
+        )
 
-        // Track the quiet floor and a slowly-decaying loud peak, then normalize
-        // between them so loudness reads 0…1 regardless of system volume (AGC).
-        noiseFloor = noiseFloor * 0.995 + min(rms, noiseFloor + 0.002) * 0.005
-        peakLevel = max(peakLevel * 0.9992, rms)
+        var latest: AudioReactiveSnapshot?
+        var strongestBeat = 0.0
+        var index = 0
+        while index < frameCount {
+            let chunk = max(1, min(samplesUntilHop, frameCount - index))
+            copyIntoRing(from: index, count: chunk)
+            index += chunk
+            processedSamples += Int64(chunk)
+            samplesUntilHop -= chunk
+            if samplesUntilHop <= 0 {
+                samplesUntilHop = Self.hopSize
+                let snapshot = analyzeHop(sampleRate: sampleRate)
+                strongestBeat = max(strongestBeat, snapshot.beat)
+                latest = snapshot
+            }
+        }
+        guard var snapshot = latest else { return nil }
+        // A beat can land on any hop in the buffer, not only the last one.
+        // Reporting the strongest keeps the beat indicator and the publication
+        // gate honest; `beatCount` is monotonic, so choreography never misses
+        // one regardless.
+        snapshot.beat = strongestBeat
+        return snapshot
+    }
+
+    // MARK: - Per-hop analysis
+
+    private func analyzeHop(sampleRate: Double) -> AudioReactiveSnapshot {
+        let dt = Double(Self.hopSize) / sampleRate
+        let streamTime = Double(processedSamples) / sampleRate
+
+        fillChronologicalWindow()
+        var meanSquare: Float = 0
+        vDSP_measqv(chronologicalSamples, 1, &meanSquare, vDSP_Length(Self.windowSize))
+        let rms = Double(sqrt(meanSquare))
+        vDSP_vmul(
+            chronologicalSamples, 1,
+            hannWindow, 1,
+            &windowedSamples, 1,
+            vDSP_Length(Self.windowSize)
+        )
+        updateSpectrum()
+
+        // Loudness: track the quiet floor and a fast-attack, slowly-decaying
+        // peak, then normalize between them so level reads 0…1 at any volume.
+        noiseFloor += (min(rms, noiseFloor + 0.002) - noiseFloor) * decayCoefficient(dt: dt, timeConstant: 10)
+        peakLevel = rms > peakLevel
+            ? peakLevel + (rms - peakLevel) * 0.25
+            : max(0.0005, peakLevel * exp(-dt / 10))
         let level = clamp((rms - noiseFloor) / max(0.015, peakLevel - noiseFloor))
 
-        // Auto-gain the bands the same way `level` is auto-gained: normalize
-        // against a slowly decaying peak of the loudest band so kicks, snares,
-        // and hats swing across 0…1 whether the source is quiet background
-        // music or a cranked mix. Rising instantly and decaying slowly keeps
-        // the scale steady within a song.
-        //
-        // Compute the spectrum once, then reduce three bin ranges. The former
-        // implementation repeated a direct DFT for every bin in every band,
-        // doing tens of thousands of scalar multiply/adds per audio buffer.
-        // A 1024-point radix-2 FFT gives bass the resolution it needs and is
-        // also cheaper than any one of those direct band calculations.
-        guard let spectrumSize = updateSpectrum(from: monoSamples) else { return nil }
-        let bassRaw = bandEnergy(sampleRate: sampleRate, low: 45, high: 160, spectrumSize: spectrumSize)
-        let midsRaw = bandEnergy(sampleRate: sampleRate, low: 350, high: 2200, spectrumSize: spectrumSize)
-        let highsRaw = bandEnergy(sampleRate: sampleRate, low: 3200, high: 12000, spectrumSize: spectrumSize)
-        spectralPeak = max(spectralPeak * 0.9992, bassRaw, midsRaw, highsRaw)
-        let bandScale = 0.9 / max(0.001, spectralPeak)
+        let bassRaw = bandMagnitude(bassBins)
+        let midsRaw = bandMagnitude(midsBins)
+        let highsRaw = bandMagnitude(highsBins)
+        let loudestBand = max(bassRaw, max(midsRaw, highsRaw))
+        bandPeak = loudestBand > bandPeak
+            ? bandPeak + (loudestBand - bandPeak) * 0.3
+            : max(0.000_02, bandPeak * exp(-dt / 8))
+        let bandScale = 0.9 / bandPeak
         let bass = clamp(bassRaw * bandScale)
         let mids = clamp(midsRaw * bandScale)
         let highs = clamp(highsRaw * bandScale)
-        // Onsets are rectified jumps in each band (spectral flux), so they fire
-        // on transients — the actual hits — rather than on sustained tones.
-        let kick = clamp((bass - previousBass) * 6)
-        let snare = clamp((mids - previousMids) * 5 + (highs - previousHighs) * 3)
-        let percussion = clamp((highs - previousHighs) * 7)
+
+        // Onsets: rectified flux of log magnitudes. Each log-spaced band is
+        // averaged and then weighted equally, so a kick occupying three bins
+        // counts as much as cymbals spread over hundreds.
+        var bandFluxTotal = 0.0
+        for band in fluxBands { bandFluxTotal += positiveFlux(band) }
+        let rawOnset = fluxBands.isEmpty ? 0 : bandFluxTotal / Double(fluxBands.count)
+        let rawKick = positiveFlux(kickBins)
+        let rawSnare = positiveFlux(snareBins)
+        let rawHat = positiveFlux(hatBins)
+        swap(&logMagnitudes, &previousLogMagnitudes)
+
+        let onset = normalize(rawOnset, scale: &odfScale, dt: dt)
+        let kick = normalize(rawKick, scale: &kickScale, dt: dt)
+        let snare = normalize(rawSnare, scale: &snareScale, dt: dt)
+        let percussion = normalize(rawHat, scale: &hatScale, dt: dt)
         let energy = clamp(level * 0.4 + bass * 0.3 + mids * 0.16 + highs * 0.14)
 
-        // Beat = a novelty spike above an adaptive threshold, rate-limited by a
-        // short refractory window so a single hit isn't counted repeatedly.
-        // 120ms allows over 8 individual hits/sec (fast even for a 16th-note
-        // hi-hat run) while comfortably outlasting one transient's decay, so
-        // the same kick or snare can't cross the threshold twice on its way
-        // down.
-        let novelty = max(kick, snare * 0.85, percussion * 0.7)
-        noveltyBaseline = noveltyBaseline * 0.95 + novelty * 0.05
-        let isBeat = novelty > max(0.12, noveltyBaseline * 1.4) && beatCooldownRemaining <= 0
-        let beat: Double
-        if isBeat {
-            beat = novelty
-            beatCooldownRemaining = 0.12
-            beatCount += 1
-        } else {
-            beat = 0
-            beatCooldownRemaining = max(0, beatCooldownRemaining - dt)
-        }
+        // Tempo and phase. The tracker runs on stream time so it is unaffected
+        // by callback jitter; its grid is converted to host time below.
+        //
+        // The onset function it sees leans on the low band, because that is
+        // where the beat usually lives. On the equally-weighted broadband
+        // function alone, sixteenth-note hi-hats correlate just as strongly at
+        // 160 BPM as the kick pattern does at 120, and the search can settle on
+        // the hats. Mixing in the kick band breaks that tie toward the pulse a
+        // listener would clap to, while the broadband term still carries
+        // material with no kick at all.
+        let beatOnset = clamp(onset * 0.6 + kick * 0.4)
+        let emittedBeats = beatTracker.process(
+            onset: beatOnset,
+            lowFrequencyOnset: kick,
+            at: streamTime
+        )
+        let grid = beatTracker.grid
 
-        // Pulse: snap up on any onset (and guarantee a strong flash on a counted
-        // beat), then decay smoothly so each hit reads as a discrete pulse.
-        let onset = max(novelty, beat)
-        pulseEnv = max(pulseEnv * exp(-dt / 0.16), onset)
-        if isBeat { pulseEnv = max(pulseEnv, 0.85) }
+        // Adaptive onset gate on the same signal. Only used as a fallback:
+        // material without a detectable pulse (ambient, spoken word, sparse
+        // acoustic) still gets a show, it is just driven by onsets rather than
+        // by a grid.
+        let baselineCoefficient = decayCoefficient(dt: dt, timeConstant: 1.5)
+        noveltyBaseline += (beatOnset - noveltyBaseline) * baselineCoefficient
+        noveltyDeviation += (abs(beatOnset - noveltyBaseline) - noveltyDeviation) * baselineCoefficient
+        let onsetThreshold = noveltyBaseline + max(0.09, noveltyDeviation * 2.2)
+
+        var beatStrength = 0.0
+        if grid.isLocked {
+            if emittedBeats > 0 {
+                beatCount += emittedBeats
+                beatStrength = clamp(0.6 + onset * 0.4)
+            }
+        } else if beatOnset > onsetThreshold, beatOnset > 0.18, beatCooldownRemaining <= 0 {
+            beatCount += 1
+            beatCooldownRemaining = 0.16
+            beatStrength = clamp(0.5 + beatOnset * 0.5)
+        }
+        beatCooldownRemaining = max(0, beatCooldownRemaining - dt)
+
+        // Pulse decays over a fraction of the beat, so it reads as one discrete
+        // hit per beat at any tempo instead of a fixed twitch rate.
+        let pulseDecay = grid.isLocked ? min(0.34, max(0.1, grid.interval * 0.42)) : 0.16
+        pulseEnv = max(pulseEnv * exp(-dt / pulseDecay), onset * 0.85)
+        if beatStrength > 0 { pulseEnv = max(pulseEnv, 0.9) }
         let pulse = clamp(pulseEnv)
 
-        // Legacy compatibility signal: sustained energy above the running baseline.
-        // Music Mode treats this as evidence, not as guaranteed section/drop detection.
-        energyBaseline = energyBaseline * 0.985 + energy * 0.015
+        // Sustained energy above the running baseline. Music Mode treats this
+        // as evidence, not as guaranteed section/drop detection.
+        energyBaseline += (energy - energyBaseline) * decayCoefficient(dt: dt, timeConstant: 3.3)
         let intensity = clamp((energy - 0.5) * 2.4) * clamp((energy - energyBaseline) * 4 + 0.3)
         dropEnv = max(dropEnv * exp(-dt / 0.3), intensity)
-        let drop = clamp(dropEnv)
 
         // Mood: treble-leaning reads bright/airy (→1), bass-leaning dark/heavy (→0).
         let mood = clamp(0.5 + (highs - bass) * 0.6 + mids * 0.05)
 
-        previousBass = bass
-        previousMids = mids
-        previousHighs = highs
-        return AudioReactiveSnapshot(level: level, beat: beat, kick: kick, snare: snare, percussion: percussion, bass: bass, mids: mids, highs: highs, energy: energy, mood: mood, confidence: clamp(level * 1.8), pulse: pulse, drop: drop, beatCount: beatCount, sourceDescription: sourceDescription)
+        return AudioReactiveSnapshot(
+            level: level,
+            beat: beatStrength,
+            kick: kick,
+            snare: snare,
+            percussion: percussion,
+            bass: bass,
+            mids: mids,
+            highs: highs,
+            energy: energy,
+            mood: mood,
+            confidence: clamp(level * 1.8),
+            pulse: pulse,
+            drop: clamp(dropEnv),
+            beatCount: beatCount,
+            tempo: grid.isLocked ? grid.tempo : 0,
+            beatInterval: grid.isLocked ? grid.interval : 0,
+            beatConfidence: grid.confidence,
+            beatReferenceTime: grid.lastBeatTime > 0 ? grid.lastBeatTime + hostTimeOffset : 0,
+            beatInBar: grid.beatInBar,
+            isTempoLocked: grid.isLocked,
+            sourceDescription: sourceDescription
+        )
     }
 
-    /// Updates a normalized half-spectrum and returns the FFT size. The input
-    /// is capped at 1024 samples and rounded down to a power of two so the
-    /// radix-2 setup remains fast even if a capture source changes buffer size.
-    private func updateSpectrum(from samples: [Float]) -> Int? {
-        let cappedSize = min(1_024, samples.count)
-        guard cappedSize >= 16 else { return nil }
-        let log2Size = vDSP_Length(floor(log2(Double(cappedSize))))
-        let size = 1 << Int(log2Size)
+    // MARK: - Spectrum
 
-        if size != fftSize {
-            if let fftSetup { vDSP_destroy_fftsetup(fftSetup) }
-            guard let newSetup = vDSP_create_fftsetup(log2Size, FFTRadix(kFFTRadix2)) else {
-                fftSetup = nil
-                fftSize = 0
-                return nil
-            }
-            fftSetup = newSetup
-            fftSize = size
-            fftLog2Size = log2Size
-            fftReal = [Float](repeating: 0, count: size / 2)
-            fftImaginary = [Float](repeating: 0, count: size / 2)
-            fftMagnitudes = [Float](repeating: 0, count: size / 2)
-        }
-
-        guard let fftSetup else { return nil }
-        for index in 0..<(size / 2) {
-            fftReal[index] = samples[index * 2]
-            fftImaginary[index] = samples[index * 2 + 1]
+    private func updateSpectrum() {
+        guard let fftSetup else { return }
+        let size = Self.windowSize
+        let half = size / 2
+        for index in 0..<half {
+            fftReal[index] = windowedSamples[index * 2]
+            fftImaginary[index] = windowedSamples[index * 2 + 1]
         }
         fftReal.withUnsafeMutableBufferPointer { real in
             fftImaginary.withUnsafeMutableBufferPointer { imaginary in
@@ -455,31 +624,148 @@ final class MusicFeatureAnalyzer {
                 vDSP_fft_zrip(fftSetup, &split, 1, fftLog2Size, FFTDirection(FFT_FORWARD))
                 fftMagnitudes.withUnsafeMutableBufferPointer { magnitudes in
                     guard let magnitudeBase = magnitudes.baseAddress else { return }
-                    vDSP_zvabs(&split, 1, magnitudeBase, 1, vDSP_Length(size / 2))
+                    vDSP_zvabs(&split, 1, magnitudeBase, 1, vDSP_Length(half))
                 }
             }
         }
         var scale = 1 / Float(size)
-        vDSP_vsmul(fftMagnitudes, 1, &scale, &fftMagnitudes, 1, vDSP_Length(size / 2))
-        return size
+        vDSP_vsmul(fftMagnitudes, 1, &scale, &fftMagnitudes, 1, vDSP_Length(half))
+        // Compressed log magnitudes are what the flux is measured on: the
+        // difference of two logs is a ratio, so an onset means the same thing
+        // at any playback volume. Bin 0 packs DC and Nyquist together and
+        // carries rumble and any DC offset, so it never participates in a band.
+        for index in 1..<half {
+            logMagnitudes[index] = log1p(Double(fftMagnitudes[index]) * Self.logCompression)
+        }
     }
 
-    /// Mean normalized magnitude inside one frequency band. Only the band's
-    /// bins participate so narrow bass energy is not diluted by the spectrum.
-    private func bandEnergy(sampleRate: Double, low: Double, high: Double, spectrumSize: Int) -> Double {
-        let firstBin = max(1, Int(ceil(low * Double(spectrumSize) / sampleRate)))
-        let lastBin = min(fftMagnitudes.count - 1, Int(floor(high * Double(spectrumSize) / sampleRate)))
-        guard firstBin <= lastBin else { return 0 }
+    private func bandMagnitude(_ range: BinRange) -> Double {
         var mean: Float = 0
         fftMagnitudes.withUnsafeBufferPointer { magnitudes in
             guard let base = magnitudes.baseAddress else { return }
-            vDSP_meanv(
-                base.advanced(by: firstBin), 1,
-                &mean,
-                vDSP_Length(lastBin - firstBin + 1)
-            )
+            vDSP_meanv(base.advanced(by: range.first), 1, &mean, vDSP_Length(range.count))
         }
         return Double(mean)
+    }
+
+    private func positiveFlux(_ range: BinRange) -> Double {
+        var total = 0.0
+        for index in range.first...range.last {
+            let difference = logMagnitudes[index] - previousLogMagnitudes[index]
+            if difference > 0 { total += difference }
+        }
+        return total / Double(range.count)
+    }
+
+    /// Divides by a fast-attack, slow-decay peak so onset strength is relative
+    /// to how hard this material actually hits, not to absolute volume.
+    private func normalize(_ value: Double, scale: inout Double, dt: Double) -> Double {
+        if value > scale {
+            scale += (value - scale) * 0.3
+        } else {
+            scale = max(Self.minimumOnsetScale, scale * exp(-dt / 6))
+        }
+        return clamp(value / scale * 0.9)
+    }
+
+    // MARK: - Buffering
+
+    private func copyIntoRing(from sourceIndex: Int, count: Int) {
+        var copied = 0
+        while copied < count {
+            let amount = min(Self.windowSize - ringWriteIndex, count - copied)
+            let destinationIndex = ringWriteIndex
+            let sourceOffset = sourceIndex + copied
+            monoSamples.withUnsafeBufferPointer { source in
+                guard let sourceBase = source.baseAddress else { return }
+                ring.withUnsafeMutableBufferPointer { destination in
+                    guard let destinationBase = destination.baseAddress else { return }
+                    destinationBase.advanced(by: destinationIndex)
+                        .update(from: sourceBase.advanced(by: sourceOffset), count: amount)
+                }
+            }
+            ringWriteIndex = (ringWriteIndex + amount) % Self.windowSize
+            copied += amount
+        }
+    }
+
+    /// Unrolls the ring into oldest-to-newest order. `ringWriteIndex` is the
+    /// next slot to write, which is also the oldest retained sample.
+    private func fillChronologicalWindow() {
+        let size = Self.windowSize
+        let head = ringWriteIndex
+        let tail = size - head
+        chronologicalSamples.withUnsafeMutableBufferPointer { destination in
+            ring.withUnsafeBufferPointer { source in
+                guard let destinationBase = destination.baseAddress,
+                      let sourceBase = source.baseAddress else { return }
+                destinationBase.update(from: sourceBase.advanced(by: head), count: tail)
+                if head > 0 {
+                    destinationBase.advanced(by: tail).update(from: sourceBase, count: head)
+                }
+            }
+        }
+    }
+
+    private func configureIfNeeded(sampleRate: Double) {
+        guard sampleRate != configuredSampleRate else { return }
+        configuredSampleRate = sampleRate
+        bassBins = binRange(low: 45, high: 160, sampleRate: sampleRate)
+        midsBins = binRange(low: 350, high: 2_200, sampleRate: sampleRate)
+        highsBins = binRange(low: 3_200, high: 12_000, sampleRate: sampleRate)
+        kickBins = binRange(low: 40, high: 150, sampleRate: sampleRate)
+        snareBins = binRange(low: 200, high: 2_000, sampleRate: sampleRate)
+        hatBins = binRange(low: 3_000, high: 12_000, sampleRate: sampleRate)
+        fluxBands = makeFluxBands(sampleRate: sampleRate)
+        beatTracker.configure(frameInterval: Double(Self.hopSize) / sampleRate)
+    }
+
+    private func binRange(low: Double, high: Double, sampleRate: Double) -> BinRange {
+        let maximumBin = Self.windowSize / 2 - 1
+        let first = min(maximumBin, max(1, Int(ceil(low * Double(Self.windowSize) / sampleRate))))
+        let last = min(maximumBin, max(first, Int(floor(high * Double(Self.windowSize) / sampleRate))))
+        return BinRange(first: first, last: last)
+    }
+
+    /// Log-spaced bands for the onset function. Bands that collapse onto the
+    /// same bins at the bottom of the spectrum are merged, so the lowest bins
+    /// are not counted several times over.
+    private func makeFluxBands(sampleRate: Double) -> [BinRange] {
+        let bandCount = 24
+        let lowest = 40.0
+        let highest = min(16_000, sampleRate / 2 - 1)
+        guard highest > lowest else { return [] }
+        let ratio = pow(highest / lowest, 1 / Double(bandCount))
+        var bands: [BinRange] = []
+        bands.reserveCapacity(bandCount)
+        var lower = lowest
+        for _ in 0..<bandCount {
+            let upper = lower * ratio
+            let range = binRange(low: lower, high: upper, sampleRate: sampleRate)
+            if let previous = bands.last, previous.first == range.first, previous.last == range.last {
+                lower = upper
+                continue
+            }
+            bands.append(range)
+            lower = upper
+        }
+        return bands
+    }
+
+    /// Keeps the analyzer's sample clock aligned with the renderer's clock
+    /// without inheriting per-callback jitter.
+    private func updateHostAnchor(hostTime: TimeInterval, streamTime: TimeInterval) {
+        let target = hostTime - streamTime
+        if !hasHostAnchor {
+            hostTimeOffset = target
+            hasHostAnchor = true
+        } else {
+            hostTimeOffset += (target - hostTimeOffset) * 0.05
+        }
+    }
+
+    private func decayCoefficient(dt: Double, timeConstant: Double) -> Double {
+        1 - exp(-dt / timeConstant)
     }
 
     private func clamp(_ value: Double) -> Double { max(0, min(1, value)) }

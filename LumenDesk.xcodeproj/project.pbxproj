@@ -45,6 +45,7 @@
 		B100000000000000000027 /* MusicChoreographyEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000027 /* MusicChoreographyEngine.swift */; };
 		B100000000000000000028 /* MusicLightingRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000028 /* MusicLightingRenderer.swift */; };
 		B100000000000000000029 /* AudioReactiveSessionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000029 /* AudioReactiveSessionController.swift */; };
+		B10000000000000000002E /* BeatTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000002E /* BeatTracker.swift */; };
 		B10000000000000000002A /* MusicModeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000002A /* MusicModeView.swift */; };
 		B10000000000000000002B /* MusicModeVisualizerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000002B /* MusicModeVisualizerView.swift */; };
 		B10000000000000000002C /* LIFXMatrix.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000002C /* LIFXMatrix.swift */; };
@@ -58,6 +59,7 @@
 		B200000000000000000007 /* PersistenceStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000007 /* PersistenceStoreTests.swift */; };
 		B200000000000000000008 /* CommandCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000008 /* CommandCoordinatorTests.swift */; };
 		B200000000000000000009 /* MusicModeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000009 /* MusicModeTests.swift */; };
+		B20000000000000000000A /* BeatTrackerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000A /* BeatTrackerTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -111,6 +113,7 @@
 		A100000000000000000027 /* MusicChoreographyEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicChoreographyEngine.swift; sourceTree = "<group>"; };
 		A100000000000000000028 /* MusicLightingRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicLightingRenderer.swift; sourceTree = "<group>"; };
 		A100000000000000000029 /* AudioReactiveSessionController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioReactiveSessionController.swift; sourceTree = "<group>"; };
+		A10000000000000000002E /* BeatTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BeatTracker.swift; sourceTree = "<group>"; };
 		A10000000000000000002A /* MusicModeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicModeView.swift; sourceTree = "<group>"; };
 		A10000000000000000002B /* MusicModeVisualizerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicModeVisualizerView.swift; sourceTree = "<group>"; };
 		A10000000000000000002C /* LIFXMatrix.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LIFXMatrix.swift; sourceTree = "<group>"; };
@@ -125,6 +128,7 @@
 		A200000000000000000007 /* PersistenceStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceStoreTests.swift; sourceTree = "<group>"; };
 		A200000000000000000008 /* CommandCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandCoordinatorTests.swift; sourceTree = "<group>"; };
 		A200000000000000000009 /* MusicModeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicModeTests.swift; sourceTree = "<group>"; };
+		A20000000000000000000A /* BeatTrackerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BeatTrackerTests.swift; sourceTree = "<group>"; };
 		A200000000000000000099 /* LumenDeskTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LumenDeskTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -200,6 +204,7 @@
 				A100000000000000000027 /* MusicChoreographyEngine.swift */,
 				A100000000000000000028 /* MusicLightingRenderer.swift */,
 				A100000000000000000029 /* AudioReactiveSessionController.swift */,
+				A10000000000000000002E /* BeatTracker.swift */,
 				A100000000000000000005 /* UDPSocket.swift */,
 				A10000000000000000001B /* AudioLevelMonitor.swift */,
 				C100000000000000000005 /* LIFX */,
@@ -275,6 +280,7 @@
 				A200000000000000000007 /* PersistenceStoreTests.swift */,
 				A200000000000000000008 /* CommandCoordinatorTests.swift */,
 				A200000000000000000009 /* MusicModeTests.swift */,
+				A20000000000000000000A /* BeatTrackerTests.swift */,
 			);
 			path = LumenDeskTests;
 			sourceTree = "<group>";
@@ -407,6 +413,7 @@
 				B100000000000000000027 /* MusicChoreographyEngine.swift in Sources */,
 				B100000000000000000028 /* MusicLightingRenderer.swift in Sources */,
 				B100000000000000000029 /* AudioReactiveSessionController.swift in Sources */,
+				B10000000000000000002E /* BeatTracker.swift in Sources */,
 				B10000000000000000002A /* MusicModeView.swift in Sources */,
 				B10000000000000000002B /* MusicModeVisualizerView.swift in Sources */,
 				B10000000000000000002C /* LIFXMatrix.swift in Sources */,
@@ -427,6 +434,7 @@
 				B200000000000000000007 /* PersistenceStoreTests.swift in Sources */,
 				B200000000000000000008 /* CommandCoordinatorTests.swift in Sources */,
 				B200000000000000000009 /* MusicModeTests.swift in Sources */,
+				B20000000000000000000A /* BeatTrackerTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

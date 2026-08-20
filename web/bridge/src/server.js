@@ -1,5 +1,6 @@
 import http from 'node:http'
 import { clampPercent } from './color.js'
+import { serveStatic } from './static.js'
 
 // A page served from https://<user>.github.io may call this bridge because
 // 127.0.0.1 is a "potentially trustworthy" origin, exempt from mixed content
@@ -56,7 +57,7 @@ function isValidRGB(rgb) {
   )
 }
 
-export function createServer({ registry, lifx, govee, allowedOrigins, version }) {
+export function createServer({ registry, lifx, govee, allowedOrigins, version, staticDir = null }) {
   const dispatch = {
     power: (device, body) => {
       const on = Boolean(body.on)
@@ -99,7 +100,9 @@ export function createServer({ registry, lifx, govee, allowedOrigins, version })
     const path = url.pathname.replace(/\/+$/, '') || '/'
 
     try {
-      if (req.method === 'GET' && (path === '/' || path === '/health')) {
+      // "/" is the web client when we are serving it; /health stays the probe
+      // either way, and is what the client uses to recognise the bridge.
+      if (req.method === 'GET' && (path === '/health' || (path === '/' && !staticDir))) {
         return json(res, 200, { ok: true, service: 'lumendesk-bridge', version })
       }
 
@@ -131,6 +134,13 @@ export function createServer({ registry, lifx, govee, allowedOrigins, version })
         if (result && result.error) return json(res, 400, result)
         if (!result) return json(res, 503, { error: 'device is not addressable yet' })
         return json(res, 200, { device: registry.get(device.id) })
+      }
+
+      // Anything that is not an API route is the web client, when the bridge
+      // is serving it. API routes are matched first so a file can never
+      // shadow one.
+      if (staticDir && (req.method === 'GET' || req.method === 'HEAD')) {
+        if (await serveStatic(staticDir, url.pathname, res)) return undefined
       }
 
       return json(res, 404, { error: 'not found' })

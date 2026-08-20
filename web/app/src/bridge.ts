@@ -24,8 +24,35 @@ export interface Device {
 
 export const DEFAULT_PORT = 8765
 
+// When the bridge serves this page itself, the API is on the very same origin,
+// so relative requests work and no cross-origin rules apply at all. That is
+// resolved once at startup by probing same-origin /health; anything else (the
+// published page, `npm run dev`) falls back to loopback on the chosen port.
+let sameOrigin = false
+
+export function useSameOrigin(value: boolean): void {
+  sameOrigin = value
+}
+
 export function bridgeURL(port: number): string {
-  return `http://127.0.0.1:${port}`
+  return sameOrigin ? window.location.origin : `http://127.0.0.1:${port}`
+}
+
+/**
+ * True when the page was served by the bridge. Checked before anything else so
+ * the app never asks the browser for local-network access it does not need.
+ */
+export async function detectSameOrigin(): Promise<boolean> {
+  try {
+    const response = await fetch(`${window.location.origin}/health`, {
+      signal: AbortSignal.timeout(2000),
+    })
+    if (!response.ok) return false
+    const body = await response.json()
+    return body?.service === 'lumendesk-bridge'
+  } catch {
+    return false
+  }
 }
 
 /** The URL a user can open in a tab to check the bridge themselves. */

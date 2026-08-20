@@ -2,10 +2,13 @@
 // client can be exercised end to end without hardware.
 //   node test/harness.js [--port 8765]
 import http from 'node:http'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { Registry } from '../src/registry.js'
 import { LifxClient } from '../src/lifx-client.js'
 import { GoveeClient } from '../src/govee-client.js'
 import { createServer } from '../src/server.js'
+import { isBuiltApp } from '../src/static.js'
 import { FakeLifxBulb, FakeGoveeDevice } from './fake-devices.js'
 
 const portArg = process.argv.indexOf('--port')
@@ -30,12 +33,18 @@ const ports = await strip.listen(govee.socket.address().port)
 govee.discoveryPort = ports.discoveryPort
 govee.controlPort = ports.controlPort
 
+// Serve the built client too, so the harness exercises the same-origin route
+// end to end exactly as a user's `npm run app` would.
+const here = path.dirname(fileURLToPath(import.meta.url))
+const appDir = path.resolve(here, '..', '..', 'app', 'dist')
+
 const server = createServer({
   registry,
   lifx,
   govee,
   allowedOrigins: ['*'],
   version: 'harness',
+  staticDir: isBuiltApp(appDir) ? appDir : null,
 })
 
 server.listen(PORT, '127.0.0.1', () => {

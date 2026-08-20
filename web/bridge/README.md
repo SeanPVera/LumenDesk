@@ -16,13 +16,12 @@ telemetry. The bridge binds loopback only (`127.0.0.1`) by default.
 ## Run it
 
 Requires [Node.js](https://nodejs.org/) 20 or newer — check with
-`node --version`. There is nothing to install beyond that: the bridge has no
-dependencies, so there is no `npm install` step.
+`node --version`.
 
 ```sh
 git clone --depth 1 https://github.com/SeanPVera/LumenDesk.git
 cd LumenDesk/web/bridge
-npm start
+npm run app
 ```
 
 Without git, download and unpack the repository instead:
@@ -30,19 +29,29 @@ Without git, download and unpack the repository instead:
 ```sh
 curl -L https://github.com/SeanPVera/LumenDesk/archive/refs/heads/main.tar.gz | tar xz
 cd LumenDesk-main/web/bridge
-npm start
+npm run app
 ```
 
 Either way it prints:
 
 ```
-[bridge] listening on http://127.0.0.1:8765
+  LumenDesk is running. Open http://127.0.0.1:8765
 ```
 
-Leave that terminal open — the bridge only runs while it does — and open the
-web app at <https://seanpvera.github.io/LumenDesk/>, which will find it on port
-8765. If you already have the repository checked out, just
-`cd web/bridge && npm start`.
+Open that address and control your lights. Leave the terminal open — the bridge
+only runs while it does.
+
+`npm run app` builds the web client and then serves it from the bridge, so the
+page and the API share one origin. **This is the route that always works**: the
+browser rules described below simply do not apply, because the page is not a
+remote site reaching into your network — it *is* the local service.
+
+### Using the published page instead
+
+`npm start` runs the API alone, with no web client, for use with
+<https://seanpvera.github.io/LumenDesk/>. That route is subject to the browser
+rules in the next section and may be blocked. It needs no build step, since the
+bridge itself has no dependencies.
 
 ```
 --port <n>            listen port (default 8765)
@@ -75,11 +84,12 @@ part most likely to bite:
   mechanism on current browsers.
 - Other browsers differ and change over time.
 
-If the hosted page cannot reach the bridge, run the app from your own machine
-instead — same bridge, no cross-origin hop and no permission needed:
+If the hosted page cannot reach the bridge, stop fighting the permission and
+let the bridge serve the client instead — the request is then same-origin and
+none of the above applies:
 
 ```sh
-cd web/app && npm install && npm run dev
+cd web/bridge && npm run app
 ```
 
 [spec]: https://w3c.github.io/webappsec-secure-contexts/#is-origin-trustworthy

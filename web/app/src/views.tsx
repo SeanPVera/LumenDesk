@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   type Device,
   type Room,
@@ -200,6 +200,14 @@ export function HomeView({
   const toggleSelect = (id: string) =>
     setSelected(s => (s.includes(id) ? s.filter(x => x !== id) : [...s, id]))
 
+  // Drop anything the current search or filter hides, so a bulk action can
+  // never reach a light the user cannot see.
+  const visibleIDs = visible.map(d => d.id)
+  const activeSelection = selected.filter(x => visibleIDs.includes(x))
+  useEffect(() => {
+    setSelected(s => (s.length === s.filter(x => visibleIDs.includes(x)).length ? s : s.filter(x => visibleIDs.includes(x))))
+  }, [query, filter]) // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
     <section>
       <div className="toolbar">
@@ -226,13 +234,13 @@ export function HomeView({
         </button>
       </div>
 
-      {selected.length > 0 && (
+      {activeSelection.length > 0 && (
         <div className="bulk" role="region" aria-label="Bulk actions">
           <span>
-            <strong>{selected.length}</strong> selected
+            <strong>{activeSelection.length}</strong> selected
           </span>
-          <button onClick={() => onBulk(selected, 'on')}>All on</button>
-          <button onClick={() => onBulk(selected, 'off')}>All off</button>
+          <button onClick={() => onBulk(activeSelection, 'on')}>All on</button>
+          <button onClick={() => onBulk(activeSelection, 'off')}>All off</button>
           <button className="ghost" onClick={() => setSelected([])}>
             Clear
           </button>
@@ -258,10 +266,11 @@ export function HomeView({
           {grouped.map(({ room, lights }) => (
             <Group key={room.id} title={room.name} count={lights.length}>
               <div className="group-actions">
-                <button className="chip" onClick={() => onBulk(lights.map(l => l.id), 'on')}>
+                {/* The whole room, not just the lights a filter left visible. */}
+                <button className="chip" onClick={() => onBulk(room.lightIDs, 'on')}>
                   Room on
                 </button>
-                <button className="chip" onClick={() => onBulk(lights.map(l => l.id), 'off')}>
+                <button className="chip" onClick={() => onBulk(room.lightIDs, 'off')}>
                   Room off
                 </button>
               </div>
@@ -493,6 +502,10 @@ function ScheduleForm({
   const [time, setTime] = useState('07:30')
   const [action, setAction] = useState<ScheduleAction>('turnOn')
   const [sceneID, setSceneID] = useState('')
+  const [weekdays, setWeekdays] = useState<number[]>([1, 2, 3, 4, 5, 6, 7])
+
+  const toggleDay = (day: number) =>
+    setWeekdays(days => (days.includes(day) ? days.filter(d => d !== day) : [...days, day].sort()))
 
   return (
     <form
@@ -504,6 +517,7 @@ function ScheduleForm({
           hour,
           minute,
           action,
+          weekdays,
           sceneID: action === 'applyScene' ? sceneID || null : null,
         })
       }}
@@ -526,7 +540,26 @@ function ScheduleForm({
           ))}
         </select>
       )}
-      <button type="submit" disabled={action === 'applyScene' && !sceneID}>
+      <div className="days" role="group" aria-label="Days">
+        {DAYS.map((label, index) => {
+          const day = index + 1
+          return (
+            <button
+              key={label}
+              type="button"
+              className={`chip day${weekdays.includes(day) ? ' active' : ''}`}
+              aria-pressed={weekdays.includes(day)}
+              onClick={() => toggleDay(day)}
+            >
+              {label}
+            </button>
+          )
+        })}
+      </div>
+      <button
+        type="submit"
+        disabled={(action === 'applyScene' && !sceneID) || weekdays.length === 0}
+      >
         Add schedule
       </button>
     </form>

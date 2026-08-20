@@ -151,3 +151,157 @@ test('a scene captures and restores device state, skipping ones that vanished', 
   // An off device is not given a colour or brightness it cannot show.
   assert.ok(!sent.some(([id, kind]) => id === 'govee:b' && kind === 'brightness'))
 })
+
+// --- regressions from the review of the full-shell change ---
+
+test('restoring a LIFX scene sends colour and brightness in one packet', () => {
+  // LIFX carries hue/sat/brightness/kelvin in a single SetColor. Sending
+  // colour then brightness rebuilt the second packet from the device's stale
+  // HSBK and silently undid the colour.
+  const registry = new Registry()
+  registry.upsert('lifx:a', {
+    name: 'A',
+    ip: '127.0.0.1',
+    power: false,
+    brightness: 10,
+    color: { r: 0, g: 0, b: 0 },
+    hsbk: { hue: 0, saturation: 0, brightness: 6553, kelvin: 3500 },
+  })
+
+  const calls = []
+  const lifx = {
+    setPower: () => true,
+    setColor: (_d, opts) => (calls.push(opts), true),
+  }
+  const scene = {
+    snapshots: { 'lifx:a': { isOn: true, brightness: 75, color: { r: 255, g: 0, b: 0 }, kelvin: null } },
+  }
+  applyScene({ scene, registry, lifx, govee: lifx })
+
+  assert.equal(calls.length, 1, 'exactly one SetColor, not one per channel')
+  assert.deepEqual(calls[0].rgb, { r: 255, g: 0, b: 0 })
+  assert.equal(calls[0].brightnessPercent, 75, 'brightness travels with the colour')
+})
+
+test('a room-scoped scene apply leaves other rooms alone', () => {
+  const registry = new Registry()
+  registry.upsert('lifx:mine', { name: 'Mine', ip: '127.0.0.1' })
+  registry.upsert('lifx:theirs', { name: 'Theirs', ip: '127.0.0.1' })
+
+  const touched = []
+  const client = {
+    setPower: d => (touched.push(d.id), true),
+    setColor: () => true,
+    setBrightness: () => true,
+  }
+  const scene = {
+    snapshots: {
+      'lifx:mine': { isOn: true, brightness: 50 },
+      'lifx:theirs': { isOn: true, brightness: 50 },
+    },
+  }
+  const result = applyScene({
+    scene,
+    registry,
+    lifx: client,
+    govee: client,
+    onlyDeviceIDs: ['lifx:mine'],
+  })
+
+  assert.deepEqual(touched, ['lifx:mine'])
+  assert.deepEqual(result.applied, ['lifx:mine'])
+})
+
+test('rooms with malformed nested fields are repaired on load', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'lumendesk-nested-'))
+  const file = path.join(dir, 'state.json')
+  await fs.writeFile(
+    file,
+    JSON.stringify({
+      rooms: [
+        { id: 'ok', name: 'Fine', lightIDs: ['lifx:a'], schedules: [] },
+        { id: 'bad', name: 'Broken', lightIDs: 'not-an-array', schedules: 'also-not' },
+        { name: 'no id' },
+        null,
+      ],
+      scenes: [{ id: 's', name: 'S', snapshots: {} }, { id: 'no-snapshots' }],
+    }),
+  )
+  const store = new Store({ file })
+  const state = store.load()
+
+  assert.equal(state.rooms.length, 2, 'entries without an id are dropped')
+  const broken = state.rooms.find(r => r.id === 'bad')
+  assert.deepEqual(broken.lightIDs, [], 'a non-array lightIDs becomes an array')
+  assert.deepEqual(broken.schedules, [], 'a non-array schedules becomes an array')
+  assert.equal(state.scenes.length, 1, 'a scene without snapshots is dropped')
+
+  // The repaired shape must be safe for the code paths that previously threw.
+  assert.doesNotThrow(() => state.rooms.some(r => r.lightIDs.includes('lifx:a')))
+  assert.doesNotThrow(() => due({ rooms: state.rooms, previous: new Date(0), now: new Date() }))
+})
+
+test('assigning to a missing room leaves existing membership untouched', async () => {
+  const store = await tmpStore()
+  store.load()
+  const room = store.addRoom('Studio')
+  store.assignLight('lifx:x', room.id)
+
+  assert.equal(store.assignLight('lifx:x', 'no-such-room'), false)
+  assert.deepEqual(
+    store.listRooms().find(r => r.id === room.id).lightIDs,
+    ['lifx:x'],
+    'a failed assignment must not strip the light from the room it was in',
+  )
+})
+
+test('flush reports a write that actually failed', async () => {
+  // A regular file standing where a directory should be fails fast and
+  // portably, unlike unwritable virtual filesystems.
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'lumendesk-ro-'))
+  const blocker = path.join(dir, 'blocker')
+  await fs.writeFile(blocker, 'not a directory')
+
+  const store = new Store({ file: path.join(blocker, 'state.json') })
+  store.load()
+  store.addRoom('Studio')
+  await assert.rejects(() => store.flush(), /could not save state/)
+
+  // The failure is reported once, then cleared, so a later good write is clean.
+  await store.flush()
+})
+
+test('a saturated LIFX colour survives capture and restore', () => {
+  // The first fix was wrong: LIFX reports a kelvin even for a saturated
+  // colour, so treating a non-zero kelvin as "white mode" zeroed the
+  // saturation and lost the colour. The captured HSBK is replayed instead.
+  const registry = new Registry()
+  const captured = { hue: 3488, saturation: 38799, brightness: 49151, kelvin: 3500 }
+  registry.upsert('lifx:a', {
+    name: 'A',
+    ip: '127.0.0.1',
+    power: true,
+    brightness: 75,
+    color: { r: 201, g: 120, b: 82 },
+    kelvin: 3500,
+    hsbk: captured,
+  })
+
+  const snaps = snapshot(registry.list())
+  assert.deepEqual(snaps['lifx:a'].hsbk, captured, 'the snapshot keeps the exact HSBK')
+
+  // Device drifts to a dim green before the scene is applied.
+  registry.upsert('lifx:a', {
+    brightness: 20,
+    hsbk: { hue: 20207, saturation: 21605, brightness: 13107, kelvin: 3500 },
+  })
+
+  const sent = []
+  const lifx = { setPower: () => true, setColor: (_d, o) => (sent.push(o), true) }
+  applyScene({ scene: { snapshots: snaps }, registry, lifx, govee: lifx })
+
+  assert.equal(sent.length, 1)
+  assert.equal(sent[0].hsbk.hue, captured.hue, 'hue restored')
+  assert.equal(sent[0].hsbk.saturation, captured.saturation, 'saturation not zeroed')
+  assert.ok(Math.abs(sent[0].hsbk.brightness - captured.brightness) < 700, 'brightness restored')
+})

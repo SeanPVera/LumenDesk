@@ -28,6 +28,7 @@ export class Store {
     this.state = { ...EMPTY }
     this.writing = null
     this.pending = false
+    this.lastWriteError = null
   }
 
   load() {
@@ -38,9 +39,25 @@ export class Store {
       // malformed field falls back to its default rather than failing the load.
       this.state = {
         schemaVersion: 1,
-        rooms: Array.isArray(parsed.rooms) ? parsed.rooms : [],
-        scenes: Array.isArray(parsed.scenes) ? parsed.scenes : [],
-        favorites: Array.isArray(parsed.favorites) ? parsed.favorites : [],
+        rooms: (Array.isArray(parsed.rooms) ? parsed.rooms : [])
+          .filter(room => room && typeof room === 'object' && room.id)
+          .map(room => ({
+            ...room,
+            name: typeof room.name === 'string' ? room.name : 'Room',
+            lightIDs: Array.isArray(room.lightIDs) ? room.lightIDs.map(String) : [],
+            schedules: (Array.isArray(room.schedules) ? room.schedules : []).filter(
+              s => s && typeof s === 'object' && s.id,
+            ),
+          })),
+        scenes: (Array.isArray(parsed.scenes) ? parsed.scenes : []).filter(
+          scene =>
+            scene &&
+            typeof scene === 'object' &&
+            scene.id &&
+            scene.snapshots &&
+            typeof scene.snapshots === 'object',
+        ),
+        favorites: Array.isArray(parsed.favorites) ? parsed.favorites.map(String) : [],
         deviceNames:
           parsed.deviceNames && typeof parsed.deviceNames === 'object' ? parsed.deviceNames : {},
       }
@@ -58,7 +75,16 @@ export class Store {
       return this.writing
     }
     this.writing = this.#write()
-      .catch(err => this.log(`could not write ${this.file}: ${err.message}`))
+      .then(() => {
+        this.lastWriteError = null
+      })
+      .catch(err => {
+        // Remembered rather than thrown here, because callers are synchronous.
+        // flush() surfaces it so a request never reports success for a change
+        // that only exists in memory.
+        this.lastWriteError = err
+        this.log(`could not write ${this.file}: ${err.message}`)
+      })
       .finally(() => {
         this.writing = null
         if (this.pending) {
@@ -67,6 +93,16 @@ export class Store {
         }
       })
     return this.writing
+  }
+
+  /** Await the pending write and throw if persistence actually failed. */
+  async flush() {
+    while (this.writing) await this.writing
+    if (this.lastWriteError) {
+      const err = this.lastWriteError
+      this.lastWriteError = null
+      throw new Error(`could not save state: ${err.message}`)
+    }
   }
 
   async #write() {
@@ -108,14 +144,15 @@ export class Store {
 
   /** A light belongs to at most one room, like the native app. */
   assignLight(deviceID, roomID) {
+    // Resolve the destination first: a failed lookup must not have already
+    // stripped the light from the room it was in.
+    const destination = roomID ? this.state.rooms.find(r => r.id === roomID) : null
+    if (roomID && !destination) return false
+
     for (const room of this.state.rooms) {
       room.lightIDs = room.lightIDs.filter(x => x !== deviceID)
     }
-    if (roomID) {
-      const room = this.state.rooms.find(r => r.id === roomID)
-      if (!room) return false
-      room.lightIDs.push(deviceID)
-    }
+    if (destination) destination.lightIDs.push(deviceID)
     this.save()
     return true
   }

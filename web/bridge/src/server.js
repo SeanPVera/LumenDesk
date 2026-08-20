@@ -30,6 +30,21 @@ function applyCORS(req, res, allowedOrigins) {
   }
 }
 
+/**
+ * CORS only stops a disallowed page from *reading* a response — a simple POST
+ * (text/plain body, no preflight) is still delivered and still acts. So
+ * state-changing requests are rejected outright unless the Origin is one we
+ * allow, or the bridge's own origin when it is serving the page. A request
+ * with no Origin at all is not browser-driven (curl, a script) and is allowed.
+ */
+function originPermitted(req, allowedOrigins) {
+  const origin = req.headers.origin
+  if (!origin) return true
+  if (allowedOrigins.includes('*') || allowedOrigins.includes(origin)) return true
+  const host = req.headers.host
+  return Boolean(host) && (origin === `http://${host}` || origin === `https://${host}`)
+}
+
 function json(res, status, body) {
   const payload = JSON.stringify(body)
   res.writeHead(status, {
@@ -113,30 +128,41 @@ export function createServer({
   const handleStore = async ({ req, res, path, url }) => {
     const body = req.method === 'POST' ? await readJSON(req) : {}
 
+    // A mutation must not report success while the change exists only in
+    // memory, so the write is awaited before the response is sent.
+    const saved = async (status, payload) => {
+      try {
+        await store.flush()
+      } catch (err) {
+        return json(res, 500, { error: err.message })
+      }
+      return json(res, status, payload)
+    }
+
     if (req.method === 'GET' && path === '/rooms') {
       json(res, 200, { rooms: store.listRooms() })
       return true
     }
     if (req.method === 'POST' && path === '/rooms') {
-      json(res, 200, { room: store.addRoom(body.name) })
+      await saved(200, { room: store.addRoom(body.name) })
       return true
     }
 
     let match = path.match(/^\/rooms\/([^/]+)$/)
     if (match && req.method === 'POST') {
       if (url.searchParams.get('delete') === '1') {
-        json(res, store.removeRoom(match[1]) ? 200 : 404, { ok: true })
+        await saved(store.removeRoom(match[1]) ? 200 : 404, { ok: true })
         return true
       }
       const room = store.updateRoom(match[1], body)
-      json(res, room ? 200 : 404, room ? { room } : { error: 'unknown room' })
+      await saved(room ? 200 : 404, room ? { room } : { error: 'unknown room' })
       return true
     }
 
     match = path.match(/^\/rooms\/([^/]+)\/schedules$/)
     if (match && req.method === 'POST') {
       const schedule = store.addSchedule(match[1], body)
-      json(res, schedule ? 200 : 404, schedule ? { schedule } : { error: 'unknown room' })
+      await saved(schedule ? 200 : 404, schedule ? { schedule } : { error: 'unknown room' })
       return true
     }
 
@@ -144,11 +170,11 @@ export function createServer({
     if (match && req.method === 'POST') {
       const [, roomID, scheduleID] = match
       if (url.searchParams.get('delete') === '1') {
-        json(res, store.removeSchedule(roomID, scheduleID) ? 200 : 404, { ok: true })
+        await saved(store.removeSchedule(roomID, scheduleID) ? 200 : 404, { ok: true })
         return true
       }
       const schedule = store.updateSchedule(roomID, scheduleID, body)
-      json(res, schedule ? 200 : 404, schedule ? { schedule } : { error: 'unknown schedule' })
+      await saved(schedule ? 200 : 404, schedule ? { schedule } : { error: 'unknown schedule' })
       return true
     }
 
@@ -164,7 +190,7 @@ export function createServer({
         json(res, 400, { error: 'no devices to capture' })
         return true
       }
-      json(res, 200, { scene: store.addScene(body.name, snapshot(devices)) })
+      await saved(200, { scene: store.addScene(body.name, snapshot(devices)) })
       return true
     }
 
@@ -182,7 +208,7 @@ export function createServer({
 
     match = path.match(/^\/scenes\/([^/]+)$/)
     if (match && req.method === 'POST' && url.searchParams.get('delete') === '1') {
-      json(res, store.removeScene(match[1]) ? 200 : 404, { ok: true })
+      await saved(store.removeScene(match[1]) ? 200 : 404, { ok: true })
       return true
     }
 
@@ -199,7 +225,7 @@ export function createServer({
         json(res, 404, { error: 'unknown room' })
         return true
       }
-      json(res, 200, { devices: decorate(registry.list()), rooms: store.listRooms() })
+      await saved(200, { devices: decorate(registry.list()), rooms: store.listRooms() })
       return true
     }
 
@@ -213,6 +239,10 @@ export function createServer({
       res.writeHead(204)
       res.end()
       return
+    }
+
+    if (req.method !== 'GET' && req.method !== 'HEAD' && !originPermitted(req, allowedOrigins)) {
+      return json(res, 403, { error: 'origin not allowed' })
     }
 
     const url = new URL(req.url, 'http://127.0.0.1')

@@ -779,3 +779,14 @@ input[type='time'] {
     display: none;
   }
 }
+
+.days {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.chip.day {
+  padding: 5px 8px;
+  font-size: 0.72rem;
+}

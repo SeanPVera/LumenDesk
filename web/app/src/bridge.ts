@@ -103,6 +103,15 @@ export function healthURL(port: number): string {
   return `${bridgeURL(port)}/health`
 }
 
+export class BridgeError extends Error {
+  status: number
+  constructor(message: string, status: number) {
+    super(message)
+    this.name = 'BridgeError'
+    this.status = status
+  }
+}
+
 // A blocked local-network request can hang rather than fail fast, so every
 // call is bounded instead of leaving the UI waiting forever.
 const TIMEOUT_MS = 5000
@@ -115,7 +124,9 @@ async function request<T>(port: number, path: string, init?: RequestInit): Promi
   })
   if (!response.ok) {
     const detail = await response.json().catch(() => null)
-    throw new Error(detail?.error ?? `bridge returned ${response.status}`)
+    // The status travels with the error: callers must not have to pattern-match
+    // a message the server chose.
+    throw new BridgeError(detail?.error ?? `bridge returned ${response.status}`, response.status)
   }
   return response.json() as Promise<T>
 }
@@ -166,7 +177,20 @@ export function rgbToHex({ r, g, b }: RGB): string {
 
 // MARK: rooms, scenes, schedules
 
-export const fetchState = (port: number) => request<BridgeState>(port, '/state')
+/**
+ * A bridge from before rooms and scenes existed has no /state, only /devices.
+ * Falling back keeps basic control working for someone running an older bridge
+ * against the freshly published page, instead of the app declaring it dead.
+ */
+export async function fetchState(port: number): Promise<BridgeState> {
+  try {
+    return await request<BridgeState>(port, '/state')
+  } catch (err) {
+    if (!(err instanceof BridgeError) || err.status !== 404) throw err
+    const devices = await fetchDevices(port)
+    return { devices, rooms: [], scenes: [], favorites: [] }
+  }
+}
 
 export const createRoom = (port: number, name: string) =>
   request<{ room: Room }>(port, '/rooms', { method: 'POST', body: JSON.stringify({ name }) })

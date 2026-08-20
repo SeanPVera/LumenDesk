@@ -1592,9 +1592,9 @@ extension LightManager {
         if let saved = goveeSegmentStates[device.id] {
             return profile.normalizedEditorState(saved)
         }
-        return .seed(count: profile.defaultSegmentCount,
-                     color: device.color,
-                     gradient: false)
+        return profile.normalizedEditorState(.seed(count: profile.defaultSegmentCount,
+                                                   color: device.color,
+                                                   gradient: false))
     }
 
     /// The saved layout only when it is what the light is currently showing.
@@ -1635,17 +1635,40 @@ extension LightManager {
     }
 
     /// One razer frame carrying a whole layout. Frames have no brightness
-    /// channel, so each segment's own brightness is folded into its RGB.
+    /// channel, so each segment's own brightness is folded into its RGB, and
+    /// switched-off zones go out as black. Fixtures that can only run some of
+    /// their zones at once are clamped here as well, so no path — studio,
+    /// scene, effect, or Music Mode — can ask the lamp for a frame it has no
+    /// way to show.
     private func sendRazerLayout(_ device: LightDevice, state: GoveeSegmentState) {
         guard demoWorkspaceController.allowsLiveNetworking else { return }
-        let colors = state.colors.map { segment -> (r: Int, g: Int, b: Int) in
-            let rgb = segment.rgb255
+        let showable = (segmentStudioProfile(for: device) ?? .generic).enforcingZoneLimit(state)
+        let colors = showable.colors.map { segment -> (r: Int, g: Int, b: Int) in
+            let rgb = segment.renderedRGB255
             let scale = segment.brightness
             return (r: Int((Double(rgb.r) * scale).rounded()),
                     g: Int((Double(rgb.g) * scale).rounded()),
                     b: Int((Double(rgb.b) * scale).rounded()))
         }
-        govee?.sendRazerFrame(deviceID: device.backendID, colors: colors, blend: state.gradient)
+        govee?.sendRazerFrame(deviceID: device.backendID, colors: colors, blend: showable.gradient)
+    }
+
+    /// Fits a generated layout to a fixture's zone rules. Effect and Music
+    /// Mode frames paint every segment, but a lamp that can only run some of
+    /// its zones at once should keep lighting the zones the user picked in the
+    /// studio — otherwise the clamp would choose a different pair from frame
+    /// to frame and the lamp would flicker between them.
+    private func zoneConstrained(_ state: GoveeSegmentState, for device: LightDevice) -> GoveeSegmentState {
+        guard let profile = segmentStudioProfile(for: device), profile.limitsSimultaneousZones else {
+            return state
+        }
+        var next = state
+        if let stored = goveeSegmentStates[device.id],
+           stored.segmentCount == next.segmentCount,
+           stored.poweredCount > 0 {
+            next.setPoweredSegments(stored.poweredSegments)
+        }
+        return profile.enforcingZoneLimit(next)
     }
 
     /// Puts a stream-hold device's applied layout on the light and leaves the
@@ -1683,10 +1706,12 @@ extension LightManager {
     /// applied — an edited-but-unapplied draft must not masquerade as live
     /// state to scenes and undo.
     func storeSegmentState(_ state: GoveeSegmentState, for device: LightDevice) {
+        let profile = segmentStudioProfile(for: device)
+        let state = profile?.enforcingZoneLimit(state) ?? state
         let previous = goveeSegmentStates[device.id]
         let changedFromAppliedState = previous?.isActive == true
             && (previous?.colors != state.colors || previous?.gradient != state.gradient)
-        if segmentStudioProfile(for: device)?.appliesViaStream == true,
+        if profile?.appliesViaStream == true,
            changedFromAppliedState {
             return
         }
@@ -1713,18 +1738,21 @@ extension LightManager {
             }
             recordChange([device])
         }
-        var next = state
+        let profile = segmentStudioProfile(for: device)
+        var next = profile?.enforcingZoneLimit(state) ?? state
         next.isActive = true
         goveeSegmentStates[device.id] = next
         persistApplicationState()
         device.color = next.blendedColor
-        if turnOn, !device.isOn {
+        // An all-dark layout is the user asking for nothing to be lit, so it
+        // must not switch the light on to show it.
+        if turnOn, !device.isOn, !next.isFullyDark {
             device.isOn = true
             sendPower(device, on: true)
         }
         noteSegmentCommand(device, summary: "Applying \(next.segmentCount)-segment layout")
         if demoWorkspaceController.allowsLiveNetworking {
-            if segmentStudioProfile(for: device)?.appliesViaStream == true {
+            if profile?.appliesViaStream == true {
                 // The overlay is the persistence: push the layout as a frame
                 // and deliberately leave razer mode up.
                 assertStreamHold(device, state: next)
@@ -1742,15 +1770,25 @@ extension LightManager {
             }
         }
         if announce {
-            logActivity(.command, title: "Segment layout applied",
-                        detail: "\(device.label): \(next.segmentCount) segments\(next.gradient ? ", blended" : "")")
-            lastActionSummary = "Painted \(next.segmentCount) segments on \(device.label)"
+            if profile?.limitsSimultaneousZones == true {
+                let unit = profile?.editorUnitName ?? "zone"
+                let summary = "\(next.poweredCount) of \(next.segmentCount) \(unit)s lit"
+                logActivity(.command, title: "Lamp zones applied", detail: "\(device.label): \(summary)")
+                lastActionSummary = "Set \(summary) on \(device.label)"
+            } else {
+                logActivity(.command, title: "Segment layout applied",
+                            detail: "\(device.label): \(next.segmentCount) segments\(next.gradient ? ", blended" : "")")
+                lastActionSummary = "Painted \(next.segmentCount) segments on \(device.label)"
+            }
         }
     }
 
     func addSegmentPreset(name: String, stops: [GoveeSegmentColor], fill: GoveeSegmentPreset.Fill = .smooth) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !stops.isEmpty else { return }
+        // A preset carries colors, not which zones a fixture happens to be
+        // running, so saved stops are always powered.
+        let stops = stops.map { $0.settingPower(true) }
         goveeSegmentPresets.append(GoveeSegmentPreset(name: trimmed, stops: stops, fill: fill))
         persistApplicationState()
         lastActionSummary = "Saved segment preset \u{201C}\(trimmed)\u{201D}"
@@ -1770,7 +1808,7 @@ extension LightManager {
             packets.append(GoveeProtocol.gradientPacket(on: state.gradient))
         }
         for group in state.colorGroups {
-            let rgb = group.color.rgb255
+            let rgb = group.color.renderedRGB255
             packets.append(GoveeProtocol.segmentColorPacket(r: rgb.r, g: rgb.g, b: rgb.b, segments: group.segments))
         }
         let brightnessGroups = state.brightnessGroups
@@ -2495,7 +2533,10 @@ extension LightManager {
                 guard !segments.isEmpty else { continue }
                 previewSegments(
                     device,
-                    state: GoveeSegmentState(colors: segments, gradient: false, isActive: false)
+                    state: zoneConstrained(
+                        GoveeSegmentState(colors: segments, gradient: false, isActive: false),
+                        for: device
+                    )
                 )
             }
         }

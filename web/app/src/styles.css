@@ -1,0 +1,450 @@
+/* The Lighting Desk brand tokens, matching Theme.swift / DESIGN_SYSTEM.md. */
+:root {
+  --void: #04060a;
+  --panel: #0e1219;
+  --raised: #151a23;
+  --text: #e8eef7;
+  --beam: #dce7f6;
+  --beam-bright: #f6faff;
+  --wave-620: #ff7a38;
+  --wave-490: #21c4de;
+  --wave-530: #46d08a;
+  --muted: #9aa6b5;
+  --border: #1f2732;
+  --radius: 5px;
+  --spectrum: linear-gradient(90deg, #6c4bf0, #3d7bf5, #21c4de, #46d08a, #d9d45f, #ffb13d, #ff7a38, #f1495c);
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--void);
+  color: var(--text);
+  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  line-height: 1.5;
+}
+
+.shell {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 24px 20px 48px;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.shell.centered {
+  justify-content: center;
+  align-items: center;
+}
+
+.bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.brand h1 {
+  font-size: 1.15rem;
+  margin: 0;
+  letter-spacing: 0.01em;
+}
+
+.dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: linear-gradient(180deg, var(--beam-bright), var(--beam));
+  box-shadow: 0 0 14px rgba(220, 231, 246, 0.45);
+}
+
+.bar-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.status {
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+main {
+  flex: 1;
+}
+
+.grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.card.on {
+  border-color: rgba(220, 231, 246, 0.4);
+  box-shadow: 0 0 0 1px rgba(220, 231, 246, 0.12), 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+
+.card.offline {
+  opacity: 0.55;
+}
+
+.card-head {
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.card h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.meta {
+  margin: 6px 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.badge {
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 0.65rem;
+  letter-spacing: 0.06em;
+  border: 1px solid currentColor;
+}
+
+.badge.lifx {
+  color: var(--wave-490);
+}
+
+.badge.govee {
+  color: var(--wave-530);
+}
+
+.warn {
+  color: var(--wave-620);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.field strong {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+input[type='range'] {
+  width: 100%;
+  accent-color: var(--beam);
+}
+
+.swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.swatch {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  padding: 0;
+}
+
+.picker {
+  width: 42px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.whites {
+  display: flex;
+  gap: 8px;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--raised);
+  color: var(--text);
+  padding: 8px 14px;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--beam);
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.toggle {
+  min-width: 66px;
+  font-weight: 600;
+}
+
+.toggle.active {
+  background: linear-gradient(180deg, var(--beam-bright), var(--beam));
+  color: var(--void);
+  border-color: transparent;
+}
+
+.chip {
+  padding: 6px 10px;
+  font-size: 0.78rem;
+}
+
+.primary {
+  background: linear-gradient(180deg, var(--beam-bright), var(--beam));
+  color: var(--void);
+  border-color: transparent;
+  font-weight: 600;
+}
+
+.ghost {
+  background: transparent;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 28px;
+  text-align: left;
+}
+
+.panel.wide {
+  max-width: 640px;
+}
+
+.panel h1 {
+  margin: 8px 0 12px;
+  font-size: 1.6rem;
+}
+
+.panel h2 {
+  margin: 0 0 8px;
+  font-size: 1.1rem;
+}
+
+.panel p {
+  color: var(--muted);
+  margin: 0 0 16px;
+}
+
+.eyebrow {
+  font-size: 0.7rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--beam);
+}
+
+.steps {
+  color: var(--muted);
+  padding-left: 20px;
+  margin: 0 0 20px;
+}
+
+.steps li {
+  margin-bottom: 10px;
+}
+
+.steps a {
+  color: var(--wave-490);
+}
+
+pre {
+  background: var(--void);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  overflow-x: auto;
+  margin: 8px 0 0;
+  /* Clone URLs are long; wrap them rather than scrolling the setup card. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.7;
+}
+
+.note {
+  display: block;
+  margin-top: 8px;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.alt {
+  margin-bottom: 20px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.alt summary {
+  cursor: pointer;
+  color: var(--wave-490);
+}
+
+.alt p {
+  margin: 10px 0 0;
+}
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85em;
+  color: var(--beam-bright);
+}
+
+.setup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.port {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.port input {
+  background: var(--void);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text);
+  padding: 8px 10px;
+  width: 120px;
+  font: inherit;
+}
+
+.hint {
+  margin: 16px 0 0;
+  font-size: 0.8rem;
+}
+
+.error {
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: rgba(201, 120, 82, 0.14);
+  border: 1px solid var(--wave-620);
+  color: var(--text);
+  font-size: 0.85rem;
+}
+
+.foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: space-between;
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+:focus-visible {
+  outline: 2px solid var(--beam);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+  }
+}
+
+.diagnostic {
+  margin-top: 18px;
+  padding: 16px;
+  border-radius: 10px;
+  border: 1px solid var(--wave-620);
+  background: rgba(201, 120, 82, 0.1);
+  font-size: 0.85rem;
+}
+
+.diagnostic p {
+  margin: 0 0 10px;
+  color: var(--text);
+}
+
+.diagnostic-head {
+  font-weight: 600;
+}
+
+.diagnostic-head code {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.diagnostic ul {
+  margin: 0 0 12px;
+  padding-left: 20px;
+  color: var(--muted);
+}
+
+.diagnostic li {
+  margin-bottom: 6px;
+}
+
+.diagnostic a {
+  color: var(--wave-490);
+  overflow-wrap: anywhere;
+}
+
+.diagnostic pre {
+  margin-top: 0;
+}

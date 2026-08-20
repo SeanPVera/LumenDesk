@@ -2,6 +2,15 @@
 
 Responsive, local-only React/TypeScript prototype for the LumenDesk UX redesign. It sends no real lighting or network commands and requires no backend.
 
+## Live demo
+
+The prototype is published to GitHub Pages from `main`:
+<https://seanpvera.github.io/LumenDesk/prototype/>
+
+This is the **simulated** UX mockup — it sends no real commands. The real web
+app, which controls actual lights through the local bridge, lives at the site
+root: <https://seanpvera.github.io/LumenDesk/> (see `web/README.md`).
+
 ## Run locally
 
 ```bash
@@ -18,6 +27,35 @@ For a production build:
 npm run build
 npm run preview
 ```
+
+## Deploying to GitHub Pages
+
+`.github/workflows/deploy-pages.yml` builds this directory to `/prototype/`
+alongside the real web app at the site root, whenever `web/**` or
+`design-prototype/**` changes on `main` (or on `workflow_dispatch`). Pull
+requests run the same build without deploying, so a broken prototype fails
+before it reaches the site.
+
+The repository's Pages source must be set to Actions for the deploy to
+succeed: **Settings → Pages → Build and deployment → Source: GitHub
+Actions**.
+
+GitHub Pages serves a project site from `https://<user>.github.io/<repo>/`,
+so the build needs a matching `base` or every asset URL 404s. `vite.config.ts`
+reads it from the `BASE_PATH` environment variable, which the workflow fills
+from `actions/configure-pages` (`/LumenDesk/prototype` here, or `/prototype`
+for a user site or custom domain). `dev`, `preview`, and a plain `npm run build` leave it unset
+and serve from `/`, so local workflows are unchanged.
+
+To reproduce the deployed build locally:
+
+```bash
+BASE_PATH=/LumenDesk/prototype npm run build
+```
+
+The result must then be served from a matching subpath — opening
+`dist/index.html` directly, or serving it at a server root, will not find
+the assets.
 
 ## Included flows
 

@@ -1,0 +1,126 @@
+name: Deploy web app to GitHub Pages
+
+# Publishes two static sites:
+#   /           the LumenDesk web app, which controls real lights through the
+#               local bridge in web/bridge
+#   /prototype/ the original design-prototype UX mockup
+# The native app is not built here — see build.yml for that.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - web/**
+      - design-prototype/**
+      - .github/workflows/deploy-pages.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - web/**
+      - design-prototype/**
+      - .github/workflows/deploy-pages.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  bridge:
+    name: Test bridge
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Run bridge tests
+        working-directory: web/bridge
+        # Protocol encoders are asserted byte-for-byte against the Swift
+        # implementation, and fake LIFX/Govee devices exercise the full
+        # discovery and command path over real UDP on loopback.
+        run: npm test
+
+  build:
+    name: Build web app
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pages: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            web/app/package-lock.json
+            design-prototype/package-lock.json
+
+      - name: Configure Pages
+        id: pages
+        uses: actions/configure-pages@v5
+
+      - name: Build web app
+        working-directory: web/app
+        env:
+          # "/<repo>" for a project site, "/" for a user site or custom domain.
+          BASE_PATH: ${{ steps.pages.outputs.base_path }}
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build design prototype
+        working-directory: design-prototype
+        env:
+          BASE_PATH: ${{ steps.pages.outputs.base_path }}/prototype
+        run: |
+          npm ci
+          npm run build
+
+      - name: Assemble site
+        run: |
+          rm -rf _site
+          mkdir -p _site
+          cp -r web/app/dist/. _site/
+          mkdir -p _site/prototype
+          cp -r design-prototype/dist/. _site/prototype/
+          echo "--- site contents ---"
+          find _site -type f | sort
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    name: Deploy to Pages
+    if: github.event_name != 'pull_request'
+    needs: [bridge, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

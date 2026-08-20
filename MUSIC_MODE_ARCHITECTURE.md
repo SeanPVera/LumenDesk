@@ -34,6 +34,7 @@ While a grid is available the engine choreographs in musical time:
 - Ordinary Govee devices use the existing solid-color LAN command with brightness folded into RGB during live frames.
 - Recognized Govee RGBIC devices use the volatile Razer/DreamView-style stream for every live segment frame. Music Mode never emits persistent `ptReal` writes per frame.
 - When a session stops, the stream is ended and the pre-session snapshot is restored when configured. A saved segment layout may be re-applied once through the normal restoration path; that is intentionally distinct from live-frame output.
+- Fixtures that cannot light every zone at once (the H60B0 uplighter runs two of its three) keep the zones the user chose in the Segment Studio for the whole session. The mask is taken from the saved layout once per frame rather than recomputed from frame content, so the lamp never alternates between zone pairs — which would read as flashing. Choreography is unaware of the limit; the constraint is applied where frames are handed to the transport.
 
 ## Safety boundaries
 

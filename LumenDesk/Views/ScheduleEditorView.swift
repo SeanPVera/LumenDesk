@@ -14,7 +14,7 @@ struct ScheduleEditorView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Schedules — \(room.name)").font(.title3.weight(.semibold))
+                    Text("Schedules — \(room.name)").font(LumenType.display(size: 19, weight: .bold))
                     Text("Choose days, edit rules in place, preview the timeline, and test safely.").font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -29,7 +29,7 @@ struct ScheduleEditorView: View {
                 .padding(.horizontal, 16).padding(.top, 12)
 
             if schedules.isEmpty {
-                VStack(spacing: 8) { Spacer(); Image(systemName: "clock.badge.plus").font(.system(size: 34)).foregroundStyle(.secondary); Text("No schedules yet").font(.headline); Text("Add a rule with locale-aware time and weekday controls.").foregroundStyle(.secondary); Spacer() }
+                VStack(spacing: 8) { Spacer(); Image(systemName: "clock.badge.plus").font(.system(size: 34)).foregroundStyle(.secondary); Text("No schedules yet").font(LumenType.display(size: 15, weight: .semibold)); Text("Add a rule with locale-aware time and weekday controls.").foregroundStyle(.secondary); Spacer() }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List(schedules) { entry in scheduleRow(entry) }.listStyle(.inset)
@@ -39,7 +39,7 @@ struct ScheduleEditorView: View {
             HStack {
                 Text("\(schedules.count) automation rule\(schedules.count == 1 ? "" : "s")").font(.caption).foregroundStyle(.secondary)
                 Spacer()
-                Button { showingNewEntry = true } label: { Label("Add Schedule", systemImage: "plus") }.buttonStyle(.borderedProminent)
+                Button { showingNewEntry = true } label: { Label("Add Schedule", systemImage: "plus") }.buttonStyle(LumenPrimaryButtonStyle())
             }.padding(16)
         }
         .sheetFrame(minWidth: 560, idealWidth: 680, minHeight: 460, idealHeight: 620).background(LumenBackground(glow: false))
@@ -54,14 +54,31 @@ struct ScheduleEditorView: View {
 
     private func scheduleRow(_ entry: ScheduleEntry) -> some View {
         HStack(spacing: 10) {
-            Toggle("", isOn: Binding(get: { entry.isEnabled }, set: { manager.setScheduleEnabled(entry.id, in: room.id, enabled: $0) })).labelsHidden().toggleStyle(.switch).controlSize(.small)
+            Toggle("", isOn: Binding(get: { entry.isEnabled }, set: { manager.setScheduleEnabled(entry.id, in: room.id, enabled: $0) }))
+                .labelsHidden()
+                .toggleStyle(LumenRockerStyle(showsLabel: false))
+                .accessibilityLabel("Enable \(entry.action.displayName) at \(entry.timeString)")
             VStack(alignment: .leading, spacing: 3) {
-                HStack { Text(entry.timeString).font(.headline.monospacedDigit()); Text(entry.daySummary).font(.caption).padding(.horizontal, 6).padding(.vertical, 2).background(.secondary.opacity(0.15), in: Capsule()) }
+                HStack(spacing: 8) {
+                    Text(entry.timeString)
+                        .font(LumenType.readout(size: 15, weight: .semibold))
+                    Text(entry.daySummary.uppercased())
+                        .font(LumenType.instrumentLabel(size: 9))
+                        .tracking(0.8)
+                        .foregroundStyle(Lumen.textTertiary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(
+                            RoundedRectangle(cornerRadius: 2, style: .continuous)
+                                .fill(Lumen.surfaceRaised)
+                        )
+                }
                 Text(entry.action.displayName).font(.caption).foregroundStyle(.secondary)
                 Text(manager.nextRunDescription(for: entry)).font(.caption2).foregroundStyle(.tertiary)
             }
             Spacer()
             Button("Test") { testingEntry = entry }
+                .buttonStyle(LumenSecondaryButtonStyle(compact: true))
             Menu {
                 Button("Edit…") { editingEntry = entry }
                 Button("Duplicate") { manager.duplicateSchedule(entry, in: room.id) }
@@ -80,18 +97,35 @@ private struct ScheduleTimelineView: View {
     let warnings: [String]
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
-            HStack { Text("24-hour timeline").font(.caption.weight(.semibold)); Spacer(); Text("Midnight   6 AM   Noon   6 PM   Midnight").font(.caption2).foregroundStyle(.tertiary) }
+            HStack {
+                LumenEyebrow(text: "24-hour timeline")
+                Spacer()
+                Text("00   06   12   18   24")
+                    .font(LumenType.readout(size: 9))
+                    .foregroundStyle(Lumen.textTertiary)
+            }
             GeometryReader { proxy in
                 ZStack(alignment: .leading) {
-                    Capsule().fill(Color.secondary.opacity(0.14)).frame(height: 8)
+                    RoundedRectangle(cornerRadius: 1, style: .continuous)
+                        .fill(Lumen.void)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 1, style: .continuous)
+                                .stroke(Lumen.hairline, lineWidth: 1)
+                        )
+                        .frame(height: 8)
                     ForEach(entries) { entry in
                         let minute = entry.action.isRelativeToSun ? 720 : entry.hour * 60 + entry.minute
-                        Circle().fill(entry.isEnabled ? Lumen.violetBright : .gray).frame(width: 12, height: 12).offset(x: max(0, min(proxy.size.width - 12, CGFloat(minute) / 1440 * proxy.size.width))).help("\(entry.daySummary), \(entry.timeString): \(entry.action.displayName)")
+                        RoundedRectangle(cornerRadius: 1, style: .continuous)
+                            .fill(entry.isEnabled ? Lumen.beamBright : Lumen.offline)
+                            .frame(width: 4, height: 14)
+                            .shadow(color: entry.isEnabled ? Lumen.beam.opacity(0.6) : .clear, radius: 5)
+                            .offset(x: max(0, min(proxy.size.width - 4, CGFloat(minute) / 1440 * proxy.size.width)))
+                            .help("\(entry.daySummary), \(entry.timeString): \(entry.action.displayName)")
                     }
                 }.frame(height: 14)
             }.frame(height: 14)
             if !warnings.isEmpty { ForEach(warnings, id: \.self) { Label($0, systemImage: "exclamationmark.triangle.fill").font(.caption2).foregroundStyle(Lumen.warning) } }
-        }.padding(10).lumenCard(radius: 8)
+        }.padding(10).lumenCard()
     }
 }
 
@@ -107,7 +141,7 @@ private struct ScheduleFormView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(entry == nil ? "New Schedule" : "Edit Schedule").font(.title3.weight(.semibold))
+            Text(entry == nil ? "New Schedule" : "Edit Schedule").font(LumenType.display(size: 19, weight: .bold))
             Label("Times use \(TimeZone.current.identifier). Across daylight-saving changes, skipped actions are held for review after wake; repeated wall-clock times run once.", systemImage: "globe")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Picker("Action", selection: $action) { ForEach(ScheduleAction.allCases, id: \.self) { Text($0.displayName).tag($0) } }
@@ -121,11 +155,36 @@ private struct ScheduleFormView: View {
                 #endif
             }
             VStack(alignment: .leading, spacing: 6) {
-                Text("Days").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                HStack { ForEach(1...7, id: \.self) { day in Button(Calendar.current.veryShortWeekdaySymbols[day - 1]) { if weekdays.contains(day) { weekdays.remove(day) } else { weekdays.insert(day) } }.buttonStyle(.bordered).tint(weekdays.contains(day) ? Lumen.violetBright : .secondary).accessibilityLabel(Calendar.current.weekdaySymbols[day - 1]) } }
-                HStack { Button("Every day") { weekdays = Set(1...7) }; Button("Weekdays") { weekdays = Set(2...6) }; Button("Weekends") { weekdays = [1,7] } }.font(.caption)
+                LumenEyebrow(text: "Days")
+                HStack(spacing: 4) {
+                    ForEach(1...7, id: \.self) { day in
+                        Toggle(Calendar.current.veryShortWeekdaySymbols[day - 1], isOn: Binding(
+                            get: { weekdays.contains(day) },
+                            set: { on in
+                                if on { weekdays.insert(day) } else { weekdays.remove(day) }
+                            }
+                        ))
+                        .toggleStyle(LumenChipStyle())
+                        .accessibilityLabel(Calendar.current.weekdaySymbols[day - 1])
+                    }
+                }
+                HStack(spacing: 6) {
+                    Button("Every day") { weekdays = Set(1...7) }
+                        .buttonStyle(LumenSecondaryButtonStyle(compact: true))
+                    Button("Weekdays") { weekdays = Set(2...6) }
+                        .buttonStyle(LumenSecondaryButtonStyle(compact: true))
+                    Button("Weekends") { weekdays = [1, 7] }
+                        .buttonStyle(LumenSecondaryButtonStyle(compact: true))
+                }
             }
-            HStack { Spacer(); Button("Cancel") { dismiss() }; Button("Save") { save() }.buttonStyle(.borderedProminent).disabled(weekdays.isEmpty) }
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .buttonStyle(LumenSecondaryButtonStyle())
+                Button("Save") { save() }
+                    .buttonStyle(LumenPrimaryButtonStyle())
+                    .disabled(weekdays.isEmpty)
+            }
         }.padding(20).sheetFrame(minWidth: 440, idealWidth: 520).background(LumenBackground(glow: false)).onAppear(perform: load)
     }
 
@@ -152,7 +211,7 @@ struct SolarSettingsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Sunrise & Sunset Times")
-                .font(.title3.weight(.semibold))
+                .font(LumenType.display(size: 19, weight: .bold))
             Text("Set your local sunrise and sunset times. LumenDesk uses these for solar-relative schedules.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
@@ -181,7 +240,7 @@ struct SolarSettingsView: View {
                     manager.setSunsetTime(hour: sunsetHour, minute: sunsetMinute)
                     dismiss()
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(LumenPrimaryButtonStyle())
                 .keyboardShortcut(.defaultAction)
             }
         }

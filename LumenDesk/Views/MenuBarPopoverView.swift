@@ -64,7 +64,7 @@ struct MenuBarPopoverView: View {
                 Label("All Off", systemImage: "power")
                     .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(LumenPrimaryButtonStyle())
             .tint(.red)
             .disabled(manager.devices.isEmpty)
             ForEach([0.1, 0.3, 0.6, 1.0], id: \.self) { value in
@@ -101,8 +101,15 @@ struct MenuBarPopoverView: View {
         HStack {
             LumenMark(size: 18)
             VStack(alignment: .leading, spacing: 0) {
-                Text("LumenDesk").font(LumenType.display(size: 13, weight: .semibold))
-                if manager.isDemoMode { Text("SAFE DEMO").font(.system(size: 8, weight: .bold)).foregroundStyle(.orange) }
+                Text("LUMENDESK")
+                    .font(LumenType.display(size: 13, weight: .bold))
+                    .tracking(1.1)
+                if manager.isDemoMode {
+                    Text("SAFE DEMO")
+                        .font(LumenType.instrumentLabel(size: 8))
+                        .tracking(0.9)
+                        .foregroundStyle(Lumen.warning)
+                }
             }
             Spacer()
             Button {
@@ -128,8 +135,8 @@ struct MenuBarPopoverView: View {
             }
             if !manager.commandPendingIDs.isEmpty { Label("\(manager.commandPendingIDs.count)", systemImage: "arrow.up.circle").font(.caption2).help("Commands in progress") }
             Text("\(manager.devices.count) light\(manager.devices.count == 1 ? "" : "s")")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+                .font(LumenType.readout(size: 10))
+                .foregroundStyle(Lumen.textTertiary)
                 .accessibilityLabel("\(manager.devices.count) light\(manager.devices.count == 1 ? "" : "s") found")
         }
         .padding(.horizontal, 12)
@@ -138,19 +145,15 @@ struct MenuBarPopoverView: View {
 
     private var globalRow: some View {
         HStack(spacing: 10) {
-            Text("All Lights")
-                .font(.callout.weight(.medium))
+            LumenEyebrow(text: "All lights", tint: Lumen.textSecondary, size: 10)
             Spacer()
             Toggle("", isOn: Binding(
                 get: { !manager.devices.isEmpty && manager.devices.allSatisfy { $0.isOn } },
                 set: { manager.setAllPower(on: $0) }
             ))
-            .toggleStyle(.switch)
             .labelsHidden()
-            .controlSize(.small)
-            .tint(Lumen.signal)
+            .toggleStyle(LumenPowerKeyStyle(size: 26, spokenLabel: "All lights power"))
             .disabled(manager.devices.isEmpty)
-            .accessibilityLabel("All lights power")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -182,34 +185,22 @@ struct MenuBarPopoverView: View {
                     get: { !lights.isEmpty && lights.allSatisfy { $0.isOn } },
                     set: { manager.setPower(in: room, on: $0) }
                 ))
-                .toggleStyle(.switch)
                 .labelsHidden()
-                .controlSize(.small)
-                .tint(Lumen.pink)
+                .toggleStyle(LumenPowerKeyStyle(
+                    size: 26,
+                    spokenLabel: "\(room.name) power, \(onCount) of \(lights.count) on"))
                 .disabled(lights.isEmpty)
-                .accessibilityLabel("\(room.name) power, \(onCount) of \(lights.count) on")
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
 
             if onCount > 0 {
-                HStack(spacing: 6) {
-                    Image(systemName: "sun.min").foregroundStyle(.tertiary).font(.caption2)
-                        .accessibilityHidden(true)
-                    Slider(value: brightnessBinding, in: 0...1)
-                        .controlSize(.mini)
-                        .accessibilityLabel("\(room.name) brightness")
-                        .accessibilityValue("\(Int(brightnessBinding.wrappedValue * 100)) percent")
-                    Image(systemName: "sun.max").foregroundStyle(.tertiary).font(.caption2)
-                        .accessibilityHidden(true)
-                    Text("\(Int(brightnessBinding.wrappedValue * 100))%")
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(.tertiary)
-                        .frame(width: 28, alignment: .trailing)
-                        .accessibilityHidden(true)
-                }
-                .padding(.horizontal, 14)
-                .padding(.bottom, 8)
+                LumenFader(label: "\(room.name) brightness",
+                           value: brightnessBinding,
+                           track: .beam,
+                           showsScale: false)
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 8)
             }
         }
     }
@@ -232,12 +223,9 @@ struct MenuBarPopoverView: View {
                 get: { !lights.isEmpty && lights.allSatisfy { $0.isOn } },
                 set: { on in manager.setPower(deviceIDs: Set(lights.map { $0.id }), on: on) }
             ))
-            .toggleStyle(.switch)
             .labelsHidden()
-            .controlSize(.small)
-            .tint(Lumen.pink)
+            .toggleStyle(LumenPowerKeyStyle(size: 26, spokenLabel: "Unassigned lights power"))
             .disabled(lights.isEmpty)
-            .accessibilityLabel("Unassigned lights power")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)

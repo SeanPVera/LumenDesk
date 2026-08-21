@@ -2477,7 +2477,10 @@ extension LightManager {
             // restore it from on stop. The UI disables this while running;
             // keep the currently-active exclusion set here too as a
             // backstop. Order and layout remain safe to change live.
-            normalized.excludedFixtureIDs = fixtureTopologies[topologyKey(for: scope)]?.excludedFixtureIDs ?? normalized.excludedFixtureIDs
+            // `fixtureTopology(for:)` (not a raw dictionary lookup) so a
+            // scope with nothing persisted yet correctly freezes to no
+            // exclusions rather than falling through to the new value.
+            normalized.excludedFixtureIDs = fixtureTopology(for: scope).excludedFixtureIDs
         }
         fixtureTopologies[topologyKey(for: scope)] = normalized
         persistApplicationState()

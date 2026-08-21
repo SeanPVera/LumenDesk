@@ -998,6 +998,7 @@ struct LibraryWorkspaceView: View {
     @State private var previewScene: LightingScene?
     @State private var editingScene: LightingScene?
     @State private var pendingAudioEffect: LightingEffect?
+    @State private var hasRestoredRunningShow = false
 
     private let columns = [GridItem(.adaptive(minimum: 220), spacing: 12)]
 
@@ -1046,6 +1047,7 @@ struct LibraryWorkspaceView: View {
         .background(LumenBackground(glow: false))
         .navigationTitle("Library")
         .searchable(text: $searchText, prompt: "Search library")
+        .onAppear { restoreRunningShowIfNeeded() }
         .sheet(item: $previewScene) { scene in
             ScenePreviewView(scene: scene).environmentObject(manager)
         }
@@ -1233,6 +1235,24 @@ struct LibraryWorkspaceView: View {
 
     private var filteredScenes: [LightingScene] {
         searchText.isEmpty ? manager.scenes : manager.scenes.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
+    }
+
+    /// This view (and its `section`/`scope` selection) is torn down and
+    /// rebuilt whenever the sidebar/tab moves to a different top-level
+    /// destination and back, since it lives behind a `switch` case in
+    /// `LumenDeskShellView.destinationView`. Without this, leaving Music
+    /// Mode running in a room and returning to Library always lands back on
+    /// Scenes / All Lights, hiding the running show's controls behind a
+    /// picker the user has to reselect by hand. Restore straight to it once,
+    /// on the freshly created instance, without overriding a section the
+    /// user then deliberately navigates away from within this instance.
+    private func restoreRunningShowIfNeeded() {
+        guard !hasRestoredRunningShow else { return }
+        hasRestoredRunningShow = true
+        if let runningScope = manager.activeEffects.first(where: { $0.value == "music-pulse" })?.key {
+            section = .music
+            scope = runningScope
+        }
     }
 
     private func start(_ effect: LightingEffect) {

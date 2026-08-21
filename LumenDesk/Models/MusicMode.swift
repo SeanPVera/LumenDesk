@@ -264,6 +264,10 @@ enum FixtureTopologyLayout: String, Codable, CaseIterable, Identifiable {
 struct FixtureTopology: Codable, Equatable {
     var layout: FixtureTopologyLayout = .leftToRight
     var fixtureOrder: [String] = []
+    /// Fixtures the user has excluded from this scope's show. They keep
+    /// whatever state they were already in — Music Mode never powers them,
+    /// snapshots them for restore, or sends them frames.
+    var excludedFixtureIDs: Set<String> = []
 
     func orderedFixtures(_ fixtures: [MusicFixtureDescriptor]) -> [MusicFixtureDescriptor] {
         let byID = Dictionary(uniqueKeysWithValues: fixtures.map { ($0.id, $0) })
@@ -280,8 +284,16 @@ struct FixtureTopology: Codable, Equatable {
         return ordered
     }
 
+    /// `fixtures` with excluded ones removed, keeping the rest in
+    /// `fixtureOrder` order. Positions are then spread across only the
+    /// included fixtures, so excluding one closes the gap it would otherwise
+    /// leave in the spatial sweep rather than leaving a dark hole in it.
+    func includedFixtures(_ fixtures: [MusicFixtureDescriptor]) -> [MusicFixtureDescriptor] {
+        excludedFixtureIDs.isEmpty ? orderedFixtures(fixtures) : orderedFixtures(fixtures).filter { !excludedFixtureIDs.contains($0.id) }
+    }
+
     func expandedTargets(for fixtures: [MusicFixtureDescriptor]) -> [MusicSpatialTarget] {
-        let ordered = orderedFixtures(fixtures)
+        let ordered = includedFixtures(fixtures)
         let count = ordered.reduce(0) { $0 + max(1, $1.segmentCount) }
         guard count > 0 else { return [] }
         var flatIndex = 0
@@ -304,6 +316,25 @@ struct FixtureTopology: Codable, Equatable {
             }
         }
         return result
+    }
+}
+
+extension FixtureTopology {
+    private enum CodingKeys: String, CodingKey {
+        case layout, fixtureOrder, excludedFixtureIDs
+    }
+
+    // Decoded field-by-field, tolerant of a missing `excludedFixtureIDs` key,
+    // so topologies saved before this field existed still decode instead of
+    // the whole per-scope entry falling back to a blank default (losing the
+    // user's saved fixture order). Defined in an extension so the compiler
+    // still synthesizes the memberwise initializer used elsewhere (e.g.
+    // `FixtureTopology()`).
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        layout = (try? container.decode(FixtureTopologyLayout.self, forKey: .layout)) ?? .leftToRight
+        fixtureOrder = (try? container.decode([String].self, forKey: .fixtureOrder)) ?? []
+        excludedFixtureIDs = (try? container.decode(Set<String>.self, forKey: .excludedFixtureIDs)) ?? []
     }
 }
 

@@ -9,6 +9,8 @@ import { LifxClient } from '../src/lifx-client.js'
 import { GoveeClient } from '../src/govee-client.js'
 import { createServer } from '../src/server.js'
 import { isBuiltApp } from '../src/static.js'
+import { Store } from '../src/store.js'
+import os from 'node:os'
 import { FakeLifxBulb, FakeGoveeDevice } from './fake-devices.js'
 
 const portArg = process.argv.indexOf('--port')
@@ -18,6 +20,9 @@ const bulb = new FakeLifxBulb({ label: 'Desk Lamp' })
 const bulbPort = await bulb.listen()
 
 const registry = new Registry()
+// Isolated store so the harness never touches a real user's state.
+const store = new Store({ file: path.join(os.tmpdir(), `lumendesk-harness-${process.pid}.json`) })
+store.load()
 const lifx = new LifxClient({ registry, discoveryAddress: '127.0.0.1', port: bulbPort })
 const govee = new GoveeClient({
   registry,
@@ -44,6 +49,7 @@ const server = createServer({
   govee,
   allowedOrigins: ['*'],
   version: 'harness',
+  store,
   staticDir: isBuiltApp(appDir) ? appDir : null,
 })
 

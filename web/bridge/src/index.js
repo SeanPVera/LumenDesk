@@ -6,6 +6,9 @@ import { LifxClient } from './lifx-client.js'
 import { GoveeClient } from './govee-client.js'
 import { createServer } from './server.js'
 import { isBuiltApp } from './static.js'
+import { Store } from './store.js'
+import { due, commandsFor } from './schedules.js'
+import { runSchedule } from './actions.js'
 
 const VERSION = '1.0.0'
 
@@ -66,6 +69,8 @@ the LumenDesk web app on a loopback HTTP API.
 const log = options.quiet ? () => {} : (...args) => console.log('[bridge]', ...args)
 
 const registry = new Registry()
+const store = new Store({ log })
+store.load()
 const lifx = new LifxClient({ registry, log })
 const govee = new GoveeClient({ registry, log })
 
@@ -85,6 +90,7 @@ const server = createServer({
   allowedOrigins: options.origins,
   version: VERSION,
   staticDir,
+  store,
 })
 
 server.listen(options.port, options.host, () => {
@@ -119,6 +125,23 @@ const refreshTimer = setInterval(() => {
   govee.refresh()
 }, options.refreshEvery)
 
+// Schedules run here rather than in the page, so they fire whether or not a
+// browser is open. The window is half-open, so a missed tick still runs once.
+let lastTick = new Date()
+const scheduleTimer = setInterval(() => {
+  const now = new Date()
+  const decisions = due({ rooms: store.listRooms(), previous: lastTick, now })
+  lastTick = now
+  for (const { room, schedule } of decisions) {
+    const result = runSchedule({ room, schedule, store, registry, lifx, govee, commandsFor })
+    log(
+      result.ran
+        ? `schedule ${schedule.action} for ${room.name} ran on ${result.devices} light(s)`
+        : `schedule ${schedule.action} for ${room.name} skipped: ${result.reason}`,
+    )
+  }
+}, 20_000)
+
 let known = 0
 const reportTimer = setInterval(() => {
   const devices = registry.list().filter(d => d.reachable)
@@ -132,6 +155,7 @@ function shutdown() {
   clearInterval(discoverTimer)
   clearInterval(refreshTimer)
   clearInterval(reportTimer)
+  clearInterval(scheduleTimer)
   lifx.stop()
   govee.stop()
   server.close(() => process.exit(0))

@@ -73,9 +73,18 @@ export class LifxClient {
 
   /** Brightness and colour share one SetColor message, so unchanged channels
    *  are carried over from the device's last known HSBK. */
-  setColor(device, { rgb, brightnessPercent, kelvin }) {
+  setColor(device, { rgb, brightnessPercent, kelvin, hsbk }) {
     const target = this.targets.get(device.id)
     if (!target || !device.ip) return false
+
+    // A scene restores the exact captured HSBK. Going through RGB would lose
+    // the distinction between a saturated colour and a white at some kelvin,
+    // because a LIFX device always reports both.
+    if (hsbk) {
+      this.#send(lifx.Message.lightSetColor, target, device.ip, lifx.setColorPayload(hsbk))
+      return true
+    }
+
     const current = device.hsbk ?? { hue: 0, saturation: 0, brightness: 32768, kelvin: 3500 }
 
     let { hue, saturation } = current
@@ -89,8 +98,8 @@ export class LifxClient {
     const brightness =
       brightnessPercent === undefined ? current.brightness : percentToU16(brightnessPercent)
 
-    const hsbk = { hue, saturation, brightness, kelvin: kelvin || current.kelvin || 3500 }
-    this.#send(lifx.Message.lightSetColor, target, device.ip, lifx.setColorPayload(hsbk))
+    const next = { hue, saturation, brightness, kelvin: kelvin || current.kelvin || 3500 }
+    this.#send(lifx.Message.lightSetColor, target, device.ip, lifx.setColorPayload(next))
     return true
   }
 

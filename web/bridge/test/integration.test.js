@@ -216,6 +216,40 @@ test('an unlisted origin is not granted access', async () => {
   assert.equal(res.headers.get('access-control-allow-origin'), null)
 })
 
+test('a disallowed origin cannot mutate, even though CORS would let it send', async () => {
+  // CORS only hides the response; a simple POST still reaches the server and
+  // still acts. State-changing requests must be refused outright.
+  const before = await api('/devices')
+  const res = await fetch(`${base}/devices/lifx%3Ad073d5000a01/power`, {
+    method: 'POST',
+    headers: { Origin: 'https://evil.example', 'Content-Type': 'text/plain' },
+    body: JSON.stringify({ on: true }),
+  })
+  assert.equal(res.status, 403)
+  assert.equal((await res.json()).error, 'origin not allowed')
+  // And the light is untouched.
+  assert.deepEqual((await api('/devices')).body.devices.length, before.body.devices.length)
+})
+
+test('the page the bridge serves may mutate on its own origin', async () => {
+  const host = new URL(base).host
+  const res = await fetch(`${base}/devices/lifx%3Ad073d5000a01/power`, {
+    method: 'POST',
+    headers: { Origin: `http://${host}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ on: false }),
+  })
+  assert.equal(res.status, 200)
+})
+
+test('a request with no Origin at all (curl, a script) still works', async () => {
+  const res = await fetch(`${base}/devices/lifx%3Ad073d5000a01/power`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ on: false }),
+  })
+  assert.equal(res.status, 200)
+})
+
 test('bad input is rejected rather than sent to a light', async () => {
   const unknown = await api('/devices/lifx%3Adeadbeefdead/power', {
     method: 'POST',

@@ -199,6 +199,40 @@ final class MusicModeTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(targets.last).position, 1, accuracy: 0.001)
     }
 
+    func testExcludedFixturesAreDroppedFromTargetsAndSpacingCloses() throws {
+        let fixtures = [
+            MusicFixtureDescriptor(id: "z", label: "Window", transport: .lifxLAN),
+            MusicFixtureDescriptor(id: "a", label: "Desk", transport: .goveeLAN),
+            MusicFixtureDescriptor(id: "s", label: "Strip", transport: .goveeRealtimeSegments, segmentCount: 3)
+        ]
+        var topology = FixtureTopology(layout: .custom, fixtureOrder: ["z", "a", "s"])
+        topology.excludedFixtureIDs = ["a"]
+
+        XCTAssertEqual(topology.includedFixtures(fixtures).map(\.id), ["z", "s"])
+
+        let targets = topology.expandedTargets(for: fixtures)
+        XCTAssertFalse(targets.contains { $0.fixtureID == "a" })
+        XCTAssertEqual(targets.count, 4) // "z" plus the 3 segments of "s", "a" excluded
+        // With "a" gone, "z" and the start of "s" should bound the sweep,
+        // closing the gap "a" would otherwise have left in the middle.
+        XCTAssertEqual(try XCTUnwrap(targets.first).position, 0, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(targets.last).position, 1, accuracy: 0.001)
+
+        // A stale ID from a fixture no longer present should be harmless.
+        topology.excludedFixtureIDs = ["a", "no-longer-connected"]
+        XCTAssertEqual(topology.includedFixtures(fixtures).map(\.id), ["z", "s"])
+    }
+
+    func testFixtureTopologyDecodesWithoutExcludedFixtureIDsKey() throws {
+        // Simulates an archive saved before `excludedFixtureIDs` existed.
+        let legacyJSON = Data("""
+        {"layout":"custom","fixtureOrder":["z","a","s"]}
+        """.utf8)
+        let decoded = try JSONDecoder().decode(FixtureTopology.self, from: legacyJSON)
+        XCTAssertEqual(decoded.fixtureOrder, ["z", "a", "s"])
+        XCTAssertEqual(decoded.excludedFixtureIDs, [])
+    }
+
     func testWaveProgressionAndLightingBounds() {
         let engine = MusicChoreographyEngine()
         let fixtures = (0..<4).map {

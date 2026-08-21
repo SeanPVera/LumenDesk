@@ -861,11 +861,12 @@ final class LightManager: ObservableObject {
         reducedMotion: Bool = false
     ) {
         guard let effect = LightingCatalog.effects.first(where: { $0.id == "music-pulse" }) else { return }
-        let targets = devices(in: scope)
+        let topology = fixtureTopology(for: scope)
+        let targets = devices(in: scope).filter { !topology.excludedFixtureIDs.contains($0.id) }
         guard !targets.isEmpty else {
             publishError(scope == .all
                 ? "Discover a light before starting Music Mode."
-                : "No lights in “\(scopeDisplayName(scope))” for Music Mode.")
+                : "No included lights in “\(scopeDisplayName(scope))” for Music Mode.")
             return
         }
 
@@ -883,7 +884,6 @@ final class LightManager: ObservableObject {
         effectRuns[scope] = run
         activeEffects[scope] = effect.id
         let fixtures = musicFixtureDescriptors(in: scope)
-        let topology = fixtureTopology(for: scope)
 
         for device in targets {
             device.isOn = true
@@ -2464,6 +2464,7 @@ extension LightManager {
         let available = Set(musicFixtureDescriptors(in: scope).map(\.id))
         var normalized = topology
         normalized.fixtureOrder = topology.fixtureOrder.filter(available.contains)
+        normalized.excludedFixtureIDs = topology.excludedFixtureIDs.intersection(available)
         fixtureTopologies[topologyKey(for: scope)] = normalized
         persistApplicationState()
         if musicModeController.activeScopeIDs.contains(scope) {

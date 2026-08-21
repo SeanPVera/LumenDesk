@@ -10,6 +10,7 @@ struct MusicModeView: View {
     @State private var showUnsafeWarning = false
 
     private var fixtures: [MusicFixtureDescriptor] { manager.musicFixtureDescriptors(in: scope) }
+    private var includedFixtures: [MusicFixtureDescriptor] { topology.includedFixtures(fixtures) }
     private var isRunning: Bool { manager.activeEffects[scope] == "music-pulse" }
 
     var body: some View {
@@ -90,7 +91,7 @@ struct MusicModeView: View {
                         )
                     }
                     .buttonStyle(LumenPrimaryButtonStyle())
-                    .disabled(fixtures.isEmpty)
+                    .disabled(includedFixtures.isEmpty)
                 }
             }
         }
@@ -151,7 +152,7 @@ struct MusicModeView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Spatial topology").font(LumenType.display(size: 15, weight: .semibold))
-                    Text("Position is explicit and never inferred from discovery order. RGBIC segments continue the path inside their fixture.")
+                    Text("Position is explicit and never inferred from discovery order. RGBIC segments continue the path inside their fixture. Exclude a light to leave it out of this room's show without changing its current state.")
                         .font(.caption).foregroundStyle(Lumen.textSecondary)
                 }
                 Spacer()
@@ -165,27 +166,45 @@ struct MusicModeView: View {
             }
 
             let ordered = topology.orderedFixtures(fixtures)
+            let includedOrdered = topology.includedFixtures(fixtures)
             ForEach(Array(ordered.enumerated()), id: \.element.id) { index, fixture in
+                let isExcluded = topology.excludedFixtureIDs.contains(fixture.id)
                 HStack(spacing: 10) {
-                    Text("\(index + 1)").font(.caption.monospacedDigit()).foregroundStyle(Lumen.textTertiary)
-                        .frame(width: 20)
+                    if let position = includedOrdered.firstIndex(where: { $0.id == fixture.id }) {
+                        Text("\(position + 1)").font(.caption.monospacedDigit()).foregroundStyle(Lumen.textTertiary)
+                            .frame(width: 20)
+                    } else {
+                        Text("–").font(.caption.monospacedDigit()).foregroundStyle(Lumen.textTertiary)
+                            .frame(width: 20)
+                    }
                     Image(systemName: fixture.segmentCount > 0 ? "rectangle.split.3x1.fill" : "lightbulb.fill")
-                        .foregroundStyle(fixture.segmentCount > 0 ? Lumen.coral : Lumen.violetBright)
+                        .foregroundStyle(isExcluded ? Lumen.textTertiary : (fixture.segmentCount > 0 ? Lumen.coral : Lumen.violetBright))
                     Text(fixture.label)
+                        .strikethrough(isExcluded)
+                        .foregroundStyle(isExcluded ? Lumen.textTertiary : Lumen.textPrimary)
                     if fixture.segmentCount > 0 {
                         Text("+ \(fixture.segmentCount) segments").font(.caption).foregroundStyle(Lumen.textTertiary)
                     }
                     Spacer()
+                    Button { toggleExclusion(fixture.id) } label: {
+                        Image(systemName: isExcluded ? "eye.slash" : "eye")
+                    }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(isExcluded ? Lumen.textTertiary : Lumen.success)
+                    .accessibilityLabel(isExcluded
+                        ? "Excluded from show. Tap to include \(fixture.label)."
+                        : "Included in show. Tap to exclude \(fixture.label).")
                     Button { moveFixture(from: index, offset: -1, ordered: ordered) } label: {
                         Image(systemName: "chevron.up")
                     }
-                    .buttonStyle(.borderless).disabled(index == 0)
+                    .buttonStyle(.borderless).disabled(index == 0 || isExcluded)
                     Button { moveFixture(from: index, offset: 1, ordered: ordered) } label: {
                         Image(systemName: "chevron.down")
                     }
-                    .buttonStyle(.borderless).disabled(index == ordered.count - 1)
+                    .buttonStyle(.borderless).disabled(index == ordered.count - 1 || isExcluded)
                 }
                 .padding(.vertical, 4)
+                .opacity(isExcluded ? 0.55 : 1)
             }
         }
         .padding(16)
@@ -322,6 +341,15 @@ struct MusicModeView: View {
     private func commitTopology() {
         manager.setFixtureTopology(topology, for: scope)
         topology = manager.fixtureTopology(for: scope)
+    }
+
+    private func toggleExclusion(_ fixtureID: String) {
+        if topology.excludedFixtureIDs.contains(fixtureID) {
+            topology.excludedFixtureIDs.remove(fixtureID)
+        } else {
+            topology.excludedFixtureIDs.insert(fixtureID)
+        }
+        commitTopology()
     }
 
     private func moveFixture(from index: Int, offset: Int, ordered: [MusicFixtureDescriptor]) {

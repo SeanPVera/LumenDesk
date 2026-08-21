@@ -382,6 +382,72 @@ final class MusicModeTests: XCTestCase {
         XCTAssertTrue(manager.activeEffects.isEmpty)
     }
 
+    @MainActor
+    func testStartMusicModeLeavesExcludedFixtureUntouched() throws {
+        let manager = LightManager(persistenceStore: MusicModePersistenceSpy())
+        manager.enterDemoMode()
+        var config = MusicModeConfiguration.configuration(for: .balanced)
+        config.usesSyntheticDemoPattern = true
+        let roomScope = LightScope.room(try XCTUnwrap(manager.rooms.first).id)
+        let roomDevices = manager.devices(in: roomScope)
+        XCTAssertGreaterThanOrEqual(roomDevices.count, 2)
+        let excluded = roomDevices[0]
+        let included = roomDevices[1]
+        excluded.isOn = false
+        let excludedOriginalPower = excluded.isOn
+        let excludedOriginalBrightness = excluded.brightness
+        let excludedOriginalColor = excluded.color
+
+        var topology = manager.fixtureTopology(for: roomScope)
+        topology.excludedFixtureIDs = [excluded.id]
+        manager.setFixtureTopology(topology, for: roomScope)
+
+        manager.startMusicMode(configuration: config, scope: roomScope)
+        // Excluded fixtures are never powered on at start, unlike the rest
+        // of the room, and shouldn't be part of the run's undo/restore set.
+        XCTAssertEqual(excluded.isOn, excludedOriginalPower)
+        XCTAssertTrue(included.isOn)
+
+        manager.musicModeController.renderNowForTesting()
+        manager.stopEffect(scope: roomScope)
+        XCTAssertEqual(excluded.isOn, excludedOriginalPower)
+        XCTAssertEqual(excluded.brightness, excludedOriginalBrightness, accuracy: 0.001)
+        XCTAssertLessThan(excluded.color.rgbDistance(to: excludedOriginalColor), 0.001)
+
+        // Toggling exclusion back on while nothing is running still applies.
+        manager.setFixtureTopology(FixtureTopology(), for: roomScope)
+        XCTAssertTrue(manager.fixtureTopology(for: roomScope).excludedFixtureIDs.isEmpty)
+    }
+
+    @MainActor
+    func testFixtureExclusionCannotChangeMidShowButLayoutStillCan() throws {
+        // A fixture newly included mid-show would receive color frames
+        // without ever being powered on or captured in the run's restore
+        // snapshot, so exclusion is frozen for the run's lifetime. Order and
+        // layout carry no such ownership implications and stay live.
+        let manager = LightManager(persistenceStore: MusicModePersistenceSpy())
+        manager.enterDemoMode()
+        var config = MusicModeConfiguration.configuration(for: .balanced)
+        config.usesSyntheticDemoPattern = true
+        let roomScope = LightScope.room(try XCTUnwrap(manager.rooms.first).id)
+        let fixture = try XCTUnwrap(manager.devices(in: roomScope).first)
+
+        manager.startMusicMode(configuration: config, scope: roomScope)
+        XCTAssertTrue(manager.fixtureTopology(for: roomScope).excludedFixtureIDs.isEmpty)
+
+        var attempt = manager.fixtureTopology(for: roomScope)
+        attempt.excludedFixtureIDs = [fixture.id]
+        attempt.layout = .circular
+        manager.setFixtureTopology(attempt, for: roomScope)
+
+        XCTAssertTrue(manager.fixtureTopology(for: roomScope).excludedFixtureIDs.isEmpty)
+        XCTAssertEqual(manager.fixtureTopology(for: roomScope).layout, .circular)
+
+        manager.stopEffect(scope: roomScope)
+        manager.setFixtureTopology(attempt, for: roomScope)
+        XCTAssertEqual(manager.fixtureTopology(for: roomScope).excludedFixtureIDs, [fixture.id])
+    }
+
     func testMusicConfigurationAndTopologyRoundTripAndMigrate() throws {
         let store = temporaryStore()
         var state = PersistedApplicationState()

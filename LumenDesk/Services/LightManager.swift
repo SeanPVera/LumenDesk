@@ -114,12 +114,18 @@ final class LightManager: ObservableObject {
         // Network effects may run faster than the UI needs to redraw. Keep the
         // device model at a smooth 4 fps while commands retain their full cadence.
         var modelUpdateElapsed: TimeInterval = .greatestFiniteMagnitude
+        // The actual devices this run powers, animates, and will restore on
+        // stop. Ordinarily every device in `scope`, but Music Mode can leave
+        // user-excluded fixtures out, so ownership can no longer be derived
+        // by re-querying `devices(in: scope)` — it has to be this stored set.
+        let animatedDeviceIDs: Set<String>
         init(effect: LightingEffect, scope: LightScope, snapshot: [LightRuntimeSnapshot], restorePreviousState: Bool = true, reducedMotion: Bool = false) {
             self.effect = effect
             self.scope = scope
             self.snapshot = snapshot
             self.restorePreviousState = restorePreviousState
             self.reducedMotion = reducedMotion
+            self.animatedDeviceIDs = Set(snapshot.map(\.deviceID))
         }
     }
     private var effectRuns: [LightScope: EffectRun] = [:]
@@ -947,7 +953,7 @@ final class LightManager: ObservableObject {
     private func stopEffects(touching deviceIDs: Set<String>) -> [String: LightRuntimeSnapshot] {
         var inherited: [String: LightRuntimeSnapshot] = [:]
         for (scope, run) in effectRuns {
-            let runIDs = Set(run.snapshot.map(\.deviceID)).union(devices(in: scope).map(\.id))
+            let runIDs = run.animatedDeviceIDs
             guard !runIDs.isDisjoint(with: deviceIDs) else { continue }
             run.timer?.invalidate()
             if run.effect.id == "music-pulse" {
@@ -981,10 +987,7 @@ final class LightManager: ObservableObject {
 
     /// True when the device belongs to a currently animating effect run.
     private func isEffectAnimating(_ deviceID: String) -> Bool {
-        effectRuns.contains { scope, run in
-            run.snapshot.contains { $0.deviceID == deviceID } ||
-            devices(in: scope).contains { $0.id == deviceID }
-        }
+        effectRuns.values.contains { $0.animatedDeviceIDs.contains(deviceID) }
     }
 
     private func runEffectFrame(_ run: EffectRun) {
@@ -2465,6 +2468,17 @@ extension LightManager {
         var normalized = topology
         normalized.fixtureOrder = topology.fixtureOrder.filter(available.contains)
         normalized.excludedFixtureIDs = topology.excludedFixtureIDs.intersection(available)
+        if effectRuns[scope]?.effect.id == "music-pulse" {
+            // A running show has already powered, snapshotted, and taken
+            // ownership of exactly its non-excluded fixtures at start
+            // (`EffectRun.animatedDeviceIDs`). Changing exclusion mid-show
+            // would target a newly-included fixture with color frames
+            // without ever powering it on, and without a snapshot to
+            // restore it from on stop. The UI disables this while running;
+            // keep the currently-active exclusion set here too as a
+            // backstop. Order and layout remain safe to change live.
+            normalized.excludedFixtureIDs = fixtureTopologies[topologyKey(for: scope)]?.excludedFixtureIDs ?? normalized.excludedFixtureIDs
+        }
         fixtureTopologies[topologyKey(for: scope)] = normalized
         persistApplicationState()
         if musicModeController.activeScopeIDs.contains(scope) {

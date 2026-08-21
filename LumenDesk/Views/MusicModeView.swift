@@ -152,7 +152,7 @@ struct MusicModeView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Spatial topology").font(LumenType.display(size: 15, weight: .semibold))
-                    Text("Position is explicit and never inferred from discovery order. RGBIC segments continue the path inside their fixture. Exclude a light to leave it out of this room's show without changing its current state.")
+                    Text("Position is explicit and never inferred from discovery order. RGBIC segments continue the path inside their fixture. Exclude a light to leave it out of this room's show without changing its current state.\(isRunning ? " Stop the show to change which lights are included." : "")")
                         .font(.caption).foregroundStyle(Lumen.textSecondary)
                 }
                 Spacer()
@@ -191,9 +191,12 @@ struct MusicModeView: View {
                     }
                     .buttonStyle(.borderless)
                     .foregroundStyle(isExcluded ? Lumen.textTertiary : Lumen.success)
+                    .disabled(isRunning)
+                    .help(isRunning ? "Stop the show to change which lights are included." : "")
                     .accessibilityLabel(isExcluded
                         ? "Excluded from show. Tap to include \(fixture.label)."
                         : "Included in show. Tap to exclude \(fixture.label).")
+                    .accessibilityHint(isRunning ? "Stop the show first to change inclusion." : "")
                     Button { moveFixture(from: index, offset: -1, ordered: ordered) } label: {
                         Image(systemName: "chevron.up")
                     }

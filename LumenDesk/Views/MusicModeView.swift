@@ -424,6 +424,8 @@ struct MusicModeView: View {
             }
         )
     }
+
+    private func reloadForScope() {
         configuration = manager.musicModeConfiguration
         topology = manager.fixtureTopology(for: scope)
     }

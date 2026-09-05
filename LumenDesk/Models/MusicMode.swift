@@ -422,6 +422,34 @@ extension MusicModeConfiguration {
         stereoImage = (try? container.decode(Double.self, forKey: .stereoImage)) ?? 0.7
         phraseAware = (try? container.decode(Bool.self, forKey: .phraseAware)) ?? true
     }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(preset, forKey: .preset)
+        try container.encode(masterBrightness, forKey: .masterBrightness)
+        try container.encode(effectIntensity, forKey: .effectIntensity)
+        try container.encode(beatSensitivity, forKey: .beatSensitivity)
+        try container.encode(bassSensitivity, forKey: .bassSensitivity)
+        try container.encode(percussionSensitivity, forKey: .percussionSensitivity)
+        try container.encode(colorChangeIntensity, forKey: .colorChangeIntensity)
+        try container.encode(movementAmount, forKey: .movementAmount)
+        try container.encode(movementDirection, forKey: .movementDirection)
+        try container.encode(movementSpeed, forKey: .movementSpeed)
+        try container.encode(minimumBrightness, forKey: .minimumBrightness)
+        try container.encode(maximumBrightness, forKey: .maximumBrightness)
+        try container.encode(allowsFlashes, forKey: .allowsFlashes)
+        try container.encode(flashIntensity, forKey: .flashIntensity)
+        try container.encode(maximumFlashFrequency, forKey: .maximumFlashFrequency)
+        try container.encode(palette, forKey: .palette)
+        try container.encode(silenceBehavior, forKey: .silenceBehavior)
+        try container.encode(photosensitivitySafeMode, forKey: .photosensitivitySafeMode)
+        try container.encode(restorePreviousState, forKey: .restorePreviousState)
+        try container.encode(usesSyntheticDemoPattern, forKey: .usesSyntheticDemoPattern)
+        try container.encodeIfPresent(metreOverride, forKey: .metreOverride)
+        try container.encode(timeFeel, forKey: .timeFeel)
+        try container.encode(stereoImage, forKey: .stereoImage)
+        try container.encode(phraseAware, forKey: .phraseAware)
+    }
 }
 
 enum FixtureTopologyLayout: String, Codable, CaseIterable, Identifiable {

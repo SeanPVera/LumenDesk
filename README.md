@@ -48,9 +48,9 @@ npm run app
 
 That serves the app from the bridge itself at <http://127.0.0.1:8765> — one origin for the page and the lights, so no browser permission is involved. Leave the terminal open while you use it.
 
-The web client covers Home (favourites, rooms, search, filters, bulk actions), Library (save and apply scenes), Automation (daily schedules, which run in the bridge so they fire with no page open), Devices (rooms, naming, diagnostics) and Settings. Animated effects, Music Mode, Govee RGBIC segment editing and LIFX matrix control remain native-app features.
+The web client covers Home (favourites, rooms, search, filters, bulk actions), Library (save and apply scenes), Music Mode (beat-tracked choreography in the browser, posted as frames to the bridge), Automation (daily schedules, which run in the bridge so they fire with no page open), Devices (rooms, naming, diagnostics) and Settings. Govee RGBIC segment editing and LIFX matrix control remain native-app features. Web Music Mode sends a single colour per fixture per frame — it does not speak the Govee razer stream, so RGBIC strips follow as one wash until that encoder is ported in lockstep with `ProtocolTests`.
 
-The published page at <https://seanpvera.github.io/LumenDesk/> can also drive the bridge (`npm start`, API only), but current browsers gate a website's access to your local network behind a permission prompt, so that route may be blocked. Everything still stays on your own network — the page talks only to the bridge on `127.0.0.1`, with no account and no cloud. The web client currently covers discovery, power, brightness, colour and white; scenes, schedules, effects, Music Mode and segment control remain native-app features. See [`web/README.md`](web/README.md) for details.
+The published page at <https://seanpvera.github.io/LumenDesk/> can also drive the bridge (`npm start`, API only), but current browsers gate a website's access to your local network behind a permission prompt, so that route may be blocked. Everything still stays on your own network — the page talks only to the bridge on `127.0.0.1`, with no account and no cloud. The web client currently covers discovery, power, brightness, colour and white, scenes, schedules, and Music Mode; segment control remains native. See [`web/README.md`](web/README.md) for details.
 
 ## Supported lighting systems
 
@@ -91,7 +91,7 @@ LumenDesk is intentionally local-first:
 
 The app needs local network permission because it sends and receives UDP packets on your network. On iOS, the first scan triggers Apple's Local Network privacy prompt; you must allow it for discovery and control to work.
 
-Music Mode analyzes **system audio on macOS** through ScreenCaptureKit and **microphone input on iOS**. Analysis is local, audio is never recorded or retained, and the feature does not receive an Apple Music-only feed.
+Music Mode analyzes **system audio on macOS** through ScreenCaptureKit, **microphone input on iOS**, a **user-selected audio file** on both platforms, and **MIDI beat clock**. Analysis is local, audio is never recorded or retained, and the feature does not receive an Apple Music-only feed.
 
 ## Feature guide
 
@@ -278,17 +278,19 @@ Themes can be applied to all lights or to a specific room.
 
 Music Mode is a first-class section of the Lighting Library. It turns the existing `music-pulse` effect into a configurable choreography session while preserving that identifier for saved-state compatibility.
 
-- Real beat tracking. LumenDesk estimates the tempo of what is playing and choreographs to the beat grid it predicts, rather than reacting to every transient: brightness swells into each beat and accents the downbeat, sweeps travel the room once per bar, and colours change on bar lines. The detected tempo is shown in BPM next to the beat indicator once it locks; music with no clear pulse falls back to the onset-driven show automatically.
-- Built-in presets: Ambient, Balanced, Concert, Cinematic, and Soundcheck, plus a persisted Custom configuration.
-- Beat, bass, percussion, color-change, brightness, movement, silence, palette, and restoration controls.
+- Real beat tracking. LumenDesk estimates the tempo of what is playing and choreographs to the beat grid it predicts, rather than reacting to every transient: brightness swells into each beat and accents the downbeat, sweeps travel the room once per bar, and colours change on bar lines. The tracker also listens for 3/4, 5/4, 6/8 and 7/8, and for half- or double-time feel, so a waltz and a head-nod groove do not get forced onto four-four. The detected tempo and metre are shown next to the beat indicator once it locks; music with no clear pulse falls back to the onset-driven show automatically.
+- Built-in presets: Ambient, Balanced, Concert, Cinematic, Soundcheck, Club, Half-time, and Waltz, plus a persisted Custom configuration.
+- Fixture roles. Each light can be wash, hit, accent, motion, or off. Auto assigns RGBIC strips to motion, downstage to hit, rear to accent, and everything else to wash, so a mixed room layers without tagging every fixture.
+- Beat, bass, percussion, color-change, brightness, movement, silence, palette, metre, feel, stereo, and restoration controls.
 - Explicit left-to-right, front-to-back, circular, or custom fixture topology. Rooms with no saved topology use deterministic label-and-ID ordering rather than discovery order.
 - Vendor-neutral lighting frames translated to combined LIFX HSBK, efficient ordinary Govee LAN color, or volatile Govee RGBIC segment streaming.
 - Independent transport ceilings and latest-frame coalescing so a slower bulb does not hold back an RGBIC stream.
 - Photosensitivity-safe mode is enabled by default. Flash requests are disabled in safe mode and are always subject to an absolute 3-per-second ceiling plus the user's lower configured limit.
 - Reduced Motion limits spatial movement and disables flashes.
-- Demo Mode includes LIFX-style bulbs, Govee bulbs, segmented Govee fixtures, and a deterministic synthetic rhythm with no copyrighted audio.
+- Demo Mode includes LIFX-style bulbs, Govee bulbs, segmented Govee fixtures, and deterministic grooves (four-on-the-floor, half-time, waltz, odd metre, breaks) with no copyrighted audio.
+- Sources: system audio on macOS, microphone on iOS, a user-selected audio file on both, and MIDI beat clock.
 
-On macOS the source is system audio and requires Screen Recording permission. On iPhone and iPad the source is the microphone and is labeled accordingly. See [Music Mode architecture](MUSIC_MODE_ARCHITECTURE.md) for the data flow and safety boundaries.
+On macOS the default source is system audio and requires Screen Recording permission. On iPhone and iPad the default source is the microphone. Open Audio File uses the existing user-selected file grant so iOS can follow a track the microphone cannot hear. MIDI clock needs a MIDI interface or IAC bus. See [Music Mode architecture](MUSIC_MODE_ARCHITECTURE.md) for the data flow and safety boundaries.
 
 ### Animated effects
 
@@ -653,11 +655,12 @@ If LumenDesk reports a bind failure for Govee, another app may already be listen
 
 ### Music Mode does not respond
 
-- On **macOS**, Music Mode reacts to **system audio from any app**. Make sure something is actually playing; there is no musical input to analyze during silence.
-- Grant **Screen Recording** to LumenDesk (macOS) or **microphone** access (iOS) when prompted.
+- On **macOS**, Music Mode reacts to **system audio from any app**. Make sure something is actually playing; there is no musical input to analyze during silence. **Open Audio File** and **MIDI Clock** are the other sources when the system mix is not what you want.
+- Grant **Screen Recording** to LumenDesk (macOS) or **microphone** access (iOS) when prompted. MIDI clock needs the MIDI entitlement and a connected interface or IAC bus.
 - Open **Lighting Library → Music Mode**, choose a preset and scope, then select **Start**.
 - Confirm the audio is loud enough for the input being monitored.
 - Stop and restart Music Mode after changing permissions.
+- A fixture set to **Off** or excluded from the topology is left untouched on purpose.
 
 ### Music Mode is not in time with the music
 
@@ -668,7 +671,7 @@ If LumenDesk reports a bind failure for Govee, another app may already be listen
 
 ### Music Mode and system audio (Screen Recording, macOS)
 
-On macOS, Music Mode analyzes the **system-audio mix** as its **only** source. It is not an Apple Music-specific feed and does not use the microphone, so room noise never mixes into the analysis. System audio is captured through ScreenCaptureKit, which macOS gates behind the **Screen Recording** permission:
+On macOS, Music Mode analyzes the **system-audio mix** as its **default** source. It is not an Apple Music-specific feed and does not use the microphone, so room noise never mixes into the analysis. System audio is captured through ScreenCaptureKit, which macOS gates behind the **Screen Recording** permission:
 
 - The first time you start Music Mode without the permission, macOS shows the Screen Recording prompt. Turn on **LumenDesk** in System Settings, return to LumenDesk, and start Music Mode again. LumenDesk re-checks the permission live on every start, so a relaunch is normally unnecessary.
 - If the permission is still off, LumenDesk shows a message pointing you to **System Settings → Privacy & Security → Screen & System Audio Recording** (called **Screen Recording** before macOS 15). Enable LumenDesk there and start Music Mode again.
@@ -676,7 +679,7 @@ On macOS, Music Mode analyzes the **system-audio mix** as its **only** source. I
 
 > **Note (developer builds):** Debug builds disable Xcode's automatic Launch Services registration so test products in temporary DerivedData folders do not become permission-relaunch candidates. Music Mode refreshes the currently running bundle's registration immediately before asking for access. A Screen Recording grant is also tied to the app's code signature. An unsigned or ad-hoc-signed build (the default when no development team is set) can still be re-prompted after rebuilding; set `DEVELOPMENT_TEAM` in `project.yml` for a stable signing identity.
 
-On **iOS**, Music Mode uses the **microphone** (there is no system-audio capture on iOS); grant microphone access when prompted.
+On **iOS**, Music Mode uses the **microphone** by default (there is no system-audio capture on iOS); grant microphone access when prompted. **Open Audio File** is the path for a track the microphone cannot hear.
 
 ## Protocol references
 

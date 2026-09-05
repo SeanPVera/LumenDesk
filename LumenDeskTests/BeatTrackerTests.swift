@@ -108,6 +108,25 @@ final class BeatTrackerTests: XCTestCase {
         XCTAssertEqual(tracker.grid.beatCount, 0)
     }
 
+    func testMetreTrackerPrefersThreeOnAWaltzKick() {
+        let tracker = MetreTracker()
+        for beat in 0..<40 {
+            let kick = beat.isMultiple(of: 3) ? 1.0 : 0.08
+            tracker.observe(beatCount: beat, kick: kick, tempo: 90, locked: beat >= 12)
+        }
+        let current = tracker.current()
+        XCTAssertEqual(current.metre, 3)
+        XCTAssertGreaterThan(current.metreConfidence, 0.2)
+    }
+
+    func testMetreTrackerStaysOnFourForFourOnTheFloor() {
+        let tracker = MetreTracker()
+        for beat in 0..<40 {
+            tracker.observe(beatCount: beat, kick: 0.9, tempo: 128, locked: beat >= 12)
+        }
+        XCTAssertEqual(tracker.current().metre, 4)
+    }
+
     // MARK: - Helpers
 
     private struct EmittedBeat {

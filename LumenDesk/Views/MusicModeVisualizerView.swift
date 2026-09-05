@@ -47,7 +47,7 @@ struct MusicModeVisualizerView: View {
         return HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(fixture.label).font(LumenType.display(size: 14, weight: .semibold))
-                Text(fixture.segmentCount > 0 ? "\(fixture.segmentCount) RGBIC segments" : transportLabel(fixture.transport))
+                Text(roleCaption(fixture))
                     .font(.caption2)
                     .foregroundStyle(Lumen.textTertiary)
             }
@@ -85,6 +85,14 @@ struct MusicModeVisualizerView: View {
             saturation: state.saturation,
             brightness: max(0.04, state.brightness)
         )
+    }
+
+    private func roleCaption(_ fixture: MusicFixtureDescriptor) -> String {
+        let role = fixture.resolvedRole
+        if fixture.segmentCount > 0 {
+            return "\(role.displayName) · \(fixture.segmentCount) RGBIC segments"
+        }
+        return "\(role.displayName) · \(transportLabel(fixture.transport))"
     }
 
     private func transportLabel(_ transport: MusicTransportKind) -> String {

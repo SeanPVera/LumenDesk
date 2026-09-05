@@ -81,8 +81,9 @@ Import/export (macOS app menu) does **not** reuse `PersistedApplicationState`: i
 Documented in `MUSIC_MODE_ARCHITECTURE.md`; read it before touching the pipeline. Flow: `AudioCaptureService` (ScreenCaptureKit system audio on macOS, AVAudioEngine microphone on iOS) → `MusicFeatureAnalyzer` (FFT features) → `AudioReactiveSessionController` (one render clock, non-overlapping scope sessions) → `MusicChoreographyEngine` (features + `MusicModeConfiguration` + `FixtureTopology` → vendor-neutral `MusicLightingFrame`) → `MusicLightingRenderer` (latest-frame-per-fixture coalescing, independent per-transport rate ceilings) → LightManager (existing scope/conflict/undo/restore rules). Invariants:
 
 - The catalog identifier remains `music-pulse` for saved-state compatibility.
-- Live frames never emit persistent `ptReal` writes — RGBIC devices get the volatile razer stream only.
+- Live frames never emit persistent `ptReal` writes — RGBIC devices get the volatile razer stream only. The web client posts `/music/frame` as a single colour per fixture and must not invent a razer encoder without lockstep `ProtocolTests`.
 - Photosensitivity-safe mode is on by default; `FlashSafetyLimiter` enforces a non-configurable hard ceiling of 3 flashes/second that no code path may bypass. Reduced Motion also disables flashes.
+- `BeatTracker.beatsPerBar` stays 4. Metre detection is an overlay (`MetreTracker` in the same file) so existing downbeat tests keep passing. Do not add new Swift files without sequential pbxproj A1/B1 IDs.
 
 ### Views and navigation
 

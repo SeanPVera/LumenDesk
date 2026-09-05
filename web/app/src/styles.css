@@ -757,6 +757,99 @@ input[type='time'] {
   z-index: 10;
 }
 
+.music-desk {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.music-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.music-toolbar .file-key {
+  position: relative;
+  overflow: hidden;
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.music-toolbar .file-key input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip.on {
+  border-color: var(--beam);
+  color: var(--beam-bright);
+}
+
+.meters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+
+.beat-readout {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+.beat-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--border);
+}
+
+.beat-dot.lit {
+  background: var(--beam-bright);
+  box-shadow: 0 0 12px rgba(246, 250, 255, 0.7);
+}
+
+.fixture-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.fixture-list li {
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  gap: 12px;
+  align-items: center;
+}
+
+.fixture-swatch {
+  width: 28px;
+  height: 18px;
+  border-radius: 3px;
+  background: var(--raised);
+  border: 1px solid var(--border);
+}
+
 @media (max-width: 820px) {
   .shell.app {
     grid-template-columns: 1fr;

@@ -267,3 +267,13 @@ export const deleteSchedule = (port: number, roomID: string, scheduleID: string)
     method: 'POST',
     body: '{}',
   })
+
+/** One colour per fixture. The bridge never opens a razer stream from this path. */
+export const postMusicFrame = (
+  port: number,
+  states: { fixtureID: string; rgb: RGB }[],
+) =>
+  request<{ ok: boolean; applied: number }>(port, '/music/frame', {
+    method: 'POST',
+    body: JSON.stringify({ states }),
+  })

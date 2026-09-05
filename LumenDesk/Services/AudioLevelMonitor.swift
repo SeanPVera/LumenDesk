@@ -4,6 +4,7 @@ import Accelerate
 import CoreServices
 import ScreenCaptureKit
 #endif
+import CoreMIDI
 
 struct AudioReactiveSnapshot: Equatable {
     var level: Double = 0
@@ -44,6 +45,17 @@ struct AudioReactiveSnapshot: Equatable {
     var beatInBar: Int = 0
     /// True once the grid is trustworthy enough to choreograph against.
     var isTempoLocked: Bool = false
+    var metre: Int = 4
+    var metreConfidence: Double = 0
+    var timeFeel: TimeFeel = .straight
+    var feltInterval: TimeInterval = 0
+    var feltTempo: Double = 0
+    /// 0 is left, 1 is right, 0.5 is centered or mono.
+    var stereo: Double = 0.5
+    var chroma: [Double] = Array(repeating: 0, count: 12)
+    var spectrum: [Double] = Array(repeating: 0, count: 32)
+    var phrasePosition: Int = 0
+    var energySlope: Double = 0
     var sourceDescription: String = "Microphone input"
 }
 
@@ -86,6 +98,18 @@ final class AudioCaptureService {
     #if os(macOS)
     private var systemAudioCapture: SystemAudioCapture?
     #endif
+    private var playerNode: AVAudioPlayerNode?
+    private var playingFile: AVAudioFile?
+    private var captureMode: CaptureMode = .idle
+    private var midiSource: MIDIClockSource?
+    private var fileTapInstalled = false
+
+    private enum CaptureMode {
+        case idle
+        case live
+        case file
+        case midi
+    }
 
     /// Outcome of starting the analysis source, so the caller can show the
     /// precise message. On macOS the source is system audio (ScreenCaptureKit);
@@ -115,10 +139,11 @@ final class AudioCaptureService {
     }
 
     func requestAccessAndStart(completion: @escaping (AudioStartResult) -> Void) {
-        if isRunning {
+        if isRunning, captureMode == .live {
             completion(.started)
             return
         }
+        stop()
         startCompletions.append(completion)
         guard !isStarting else { return }
         isStarting = true
@@ -169,6 +194,7 @@ final class AudioCaptureService {
     private func finishStart(_ result: AudioStartResult) {
         isStarting = false
         isRunning = result == .started
+        if result == .started { captureMode = .live }
         let completions = startCompletions
         startCompletions.removeAll(keepingCapacity: true)
         for completion in completions { completion(result) }
@@ -267,27 +293,246 @@ final class AudioCaptureService {
         }
     }
 
+    func startFromFile(url: URL, completion: @escaping (AudioStartResult) -> Void) {
+        stop()
+        resetAnalyzer(sourceDescription: "Audio file")
+        do {
+            let file = try AVAudioFile(forReading: url)
+            let player = AVAudioPlayerNode()
+            engine.attach(player)
+            engine.connect(player, to: engine.mainMixerNode, format: file.processingFormat)
+            #if os(iOS)
+            let session = AVAudioSession.sharedInstance()
+            try? session.setCategory(.playback, options: [.mixWithOthers])
+            try? session.setActive(true)
+            #endif
+            engine.mainMixerNode.installTap(onBus: 0, bufferSize: 1024, format: file.processingFormat) { [weak self] buffer, _ in
+                self?.consume(buffer)
+            }
+            fileTapInstalled = true
+            try engine.start()
+            playerNode = player
+            playingFile = file
+            captureMode = .file
+            isRunning = true
+            scheduleFileLoop()
+            player.play()
+            setSourceDescription("Audio file")
+            completion(.started)
+        } catch {
+            teardownFilePlayback()
+            completion(.unavailable)
+        }
+    }
+
+    func startFromMIDI(completion: @escaping (AudioStartResult) -> Void) {
+        stop()
+        resetAnalyzer(sourceDescription: "MIDI clock")
+        let source = MIDIClockSource { [weak self] snapshot in
+            self?.publishSnapshot(snapshot)
+        }
+        guard source.start() else {
+            completion(.unavailable)
+            return
+        }
+        midiSource = source
+        captureMode = .midi
+        isRunning = true
+        setSourceDescription("MIDI clock")
+        completion(.started)
+    }
+
+    private func scheduleFileLoop() {
+        guard let player = playerNode, let file = playingFile else { return }
+        player.scheduleFile(file, at: nil) { [weak self] in
+            DispatchQueue.main.async {
+                guard let self, self.captureMode == .file else { return }
+                self.scheduleFileLoop()
+            }
+        }
+    }
+
+    private func teardownFilePlayback() {
+        if fileTapInstalled {
+            engine.mainMixerNode.removeTap(onBus: 0)
+            fileTapInstalled = false
+        }
+        playerNode?.stop()
+        if let playerNode {
+            engine.detach(playerNode)
+        }
+        playerNode = nil
+        playingFile = nil
+        if engine.isRunning { engine.stop() }
+    }
+
+    private func publishSnapshot(_ snapshot: AudioReactiveSnapshot) {
+        analysisQueue.async { [weak self] in
+            guard let self else { return }
+            let hostTime = ProcessInfo.processInfo.systemUptime
+            guard snapshot.beat > 0 || hostTime - self.lastPublishedHostTime >= self.publicationInterval else { return }
+            self.lastPublishedHostTime = hostTime
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.onLevel?(snapshot.level)
+                self.onSnapshot?(snapshot)
+                for subscriber in self.snapshotSubscribers.values { subscriber(snapshot) }
+            }
+        }
+    }
+
     func stop() {
         startGeneration += 1
         isStarting = false
         isRunning = false
         startCompletions.removeAll(keepingCapacity: true)
-        #if os(iOS)
-        if engine.isRunning {
-            engine.inputNode.removeTap(onBus: 0)
-            engine.stop()
+        let mode = captureMode
+        captureMode = .idle
+        midiSource?.stop()
+        midiSource = nil
+        switch mode {
+        case .file:
+            teardownFilePlayback()
+        case .live:
+            #if os(iOS)
+            if engine.isRunning {
+                engine.inputNode.removeTap(onBus: 0)
+                engine.stop()
+            }
+            #endif
+            #if os(macOS)
+            systemAudioCapture?.stop()
+            systemAudioCapture = nil
+            #endif
+        case .midi, .idle:
+            break
         }
-        #endif
-        #if os(macOS)
-        systemAudioCapture?.stop()
-        systemAudioCapture = nil
-        #endif
     }
 }
 
 /// Source-compatible name for saved call sites while Music Mode moves onto
 /// the shared, multi-subscriber capture service.
 typealias AudioLevelMonitor = AudioCaptureService
+
+/// Follows MIDI beat clock (24 PPQ) and publishes a locked beat-grid snapshot
+/// so a DAW or controller can drive Music Mode without an audio tap.
+final class MIDIClockSource {
+    private var client: MIDIClientRef = 0
+    private var port: MIDIPortRef = 0
+    private var ticks = 0
+    private var lastTickTime: TimeInterval = 0
+    private var interval: TimeInterval = 0.5
+    private var beatCount = 0
+    private var running = false
+    private var startedAt: TimeInterval = 0
+    private let onSnapshot: (AudioReactiveSnapshot) -> Void
+    private let lock = NSLock()
+
+    init(onSnapshot: @escaping (AudioReactiveSnapshot) -> Void) {
+        self.onSnapshot = onSnapshot
+    }
+
+    func start() -> Bool {
+        var status = MIDIClientCreateWithBlock("LumenDesk" as CFString, &client) { _ in }
+        guard status == noErr else { return false }
+        let observer = Unmanaged.passUnretained(self)
+        status = MIDIInputPortCreateWithBlock(client, "Music Mode clock" as CFString, &port) { packetList, _ in
+            observer.takeUnretainedValue().handle(packetList)
+        }
+        guard status == noErr else { return false }
+        let count = MIDIGetNumberOfSources()
+        guard count > 0 else {
+            MIDIPortDispose(port)
+            MIDIClientDispose(client)
+            port = 0
+            client = 0
+            return false
+        }
+        for index in 0..<count {
+            MIDIPortConnectSource(port, MIDIGetSource(index), nil)
+        }
+        running = true
+        startedAt = ProcessInfo.processInfo.systemUptime
+        return true
+    }
+
+    func stop() {
+        running = false
+        if port != 0 { MIDIPortDispose(port); port = 0 }
+        if client != 0 { MIDIClientDispose(client); client = 0 }
+    }
+
+    private func handle(_ packetList: UnsafePointer<MIDIPacketList>) {
+        guard running else { return }
+        // Clock ticks arrive as one-byte packets; reading the first packet of
+        // each callback is enough and avoids MIDIPacketNext pointer walking.
+        let packet = packetList.pointee.packet
+        let length = min(Int(packet.length), 256)
+        withUnsafeBytes(of: packet.data) { raw in
+            let bytes = raw.bindMemory(to: UInt8.self)
+            for index in 0..<min(length, bytes.count) {
+                switch bytes[index] {
+                case 0xF8: tick()
+                case 0xFA, 0xFB, 0xFC:
+                    lock.lock(); ticks = 0; lock.unlock()
+                default:
+                    break
+                }
+            }
+        }
+    }
+
+    private func tick() {
+        let now = ProcessInfo.processInfo.systemUptime
+        lock.lock()
+        if lastTickTime > 0 {
+            let gap = now - lastTickTime
+            if gap > 0, gap < 0.2 {
+                interval = interval * 0.85 + gap * 24 * 0.15
+            }
+        }
+        lastTickTime = now
+        ticks += 1
+        var emit = false
+        if ticks >= 24 {
+            ticks = 0
+            beatCount += 1
+            emit = true
+        }
+        let beats = beatCount
+        let beatInterval = max(0.15, min(1.2, interval))
+        lock.unlock()
+        guard emit else { return }
+        let pulse: Double = 1
+        let beatInBar = beats % 4
+        var snapshot = AudioReactiveSnapshot()
+        snapshot.level = 0.55
+        snapshot.beat = 1
+        snapshot.kick = beatInBar == 0 ? 1 : 0.35
+        snapshot.snare = beatInBar == 1 || beatInBar == 3 ? 0.9 : 0.1
+        snapshot.percussion = 0.4
+        snapshot.bass = 0.6
+        snapshot.mids = 0.45
+        snapshot.highs = 0.35
+        snapshot.energy = 0.62
+        snapshot.confidence = 1
+        snapshot.pulse = pulse
+        snapshot.beatCount = beats
+        snapshot.tempo = 60 / beatInterval
+        snapshot.beatInterval = beatInterval
+        snapshot.beatConfidence = 1
+        snapshot.beatReferenceTime = now
+        snapshot.beatInBar = beatInBar
+        snapshot.isTempoLocked = true
+        snapshot.metre = 4
+        snapshot.metreConfidence = 1
+        snapshot.timeFeel = .straight
+        snapshot.feltInterval = beatInterval
+        snapshot.feltTempo = 60 / beatInterval
+        snapshot.sourceDescription = "MIDI clock"
+        onSnapshot(snapshot)
+    }
+}
 
 private extension AVAudioPCMBuffer {
     /// AVAudioEngine tap memory is only valid for the duration of the callback.
@@ -390,6 +635,8 @@ final class MusicFeatureAnalyzer {
     private var dropEnv: Double = 0
     private var energyBaseline: Double = 0
     private var beatCount = 0
+    private var previousEnergy: Double = 0
+    private var lastStereo: Double = 0.5
 
     // Beat tracking runs on the analyzer's own sample clock — immune to
     // callback jitter — and is converted to host time for renderers through a
@@ -440,6 +687,18 @@ final class MusicFeatureAnalyzer {
         }
         var divisorValue = Float(max(1, channels))
         vDSP_vsdiv(monoSamples, 1, &divisorValue, &monoSamples, 1, vDSP_Length(frameCount))
+
+        if channels >= 2 {
+            var leftMean: Float = 0
+            var rightMean: Float = 0
+            vDSP_measqv(channelData[0], 1, &leftMean, vDSP_Length(frameCount))
+            vDSP_measqv(channelData[1], 1, &rightMean, vDSP_Length(frameCount))
+            let left = Double(sqrt(leftMean))
+            let right = Double(sqrt(rightMean))
+            lastStereo = (left + right) < 1e-8 ? 0.5 : right / (left + right)
+        } else {
+            lastStereo = 0.5
+        }
 
         updateHostAnchor(
             hostTime: hostTime ?? ProcessInfo.processInfo.systemUptime,
@@ -581,6 +840,12 @@ final class MusicFeatureAnalyzer {
 
         // Mood: treble-leaning reads bright/airy (→1), bass-leaning dark/heavy (→0).
         let mood = clamp(0.5 + (highs - bass) * 0.6 + mids * 0.05)
+        let slope = energy - previousEnergy
+        previousEnergy = energy
+        let metre = max(1, grid.metre)
+        let feelMultiplier = grid.timeFeel.intervalMultiplier
+        let feltInterval = grid.isLocked ? grid.interval * feelMultiplier : 0
+        let feltTempo = grid.isLocked && feelMultiplier > 0 ? grid.tempo / feelMultiplier : 0
 
         return AudioReactiveSnapshot(
             level: level,
@@ -601,8 +866,18 @@ final class MusicFeatureAnalyzer {
             beatInterval: grid.isLocked ? grid.interval : 0,
             beatConfidence: grid.confidence,
             beatReferenceTime: grid.lastBeatTime > 0 ? grid.lastBeatTime + hostTimeOffset : 0,
-            beatInBar: grid.beatInBar,
+            beatInBar: snapshotBeatInBar(grid),
             isTempoLocked: grid.isLocked,
+            metre: metre,
+            metreConfidence: grid.metreConfidence,
+            timeFeel: grid.timeFeel,
+            feltInterval: feltInterval,
+            feltTempo: feltTempo,
+            stereo: lastStereo,
+            chroma: chromaVector(sampleRate: sampleRate),
+            spectrum: spectrumVector(),
+            phrasePosition: (beatCount / metre) % 8,
+            energySlope: slope,
             sourceDescription: sourceDescription
         )
     }
@@ -655,6 +930,35 @@ final class MusicFeatureAnalyzer {
             if difference > 0 { total += difference }
         }
         return total / Double(range.count)
+    }
+
+    private func spectrumVector() -> [Double] {
+        let half = Self.windowSize / 2
+        var bins = [Double](repeating: 0, count: 32)
+        let usable = max(1, half - 1)
+        for index in 1..<half {
+            let bucket = min(31, (index - 1) * 32 / usable)
+            bins[bucket] = max(bins[bucket], Double(fftMagnitudes[index]))
+        }
+        let peak = bins.max() ?? 0
+        guard peak > 1e-9 else { return bins }
+        return bins.map { min(1, $0 / peak) }
+    }
+
+    private func chromaVector(sampleRate: Double) -> [Double] {
+        var bins = [Double](repeating: 0, count: 12)
+        let half = Self.windowSize / 2
+        guard sampleRate > 0 else { return bins }
+        for index in 1..<half {
+            let frequency = Double(index) * sampleRate / Double(Self.windowSize)
+            guard frequency >= 40, frequency <= 5_000 else { continue }
+            let midi = 69 + 12 * log2(frequency / 440)
+            let pitchClass = ((Int(midi.rounded()) % 12) + 12) % 12
+            bins[pitchClass] += Double(fftMagnitudes[index])
+        }
+        let peak = bins.max() ?? 0
+        guard peak > 1e-9 else { return bins }
+        return bins.map { min(1, $0 / peak) }
     }
 
     /// Divides by a fast-attack, slow-decay peak so onset strength is relative
@@ -769,6 +1073,15 @@ final class MusicFeatureAnalyzer {
     }
 
     private func clamp(_ value: Double) -> Double { max(0, min(1, value)) }
+
+    /// Remap the bar position onto the detected metre for choreography without
+    /// rewriting `BeatGrid.beatInBar`, which the four-four downbeat tests read.
+    private func snapshotBeatInBar(_ grid: BeatGrid) -> Int {
+        if grid.metre != BeatTracker.beatsPerBar, grid.metre > 0 {
+            return ((grid.beatCount % grid.metre) + grid.metre) % grid.metre
+        }
+        return grid.beatInBar
+    }
 }
 
 #if os(macOS)

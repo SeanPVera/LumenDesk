@@ -296,6 +296,34 @@ export function createServer({
         return json(res, 200, { device: registry.get(device.id) })
       }
 
+      // Music Mode frames are computed in the browser. One solid colour per
+      // fixture — RGBIC razer is not spoken here, so a strip follows as a wash
+      // until that encoder is ported in lockstep with ProtocolTests.
+      if (req.method === 'POST' && path === '/music/frame') {
+        const body = await readJSON(req)
+        const states = Array.isArray(body.states) ? body.states : []
+        let applied = 0
+        const seen = new Set()
+        for (const state of states) {
+          const id = state && state.fixtureID
+          if (!id || seen.has(id)) continue
+          seen.add(id)
+          const device = registry.get(id)
+          if (!device) continue
+          const rgb = state.rgb
+          if (!isValidRGB(rgb)) continue
+          const ok =
+            device.brand === 'lifx'
+              ? lifx.setColor(device, { rgb })
+              : govee.setColor(device, { rgb })
+          if (ok) {
+            registry.patch(device.id, { color: rgb, power: true })
+            applied += 1
+          }
+        }
+        return json(res, 200, { ok: true, applied })
+      }
+
       if (store) {
         const stored = await handleStore({ req, res, path, url })
         if (stored) return undefined

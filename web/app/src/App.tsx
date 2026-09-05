@@ -24,6 +24,7 @@ import {
   startDiscovery,
   toggleFavorite,
   updateSchedule,
+  postMusicFrame,
   useSameOrigin,
 } from './bridge'
 import { BridgeSetup, type BridgeState, describeFailure } from './BridgeSetup'
@@ -35,12 +36,14 @@ import {
   LibraryView,
   SettingsView,
 } from './views'
+import { MusicModeView } from './MusicModeView'
 
-type Destination = 'home' | 'library' | 'automation' | 'devices' | 'settings'
+type Destination = 'home' | 'library' | 'music' | 'automation' | 'devices' | 'settings'
 
 const NAV: { id: Destination; label: string; icon: string }[] = [
   { id: 'home', label: 'Home', icon: '⌂' },
   { id: 'library', label: 'Library', icon: '✦' },
+  { id: 'music', label: 'Music', icon: '♩' },
   { id: 'automation', label: 'Automation', icon: '◷' },
   { id: 'devices', label: 'Devices', icon: '⌁' },
   { id: 'settings', label: 'Settings', icon: '⚙' },
@@ -284,6 +287,9 @@ export default function App() {
             onApply={scene => mutate(() => applyScene(port, scene.id), `Applied “${scene.name}”`)}
             onDelete={scene => mutate(() => deleteScene(port, scene.id), `Deleted “${scene.name}”`)}
           />
+        )}
+        {destination === 'music' && (
+          <MusicModeView devices={devices} port={port} postFrame={postMusicFrame} />
         )}
         {destination === 'automation' && (
           <AutomationView

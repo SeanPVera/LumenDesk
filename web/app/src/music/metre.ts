@@ -32,10 +32,12 @@ export class MetreTracker {
 
     if (!locked || this.kickHistory.length < 12) return;
 
+    // Score four first so a tied prominence cannot be stolen by 3 listed first.
     let best: Metre = 4;
-    let bestScore = -1;
-    const scores: Partial<Record<Metre, number>> = {};
+    let bestScore = this.scoreMetre(4);
+    const scores: Partial<Record<Metre, number>> = { 4: bestScore };
     for (const n of CANDIDATES) {
+      if (n === 4) continue;
       const score = this.scoreMetre(n);
       scores[n] = score;
       if (score > bestScore) {
@@ -72,22 +74,29 @@ export class MetreTracker {
 
   private scoreMetre(n: Metre): number {
     const bins = new Array(n).fill(0);
-    const hist = this.kickHistory;
-    for (let i = 0; i < hist.length; i += 1) {
-      bins[i % n] += hist[hist.length - 1 - i];
+    const counts = new Array(n).fill(0);
+    const oldest = this.lastBeat - this.kickHistory.length + 1;
+    for (let i = 0; i < this.kickHistory.length; i += 1) {
+      const beat = oldest + i;
+      const slot = ((beat % n) + n) % n;
+      bins[slot] += this.kickHistory[i];
+      counts[slot] += 1;
+    }
+    for (let i = 0; i < n; i += 1) {
+      if (counts[i] > 0) bins[i] /= counts[i];
     }
     const max = Math.max(...bins);
     if (max <= 1e-6) return 0;
     const mean = bins.reduce((a, b) => a + b, 0) / n;
     const prominence = (max - mean) / max;
-    const downbeat = Math.max(...bins);
-    const downbeatIndex = bins.indexOf(downbeat);
+    const downbeatIndex = bins.indexOf(max);
     let grouped = 0;
     if (n === 6) {
       const a = bins[0] + bins[3];
       const b = bins[1] + bins[4];
       const c = bins[2] + bins[5];
-      grouped = a > b && a > c ? 0.18 : 0;
+      // Waltz (equal weight on 1 and 4 of a 6-count) must not outscore 3/4.
+      if (a > b && a > c && bins[0] > bins[3] * 1.15) grouped = 0.18;
     }
     const alignment = downbeatIndex === 0 ? 0.12 : 0;
     return Math.max(0, Math.min(1, prominence * 0.85 + grouped + alignment));

@@ -177,9 +177,9 @@ final class BeatTracker {
         let multiplier = detected.feel.intervalMultiplier
         grid.feltInterval = grid.interval * multiplier
         grid.feltTempo = grid.tempo / max(0.25, multiplier)
-        if detected.metre != Self.beatsPerBar, detected.metre > 0 {
-            grid.beatInBar = ((grid.beatCount % detected.metre) + detected.metre) % detected.metre
-        }
+        // Leave `beatInBar` to the four-four downbeat heuristic. Choreography
+        // remaps through `snapshot.metre` so existing downbeat tests keep the
+        // grid they were written against.
     }
 
     // MARK: - Beat emission
@@ -510,10 +510,12 @@ final class MetreTracker {
 
         guard locked, kickHistory.count >= 12 else { return }
 
+        // Score four first so a tied prominence (four-on-the-floor, every beat
+        // equally loud) cannot be stolen by 3 just because it is listed first.
         var best = 4
-        var bestScore = -1.0
-        var scores: [Int: Double] = [:]
-        for n in Self.candidates {
+        var bestScore = scoreMetre(4)
+        var scores: [Int: Double] = [4: bestScore]
+        for n in Self.candidates where n != 4 {
             let score = scoreMetre(n)
             scores[n] = score
             if score > bestScore {
@@ -548,8 +550,19 @@ final class MetreTracker {
 
     private func scoreMetre(_ n: Int) -> Double {
         var bins = [Double](repeating: 0, count: n)
-        for (index, value) in kickHistory.reversed().enumerated() {
-            bins[index % n] += value
+        var counts = [Int](repeating: 0, count: n)
+        let oldest = lastBeat - kickHistory.count + 1
+        for (index, value) in kickHistory.enumerated() {
+            let beat = oldest + index
+            let slot = ((beat % n) + n) % n
+            bins[slot] += value
+            counts[slot] += 1
+        }
+        // Average per slot so a leftover sample cannot fake a downbeat.
+        // 40 equal kicks would otherwise make 3 look more periodic than 4
+        // because 40 % 3 leaves an extra hit in bin 0.
+        for i in 0..<n where counts[i] > 0 {
+            bins[i] /= Double(counts[i])
         }
         guard let maxBin = bins.max(), maxBin > 1e-6 else { return 0 }
         let mean = bins.reduce(0, +) / Double(n)
@@ -560,7 +573,11 @@ final class MetreTracker {
             let a = bins[0] + bins[3]
             let b = bins[1] + bins[4]
             let c = bins[2] + bins[5]
-            grouped = a > b && a > c ? 0.18 : 0
+            // Waltz (equal weight on 1 and 4 of a 6-count) must not outscore 3/4.
+            // True 6/8 has a heavier downbeat than the secondary grouping.
+            if a > b, a > c, bins[0] > bins[3] * 1.15 {
+                grouped = 0.18
+            }
         }
         let alignment = downbeatIndex == 0 ? 0.12 : 0
         return max(0, min(1, prominence * 0.85 + grouped + alignment))

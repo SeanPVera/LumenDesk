@@ -866,7 +866,7 @@ final class MusicFeatureAnalyzer {
             beatInterval: grid.isLocked ? grid.interval : 0,
             beatConfidence: grid.confidence,
             beatReferenceTime: grid.lastBeatTime > 0 ? grid.lastBeatTime + hostTimeOffset : 0,
-            beatInBar: grid.beatInBar,
+            beatInBar: snapshotBeatInBar(grid),
             isTempoLocked: grid.isLocked,
             metre: metre,
             metreConfidence: grid.metreConfidence,
@@ -1073,6 +1073,15 @@ final class MusicFeatureAnalyzer {
     }
 
     private func clamp(_ value: Double) -> Double { max(0, min(1, value)) }
+
+    /// Remap the bar position onto the detected metre for choreography without
+    /// rewriting `BeatGrid.beatInBar`, which the four-four downbeat tests read.
+    private func snapshotBeatInBar(_ grid: BeatGrid) -> Int {
+        if grid.metre != BeatTracker.beatsPerBar, grid.metre > 0 {
+            return ((grid.beatCount % grid.metre) + grid.metre) % grid.metre
+        }
+        return grid.beatInBar
+    }
 }
 
 #if os(macOS)

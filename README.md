@@ -695,3 +695,7 @@ On **iOS**, Music Mode uses the **microphone** by default (there is no system-au
 - Network transport is implemented with local UDP sockets rather than vendor SDKs.
 - The app is sandboxed and uses network client/server entitlements for LAN communication.
 - The macOS target includes a Settings scene, command menus, import/export panels, and a menu bar extra.
+
+## License
+
+LumenDesk is released under the [MIT License](LICENSE).

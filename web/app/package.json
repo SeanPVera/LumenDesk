@@ -2,6 +2,7 @@
   "name": "lumendesk-web",
   "private": true,
   "version": "1.0.0",
+  "license": "MIT",
   "description": "LumenDesk web client. Controls real LIFX and Govee lights through the local LumenDesk bridge.",
   "type": "module",
   "scripts": {

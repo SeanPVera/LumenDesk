@@ -23,7 +23,7 @@
     <key>LSMinimumSystemVersion</key>
     <string>$(MACOSX_DEPLOYMENT_TARGET)</string>
     <key>NSHumanReadableCopyright</key>
-    <string>LumenDesk</string>
+    <string>Copyright © 2026 SeanPVera</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>LumenDesk analyzes music and room audio levels locally to animate music-reactive lighting effects.</string>
     <key>NSScreenCaptureUsageDescription</key>

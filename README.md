@@ -56,11 +56,13 @@ The published page at <https://seanpvera.github.io/LumenDesk/> can also drive th
 
 Grab the disk image from the [latest release](https://github.com/SeanPVera/LumenDesk/releases/latest), open it, and drag **LumenDesk** into Applications. It needs macOS 13 Ventura or later. On first launch, allow the **Local Network** prompt so discovery can reach your bulbs.
 
-If a release is marked unsigned, macOS refuses to open it until you clear the download quarantine:
+Releases are not notarized, so macOS blocks the app the first time you open it. Clear the download quarantine once and it stops:
 
 ```sh
 xattr -dr com.apple.quarantine /Applications/LumenDesk.app
 ```
+
+If you would rather click than type: on Ventura and Sonoma, Control-click the app and choose **Open**. Sequoia removed that shortcut, so there you let the first launch get blocked, then open **System Settings → Privacy & Security** and click **Open Anyway**.
 
 ### Build your own disk image
 

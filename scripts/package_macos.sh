@@ -117,9 +117,14 @@ if [[ -n "$SIGNING_IDENTITY" && -z "$TEAM_ID" ]]; then
     TEAM_ID="$(sed -n 's/.*(\([A-Z0-9]\{10\}\))$/\1/p' <<<"$SIGNING_IDENTITY")"
 fi
 
+# A self-signed identity from Keychain Access is not a Developer ID and cannot
+# be exported or notarized, but it is stable across rebuilds, which is the only
+# property TCC cares about. Treat anything that is not a Developer ID as local.
 MODE="unsigned"
-if [[ -n "$SIGNING_IDENTITY" && -n "$TEAM_ID" ]]; then
+if [[ "$SIGNING_IDENTITY" == "Developer ID Application"* && -n "$TEAM_ID" ]]; then
     MODE="signed"
+elif [[ -n "$SIGNING_IDENTITY" ]]; then
+    MODE="self-signed"
 fi
 
 NOTARY_ARGS=()
@@ -134,11 +139,22 @@ if [[ "$MODE" == "signed" && "$SKIP_NOTARIZE" != "1" ]]; then
 fi
 
 log "LumenDesk $VERSION ($BUILD_NUMBER) — $MODE"
-if [[ "$MODE" == "unsigned" ]]; then
-    warn "No Developer ID identity found. The result runs on this Mac only."
-elif [[ "$MODE" == "signed" ]]; then
-    warn "Signing without notarization. Downloads on other Macs will be blocked."
-fi
+case "$MODE" in
+    unsigned)
+        warn "No signing identity found. Ad-hoc signing instead."
+        warn "Every build gets a different signature, so macOS drops the Screen"
+        warn "Recording and Local Network grants on each update. A free"
+        warn "self-signed certificate fixes that; see DISTRIBUTION.md."
+        ;;
+    self-signed)
+        warn "Signing with a local identity: $SIGNING_IDENTITY"
+        warn "Gatekeeper still blocks downloads, but privacy grants now survive"
+        warn "updates because the signature is stable."
+        ;;
+    signed)
+        warn "Signing without notarization. Downloads on other Macs will be blocked."
+        ;;
+esac
 
 # ---------------------------------------------------------------------------
 # Archive
@@ -155,25 +171,38 @@ ARCHIVE_SETTINGS=(
     "CURRENT_PROJECT_VERSION=$BUILD_NUMBER"
 )
 
-if [[ "$MODE" == "unsigned" ]]; then
-    # arm64 refuses to execute a binary with no signature at all, so ad-hoc
-    # sign rather than passing CODE_SIGNING_ALLOWED=NO.
-    ARCHIVE_SETTINGS+=(
-        "CODE_SIGN_STYLE=Manual"
-        "CODE_SIGN_IDENTITY=-"
-        "CODE_SIGNING_REQUIRED=NO"
-        "DEVELOPMENT_TEAM="
-        "PROVISIONING_PROFILE_SPECIFIER="
-    )
-else
-    ARCHIVE_SETTINGS+=(
-        "CODE_SIGN_STYLE=Manual"
-        "CODE_SIGN_IDENTITY=$SIGNING_IDENTITY"
-        "DEVELOPMENT_TEAM=$TEAM_ID"
-        "PROVISIONING_PROFILE_SPECIFIER="
-        "OTHER_CODE_SIGN_FLAGS=--timestamp"
-    )
-fi
+case "$MODE" in
+    unsigned)
+        # arm64 refuses to execute a binary with no signature at all, so ad-hoc
+        # sign rather than passing CODE_SIGNING_ALLOWED=NO.
+        ARCHIVE_SETTINGS+=(
+            "CODE_SIGN_STYLE=Manual"
+            "CODE_SIGN_IDENTITY=-"
+            "CODE_SIGNING_REQUIRED=NO"
+            "DEVELOPMENT_TEAM="
+            "PROVISIONING_PROFILE_SPECIFIER="
+        )
+        ;;
+    self-signed)
+        # No secure timestamp: a self-signed leaf has nothing to anchor to and
+        # the request would only add a network round trip that can fail.
+        ARCHIVE_SETTINGS+=(
+            "CODE_SIGN_STYLE=Manual"
+            "CODE_SIGN_IDENTITY=$SIGNING_IDENTITY"
+            "DEVELOPMENT_TEAM="
+            "PROVISIONING_PROFILE_SPECIFIER="
+        )
+        ;;
+    signed)
+        ARCHIVE_SETTINGS+=(
+            "CODE_SIGN_STYLE=Manual"
+            "CODE_SIGN_IDENTITY=$SIGNING_IDENTITY"
+            "DEVELOPMENT_TEAM=$TEAM_ID"
+            "PROVISIONING_PROFILE_SPECIFIER="
+            "OTHER_CODE_SIGN_FLAGS=--timestamp"
+        )
+        ;;
+esac
 
 log "Archiving"
 xcodebuild archive \
@@ -190,9 +219,10 @@ xcodebuild archive \
 
 mkdir -p "$EXPORT_DIR"
 
-if [[ "$MODE" == "unsigned" ]]; then
-    # exportArchive has no meaningful Developer ID output without an identity,
-    # so lift the app straight out of the archive.
+if [[ "$MODE" != "signed" && "$MODE" != "notarized" ]]; then
+    # exportArchive only knows how to produce Developer ID output, so for the
+    # ad-hoc and self-signed cases lift the app straight out of the archive.
+    # It is already signed by the archive step either way.
     log "Extracting app from archive"
     cp -R "$ARCHIVE_PATH/Products/Applications/$APP_NAME.app" "$EXPORT_DIR/"
 else
@@ -271,7 +301,10 @@ hdiutil create \
     -ov \
     "$DMG_PATH"
 
-if [[ "$MODE" != "unsigned" ]]; then
+if [[ "$MODE" == "self-signed" ]]; then
+    log "Signing disk image"
+    codesign --sign "$SIGNING_IDENTITY" "$DMG_PATH"
+elif [[ "$MODE" != "unsigned" ]]; then
     log "Signing disk image"
     codesign --sign "$SIGNING_IDENTITY" --timestamp "$DMG_PATH"
 fi
@@ -293,9 +326,25 @@ printf '  mode   %s\n' "$MODE"
 if [[ "$MODE" != "notarized" ]]; then
     cat <<'HINT'
 
-Because this build is not notarized, macOS will refuse to open it after a
-download. Clear the quarantine flag on the receiving Mac:
+This build is not notarized, so macOS refuses to open it once the file has
+been downloaded. On the receiving Mac, after dragging the app into
+Applications:
 
     xattr -dr com.apple.quarantine /Applications/LumenDesk.app
+
+That one command covers every macOS version. The click-through alternative
+differs: on Ventura and Sonoma it is Control-click the app, then Open. On
+Sequoia and later Apple removed that shortcut, and the only route is System
+Settings > Privacy & Security > Open Anyway, after a first blocked launch.
+HINT
+fi
+
+if [[ "$MODE" == "unsigned" ]]; then
+    cat <<'HINT'
+
+Ad-hoc signatures change on every build, so Screen Recording and Local
+Network approvals reset each time you update. A self-signed code signing
+certificate from Keychain Access costs nothing and makes them stick. See
+DISTRIBUTION.md.
 HINT
 fi

@@ -11,15 +11,18 @@ app itself follows.
 
 ## The short version
 
-| Route | Cost | Opens on other Macs | Effort |
+| Route | Cost | Opens on other Macs | Privacy grants survive updates |
 | --- | --- | --- | --- |
-| Build in Xcode | Free | No | Trivial |
-| Unsigned DMG | Free | Only after `xattr -dr` | One command |
-| Developer ID, notarized | $99/yr | Yes, double-click | One command plus a one-time key setup |
-| Mac App Store | $99/yr | Yes, via the store | Weeks, and review risk |
+| Build in Xcode | Free | No | No |
+| Ad-hoc DMG | Free | Only after `xattr -dr` | No |
+| Self-signed DMG | Free | Only after `xattr -dr` | Yes |
+| Developer ID, notarized | $99/yr | Yes, double-click | Yes |
+| Mac App Store | $99/yr | Yes, via the store | Yes |
 
-If you want people to install this without you talking them through a
-Terminal command, you want the third row.
+If you are staying free, take the self-signed row over the ad-hoc one. Same
+install friction, and it stops macOS from forgetting your Screen Recording
+approval every time you ship an update. The last column is explained under
+[Why the signature is what macOS remembers](#why-the-signature-is-what-macos-remembers).
 
 ## Route 1: build it in Xcode
 
@@ -31,7 +34,7 @@ This is the whole story for one machine. The build is ad-hoc signed, so the
 signature is unique to that compile and macOS treats a rebuilt copy as a
 different app.
 
-## Route 2: an unsigned disk image
+## Route 2: a free disk image
 
 ```sh
 ./scripts/package_macos.sh
@@ -43,13 +46,48 @@ SHA-256 file. Apple Silicon refuses to execute a binary with no signature at
 all, which is why the script ad-hoc signs instead of passing
 `CODE_SIGNING_ALLOWED=NO`.
 
-Anyone who downloads that DMG gets stopped by Gatekeeper and has to run:
+### Getting past Gatekeeper
+
+The DMG is not notarized, so a Mac that downloaded it refuses to open the app.
+One command clears it on every macOS version:
 
 ```sh
 xattr -dr com.apple.quarantine /Applications/LumenDesk.app
 ```
 
-Fine for a handful of people who trust you. Not a distribution story.
+The click-through route depends on the release. On Ventura and Sonoma,
+Control-click the app and choose **Open**. Sequoia removed that shortcut, so
+there you launch it once, let it get blocked, then go to **System Settings →
+Privacy & Security** and click **Open Anyway** next to the warning.
+
+### Use a self-signed certificate
+
+Ad-hoc signatures are regenerated from scratch on every build. macOS therefore
+treats each release as a different app and drops its Screen Recording and
+Local Network approvals, which means re-granting both after every update.
+
+A self-signed code signing certificate is free, takes about a minute, and
+makes the signature stable so the approvals stick. It does nothing for
+Gatekeeper, so the quarantine step above still applies.
+
+1. Open **Keychain Access → Certificate Assistant → Create a Certificate**.
+2. Name it something like `LumenDesk Self-Signed`.
+3. Identity Type: **Self Signed Root**. Certificate Type: **Code Signing**.
+4. Leave the rest at their defaults and create it.
+
+Then build with it:
+
+```sh
+SIGNING_IDENTITY="LumenDesk Self-Signed" ./scripts/package_macos.sh
+```
+
+The script recognises that this is not a Developer ID, so it signs during the
+archive, skips `exportArchive` and notarization, and signs the DMG without a
+secure timestamp. Keep that certificate in your keychain and back it up. Lose
+it and the next release looks like a new app to macOS again.
+
+An **Apple Development** certificate from a free Apple ID works the same way
+and the script handles it identically.
 
 ## Route 3: Developer ID and notarization
 
@@ -147,20 +185,27 @@ For a local-first LAN utility with no accounts and no in-app purchases, the
 store buys you very little and costs the same $99. Notarized direct download
 is the better fit.
 
-## Why signing matters more for this app than most
+## Why the signature is what macOS remembers
 
-Two macOS privacy grants are keyed to an app's code signature, not its path:
+Two macOS privacy grants are keyed to an app's code signature rather than its
+path on disk:
 
 - **Screen Recording**, which Music Mode needs for system-audio capture.
 - **Local Network**, which every discovery scan needs on macOS 15 and later.
 
 An ad-hoc signature is regenerated on every build, so macOS sees a new app
-each time and drops the grants. That is the behavior already documented in the
-README under Music Mode troubleshooting. A stable Developer ID signature fixes
-it permanently: users approve once and the grant survives updates.
+each time and drops both grants. That is the behavior already documented in
+the README under Music Mode troubleshooting.
 
-This is the practical argument for Route 3 even if you only ever install on
-your own machines.
+Any stable signing identity fixes it, including a free self-signed one. This
+is a separate axis from Gatekeeper, which is what notarization buys. Worth
+keeping the two apart when deciding what you need:
+
+| | Stable privacy grants | Opens without a Terminal command |
+| --- | --- | --- |
+| Ad-hoc | No | No |
+| Self-signed | Yes | No |
+| Developer ID, notarized | Yes | Yes |
 
 ## Versioning
 

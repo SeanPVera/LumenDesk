@@ -139,10 +139,18 @@ jobs:
             echo "prompt so discovery can reach your bulbs."
             echo
             if [[ "$SIGNED" != "true" ]]; then
-              echo "> This build is unsigned. macOS will refuse to open it until you clear the"
-              echo "> quarantine flag:"
-              echo ">"
-              echo "> \`xattr -dr com.apple.quarantine /Applications/LumenDesk.app\`"
+              echo "### This build is not notarized"
+              echo
+              echo "macOS blocks it on first launch. Clear the download quarantine once,"
+              echo "after dragging the app into Applications:"
+              echo
+              echo "\`\`\`sh"
+              echo "xattr -dr com.apple.quarantine /Applications/LumenDesk.app"
+              echo "\`\`\`"
+              echo
+              echo "To click instead of typing: on Ventura and Sonoma, Control-click the app"
+              echo "and choose Open. Sequoia removed that shortcut, so let the first launch"
+              echo "get blocked, then use System Settings > Privacy & Security > Open Anyway."
               echo
             fi
             echo "\`\`\`"

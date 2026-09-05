@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct MusicModeView: View {
     @EnvironmentObject private var manager: LightManager
@@ -8,6 +9,7 @@ struct MusicModeView: View {
     @State private var topology = FixtureTopology()
     @State private var advancedExpanded = false
     @State private var showUnsafeWarning = false
+    @State private var showFileImporter = false
 
     private var fixtures: [MusicFixtureDescriptor] { manager.musicFixtureDescriptors(in: scope) }
     private var includedFixtures: [MusicFixtureDescriptor] { topology.includedFixtures(fixtures) }
@@ -39,6 +41,21 @@ struct MusicModeView: View {
         } message: {
             Text("Music Mode will still enforce its absolute 3 flashes-per-second ceiling and your selected frequency, but flashing can affect people with photosensitivity. Safe Mode is recommended.")
         }
+        .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.audio], allowsMultipleSelection: false) { result in
+            guard case .success(let urls) = result, let url = urls.first else { return }
+            let accessed = url.startAccessingSecurityScopedResource()
+            commitConfiguration()
+            manager.startMusicMode(
+                configuration: configuration,
+                scope: scope,
+                reducedMotion: reduceMotion,
+                capture: .file(url)
+            )
+            if accessed {
+                // Keep the sandbox grant for the length of the show; stop is
+                // the matching release via the capture service tearing down.
+            }
+        }
     }
 
     private var intro: some View {
@@ -59,9 +76,9 @@ struct MusicModeView: View {
                     .foregroundStyle(Lumen.textPrimary)
                 SpectrumRule(height: 2, tapered: true).frame(width: 120)
                 #if os(macOS)
-                Text("LumenDesk analyzes system audio locally and choreographs your lights without recording or retaining audio.")
+                Text("LumenDesk analyzes system audio locally and choreographs your lights without recording or retaining audio. Open an audio file or follow MIDI clock when you want a source that is not the system mix.")
                 #else
-                Text("LumenDesk analyzes microphone input locally and choreographs your lights without recording or retaining audio.")
+                Text("LumenDesk analyzes microphone input locally and choreographs your lights without recording or retaining audio. Open an audio file on this device when you want a track the microphone cannot hear.")
                 #endif
                 Text("Soundcheck remains available as a built-in preset, and saved music-pulse effects remain compatible.")
                     .font(.caption)
@@ -82,16 +99,32 @@ struct MusicModeView: View {
                     Button("Stop", role: .destructive) { manager.stopEffect(scope: scope) }
                         .buttonStyle(LumenSecondaryButtonStyle())
                 } else {
-                    Button("Start Music Mode") {
-                        commitConfiguration()
-                        manager.startMusicMode(
-                            configuration: configuration,
-                            scope: scope,
-                            reducedMotion: reduceMotion
-                        )
+                    VStack(alignment: .trailing, spacing: 8) {
+                        Button("Start Music Mode") {
+                            commitConfiguration()
+                            manager.startMusicMode(
+                                configuration: configuration,
+                                scope: scope,
+                                reducedMotion: reduceMotion
+                            )
+                        }
+                        .buttonStyle(LumenPrimaryButtonStyle())
+                        .disabled(includedFixtures.isEmpty)
+                        Button("Open Audio File…") { showFileImporter = true }
+                            .buttonStyle(LumenSecondaryButtonStyle())
+                            .disabled(includedFixtures.isEmpty)
+                        Button("MIDI Clock") {
+                            commitConfiguration()
+                            manager.startMusicMode(
+                                configuration: configuration,
+                                scope: scope,
+                                reducedMotion: reduceMotion,
+                                capture: .midiClock
+                            )
+                        }
+                        .buttonStyle(LumenSecondaryButtonStyle())
+                        .disabled(includedFixtures.isEmpty)
                     }
-                    .buttonStyle(LumenPrimaryButtonStyle())
-                    .disabled(includedFixtures.isEmpty)
                 }
             }
         }
@@ -152,7 +185,7 @@ struct MusicModeView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Spatial topology").font(LumenType.display(size: 15, weight: .semibold))
-                    Text("Position is explicit and never inferred from discovery order. RGBIC segments continue the path inside their fixture. Exclude a light to leave it out of this room's show without changing its current state.\(isRunning ? " Stop the show to change which lights are included." : "")")
+                    Text("Position is explicit and never inferred from discovery order. RGBIC segments continue the path inside their fixture. Assign a role to split wash, hit, accent, and motion across the room. Exclude a light or set it to Off to leave it out of this room's show without changing its current state.\(isRunning ? " Stop the show to change which lights are included." : "")")
                         .font(.caption).foregroundStyle(Lumen.textSecondary)
                 }
                 Spacer()
@@ -185,6 +218,13 @@ struct MusicModeView: View {
                     if fixture.segmentCount > 0 {
                         Text("+ \(fixture.segmentCount) segments").font(.caption).foregroundStyle(Lumen.textTertiary)
                     }
+                    Picker("Role", selection: roleBinding(fixture.id)) {
+                        ForEach(FixtureRole.allCases) { Text($0.displayName).tag($0) }
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                    .disabled(isExcluded)
+                    .help(fixture.resolvedRole.summary)
                     Spacer()
                     Button { toggleExclusion(fixture.id) } label: {
                         Image(systemName: isExcluded ? "eye.slash" : "eye")
@@ -262,14 +302,38 @@ struct MusicModeView: View {
                     Text("Aurora").tag("aurora")
                     Text("Sunset").tag("sunset")
                     Text("Ocean").tag("ocean")
+                    Text("Club").tag("club")
                 }
                 Picker("Silence behavior", selection: binding(\.silenceBehavior)) {
                     ForEach(MusicSilenceBehavior.allCases) { Text($0.displayName).tag($0) }
                 }
+
+                Divider().overlay(Lumen.hairline)
+                Picker("Metre", selection: metreBinding) {
+                    Text("Auto").tag("auto")
+                    ForEach(MusicMetre.allCases) { Text($0.displayName).tag(String($0.rawValue)) }
+                }
+                Picker("Time feel", selection: binding(\.timeFeel)) {
+                    ForEach(TimeFeel.allCases) { Text($0.displayName).tag($0) }
+                }
+                musicSlider("Stereo image", value: binding(\.stereoImage), icon: "headphones")
+                Toggle("Phrase-aware lifts", isOn: binding(\.phraseAware))
+                    .toggleStyle(LumenRockerStyle())
+                Text("Auto metre listens for 3/4, 5/4, 6/8 and 7/8. Half-time feels every other beat. Roles and metre stay inside the 3 flashes/second ceiling.")
+                    .font(.caption).foregroundStyle(Lumen.textSecondary)
+
                 Toggle("Restore previous state when stopped", isOn: binding(\.restorePreviousState))
                 if manager.isDemoMode {
                     Toggle("Use deterministic demo rhythm", isOn: binding(\.usesSyntheticDemoPattern))
-                    Text("Turn this off to demonstrate with live audio input. The synthetic pattern contains no copyrighted audio.")
+                    Picker("Demo groove", selection: Binding(
+                        get: { manager.musicModeController.selectedGrooveID },
+                        set: { manager.musicModeController.setGroove($0) }
+                    )) {
+                        ForEach(MusicGroove.all) { groove in
+                            Text(groove.name).tag(groove.id)
+                        }
+                    }
+                    Text("Turn this off to demonstrate with live audio input. Grooves cover waltz, odd metre, and half-time with no copyrighted audio.")
                         .font(.caption).foregroundStyle(Lumen.textSecondary)
                 }
             }
@@ -316,6 +380,7 @@ struct MusicModeView: View {
                 if configuration.palette == MusicModeConfiguration.auroraPalette { return "aurora" }
                 if configuration.palette == MusicModeConfiguration.sunsetPalette { return "sunset" }
                 if configuration.palette == MusicModeConfiguration.oceanPalette { return "ocean" }
+                if configuration.palette == MusicModeConfiguration.clubPalette { return "club" }
                 return "soundcheck"
             },
             set: { name in
@@ -323,6 +388,7 @@ struct MusicModeView: View {
                 case "aurora": configuration.palette = MusicModeConfiguration.auroraPalette
                 case "sunset": configuration.palette = MusicModeConfiguration.sunsetPalette
                 case "ocean": configuration.palette = MusicModeConfiguration.oceanPalette
+                case "club": configuration.palette = MusicModeConfiguration.clubPalette
                 default: configuration.palette = MusicModeConfiguration.soundcheckPalette
                 }
                 configuration.preset = .custom
@@ -331,7 +397,33 @@ struct MusicModeView: View {
         )
     }
 
-    private func reloadForScope() {
+    private var metreBinding: Binding<String> {
+        Binding(
+            get: {
+                if let metre = configuration.metreOverride { return String(metre.rawValue) }
+                return "auto"
+            },
+            set: { value in
+                configuration.metreOverride = MusicMetre(rawValue: Int(value) ?? -1)
+                configuration.preset = .custom
+                commitConfiguration()
+            }
+        )
+    }
+
+    private func roleBinding(_ fixtureID: String) -> Binding<FixtureRole> {
+        Binding(
+            get: { topology.role(for: fixtureID) },
+            set: { role in
+                if role == .auto {
+                    topology.roles.removeValue(forKey: fixtureID)
+                } else {
+                    topology.roles[fixtureID] = role
+                }
+                commitTopology()
+            }
+        )
+    }
         configuration = manager.musicModeConfiguration
         topology = manager.fixtureTopology(for: scope)
     }
@@ -431,7 +523,9 @@ private struct MusicModeInputStatusView: View {
     private var tempoLabel: String {
         let snapshot = controller.latestSnapshot
         guard snapshot.isTempoLocked, snapshot.tempo > 0 else { return "Beat" }
-        return "\(Int(snapshot.tempo.rounded())) BPM"
+        let bpm = Int((snapshot.feltTempo > 0 ? snapshot.feltTempo : snapshot.tempo).rounded())
+        let metre = snapshot.metre > 0 ? snapshot.metre : 4
+        return "\(bpm) · \(metre)/\(metre == 6 ? 8 : 4)"
     }
 
     private var sourceIcon: String {
@@ -439,6 +533,8 @@ private struct MusicModeInputStatusView: View {
         case .systemAudio: return "macbook.and.iphone"
         case .microphone: return "mic.fill"
         case .syntheticDemo: return "waveform.badge.plus"
+        case .filePlayback: return "waveform.badge.magnifyingglass"
+        case .midiClock: return "pianokeys"
         case .permissionDenied: return "lock.trianglebadge.exclamationmark"
         case .unavailable: return "exclamationmark.triangle.fill"
         case .idle, .requestingPermission: return "waveform"
@@ -456,7 +552,7 @@ private struct MusicModeInputStatusView: View {
     private var statusColor: Color {
         switch controller.sourceStatus {
         case .permissionDenied, .unavailable: return Lumen.warning
-        case .systemAudio, .microphone, .syntheticDemo: return Lumen.success
+        case .systemAudio, .microphone, .syntheticDemo, .filePlayback, .midiClock: return Lumen.success
         case .idle, .requestingPermission: return Lumen.textSecondary
         }
     }

@@ -135,6 +135,31 @@ test('LIFX colour and brightness map into HSBK', async () => {
   assert.equal(bulb.color.saturation, 65535, 'hue/saturation preserved across a brightness change')
 })
 
+test('music frame paints one solid colour per fixture and never invents razer', async () => {
+  const devices = await waitFor(() => {
+    const list = registry.list()
+    return list.length >= 2 ? list : null
+  })
+  const lifxDevice = devices.find(d => d.brand === 'lifx')
+  const goveeDevice = devices.find(d => d.brand === 'govee')
+  const res = await api('/music/frame', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: ORIGIN },
+    body: JSON.stringify({
+      states: [
+        { fixtureID: lifxDevice.id, rgb: { r: 20, g: 40, b: 200 } },
+        { fixtureID: goveeDevice.id, rgb: { r: 20, g: 40, b: 200 } },
+        { fixtureID: lifxDevice.id, rgb: { r: 255, g: 0, b: 0 } },
+      ],
+    }),
+  })
+  assert.equal(res.status, 200)
+  assert.equal(res.body.ok, true)
+  assert.equal(res.body.applied, 2)
+  const patched = registry.get(lifxDevice.id)
+  assert.deepEqual(patched.color, { r: 20, g: 40, b: 200 })
+})
+
 test('Govee commands arrive as LAN JSON and update state', async () => {
   const id = encodeURIComponent(`govee:${strip.device}`)
 

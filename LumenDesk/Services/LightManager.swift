@@ -864,11 +864,16 @@ final class LightManager: ObservableObject {
     func startMusicMode(
         configuration: MusicModeConfiguration,
         scope: LightScope = .all,
-        reducedMotion: Bool = false
+        reducedMotion: Bool = false,
+        capture: MusicCapturePreference = .platformDefault
     ) {
         guard let effect = LightingCatalog.effects.first(where: { $0.id == "music-pulse" }) else { return }
         let topology = fixtureTopology(for: scope)
-        let targets = devices(in: scope).filter { !topology.excludedFixtureIDs.contains($0.id) }
+        let fixtures = musicFixtureDescriptors(in: scope)
+        let skipped = topology.excludedFixtureIDs.union(
+            Set(fixtures.filter { $0.resolvedRole == .off }.map(\.id))
+        )
+        let targets = devices(in: scope).filter { !skipped.contains($0.id) }
         guard !targets.isEmpty else {
             publishError(scope == .all
                 ? "Discover a light before starting Music Mode."
@@ -889,7 +894,6 @@ final class LightManager: ObservableObject {
         )
         effectRuns[scope] = run
         activeEffects[scope] = effect.id
-        let fixtures = musicFixtureDescriptors(in: scope)
 
         for device in targets {
             device.isOn = true
@@ -909,6 +913,7 @@ final class LightManager: ObservableObject {
             fixtures: fixtures,
             reducedMotion: reducedMotion,
             useSyntheticPattern: isDemoMode && normalized.usesSyntheticDemoPattern,
+            capture: capture,
             onFrame: { [weak self] frame in
                 self?.renderMusicFrame(frame, scope: scope)
             },
@@ -2496,19 +2501,23 @@ extension LightManager {
     }
 
     func musicFixtureDescriptors(in scope: LightScope) -> [MusicFixtureDescriptor] {
-        devices(in: scope).map { device in
+        let topology = fixtureTopology(for: scope)
+        return devices(in: scope).map { device in
+            let role = topology.role(for: device.id)
             if device.brand == .govee, segmentProfile(for: device) != nil {
                 return MusicFixtureDescriptor(
                     id: device.id,
                     label: device.label,
                     transport: .goveeRealtimeSegments,
-                    segmentCount: segmentState(for: device).segmentCount
+                    segmentCount: segmentState(for: device).segmentCount,
+                    role: role
                 )
             }
             return MusicFixtureDescriptor(
                 id: device.id,
                 label: device.label,
-                transport: device.brand == .lifx ? .lifxLAN : .goveeLAN
+                transport: device.brand == .lifx ? .lifxLAN : .goveeLAN,
+                role: role
             )
         }
     }

@@ -129,38 +129,37 @@ final class MusicChoreographyEngine {
         // before.
         let reactivePulse = max(snapshot.beat, snapshot.pulse)
         let musicalPulse = beatShape(phase: clock.phase)
-            * Self.barAccent(clock.beatInBar)
+            * Self.barAccent(clock.beatInBar, metre: clock.metre)
             * min(1, 0.4 + snapshot.energy * 0.8)
         let pulseDrive = reactivePulse + (musicalPulse - reactivePulse) * clock.strength
+        let phraseLift = configuration.phraseAware ? max(0, snapshot.energySlope) * 0.22 : 0
+        let chromaHue = Self.chromaToHue(snapshot.chroma)
 
         var states: [MusicLightingState] = []
         states.reserveCapacity(targets.count)
-        for (index, target) in targets.enumerated() {
-            let role = index % 3
-            let roleOnset: Double
-            switch role {
-            case 0: roleOnset = snapshot.kick * config.bassSensitivity
-            case 1: roleOnset = snapshot.snare * config.percussionSensitivity
-            default: roleOnset = snapshot.percussion * config.percussionSensitivity
-            }
+        for target in targets {
+            let isHit = target.role == .hit
+            let isAccent = target.role == .accent
+            let isMotion = target.role == .motion
+            let isWash = target.role == .wash || target.role == .auto
 
             let phase = spatialPhase(position: target.position, direction: config.movementDirection)
             let wave = 0.5 + 0.5 * sin(phase * 2 * .pi)
-            let spatialWeight = 1 - config.movementAmount + config.movementAmount * (0.3 + wave * 0.7)
+            let stereoBias = 1 + (snapshot.stereo - 0.5) * 2 * config.stereoImage * (target.position - 0.5) * 2
+            let spatialWeight = (1 - config.movementAmount + config.movementAmount * (0.3 + wave * 0.7)) * max(0.55, stereoBias)
             let bassDrive = snapshot.bass * config.bassSensitivity
             let sustainedLift = sustainedEnergyEvent ? 0.14 + snapshot.energy * 0.16 : 0
-            // Split into where the fixture rests between hits and how far a beat
-            // lifts it. The swing is the larger half, and large enough that a
-            // strong beat reaches the top of the configured range.
-            //
-            // The previous weighting made continuous loudness the biggest term,
-            // so fixtures sat at a bright mid-level that the beat could only
-            // nudge: busy, but never legibly on the beat.
             let sustain = 0.1
                 + pow(max(snapshot.level, snapshot.energy), 0.65) * 0.2
                 + bassDrive * 0.14
-            let swing = pulseDrive * (0.35 + config.beatSensitivity * 0.8)
-            var drive = sustain + swing + roleOnset * 0.12 + sustainedLift
+            var swing = pulseDrive * (0.35 + config.beatSensitivity * 0.8)
+            if isHit { swing *= 1.35 }
+            if isWash { swing *= 0.72 }
+            if isMotion { swing *= 0.9 }
+            if isAccent { swing *= 0.55 }
+            var drive = sustain + swing + phraseLift + sustainedLift
+            if isAccent { drive += snapshot.snare * config.percussionSensitivity * 0.28 }
+            if isHit { drive += snapshot.kick * config.bassSensitivity * 0.2 }
             drive = min(1, drive * (0.55 + config.effectIntensity * 0.65) * spatialWeight)
 
             if silence {
@@ -203,16 +202,13 @@ final class MusicChoreographyEngine {
             let paletteMotion = target.position * config.colorChangeIntensity * Double(max(1, palette.count - 1))
                 + quantizedPaletteProgress(strength: clock.strength)
             var color = Self.paletteColor(palette, position: paletteMotion / entries)
-            color.hue = (color.hue + (snapshot.mood - 0.5) * 0.12).wrappedUnit
+            color.hue = (color.hue + (snapshot.mood - 0.5) * 0.08 + chromaHue * 0.04).wrappedUnit
 
-            if role == 1 && roleOnset > 0.42 {
-                // Snare/clap: a complementary, lower-saturation accent. It is
-                // not a flash unless the independent limiter admitted one.
+            if isAccent && snapshot.snare * config.percussionSensitivity > 0.42 {
                 color.hue = (color.hue + 0.5).wrappedUnit
                 color.saturation *= 0.72
-            } else if role == 2 && roleOnset > 0.38 {
-                color.hue = (color.hue + 0.08).wrappedUnit
-                color.saturation = min(1, color.saturation + 0.12)
+            } else if isHit && snapshot.kick > 0.5 {
+                color.saturation = min(1, color.saturation + 0.08)
             }
             if flashIntensity > 0 {
                 color.saturation *= 1 - flashIntensity * 0.8
@@ -225,7 +221,7 @@ final class MusicChoreographyEngine {
                 saturation: color.saturation,
                 brightness: brightness,
                 transitionDuration: silence ? 0.55 : (flashIntensity > 0 ? 0.04 : 0.1),
-                priority: flashIntensity > 0 ? 3 : (roleOnset > 0.4 ? 2 : 1)
+                priority: flashIntensity > 0 ? 3 : (isHit ? 2 : 1)
             ))
         }
 
@@ -273,42 +269,46 @@ final class MusicChoreographyEngine {
     private struct MusicalClock {
         /// 0…1 position inside the current beat, 0 exactly on the beat.
         var phase: Double = 0
-        /// Which beat of an assumed four-beat bar this is.
+        /// Which beat of the current bar this is.
         var beatInBar: Int = 0
-        /// Seconds per beat, or 0 when there is no usable grid.
+        /// Seconds per felt beat, or 0 when there is no usable grid.
         var interval: TimeInterval = 0
         /// How far to trust the grid: 0 renders the energy-driven show, 1 the
         /// fully beat-synchronized one, and values between cross-fade.
         var strength: Double = 0
         /// Bars per second, 0 when there is no usable grid.
         var barRate: Double = 0
+        var metre: Int = 4
     }
 
     private func musicalClock(snapshot: AudioReactiveSnapshot, timestamp: TimeInterval) -> MusicalClock {
+        let interval = snapshot.feltInterval > 0 ? snapshot.feltInterval : snapshot.beatInterval
+        let metre = snapshot.metre > 0 ? snapshot.metre : BeatTracker.beatsPerBar
         guard snapshot.isTempoLocked,
-              snapshot.beatInterval > 0,
-              snapshot.beatReferenceTime > 0 else { return MusicalClock() }
+              interval > 0,
+              snapshot.beatReferenceTime > 0 else { return MusicalClock(metre: metre) }
         // A reference this old means analysis stopped feeding the grid (capture
         // ended, the audio went silent). Extrapolating from it would drift, so
         // fall back to the reactive show instead.
-        guard timestamp - snapshot.beatReferenceTime < snapshot.beatInterval * 6 else { return MusicalClock() }
+        guard timestamp - snapshot.beatReferenceTime < interval * 6 else { return MusicalClock(metre: metre) }
 
         // Evaluating slightly ahead is only meaningful on a predicted grid: it
         // pays for the transport and firmware delay so the swell lands on the
         // beat rather than a frame or two behind it.
         let predicted = timestamp + Self.outputLatencyCompensation
-        let beats = (predicted - snapshot.beatReferenceTime) / snapshot.beatInterval
+        let beats = (predicted - snapshot.beatReferenceTime) / interval
         let wholeBeats = floor(beats)
         let beatInBar = Int(((Double(snapshot.beatInBar) + wholeBeats)
-            .truncatingRemainder(dividingBy: Double(BeatTracker.beatsPerBar))
-            + Double(BeatTracker.beatsPerBar))
-            .truncatingRemainder(dividingBy: Double(BeatTracker.beatsPerBar)))
+            .truncatingRemainder(dividingBy: Double(metre))
+            + Double(metre))
+            .truncatingRemainder(dividingBy: Double(metre)))
         return MusicalClock(
             phase: beats - wholeBeats,
             beatInBar: beatInBar,
-            interval: snapshot.beatInterval,
+            interval: interval,
             strength: max(0, min(1, snapshot.beatConfidence * 1.6)),
-            barRate: 1 / (snapshot.beatInterval * Double(BeatTracker.beatsPerBar))
+            barRate: 1 / (interval * Double(metre)),
+            metre: metre
         )
     }
 
@@ -320,14 +320,18 @@ final class MusicChoreographyEngine {
         return max(decay, anticipation)
     }
 
-    /// Relative weight of each beat in a four-beat bar. Accenting one and three
-    /// — the downbeat most — is what makes a run of pulses read as a groove
-    /// rather than as a metronome.
-    private static func barAccent(_ beatInBar: Int) -> Double {
-        switch beatInBar {
-        case 0: return 1
-        case 2: return 0.88
-        default: return 0.74
+    /// Relative weight of each beat in the current bar. Odd metres keep a
+    /// strong downbeat and a secondary accent so a run of pulses still reads
+    /// as a groove rather than a metronome.
+    private static func barAccent(_ beatInBar: Int, metre: Int) -> Double {
+        if beatInBar == 0 { return 1 }
+        switch metre {
+        case 3: return beatInBar == 1 ? 0.7 : 0.82
+        case 5: return beatInBar == 3 ? 0.9 : 0.7
+        case 6: return beatInBar == 3 ? 0.9 : 0.72
+        case 7: return beatInBar == 3 || beatInBar == 5 ? 0.88 : 0.7
+        default:
+            return beatInBar == 2 ? 0.88 : 0.74
         }
     }
 
@@ -383,7 +387,7 @@ final class MusicChoreographyEngine {
             // Reverse on the bar line while locked. Without a grid there are no
             // bars, so fall back to flipping every four detected beats, which is
             // the cadence the show used before.
-            let bar = clock.strength > 0 ? Int(floor(barsElapsed)) : lastBeatCount / BeatTracker.beatsPerBar
+            let bar = clock.strength > 0 ? Int(floor(barsElapsed)) : lastBeatCount / max(1, clock.metre)
             if !bar.isMultiple(of: 2) { rate = -rate }
         }
         movementPhase += rate * dt
@@ -432,6 +436,17 @@ final class MusicChoreographyEngine {
             saturation: palette[low].saturation + (palette[high].saturation - palette[low].saturation) * fraction,
             brightness: palette[low].brightness + (palette[high].brightness - palette[low].brightness) * fraction
         )
+    }
+
+    private static func chromaToHue(_ chroma: [Double]) -> Double {
+        guard chroma.count >= 12 else { return 0 }
+        var best = 0.0
+        var index = 0
+        for (offset, value) in chroma.enumerated() where value > best {
+            best = value
+            index = offset
+        }
+        return best > 0.15 ? Double(index) / 12 : 0
     }
 }
 

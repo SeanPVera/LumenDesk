@@ -199,6 +199,86 @@ final class MusicModeTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(targets.last).position, 1, accuracy: 0.001)
     }
 
+    func testOffRoleIsDroppedFromTargetsLikeExclusion() throws {
+        let fixtures = [
+            MusicFixtureDescriptor(id: "z", label: "Window", transport: .lifxLAN, role: .wash),
+            MusicFixtureDescriptor(id: "a", label: "Desk", transport: .goveeLAN, role: .off),
+            MusicFixtureDescriptor(id: "s", label: "Strip", transport: .goveeRealtimeSegments, segmentCount: 3, role: .motion)
+        ]
+        let topology = FixtureTopology(layout: .custom, fixtureOrder: ["z", "a", "s"])
+        XCTAssertEqual(topology.includedFixtures(fixtures).map(\.id), ["z", "s"])
+        let targets = topology.expandedTargets(for: fixtures)
+        XCTAssertFalse(targets.contains { $0.fixtureID == "a" })
+        XCTAssertEqual(targets.map(\.role), [.wash, .motion, .motion, .motion])
+    }
+
+    func testHitFixturesAreBrighterOnTheDownbeatThanWash() {
+        let engine = MusicChoreographyEngine()
+        let hit = MusicFixtureDescriptor(id: "hit", label: "Downstage", transport: .lifxLAN, role: .hit)
+        let wash = MusicFixtureDescriptor(id: "wash", label: "Wash", transport: .lifxLAN, role: .wash)
+        var config = MusicModeConfiguration.configuration(for: .club)
+        config.movementAmount = 0
+        config.allowsFlashes = false
+        config.photosensitivitySafeMode = true
+        let interval = 0.5
+        let reference = 40.0
+        var hitOn: [Double] = []
+        var washOn: [Double] = []
+        for frame in 0..<80 {
+            let timestamp = reference + Double(frame) * 0.025
+            var snapshot = lockedSnapshot(at: timestamp, reference: reference, interval: interval)
+            snapshot.kick = 0.9
+            snapshot.energy = 0.7
+            snapshot.metre = 4
+            snapshot.feltInterval = interval
+            let frameStates = engine.makeFrame(
+                snapshot: snapshot,
+                configuration: config,
+                topology: FixtureTopology(layout: .custom, fixtureOrder: ["hit", "wash"]),
+                fixtures: [hit, wash],
+                timestamp: timestamp,
+                sequenceNumber: UInt64(frame)
+            ).states
+            let phase = ((timestamp + 0.045 - reference) / interval)
+            let fraction = phase - floor(phase)
+            guard frame > 16, fraction < 0.12 else { continue }
+            if let hitBrightness = frameStates.first(where: { $0.fixtureID == "hit" })?.brightness {
+                hitOn.append(hitBrightness)
+            }
+            if let washBrightness = frameStates.first(where: { $0.fixtureID == "wash" })?.brightness {
+                washOn.append(washBrightness)
+            }
+        }
+        XCTAssertGreaterThan(hitOn.count, 4)
+        let hitMean = hitOn.reduce(0, +) / Double(hitOn.count)
+        let washMean = washOn.reduce(0, +) / Double(washOn.count)
+        XCTAssertGreaterThan(hitMean, washMean, "hit layer should punch harder on the downbeat than wash")
+    }
+
+    func testClubHalftimeAndWaltzPresets() {
+        let club = MusicModeConfiguration.configuration(for: .club)
+        XCTAssertEqual(club.metreOverride, .four)
+        XCTAssertEqual(club.timeFeel, .straight)
+        let half = MusicModeConfiguration.configuration(for: .halftime)
+        XCTAssertEqual(half.timeFeel, .half)
+        let waltz = MusicModeConfiguration.configuration(for: .waltz)
+        XCTAssertEqual(waltz.metreOverride, .three)
+        XCTAssertEqual(MusicModePreset.allCases.count, 9)
+    }
+
+    func testLegacyMusicModeConfigurationDecodesWithoutNewKeys() throws {
+        let legacyJSON = Data("""
+        {"preset":"cinematic","masterBrightness":0.78,"effectIntensity":0.7,"beatSensitivity":0.48,"bassSensitivity":0.68,"percussionSensitivity":0.38,"colorChangeIntensity":0.54,"movementAmount":0.74,"movementDirection":"forward","movementSpeed":0.28,"minimumBrightness":0.08,"maximumBrightness":0.9,"allowsFlashes":true,"flashIntensity":0.34,"maximumFlashFrequency":0.75,"palette":[{"hex":16763914},{"hex":16743628},{"hex":14896243},{"hex":7682959}],"silenceBehavior":"holdPalette","photosensitivitySafeMode":true,"restorePreviousState":true}
+        """.utf8)
+        let decoded = try JSONDecoder().decode(MusicModeConfiguration.self, from: legacyJSON)
+        XCTAssertEqual(decoded.preset, .cinematic)
+        XCTAssertNil(decoded.metreOverride)
+        XCTAssertEqual(decoded.timeFeel, .auto)
+        XCTAssertEqual(decoded.stereoImage, 0.7, accuracy: 0.001)
+        XCTAssertTrue(decoded.phraseAware)
+        XCTAssertTrue(decoded.photosensitivitySafeMode)
+    }
+
     func testExcludedFixturesAreDroppedFromTargetsAndSpacingCloses() throws {
         let fixtures = [
             MusicFixtureDescriptor(id: "z", label: "Window", transport: .lifxLAN),

@@ -21,6 +21,14 @@ struct BeatGrid: Equatable {
     var beatCount: Int = 0
     /// True once the grid is trustworthy enough to choreograph against.
     var isLocked: Bool = false
+    /// Detected musical metre. Overlay only — `BeatTracker.beatsPerBar` stays 4
+    /// so the existing four-four downbeat heuristic and its tests stay intact.
+    var metre: Int = 4
+    var metreConfidence: Double = 0
+    var timeFeel: TimeFeel = .straight
+    /// Seconds between felt pulses after half/double-time is applied.
+    var feltInterval: TimeInterval = 0
+    var feltTempo: Double = 0
 }
 
 /// Estimates tempo and beat phase from an onset-detection function (ODF).
@@ -80,6 +88,7 @@ final class BeatTracker {
     private var scratch: [Double] = []
     private var autocorrelation: [Double] = []
     private var combScores: [Double] = []
+    private let metreTracker = MetreTracker()
 
     init(frameInterval: TimeInterval = 512.0 / 48_000.0) {
         let interval = max(0.001, frameInterval)
@@ -115,6 +124,7 @@ final class BeatTracker {
         pendingBarEnergy = 0
         nextBarEnergy = 0
         for index in history.indices { history[index] = 0 }
+        metreTracker.reset()
     }
 
     /// Feeds one ODF frame and returns the number of grid beats that fell in it
@@ -145,7 +155,31 @@ final class BeatTracker {
         correctPhase(onset: clampedOnset, at: time)
         let emitted = emitBeats(upTo: time)
         accumulateBarEnergy(lowFrequencyOnset, at: time)
+        if emitted > 0 {
+            metreTracker.observe(
+                beatCount: grid.beatCount,
+                kick: max(0, lowFrequencyOnset),
+                tempo: grid.tempo,
+                locked: grid.isLocked
+            )
+            applyDetectedMusicalTime()
+        }
         return emitted
+    }
+
+    /// Overlays detected metre and feel onto the grid without changing the
+    /// four-four downbeat accumulator that `beatsPerBar` still owns.
+    private func applyDetectedMusicalTime() {
+        let detected = metreTracker.current()
+        grid.metre = detected.metre
+        grid.metreConfidence = detected.metreConfidence
+        grid.timeFeel = detected.feel
+        let multiplier = detected.feel.intervalMultiplier
+        grid.feltInterval = grid.interval * multiplier
+        grid.feltTempo = grid.tempo / max(0.25, multiplier)
+        if detected.metre != Self.beatsPerBar, detected.metre > 0 {
+            grid.beatInBar = ((grid.beatCount % detected.metre) + detected.metre) % detected.metre
+        }
     }
 
     // MARK: - Beat emission
@@ -434,5 +468,101 @@ final class BeatTracker {
         var index = writeIndex - 1 - framesAgo
         while index < 0 { index += capacity }
         return history[index % capacity]
+    }
+}
+
+/// Estimates 3/4/5/6/7 from kick-energy periodicity and half/double feel
+/// from even-versus-odd beat weight. Folded into BeatTracker.swift so it
+/// needs no new pbxproj file ID.
+final class MetreTracker {
+    private static let candidates = [3, 4, 5, 6, 7]
+
+    private var kickHistory: [Double] = []
+    private var evenEnergy: Double = 0
+    private var oddEnergy: Double = 0
+    private var metre = 4
+    private var metreConfidence: Double = 0
+    private var feel: TimeFeel = .straight
+    private var lastBeat = -1
+
+    func reset() {
+        kickHistory.removeAll(keepingCapacity: true)
+        evenEnergy = 0
+        oddEnergy = 0
+        metre = 4
+        metreConfidence = 0
+        feel = .straight
+        lastBeat = -1
+    }
+
+    func observe(beatCount: Int, kick: Double, tempo: Double, locked: Bool) {
+        guard beatCount != lastBeat else { return }
+        lastBeat = beatCount
+        kickHistory.append(max(0, kick))
+        if kickHistory.count > 64 { kickHistory.removeFirst(kickHistory.count - 64) }
+
+        let decay = 0.92
+        if beatCount.isMultiple(of: 2) {
+            evenEnergy = evenEnergy * decay + kick
+        } else {
+            oddEnergy = oddEnergy * decay + kick
+        }
+
+        guard locked, kickHistory.count >= 12 else { return }
+
+        var best = 4
+        var bestScore = -1.0
+        var scores: [Int: Double] = [:]
+        for n in Self.candidates {
+            let score = scoreMetre(n)
+            scores[n] = score
+            if score > bestScore {
+                bestScore = score
+                best = n
+            }
+        }
+
+        let fourScore = scores[4] ?? 0
+        let adopt = best == metre || bestScore > fourScore * 1.12
+        let next = adopt ? best : metre
+        if next != metre {
+            if bestScore > metreConfidence + 0.08 { metre = next }
+        } else {
+            metre = next
+        }
+        metreConfidence = max(0, min(1, bestScore))
+
+        let ratio = evenEnergy / max(0.0001, oddEnergy)
+        if tempo >= 125, ratio > 2.15 {
+            feel = .half
+        } else if tempo <= 88, ratio < 1.25, evenEnergy + oddEnergy > 0.4 {
+            feel = .double
+        } else {
+            feel = .straight
+        }
+    }
+
+    func current() -> (metre: Int, metreConfidence: Double, feel: TimeFeel) {
+        (metre, metreConfidence, feel)
+    }
+
+    private func scoreMetre(_ n: Int) -> Double {
+        var bins = [Double](repeating: 0, count: n)
+        for (index, value) in kickHistory.reversed().enumerated() {
+            bins[index % n] += value
+        }
+        guard let maxBin = bins.max(), maxBin > 1e-6 else { return 0 }
+        let mean = bins.reduce(0, +) / Double(n)
+        let prominence = (maxBin - mean) / maxBin
+        let downbeatIndex = bins.firstIndex(of: maxBin) ?? 0
+        var grouped = 0.0
+        if n == 6 {
+            let a = bins[0] + bins[3]
+            let b = bins[1] + bins[4]
+            let c = bins[2] + bins[5]
+            grouped = a > b && a > c ? 0.18 : 0
+        }
+        let alignment = downbeatIndex == 0 ? 0.12 : 0
+        return max(0, min(1, prominence * 0.85 + grouped + alignment))
     }
 }

@@ -6,6 +6,9 @@ enum MusicModePreset: String, Codable, CaseIterable, Identifiable {
     case concert
     case cinematic
     case soundcheck
+    case club
+    case halftime
+    case waltz
     case custom
 
     var id: String { rawValue }
@@ -17,6 +20,9 @@ enum MusicModePreset: String, Codable, CaseIterable, Identifiable {
         case .concert: return "Concert"
         case .cinematic: return "Cinematic"
         case .soundcheck: return "Soundcheck"
+        case .club: return "Club"
+        case .halftime: return "Half-time"
+        case .waltz: return "Waltz"
         case .custom: return "Custom"
         }
     }
@@ -28,6 +34,9 @@ enum MusicModePreset: String, Codable, CaseIterable, Identifiable {
         case .concert: return "Strong percussion accents and faster traveling motion."
         case .cinematic: return "Broad sweeps with gradual energy and infrequent bursts."
         case .soundcheck: return "The recognizable original beat-and-instrument response, made safer."
+        case .club: return "Four-on-the-floor wash plus a hard hit layer on the downbeat."
+        case .halftime: return "Felt pulse on every other beat. Head-nod, not strobe."
+        case .waltz: return "Three-count swell. Downbeat takes the room, two and three breathe."
         case .custom: return "Your saved mapping, palette, limits, and topology behavior."
         }
     }
@@ -73,6 +82,86 @@ enum MusicSilenceBehavior: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+/// Musical metre Music Mode can lock to. Four-four remains the default.
+enum MusicMetre: Int, Codable, CaseIterable, Identifiable {
+    case three = 3
+    case four = 4
+    case five = 5
+    case six = 6
+    case seven = 7
+
+    var id: Int { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .three: return "3/4"
+        case .four: return "4/4"
+        case .five: return "5/4"
+        case .six: return "6/8"
+        case .seven: return "7/8"
+        }
+    }
+}
+
+enum TimeFeel: String, Codable, CaseIterable, Identifiable {
+    case auto
+    case straight
+    case half
+    case double
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .auto: return "Auto"
+        case .straight: return "Straight"
+        case .half: return "Half-time"
+        case .double: return "Double-time"
+        }
+    }
+
+    var intervalMultiplier: Double {
+        switch self {
+        case .auto, .straight: return 1
+        case .half: return 2
+        case .double: return 0.5
+        }
+    }
+}
+
+enum FixtureRole: String, Codable, CaseIterable, Identifiable {
+    case auto
+    case wash
+    case hit
+    case accent
+    case motion
+    case off
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .auto: return "Auto"
+        case .wash: return "Wash"
+        case .hit: return "Hit"
+        case .accent: return "Accent"
+        case .motion: return "Motion"
+        case .off: return "Off"
+        }
+    }
+
+    var summary: String {
+        switch self {
+        case .auto: return "Assigned from the fixture: RGBIC becomes motion, downstage becomes hit, rear becomes accent, otherwise wash."
+        case .wash: return "Room fill. Softer swing, holds the palette."
+        case .hit: return "Downbeat punch. Harder swing, follows the kick."
+        case .accent: return "Complementary colour on snare and percussion."
+        case .motion: return "Travels the room. RGBIC segments continue the path."
+        case .off: return "Left out of this show without changing its current state."
+        }
+    }
+}
+
 struct MusicPaletteColor: Codable, Equatable, Hashable, Identifiable {
     var hex: UInt32
     var id: UInt32 { hex }
@@ -111,6 +200,11 @@ struct MusicModeConfiguration: Codable, Equatable {
     var photosensitivitySafeMode: Bool = true
     var restorePreviousState: Bool = true
     var usesSyntheticDemoPattern: Bool = false
+    /// `nil` lets the metre tracker choose. Saved archives without this key stay auto.
+    var metreOverride: MusicMetre? = nil
+    var timeFeel: TimeFeel = .auto
+    var stereoImage: Double = 0.7
+    var phraseAware: Bool = true
 
     static let soundcheckPalette = [
         MusicPaletteColor(0xFF3B9D),
@@ -138,6 +232,13 @@ struct MusicModeConfiguration: Codable, Equatable {
         MusicPaletteColor(0x22AFCF),
         MusicPaletteColor(0x2867C7),
         MusicPaletteColor(0x15366E)
+    ]
+
+    static let clubPalette = [
+        MusicPaletteColor(0xFF2D6A),
+        MusicPaletteColor(0x7C5CFF),
+        MusicPaletteColor(0x21C4DE),
+        MusicPaletteColor(0xF6FAFF)
     ]
 
     static func configuration(for preset: MusicModePreset) -> MusicModeConfiguration {
@@ -206,6 +307,42 @@ struct MusicModeConfiguration: Codable, Equatable {
             value.maximumFlashFrequency = 0.75
             value.palette = sunsetPalette
             value.silenceBehavior = .holdPalette
+        case .club:
+            value.masterBrightness = 0.88
+            value.effectIntensity = 0.8
+            value.beatSensitivity = 0.9
+            value.bassSensitivity = 0.86
+            value.percussionSensitivity = 0.7
+            value.colorChangeIntensity = 0.48
+            value.movementAmount = 0.7
+            value.movementSpeed = 0.64
+            value.metreOverride = .four
+            value.timeFeel = .straight
+            value.palette = clubPalette
+        case .halftime:
+            value.masterBrightness = 0.78
+            value.effectIntensity = 0.7
+            value.beatSensitivity = 0.8
+            value.bassSensitivity = 0.84
+            value.percussionSensitivity = 0.5
+            value.colorChangeIntensity = 0.4
+            value.movementAmount = 0.42
+            value.movementSpeed = 0.28
+            value.timeFeel = .half
+            value.palette = sunsetPalette
+        case .waltz:
+            value.masterBrightness = 0.7
+            value.effectIntensity = 0.58
+            value.beatSensitivity = 0.62
+            value.bassSensitivity = 0.55
+            value.percussionSensitivity = 0.32
+            value.colorChangeIntensity = 0.5
+            value.movementAmount = 0.48
+            value.movementSpeed = 0.3
+            value.metreOverride = .three
+            value.timeFeel = .straight
+            value.palette = oceanPalette
+            value.silenceBehavior = .holdPalette
         case .soundcheck:
             break
         case .custom:
@@ -229,6 +366,7 @@ struct MusicModeConfiguration: Codable, Equatable {
         value.maximumBrightness = max(value.minimumBrightness, value.maximumBrightness.clamped01)
         value.flashIntensity = value.flashIntensity.clamped01
         value.maximumFlashFrequency = max(0, min(FlashSafetyLimiter.hardMaximumFrequency, value.maximumFlashFrequency))
+        value.stereoImage = value.stereoImage.clamped01
         if value.palette.isEmpty { value.palette = Self.soundcheckPalette }
         // Keep the user's flash settings while Safe Mode is active so turning
         // it off after the explicit warning restores the chosen limits. The
@@ -240,6 +378,49 @@ struct MusicModeConfiguration: Codable, Equatable {
             value.maximumFlashFrequency = 0
         }
         return value
+    }
+}
+
+extension MusicModeConfiguration {
+    private enum CodingKeys: String, CodingKey {
+        case preset, masterBrightness, effectIntensity, beatSensitivity
+        case bassSensitivity, percussionSensitivity, colorChangeIntensity
+        case movementAmount, movementDirection, movementSpeed
+        case minimumBrightness, maximumBrightness, allowsFlashes
+        case flashIntensity, maximumFlashFrequency, palette, silenceBehavior
+        case photosensitivitySafeMode, restorePreviousState, usesSyntheticDemoPattern
+        case metreOverride, timeFeel, stereoImage, phraseAware
+    }
+
+    // Field-by-field so archives saved before metre, feel, stereo, and phrase
+    // keys existed still decode instead of the whole configuration falling
+    // back to Soundcheck (the PersistenceStore `try?` default).
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        preset = (try? container.decode(MusicModePreset.self, forKey: .preset)) ?? .soundcheck
+        masterBrightness = (try? container.decode(Double.self, forKey: .masterBrightness)) ?? 0.82
+        effectIntensity = (try? container.decode(Double.self, forKey: .effectIntensity)) ?? 0.72
+        beatSensitivity = (try? container.decode(Double.self, forKey: .beatSensitivity)) ?? 0.72
+        bassSensitivity = (try? container.decode(Double.self, forKey: .bassSensitivity)) ?? 0.76
+        percussionSensitivity = (try? container.decode(Double.self, forKey: .percussionSensitivity)) ?? 0.68
+        colorChangeIntensity = (try? container.decode(Double.self, forKey: .colorChangeIntensity)) ?? 0.66
+        movementAmount = (try? container.decode(Double.self, forKey: .movementAmount)) ?? 0.58
+        movementDirection = (try? container.decode(MusicMovementDirection.self, forKey: .movementDirection)) ?? .forward
+        movementSpeed = (try? container.decode(Double.self, forKey: .movementSpeed)) ?? 0.55
+        minimumBrightness = (try? container.decode(Double.self, forKey: .minimumBrightness)) ?? 0.08
+        maximumBrightness = (try? container.decode(Double.self, forKey: .maximumBrightness)) ?? 0.92
+        allowsFlashes = (try? container.decode(Bool.self, forKey: .allowsFlashes)) ?? true
+        flashIntensity = (try? container.decode(Double.self, forKey: .flashIntensity)) ?? 0.42
+        maximumFlashFrequency = (try? container.decode(Double.self, forKey: .maximumFlashFrequency)) ?? 1.5
+        palette = (try? container.decode([MusicPaletteColor].self, forKey: .palette)) ?? Self.soundcheckPalette
+        silenceBehavior = (try? container.decode(MusicSilenceBehavior.self, forKey: .silenceBehavior)) ?? .settle
+        photosensitivitySafeMode = (try? container.decode(Bool.self, forKey: .photosensitivitySafeMode)) ?? true
+        restorePreviousState = (try? container.decode(Bool.self, forKey: .restorePreviousState)) ?? true
+        usesSyntheticDemoPattern = (try? container.decode(Bool.self, forKey: .usesSyntheticDemoPattern)) ?? false
+        metreOverride = try? container.decode(MusicMetre.self, forKey: .metreOverride)
+        timeFeel = (try? container.decode(TimeFeel.self, forKey: .timeFeel)) ?? .auto
+        stereoImage = (try? container.decode(Double.self, forKey: .stereoImage)) ?? 0.7
+        phraseAware = (try? container.decode(Bool.self, forKey: .phraseAware)) ?? true
     }
 }
 
@@ -268,6 +449,9 @@ struct FixtureTopology: Codable, Equatable {
     /// whatever state they were already in — Music Mode never powers them,
     /// snapshots them for restore, or sends them frames.
     var excludedFixtureIDs: Set<String> = []
+    /// Per-fixture choreography roles, keyed by stable device ID. Missing
+    /// entries resolve as `.auto`.
+    var roles: [String: FixtureRole] = [:]
 
     func orderedFixtures(_ fixtures: [MusicFixtureDescriptor]) -> [MusicFixtureDescriptor] {
         let byID = Dictionary(uniqueKeysWithValues: fixtures.map { ($0.id, $0) })
@@ -284,12 +468,14 @@ struct FixtureTopology: Codable, Equatable {
         return ordered
     }
 
-    /// `fixtures` with excluded ones removed, keeping the rest in
-    /// `fixtureOrder` order. Positions are then spread across only the
+    /// `fixtures` with excluded ones and `.off` roles removed, keeping the rest
+    /// in `fixtureOrder` order. Positions are then spread across only the
     /// included fixtures, so excluding one closes the gap it would otherwise
     /// leave in the spatial sweep rather than leaving a dark hole in it.
     func includedFixtures(_ fixtures: [MusicFixtureDescriptor]) -> [MusicFixtureDescriptor] {
-        excludedFixtureIDs.isEmpty ? orderedFixtures(fixtures) : orderedFixtures(fixtures).filter { !excludedFixtureIDs.contains($0.id) }
+        orderedFixtures(fixtures).filter {
+            !excludedFixtureIDs.contains($0.id) && $0.resolvedRole != .off
+        }
     }
 
     func expandedTargets(for fixtures: [MusicFixtureDescriptor]) -> [MusicSpatialTarget] {
@@ -300,6 +486,7 @@ struct FixtureTopology: Codable, Equatable {
         var result: [MusicSpatialTarget] = []
         for fixture in ordered {
             let segmentCount = max(1, fixture.segmentCount)
+            let role = fixture.resolvedRole
             for segment in 0..<segmentCount {
                 let position: Double
                 if layout == .circular {
@@ -310,31 +497,37 @@ struct FixtureTopology: Codable, Equatable {
                 result.append(MusicSpatialTarget(
                     fixtureID: fixture.id,
                     segmentID: fixture.segmentCount > 0 ? segment : nil,
-                    position: position
+                    position: position,
+                    role: role
                 ))
                 flatIndex += 1
             }
         }
         return result
     }
+
+    func role(for fixtureID: String) -> FixtureRole {
+        roles[fixtureID] ?? .auto
+    }
 }
 
 extension FixtureTopology {
     private enum CodingKeys: String, CodingKey {
-        case layout, fixtureOrder, excludedFixtureIDs
+        case layout, fixtureOrder, excludedFixtureIDs, roles
     }
 
-    // Decoded field-by-field, tolerant of a missing `excludedFixtureIDs` key,
-    // so topologies saved before this field existed still decode instead of
-    // the whole per-scope entry falling back to a blank default (losing the
-    // user's saved fixture order). Defined in an extension so the compiler
-    // still synthesizes the memberwise initializer used elsewhere (e.g.
-    // `FixtureTopology()`).
+    // Decoded field-by-field, tolerant of a missing `excludedFixtureIDs` or
+    // `roles` key, so topologies saved before those fields existed still
+    // decode instead of the whole per-scope entry falling back to a blank
+    // default (losing the user's saved fixture order). Defined in an
+    // extension so the compiler still synthesizes the memberwise initializer
+    // used elsewhere (e.g. `FixtureTopology()`).
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         layout = (try? container.decode(FixtureTopologyLayout.self, forKey: .layout)) ?? .leftToRight
         fixtureOrder = (try? container.decode([String].self, forKey: .fixtureOrder)) ?? []
         excludedFixtureIDs = (try? container.decode(Set<String>.self, forKey: .excludedFixtureIDs)) ?? []
+        roles = (try? container.decode([String: FixtureRole].self, forKey: .roles)) ?? [:]
     }
 }
 
@@ -349,12 +542,31 @@ struct MusicFixtureDescriptor: Codable, Equatable, Identifiable {
     let label: String
     let transport: MusicTransportKind
     let segmentCount: Int
+    let role: FixtureRole
 
-    init(id: String, label: String, transport: MusicTransportKind, segmentCount: Int = 0) {
+    init(
+        id: String,
+        label: String,
+        transport: MusicTransportKind,
+        segmentCount: Int = 0,
+        role: FixtureRole = .auto
+    ) {
         self.id = id
         self.label = label
         self.transport = transport
         self.segmentCount = max(0, segmentCount)
+        self.role = role
+    }
+
+    /// Explicit roles win; `.auto` is assigned from the fixture itself so a
+    /// new room still layers without the user tagging every light.
+    var resolvedRole: FixtureRole {
+        if role != .auto { return role }
+        if segmentCount > 0 { return .motion }
+        let folded = label.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "en_US_POSIX"))
+        if id.localizedCaseInsensitiveContains("kick") || folded.contains("downstage") { return .hit }
+        if id.localizedCaseInsensitiveContains("accent") || folded.contains("rear") { return .accent }
+        return .wash
     }
 }
 
@@ -362,6 +574,7 @@ struct MusicSpatialTarget: Codable, Equatable {
     let fixtureID: String
     let segmentID: Int?
     let position: Double
+    let role: FixtureRole
 }
 
 struct MusicLightingState: Equatable {

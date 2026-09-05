@@ -1,0 +1,186 @@
+# Shipping LumenDesk as an installable macOS app
+
+LumenDesk already builds and runs. What it has never had is an artifact you
+can hand to someone: a `.app` that opens on a Mac other than the one that
+compiled it. This document covers the four ways to get there, what each one
+costs, and the specific things about this app that make the choice matter.
+
+Everything here uses tooling that ships with macOS and Xcode. No Homebrew, no
+`create-dmg`, no third-party actions, matching the zero-dependency rule the
+app itself follows.
+
+## The short version
+
+| Route | Cost | Opens on other Macs | Effort |
+| --- | --- | --- | --- |
+| Build in Xcode | Free | No | Trivial |
+| Unsigned DMG | Free | Only after `xattr -dr` | One command |
+| Developer ID, notarized | $99/yr | Yes, double-click | One command plus a one-time key setup |
+| Mac App Store | $99/yr | Yes, via the store | Weeks, and review risk |
+
+If you want people to install this without you talking them through a
+Terminal command, you want the third row.
+
+## Route 1: build it in Xcode
+
+Open `LumenDesk.xcodeproj`, pick the `LumenDesk` scheme and **My Mac**, press
+`⌘R`. To keep the result, choose **Product → Archive**, then **Distribute
+App → Copy App**, and drag the output into `/Applications`.
+
+This is the whole story for one machine. The build is ad-hoc signed, so the
+signature is unique to that compile and macOS treats a rebuilt copy as a
+different app.
+
+## Route 2: an unsigned disk image
+
+```sh
+./scripts/package_macos.sh
+```
+
+With no signing credentials in the environment, the script archives a Release
+build, ad-hoc signs it, and writes `dist/LumenDesk-<version>.dmg` plus a
+SHA-256 file. Apple Silicon refuses to execute a binary with no signature at
+all, which is why the script ad-hoc signs instead of passing
+`CODE_SIGNING_ALLOWED=NO`.
+
+Anyone who downloads that DMG gets stopped by Gatekeeper and has to run:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/LumenDesk.app
+```
+
+Fine for a handful of people who trust you. Not a distribution story.
+
+## Route 3: Developer ID and notarization
+
+This is the real answer for an app that talks to hardware on your LAN and has
+no business being in a store.
+
+### What you need once
+
+1. An Apple Developer Program membership, $99 a year.
+2. A **Developer ID Application** certificate. Create it in Xcode under
+   **Settings → Accounts → Manage Certificates → + → Developer ID
+   Application**, or on the developer portal. It lands in your login keychain.
+3. An **App Store Connect API key** for notarization. Go to App Store Connect
+   → Users and Access → Integrations → App Store Connect API, create a key
+   with the **Developer** role, and download the `.p8`. Apple lets you
+   download it exactly once. Note the Key ID and the Issuer ID next to it.
+
+The API key is the better path. The alternative, an Apple ID plus an
+app-specific password, works and the script supports it, but it ties your
+release pipeline to a human account and to two-factor prompts.
+
+### Build a release locally
+
+```sh
+export TEAM_ID=ABCDE12345
+export NOTARY_KEY_PATH=~/private_keys/AuthKey_XXXXXXXXXX.p8
+export NOTARY_KEY_ID=XXXXXXXXXX
+export NOTARY_ISSUER_ID=aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee
+
+./scripts/package_macos.sh --version 1.0.0
+```
+
+The script finds the Developer ID identity in your keychain on its own. It
+then archives, exports with manual Developer ID signing and a secure
+timestamp, notarizes the app, staples the ticket, builds the DMG, signs the
+DMG, notarizes that too, and staples it.
+
+Both submissions are deliberate. Stapling only the DMG leaves an app that
+needs an online Gatekeeper check the first time someone copies it out. Two
+tickets means the app opens on a Mac with no network at all.
+
+Pass `--skip-notarize` to sign without submitting when you are iterating.
+
+### Build a release in CI
+
+`.github/workflows/release.yml` runs on any `v*` tag. Add these repository
+secrets and it signs and notarizes; leave them out and it still produces an
+unsigned DMG as a workflow artifact, so the pipeline is useful before you pay
+Apple anything.
+
+| Secret | What it is |
+| --- | --- |
+| `MACOS_CERTIFICATE_P12` | Your Developer ID Application cert and private key, exported from Keychain Access as `.p12`, then `base64 -i cert.p12 \| pbcopy` |
+| `MACOS_CERTIFICATE_PASSWORD` | The password you set on that export |
+| `APPLE_TEAM_ID` | Your 10-character team identifier |
+| `MACOS_SIGNING_IDENTITY` | Optional. The full identity string. Omit it and the script reads the keychain |
+| `NOTARY_KEY_P8` | The App Store Connect `.p8`, base64 encoded the same way |
+| `NOTARY_KEY_ID` | Key ID from App Store Connect |
+| `NOTARY_ISSUER_ID` | Issuer ID from App Store Connect |
+
+Then cut a release:
+
+```sh
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+The workflow runs the test suite, imports the certificate into a throwaway
+keychain, packages, publishes a GitHub Release with the DMG and its checksum
+attached, and deletes the keychain whether or not the run succeeded.
+
+## Route 4: the Mac App Store
+
+Technically possible. The app already carries `com.apple.security.app-sandbox`
+and a category, which are the two things people usually have to retrofit.
+
+What it would additionally take: an App Store Connect record, screenshots, a
+privacy nutrition label, and a switch from Developer ID signing to a **Mac App
+Distribution** certificate with a provisioning profile.
+
+Two things I would want to check before committing to this, because I do not
+know how review would land:
+
+- **Screen Recording for system audio.** Music Mode uses ScreenCaptureKit to
+  capture system audio on macOS. ScreenCaptureKit is allowed in store apps,
+  but reviewers do ask why an app needs screen access, and "to read audio"
+  is a justification you would have to make in the review notes.
+- **Vendor names.** The listing describes control of LIFX and Govee hardware
+  over undocumented LAN protocols. That is legal to build and I have no
+  reason to think review blocks it, but neither vendor has blessed it, and
+  trademark use in store metadata is the kind of thing that draws a rejection
+  letter. I am guessing here rather than reporting a rule.
+
+For a local-first LAN utility with no accounts and no in-app purchases, the
+store buys you very little and costs the same $99. Notarized direct download
+is the better fit.
+
+## Why signing matters more for this app than most
+
+Two macOS privacy grants are keyed to an app's code signature, not its path:
+
+- **Screen Recording**, which Music Mode needs for system-audio capture.
+- **Local Network**, which every discovery scan needs on macOS 15 and later.
+
+An ad-hoc signature is regenerated on every build, so macOS sees a new app
+each time and drops the grants. That is the behavior already documented in the
+README under Music Mode troubleshooting. A stable Developer ID signature fixes
+it permanently: users approve once and the grant survives updates.
+
+This is the practical argument for Route 3 even if you only ever install on
+your own machines.
+
+## Versioning
+
+`Info.plist` reads `CFBundleShortVersionString` and `CFBundleVersion` from
+`$(MARKETING_VERSION)` and `$(CURRENT_PROJECT_VERSION)`, both declared in
+`project.yml`. The packaging script overrides them on the `xcodebuild` command
+line, so a release never requires editing a tracked file. Version comes from
+the git tag, build number from the commit count.
+
+If you regenerate the project with `xcodegen generate`, those two settings
+have to stay in `project.yml` or the plist substitutions resolve to empty
+strings and the bundle ships with no version.
+
+## Deliberately not included
+
+- **Sparkle or any in-app updater.** Every option is a third-party package,
+  and the project takes no SPM or CocoaPods dependencies. Updates go through
+  GitHub Releases.
+- **A Homebrew cask.** Worth doing once releases are notarized and stable.
+  A cask that points at an unsigned DMG just moves the Gatekeeper problem.
+- **A styled DMG window.** Background art and icon placement need Finder
+  scripting, which is unreliable on headless CI runners. The image ships with
+  the app and an `/Applications` symlink, which is enough to drag into.

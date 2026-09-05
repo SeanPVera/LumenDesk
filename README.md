@@ -52,6 +52,26 @@ The web client covers Home (favourites, rooms, search, filters, bulk actions), L
 
 The published page at <https://seanpvera.github.io/LumenDesk/> can also drive the bridge (`npm start`, API only), but current browsers gate a website's access to your local network behind a permission prompt, so that route may be blocked. Everything still stays on your own network — the page talks only to the bridge on `127.0.0.1`, with no account and no cloud. The web client currently covers discovery, power, brightness, colour and white, scenes, schedules, and Music Mode; segment control remains native. See [`web/README.md`](web/README.md) for details.
 
+## Installing the Mac app
+
+Grab the disk image from the [latest release](https://github.com/SeanPVera/LumenDesk/releases/latest), open it, and drag **LumenDesk** into Applications. It needs macOS 13 Ventura or later. On first launch, allow the **Local Network** prompt so discovery can reach your bulbs.
+
+If a release is marked unsigned, macOS refuses to open it until you clear the download quarantine:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/LumenDesk.app
+```
+
+### Build your own disk image
+
+```sh
+git clone https://github.com/SeanPVera/LumenDesk.git
+cd LumenDesk
+./scripts/package_macos.sh
+```
+
+The script archives a Release build and writes `dist/LumenDesk-<version>.dmg` alongside its SHA-256. It uses only Xcode and macOS tooling. With a Developer ID certificate and an App Store Connect notary key in the environment, the same command produces a signed, notarized, stapled image that opens with a double-click on any Mac. [`DISTRIBUTION.md`](DISTRIBUTION.md) covers the credential setup, the CI secrets, and why a stable signature matters for the Screen Recording and Local Network grants this app relies on.
+
 ## Supported lighting systems
 
 ### LIFX
@@ -454,6 +474,8 @@ The app also includes an in-app Keyboard Shortcuts view.
 5. If prompted by macOS firewall or privacy dialogs, allow local network communication.
 6. Run a scan from the app or with **⌘R**.
 
+To produce a `.app` you can keep or hand to someone else, use `./scripts/package_macos.sh` rather than the DerivedData build. See [`DISTRIBUTION.md`](DISTRIBUTION.md).
+
 ### Run on iPhone
 
 1. Connect your iPhone over USB, or pair it wirelessly from **Window → Devices and Simulators** in Xcode.
@@ -558,6 +580,8 @@ This rewrites `LumenDesk.xcodeproj` from the declarative project configuration.
 ## Project layout
 
 ```text
+scripts/                            # Release packaging and brand asset generation
+└── package_macos.sh                # Archive, sign, notarize, and wrap the Mac app in a DMG
 web/                                # Browser client and the local bridge it talks to
 ├── app/                            # React web client, published to GitHub Pages
 └── bridge/                         # Node UDP bridge: LIFX/Govee LAN protocols over a loopback HTTP API

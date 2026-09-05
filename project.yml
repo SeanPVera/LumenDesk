@@ -19,9 +19,11 @@ targets:
       path: LumenDesk/Info.plist
       properties:
         CFBundleDisplayName: LumenDesk
-        CFBundleShortVersionString: "1.0"
-        CFBundleVersion: "1"
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        LSApplicationCategoryType: public.app-category.utilities
         LSMinimumSystemVersion: "13.0"
+        NSHumanReadableCopyright: "Copyright © 2026 SeanPVera"
         NSLocalNetworkUsageDescription: LumenDesk discovers and controls LIFX and Govee smart bulbs on your local network.
         NSMicrophoneUsageDescription: LumenDesk analyzes music and room audio levels locally to animate music-reactive lighting effects.
         NSScreenCaptureUsageDescription: LumenDesk can capture system audio from music apps locally to drive music-reactive lightshows.
@@ -41,6 +43,12 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.lumendesk.LumenDesk
+        # Info.plist reads both through $(...), so a release build can
+        # override them on the xcodebuild command line without editing
+        # tracked files. Keep them here or regeneration drops them and
+        # the bundle ships an empty version string.
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
         # The sandbox entitlements only exist on macOS; iOS device builds are
         # signed without an entitlements file (Local Network needs none).
         CODE_SIGN_ENTITLEMENTS[sdk=macosx*]: LumenDesk/LumenDesk.entitlements

@@ -46,14 +46,12 @@ jobs:
             test
 
       - name: Import signing certificate
-        id: signing
         env:
           CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
           CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
         run: |
           if [[ -z "$CERTIFICATE_P12" ]]; then
             echo "No MACOS_CERTIFICATE_P12 secret. Building unsigned."
-            echo "available=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -84,7 +82,6 @@ jobs:
           # already had on the search list.
           security list-keychain -d user -s "$KEYCHAIN_PATH" \
             $(security list-keychains -d user | tr -d ' "')
-          echo "available=true" >> "$GITHUB_OUTPUT"
 
       - name: Write notary API key
         env:
@@ -100,6 +97,7 @@ jobs:
           echo "NOTARY_KEY_PATH=$KEY_PATH" >> "$GITHUB_ENV"
 
       - name: Package
+        id: package
         env:
           SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
           TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -112,6 +110,10 @@ jobs:
             ARGS+=(--version "$INPUT_VERSION")
           fi
           ./scripts/package_macos.sh "${ARGS[@]}"
+
+          # Whether the artifact is notarized is what decides the release
+          # notes, and only the script knows it.
+          echo "mode=$(cat dist/*.mode)" >> "$GITHUB_OUTPUT"
 
       - name: Upload disk image
         uses: actions/upload-artifact@v4
@@ -126,7 +128,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
-          SIGNED: ${{ steps.signing.outputs.available }}
+          MODE: ${{ steps.package.outputs.mode }}
         run: |
           TAG="${GITHUB_REF_NAME}"
           DMG="$(ls dist/*.dmg)"
@@ -138,7 +140,7 @@ jobs:
             echo "Requires macOS 13 Ventura or later. On first launch, allow the Local Network"
             echo "prompt so discovery can reach your bulbs."
             echo
-            if [[ "$SIGNED" != "true" ]]; then
+            if [[ "$MODE" != "notarized" ]]; then
               echo "### This build is not notarized"
               echo
               echo "macOS blocks it on first launch. Clear the download quarantine once,"
@@ -151,6 +153,13 @@ jobs:
               echo "To click instead of typing: on Ventura and Sonoma, Control-click the app"
               echo "and choose Open. Sequoia removed that shortcut, so let the first launch"
               echo "get blocked, then use System Settings > Privacy & Security > Open Anyway."
+              echo
+            fi
+
+            if [[ "$MODE" == "unsigned" ]]; then
+              echo "This build is ad-hoc signed, so macOS sees each release as a different"
+              echo "app and forgets its Screen Recording and Local Network approvals. Expect"
+              echo "to grant both again after updating."
               echo
             fi
             echo "\`\`\`"

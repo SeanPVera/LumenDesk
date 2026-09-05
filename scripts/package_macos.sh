@@ -318,10 +318,17 @@ fi
 
 shasum -a 256 "$DMG_PATH" | awk '{print $1}' > "$DMG_PATH.sha256"
 
+# Record which mode actually produced this image. Callers need it to say the
+# right thing about Gatekeeper, and "a certificate was available" is not the
+# same question as "did this get notarized".
+MODE_PATH="$OUTPUT_DIR/$APP_NAME-$VERSION.mode"
+printf '%s\n' "$MODE" > "$MODE_PATH"
+
 log "Done"
 printf '  %s\n' "$DMG_PATH"
 printf '  sha256 %s\n' "$(cat "$DMG_PATH.sha256")"
 printf '  mode   %s\n' "$MODE"
+printf '  %s\n' "$MODE_PATH"
 
 if [[ "$MODE" != "notarized" ]]; then
     cat <<'HINT'

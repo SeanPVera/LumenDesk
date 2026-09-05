@@ -46,6 +46,11 @@ SHA-256 file. Apple Silicon refuses to execute a binary with no signature at
 all, which is why the script ad-hoc signs instead of passing
 `CODE_SIGNING_ALLOWED=NO`.
 
+It also writes `dist/LumenDesk-<version>.mode`, naming which of the modes
+actually produced the image. The release workflow reads that file to decide
+what the release notes say about Gatekeeper, because whether a certificate was
+available and whether the artifact got notarized are different questions.
+
 ### Getting past Gatekeeper
 
 The DMG is not notarized, so a Mac that downloaded it refuses to open the app.

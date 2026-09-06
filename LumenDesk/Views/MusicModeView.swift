@@ -236,7 +236,7 @@ struct MusicModeView: View {
         VStack(alignment: .leading, spacing: 14) {
             LumenEyebrow(text: "Show balance", tint: Lumen.beamDim, size: 10)
             if showsPlainHelp {
-                Text("A preset sets all of these for you. Move one and the preset becomes Custom, which keeps your version.")
+                Text("A preset sets all of these for you. Move one and the preset becomes Custom. Picking a named preset afterwards writes over what you changed.")
                     .font(.caption)
                     .foregroundStyle(Lumen.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)

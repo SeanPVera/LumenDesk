@@ -921,9 +921,13 @@ private final class MusicCaptureStub: SystemAudioCapturing {
 final class MusicModeHelpCopyTests: XCTestCase {
     /// Words that mean nothing to someone who just wants their lamps to blink
     /// along with a song. Appearing in plain-language copy is a failure.
+    ///
+    /// "downstage" is deliberately absent: `resolvedRole` matches that literal
+    /// string in a light's name, so the copy explaining Auto has to quote it
+    /// for the explanation to be true and actionable.
     private let jargon = [
         "topology", "fixture", "rgbic", "hsbk", "onset", "vendor",
-        "razer", "ptreal", "downstage", "coalesc", "choreograph",
+        "razer", "ptreal", "coalesc", "choreograph",
         "normalized", "hysteresis", "entitlement", "daw"
     ]
 
@@ -1001,6 +1005,17 @@ final class MusicModeHelpCopyTests: XCTestCase {
             ("readout", MusicModeHelp.readout)
         ]
         for (name, copy) in strings { assertPlain(copy, label: name) }
+    }
+
+    /// The Auto role reads a light's name. If the copy stops naming the words
+    /// it matches on, a user has no way to steer the assignment and the
+    /// explanation becomes a claim about intelligence the app does not have.
+    func testAutoRoleCopyNamesTheWordsItMatchesOn() {
+        let copy = FixtureRole.auto.plainSummary.lowercased()
+        for word in ["kick", "downstage", "rear", "accent"] {
+            XCTAssertTrue(copy.contains(word), "Auto copy no longer mentions \(word)")
+        }
+        XCTAssertTrue(copy.contains("segment"), "Auto copy no longer mentions the segment check")
     }
 
     /// The flash ceiling is a safety promise, so the copy has to keep stating

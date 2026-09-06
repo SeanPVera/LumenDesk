@@ -73,7 +73,7 @@ export const PRESET_COPY: Record<
 export const ROLE_COPY: Record<FixtureRole, { name: string; plain: string }> = {
   auto: {
     name: "Auto",
-    plain: "Let LumenDesk choose. Strips get the travelling colour, lights near you take the punch, lights behind you take the second colour, the rest fill the room.",
+    plain: 'Let LumenDesk choose from the light\'s name: one with "kick" or "downstage" takes the punch, one with "rear" or "accent" takes the second colour, and the rest fill the room. The bridge does not report segments, so nothing gets the travelling colour on its own here. Pick Motion by hand for a strip.',
   },
   wash: { name: "Wash", plain: "Fills the room. Bright and steady with a soft pulse underneath." },
   hit: { name: "Hit", plain: "Punches on the beat. Give this to the light you want the kick drum to land in." },
@@ -85,27 +85,27 @@ export const ROLE_COPY: Record<FixtureRole, { name: string; plain: string }> = {
 export const SOURCE_COPY: Record<string, { name: string; plain: string }> = {
   microphone: {
     name: "Microphone",
-    plain: "Listens to the room, so the music has to be audible. The browser asks for microphone access the first time.",
+    plain: "Starts the show listening to the room, so the music has to be audible. The browser asks for microphone access the first time.",
   },
   file: {
     name: "Audio file",
-    plain: "Pick a song from this computer. The page plays it and lights to it, which is the most reliable option.",
+    plain: "Pick a song from this computer and the show starts on it. The page plays the track and lights to it, which is the most reliable option.",
   },
   midi: {
     name: "MIDI clock",
-    plain: "Follows a beat sent by DJ software, a drum machine, or recording software over MIDI.",
+    plain: "Starts the show on a beat sent by DJ software, a drum machine, or recording software over MIDI.",
   },
   demo: {
     name: "Demo groove",
-    plain: "A built-in rhythm with no audio at all. Use it to see what the lights do before you commit to a track.",
+    plain: "Starts the show on a built-in rhythm with no audio at all. Use it to see what the lights do before you commit to a track.",
   },
 };
 
 export const MUSIC_HELP = {
   steps: [
-    "Pick where the sound comes from: an audio file, the microphone, MIDI, or the built-in demo groove.",
-    "Pick a preset. Balanced is the safe first choice, and you can change it while the music plays.",
-    "Press Start. The meters move, your lights follow, and Stop puts them back.",
+    "Pick a preset from the panel below. Balanced is the safe first choice, and you can change it while the show runs.",
+    "Choose where the sound comes from. Each source button starts the show as soon as you pick it, and the microphone or a file may ask for permission first. Start then restarts whatever source you last chose.",
+    "Stop ends the show. The lights hold the last colour they were sent, so apply a scene from Library if you want them back where they were.",
   ],
   readout:
     'The bars show what the page is hearing: overall volume, then bass, mids and highs. The dot flashes on each beat. Once the tempo locks — usually about four seconds of steady rhythm — the label changes from "Beat" to the speed in beats per minute and how many beats are in a bar.',

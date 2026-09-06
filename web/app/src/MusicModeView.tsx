@@ -69,9 +69,9 @@ export function MusicModeView({
         <p className="eyebrow">Music Mode</p>
         <h2>Your lights follow the music.</h2>
         <p>
-          Pick where the sound comes from, pick a preset, press Start. The music is analysed in
-          this browser tab and never uploaded anywhere; only the resulting colours go to the
-          bridge running on your own machine.
+          Pick a preset, then pick where the sound comes from. The music is analysed in this
+          browser tab and never uploaded anywhere; only the resulting colours go to the bridge
+          running on your own machine.
         </p>
         <ol className="steps">
           {MUSIC_HELP.steps.map(step => (

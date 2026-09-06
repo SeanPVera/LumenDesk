@@ -678,7 +678,7 @@ extension MusicModePreset {
         case .waltz:
             return "Counts in threes. The first beat takes the room, the next two breathe. For waltzes, jazz in three, and a lot of folk music."
         case .custom:
-            return "Your own settings. Moving any slider or switch below saves the result here, and it stays put until you change it again."
+            return "Your own settings. Moving any slider or switch puts you here. Picking a named preset afterwards writes over these values, so there is no going back to them."
         }
     }
 
@@ -703,7 +703,7 @@ extension FixtureRole {
     var plainSummary: String {
         switch self {
         case .auto:
-            return "Let LumenDesk choose. Strips get the traveling color, lights near you take the punch, lights behind you take the second color, and everything else fills the room."
+            return "Let LumenDesk choose from the light itself. Anything with segments gets the traveling color. A light with \"kick\" or \"downstage\" in its name takes the punch, one with \"rear\" or \"accent\" takes the second color, and the rest fill the room. Rename a light if you want it picked for a job."
         case .wash:
             return "Fills the room with light. Bright and steady, with a soft pulse underneath."
         case .hit:
@@ -773,10 +773,10 @@ extension FixtureTopologyLayout {
     /// How to describe where the lights are without the word "topology".
     var plainSummary: String {
         switch self {
-        case .leftToRight: return "List your lights the way they sit across the room, left side first."
-        case .frontToBack: return "List your lights from the closest to the furthest away."
-        case .circular: return "Your lights ring the room, so the last one sits next to the first."
-        case .custom: return "Your own order. Use the arrows to move a light up or down the list."
+        case .leftToRight: return "A label for a list you have put in left-to-right order yourself. The sweep runs from the first light to the last."
+        case .frontToBack: return "A label for a list you have put in near-to-far order yourself. The sweep runs the same way, first light to last."
+        case .circular: return "The one that changes the show: the sweep wraps from the last light back to the first, for lights that ring the room."
+        case .custom: return "Your own order, set with the arrows. The sweep runs first light to last, the same as the two named orders."
         }
     }
 }
@@ -803,7 +803,7 @@ enum MusicModeHelp {
                  detail: "Choose which lights are in the show at the top right, then pick a preset. Balanced is the safe first choice. You can change presets while the music is playing."),
             Step(id: 3,
                  title: "Press Start Music Mode",
-                 detail: "The meters below start moving and your lights follow the music. Press Stop when you are done and the lights go back to how you left them.")
+                 detail: "The meters below start moving and your lights follow the music. Press Stop when you are done. Every light goes back to how you left it, unless you switch off Restore previous state in the advanced controls.")
         ]
         #else
         return [
@@ -815,7 +815,7 @@ enum MusicModeHelp {
                  detail: "Choose which lights are in the show at the top, then pick a preset. Balanced is the safe first choice. You can change presets while the music is playing."),
             Step(id: 3,
                  title: "Press Start Music Mode",
-                 detail: "The meters below start moving and your lights follow the music. Press Stop when you are done and the lights go back to how you left them.")
+                 detail: "The meters below start moving and your lights follow the music. Press Stop when you are done. Every light goes back to how you left it, unless you switch off Restore previous state in the advanced controls.")
         ]
         #endif
     }
@@ -828,8 +828,8 @@ enum MusicModeHelp {
     static let beatSensitivity = "How strongly the lights answer the beat. Turn it up if the room feels flat, down if it feels twitchy."
     static let bassSensitivity = "How much the low end — kick drum and bass — drives the lights."
     static let percussionSensitivity = "How much snares, hats and claps show up as accents."
-    static let colorChangeIntensity = "How often the color changes. Low holds one color for a long time; high moves through the palette quickly."
-    static let movementAmount = "How far color travels across your lights. At zero, every light does the same thing at the same time."
+    static let colorChangeIntensity = "How often the color changes, and how far apart the colors sit across the room. Low holds one color for a long time and keeps the room close to a single shade."
+    static let movementAmount = "How far the brightness wave travels across your lights. At zero the wave stops, though color still spreads across the room and the stereo setting can still lift one end of it."
     static let movementSpeed = "How fast that travel crosses the room."
     static let minimumBrightness = "The dimmest the lights are allowed to go between beats. Raise it if the room keeps going too dark."
     static let maximumBrightness = "The brightest a beat is allowed to push the lights."
@@ -838,7 +838,7 @@ enum MusicModeHelp {
     static let maximumFlashFrequency = "The most flashes allowed per second. LumenDesk never goes above three per second no matter what this says."
     static let photosensitivitySafeMode = "On by default. Blocks flashing outright, because flashing light can trigger seizures and migraines in some people. Leave it on unless you know everyone in the room is fine with it."
     static let palette = "The set of colors the show picks from. It changes the mood more than any other single control."
-    static let stereoImage = "How much the left and right of the recording spread across your room. At zero the whole room reacts as one; turn it up and lights on the left follow the left channel."
+    static let stereoImage = "How much the balance of the recording tilts the room. At zero every light gets the same level. Turn it up and a mix leaning one way brightens the lights at that end of your list."
     static let phraseAware = "Lets the show notice when a section is building and lift with it, instead of treating every bar the same."
     static let restorePreviousState = "When you press Stop, put every light back exactly how it was before the show started."
     static let reducedMotion = "If Reduced Motion is on in your system accessibility settings, LumenDesk keeps movement small and never flashes."
@@ -851,7 +851,7 @@ enum MusicModeHelp {
     static let fileSource = "Pick a song file and LumenDesk plays it and lights to it. Useful on iPhone and iPad, or when you want one specific track rather than everything the device is playing."
     static let midiSource = "Follows a beat sent by DJ software, a drum machine, or recording software over MIDI. Use this when you want the lights locked to that clock instead of working the tempo out by ear."
 
-    static let roles = "Every light gets a job. Auto picks one for you and is fine for most rooms — change a light's job only if you want that specific light doing something else."
-    static let order = "Movement runs down this list in order, so the list should match where the lights actually sit in the room. Use the arrows to reorder, and the eye button to leave a light out of the show entirely."
+    static let roles = "Every light gets a job. Auto reads the light's own name and segment count rather than knowing where it sits, so set a job by hand whenever you want a specific light doing a specific thing."
+    static let order = "Movement runs down this list in order, so the list should match where the lights actually sit in the room. The arrows are what reorder it; the layout above is a label for the order you have already set, apart from Circular, which wraps the sweep from the last light back to the first. The eye button leaves a light out of the show entirely."
     static let sharedSource = "Every room in a show listens to the same audio source. To run a second room, start it on the same source; to switch sources, stop the shows that are already running."
 }

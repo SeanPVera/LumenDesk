@@ -332,7 +332,7 @@ Press **Stop** when you are done. Unless you turn it off, every light goes back 
 | **Soundcheck** | The look LumenDesk had before Music Mode, minus the harsh flashing. | Anyone who liked the old one |
 | **Custom** | Whatever you last changed by hand. | Your own settings |
 
-You can change presets while the music is playing. Moving any slider switches the preset to **Custom** and keeps your version.
+You can change presets while the music is playing. Moving any slider switches the preset to **Custom**, and picking a named preset afterwards writes over those values, so a customised setup does not survive a trip through the other presets.
 
 #### Giving each light a job
 
@@ -340,14 +340,14 @@ Under **Which light does what**, every light in the room gets a job. **Auto** pi
 
 | Job | What that light does |
 | --- | --- |
-| **Auto** | LumenDesk decides: strips get the travelling colour, lights near you take the punch, lights behind you take the second colour, the rest fill the room. |
+| **Auto** | LumenDesk decides from the light itself. Anything with segments gets the travelling colour. A light with "kick" or "downstage" in its name takes the punch, one with "rear" or "accent" takes the second colour, the rest fill the room. Rename a light to steer this. |
 | **Wash** | Fills the room. Bright and steady with a soft pulse underneath. |
 | **Hit** | Punches on the beat. Give it to the light you want the kick drum to land in. |
 | **Accent** | Answers the snare and cymbals in a second colour. Best off to one side. |
 | **Motion** | Colour runs across it in time with the music. Best on a strip. |
 | **Off** | Sits the show out and keeps whatever it is showing right now. |
 
-The list order matters, because movement travels down it. Put the lights in the order they actually sit in the room, using the arrows to reorder or one of the ready-made layouts (left to right, front to back, or circular for lights that ring the room). The eye button leaves a light out of the show entirely. Both of those are locked while a show is running, so stop it first.
+The list order matters, because movement travels down it. Put the lights in the order they actually sit in the room using the arrows, which are the only thing that reorders the list. The layout picker beside it is a label for the order you have already set: **Left to right**, **Front to back** and **Custom order** all sweep from the first light to the last. **Circular** is the one that changes the show, wrapping the sweep from the last light back to the first. The eye button leaves a light out entirely, and both the eye button and Off are locked while a show is running, so stop it first.
 
 #### What the meters are telling you
 
@@ -368,12 +368,12 @@ You need none of these to run a show. Turn on **Explain the controls** at the to
 | Beat sensitivity | Makes the lights answer the beat harder. Turn it down if the room feels twitchy. |
 | Bass sensitivity | Gives the kick drum and bass line more control over the lights. |
 | Percussion sensitivity | Brings out snares, hats and claps as accents. |
-| Color-change intensity | Changes colour more often. Low holds one colour a long time. |
-| Movement amount | Sends colour further across the room. At zero, every light does the same thing at once. |
+| Color-change intensity | Changes colour more often, and spreads the palette further across the room. Low holds one colour a long time and keeps the room near a single shade. |
+| Movement amount | Sends the brightness wave further across the room. At zero the wave stops, though colour spread and the stereo tilt still vary from light to light. |
 | Movement speed | Makes that travel faster. |
 | Minimum brightness | Keeps the lights from dropping as dark between beats. |
 | Maximum brightness | Lets a beat push the lights brighter. |
-| Stereo image | Spreads the left and right of the recording across your room. At zero the room reacts as one. |
+| Stereo image | Tilts the room with the balance of the recording. At zero every light gets the same level; turn it up and a mix leaning one way brightens the lights at that end of your list. |
 
 Three switches are worth knowing:
 
@@ -390,7 +390,7 @@ If **Reduced Motion** is on in your system accessibility settings, LumenDesk kee
 | Lights do nothing | Nothing is playing, or the permission is not granted yet. On a Mac, check Screen Recording; on iPhone, check the microphone. |
 | One light never joins in | It is set to **Off**, or the eye button excluded it. Both are on purpose, and both need the show stopped to change. |
 | The readout never leaves **Beat** | The music has no steady pulse to lock onto. Rubato, free playing and dense percussion all do this. The show still works. |
-| The room feels behind the music | Raise **Beat sensitivity**. If it started mid-song, stop and start again so the tempo locks from a clean beat. |
+| The room feels behind the music | Check the readout. Until it shows a BPM the show is answering each sound as it arrives, so it always trails a little; give it a few seconds of steady rhythm to lock. On iPhone the microphone also adds the time the sound takes to cross the room, and a congested Wi-Fi network or a slow bulb adds the rest. **Beat sensitivity** will not help here: it changes how hard a pulse hits, not when. |
 | A second room will not start | Every room in a show shares one audio source. Start the second room on the same source, or stop the first one before switching sources. |
 | Colours never change | **Color-change intensity** is low, or the palette is a set of near-identical colours. |
 

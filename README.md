@@ -312,6 +312,10 @@ Music Mode is a first-class section of the Lighting Library. It turns the existi
 - Demo Mode includes LIFX-style bulbs, Govee bulbs, segmented Govee fixtures, and deterministic grooves (four-on-the-floor, half-time, waltz, odd metre, breaks) with no copyrighted audio.
 - Sources: system audio on macOS, microphone on iOS, a user-selected audio file on both, and MIDI beat clock.
 
+Rooms share one live audio source. Start additional rooms with the same source; stop the other shows before choosing a different file or switching between system audio and MIDI. Stop also cancels a pending audio-permission request. A failed start restores the original lighting state regardless of the restore-on-stop preference.
+
+During a show, you can change an included fixture between wash, hit, accent, motion, and auto. Stop first to change inclusion or move a fixture into or out of Off. The restore-on-stop preference can be changed while the show runs. Half-time pulses span two detected beats while palette and movement timing retain the detected bar length.
+
 On macOS the default source is system audio and requires Screen Recording permission. On iPhone and iPad the default source is the microphone. Open Audio File uses the existing user-selected file grant so iOS can follow a track the microphone cannot hear. MIDI clock needs a MIDI interface or IAC bus. See [Music Mode architecture](MUSIC_MODE_ARCHITECTURE.md) for the data flow and safety boundaries.
 
 ### Animated effects

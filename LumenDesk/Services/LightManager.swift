@@ -57,7 +57,7 @@ final class LightManager: ObservableObject {
     @Published private(set) var musicModeConfiguration = MusicModeConfiguration.configuration(for: .soundcheck)
     @Published private(set) var fixtureTopologies: [String: FixtureTopology] = [:]
 
-    let musicModeController = AudioReactiveSessionController()
+    let musicModeController: AudioReactiveSessionController
 
     private var errorClearTask: Task<Void, Never>?
     private var lifx: LIFXClient?
@@ -145,13 +145,15 @@ final class LightManager: ObservableObject {
         confirmationCoordinator: ConfirmationCoordinator? = nil,
         scheduleEngine: ScheduleEngine? = nil,
         persistenceStore: ApplicationPersistence? = nil,
-        commandCoordinator: CommandCoordinator? = nil
+        commandCoordinator: CommandCoordinator? = nil,
+        musicModeController: AudioReactiveSessionController? = nil
     ) {
         self.demoWorkspaceController = demoWorkspaceController ?? DemoWorkspaceController()
         self.confirmationCoordinator = confirmationCoordinator ?? ConfirmationCoordinator(defaults: defaults)
         self.scheduleEngine = scheduleEngine ?? ScheduleEngine()
         self.persistenceStore = persistenceStore ?? PersistenceStore.live(legacyDefaults: defaults)
         self.commandCoordinator = commandCoordinator ?? CommandCoordinator()
+        self.musicModeController = musicModeController ?? AudioReactiveSessionController()
         let persistedState = self.persistenceStore.load()
         rooms = persistedState.rooms
         favoriteIDs = persistedState.favoriteIDs
@@ -882,6 +884,11 @@ final class LightManager: ObservableObject {
         }
 
         let normalized = configuration.normalized(reducedMotion: reducedMotion)
+        guard (isDemoMode && normalized.usesSyntheticDemoPattern)
+                || musicModeController.canStartCapture(capture, replacing: scope) else {
+            publishError("Music Mode shares one audio source across rooms. Stop the other shows before selecting a different source.")
+            return
+        }
         let inherited = stopEffects(touching: Set(targets.map(\.id)))
         let startingSnapshot = targets.map { inherited[$0.id] ?? snapshot($0) }
         recordChange(targets)
@@ -927,8 +934,11 @@ final class LightManager: ObservableObject {
                         detail: "\(normalized.preset.displayName) · \(self.scopeDisplayName(scope))"
                     )
                 case .needsScreenRecording, .unavailable:
-                    self.stopEffect(scope: scope, restore: true)
-                    self.publishError(self.musicModeFailureMessage(for: result))
+                    // Failed startup is a rollback even when the user asked
+                    // to keep the final look after a successful show.
+                    self.stopEffect(scope: scope, restore: false)
+                    self.restoreDeviceStates(run.snapshot)
+                    self.publishError(self.musicModeFailureMessage(for: result, capture: capture))
                 }
             }
         )
@@ -977,7 +987,15 @@ final class LightManager: ObservableObject {
 
     /// User-facing message when Music Mode can't start its audio source.
     /// macOS uses system audio (Screen Recording); iOS uses the microphone.
-    private func musicModeFailureMessage(for result: AudioCaptureService.AudioStartResult) -> String {
+    private func musicModeFailureMessage(for result: AudioCaptureService.AudioStartResult, capture: MusicCapturePreference) -> String {
+        switch capture {
+        case .file:
+            return "Music Mode couldn't open or play that audio file. Choose an accessible, supported audio file and try again."
+        case .midiClock:
+            return "Music Mode couldn't connect to a MIDI source. Connect your MIDI device or enable a MIDI clock output, then try again."
+        case .platformDefault:
+            break
+        }
         #if os(macOS)
         switch result {
         case .needsScreenRecording:
@@ -2444,6 +2462,7 @@ extension LightManager {
         musicModeConfiguration = configuration.normalized()
         persistApplicationState()
         for scope in musicModeController.activeScopeIDs {
+            effectRuns[scope]?.restorePreviousState = musicModeConfiguration.restorePreviousState
             musicModeController.update(
                 scope: scope,
                 configuration: musicModeConfiguration,
@@ -2485,7 +2504,11 @@ extension LightManager {
             // `fixtureTopology(for:)` (not a raw dictionary lookup) so a
             // scope with nothing persisted yet correctly freezes to no
             // exclusions rather than falling through to the new value.
-            normalized.excludedFixtureIDs = fixtureTopology(for: scope).excludedFixtureIDs
+            let activeTopology = fixtureTopology(for: scope)
+            normalized.excludedFixtureIDs = activeTopology.excludedFixtureIDs
+            for id in available where (activeTopology.role(for: id) == .off) != (normalized.role(for: id) == .off) {
+                normalized.roles[id] = activeTopology.roles[id]
+            }
         }
         fixtureTopologies[topologyKey(for: scope)] = normalized
         persistApplicationState()

@@ -96,13 +96,19 @@ final class AudioCaptureService {
     var onSnapshot: ((AudioReactiveSnapshot) -> Void)?
 
     #if os(macOS)
-    private var systemAudioCapture: SystemAudioCapture?
+    private var systemAudioCapture: SystemAudioCapturing?
+    private let makeSystemAudioCapture: (@escaping (AVAudioPCMBuffer) -> Void) -> SystemAudioCapturing
+
+    init(makeSystemAudioCapture: @escaping (@escaping (AVAudioPCMBuffer) -> Void) -> SystemAudioCapturing = { SystemAudioCapture(onBuffer: $0) }) {
+        self.makeSystemAudioCapture = makeSystemAudioCapture
+    }
     #endif
     private var playerNode: AVAudioPlayerNode?
     private var playingFile: AVAudioFile?
     private var captureMode: CaptureMode = .idle
     private var midiSource: MIDIClockSource?
     private var fileTapInstalled = false
+    private var securityScopedFileURL: URL?
 
     private enum CaptureMode {
         case idle
@@ -143,10 +149,14 @@ final class AudioCaptureService {
             completion(.started)
             return
         }
+        if isStarting {
+            startCompletions.append(completion)
+            return
+        }
         stop()
         startCompletions.append(completion)
-        guard !isStarting else { return }
         isStarting = true
+        captureMode = .live
         startGeneration += 1
         let generation = startGeneration
         resetAnalyzer(sourceDescription: preferredSourceDescription)
@@ -154,10 +164,10 @@ final class AudioCaptureService {
         // macOS: system audio (Apple Music / other apps) is the SOLE source.
         // The microphone is never started here, so room noise can't pollute the
         // music analysis, and there is no silent mic fallback.
-        let capture = SystemAudioCapture { [weak self] buffer in
+        let capture = makeSystemAudioCapture { [weak self] buffer in
             // SystemAudioCapture already created an owned mono buffer. Avoid
             // allocating and copying it a second time before analysis.
-            self?.consume(buffer, requiresOwnedCopy: false)
+            self?.consume(buffer, requiresOwnedCopy: false, generation: generation)
         }
         systemAudioCapture = capture
         capture.start { [weak self] result in
@@ -184,7 +194,7 @@ final class AudioCaptureService {
         }
         #else
         // iOS: microphone is the only available source (no ScreenCaptureKit).
-        startMicrophone { [weak self] started in
+        startMicrophone(generation: generation) { [weak self] started in
             guard let self, self.startGeneration == generation else { return }
             self.finishStart(started ? .started : .unavailable)
         }
@@ -226,14 +236,15 @@ final class AudioCaptureService {
     }
 
     #if os(iOS)
-    private func startMicrophone(completion: @escaping (Bool) -> Void) {
+    private func startMicrophone(generation: Int, completion: @escaping (Bool) -> Void) {
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .authorized:
-            completion(start())
+            completion(start(generation: generation))
         case .notDetermined:
             AVCaptureDevice.requestAccess(for: .audio) { [weak self] granted in
                 DispatchQueue.main.async {
-                    completion(granted && (self?.start() ?? false))
+                    guard let self, self.startGeneration == generation else { return }
+                    completion(granted && self.start(generation: generation))
                 }
             }
         default:
@@ -242,7 +253,7 @@ final class AudioCaptureService {
     }
 
     @discardableResult
-    private func start() -> Bool {
+    private func start(generation: Int) -> Bool {
         guard !engine.isRunning else { return true }
         let session = AVAudioSession.sharedInstance()
         try? session.setCategory(.playAndRecord, options: [.mixWithOthers, .defaultToSpeaker])
@@ -252,7 +263,7 @@ final class AudioCaptureService {
         guard format.channelCount > 0 else { return false }
 
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
-            self?.consume(buffer)
+            self?.consume(buffer, generation: generation)
         }
 
         do {
@@ -265,7 +276,7 @@ final class AudioCaptureService {
     }
     #endif
 
-    private func consume(_ buffer: AVAudioPCMBuffer, requiresOwnedCopy: Bool = true) {
+    private func consume(_ buffer: AVAudioPCMBuffer, requiresOwnedCopy: Bool = true, generation: Int) {
         guard analysisSlot.wait(timeout: .now()) == .success else { return }
         let hostTime = ProcessInfo.processInfo.systemUptime
         let analysisBuffer: AVAudioPCMBuffer
@@ -285,7 +296,7 @@ final class AudioCaptureService {
             guard snapshot.beat > 0 || hostTime - self.lastPublishedHostTime >= self.publicationInterval else { return }
             self.lastPublishedHostTime = hostTime
             DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
+                guard let self, self.startGeneration == generation else { return }
                 self.onLevel?(snapshot.level)
                 self.onSnapshot?(snapshot)
                 for subscriber in self.snapshotSubscribers.values { subscriber(snapshot) }
@@ -294,25 +305,31 @@ final class AudioCaptureService {
     }
 
     func startFromFile(url: URL, completion: @escaping (AudioStartResult) -> Void) {
+        if isRunning, captureMode == .file, playingFile?.url == url {
+            completion(.started)
+            return
+        }
         stop()
+        let generation = startGeneration
+        if url.startAccessingSecurityScopedResource() { securityScopedFileURL = url }
         resetAnalyzer(sourceDescription: "Audio file")
         do {
             let file = try AVAudioFile(forReading: url)
             let player = AVAudioPlayerNode()
             engine.attach(player)
+            playerNode = player
+            playingFile = file
             engine.connect(player, to: engine.mainMixerNode, format: file.processingFormat)
             #if os(iOS)
             let session = AVAudioSession.sharedInstance()
             try? session.setCategory(.playback, options: [.mixWithOthers])
             try? session.setActive(true)
             #endif
-            engine.mainMixerNode.installTap(onBus: 0, bufferSize: 1024, format: file.processingFormat) { [weak self] buffer, _ in
-                self?.consume(buffer)
+            player.installTap(onBus: 0, bufferSize: 1024, format: file.processingFormat) { [weak self] buffer, _ in
+                self?.consume(buffer, generation: generation)
             }
             fileTapInstalled = true
             try engine.start()
-            playerNode = player
-            playingFile = file
             captureMode = .file
             isRunning = true
             scheduleFileLoop()
@@ -326,10 +343,15 @@ final class AudioCaptureService {
     }
 
     func startFromMIDI(completion: @escaping (AudioStartResult) -> Void) {
+        if isRunning, captureMode == .midi {
+            completion(.started)
+            return
+        }
         stop()
+        let generation = startGeneration
         resetAnalyzer(sourceDescription: "MIDI clock")
         let source = MIDIClockSource { [weak self] snapshot in
-            self?.publishSnapshot(snapshot)
+            self?.publishSnapshot(snapshot, generation: generation)
         }
         guard source.start() else {
             completion(.unavailable)
@@ -344,9 +366,11 @@ final class AudioCaptureService {
 
     private func scheduleFileLoop() {
         guard let player = playerNode, let file = playingFile else { return }
+        let generation = startGeneration
         player.scheduleFile(file, at: nil) { [weak self] in
             DispatchQueue.main.async {
-                guard let self, self.captureMode == .file else { return }
+                guard let self, self.captureMode == .file,
+                      self.startGeneration == generation else { return }
                 self.scheduleFileLoop()
             }
         }
@@ -354,7 +378,7 @@ final class AudioCaptureService {
 
     private func teardownFilePlayback() {
         if fileTapInstalled {
-            engine.mainMixerNode.removeTap(onBus: 0)
+            playerNode?.removeTap(onBus: 0)
             fileTapInstalled = false
         }
         playerNode?.stop()
@@ -363,17 +387,19 @@ final class AudioCaptureService {
         }
         playerNode = nil
         playingFile = nil
+        securityScopedFileURL?.stopAccessingSecurityScopedResource()
+        securityScopedFileURL = nil
         if engine.isRunning { engine.stop() }
     }
 
-    private func publishSnapshot(_ snapshot: AudioReactiveSnapshot) {
+    private func publishSnapshot(_ snapshot: AudioReactiveSnapshot, generation: Int) {
         analysisQueue.async { [weak self] in
             guard let self else { return }
             let hostTime = ProcessInfo.processInfo.systemUptime
-            guard snapshot.beat > 0 || hostTime - self.lastPublishedHostTime >= self.publicationInterval else { return }
+            guard !snapshot.isTempoLocked || snapshot.beat > 0 || hostTime - self.lastPublishedHostTime >= self.publicationInterval else { return }
             self.lastPublishedHostTime = hostTime
             DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
+                guard let self, self.startGeneration == generation else { return }
                 self.onLevel?(snapshot.level)
                 self.onSnapshot?(snapshot)
                 for subscriber in self.snapshotSubscribers.values { subscriber(snapshot) }
@@ -419,12 +445,8 @@ typealias AudioLevelMonitor = AudioCaptureService
 final class MIDIClockSource {
     private var client: MIDIClientRef = 0
     private var port: MIDIPortRef = 0
-    private var ticks = 0
-    private var lastTickTime: TimeInterval = 0
-    private var interval: TimeInterval = 0.5
-    private var beatCount = 0
+    private var clock = MIDIBeatClockTracker()
     private var running = false
-    private var startedAt: TimeInterval = 0
     private let onSnapshot: (AudioReactiveSnapshot) -> Void
     private let lock = NSLock()
 
@@ -435,11 +457,14 @@ final class MIDIClockSource {
     func start() -> Bool {
         var status = MIDIClientCreateWithBlock("LumenDesk" as CFString, &client) { _ in }
         guard status == noErr else { return false }
-        let observer = Unmanaged.passUnretained(self)
-        status = MIDIInputPortCreateWithBlock(client, "Music Mode clock" as CFString, &port) { packetList, _ in
-            observer.takeUnretainedValue().handle(packetList)
+        status = MIDIInputPortCreateWithBlock(client, "Music Mode clock" as CFString, &port) { [weak self] packetList, _ in
+            self?.handle(packetList)
         }
-        guard status == noErr else { return false }
+        guard status == noErr else {
+            MIDIClientDispose(client)
+            client = 0
+            return false
+        }
         let count = MIDIGetNumberOfSources()
         guard count > 0 else {
             MIDIPortDispose(port)
@@ -451,59 +476,96 @@ final class MIDIClockSource {
         for index in 0..<count {
             MIDIPortConnectSource(port, MIDIGetSource(index), nil)
         }
+        lock.lock()
         running = true
-        startedAt = ProcessInfo.processInfo.systemUptime
+        clock = MIDIBeatClockTracker()
+        lock.unlock()
         return true
     }
 
     func stop() {
+        lock.lock()
         running = false
+        lock.unlock()
         if port != 0 { MIDIPortDispose(port); port = 0 }
         if client != 0 { MIDIClientDispose(client); client = 0 }
     }
 
     private func handle(_ packetList: UnsafePointer<MIDIPacketList>) {
-        guard running else { return }
-        // Clock ticks arrive as one-byte packets; reading the first packet of
-        // each callback is enough and avoids MIDIPacketNext pointer walking.
-        let packet = packetList.pointee.packet
-        let length = min(Int(packet.length), 256)
-        withUnsafeBytes(of: packet.data) { raw in
-            let bytes = raw.bindMemory(to: UInt8.self)
-            for index in 0..<min(length, bytes.count) {
-                switch bytes[index] {
-                case 0xF8: tick()
-                case 0xFA, 0xFB, 0xFC:
-                    lock.lock(); ticks = 0; lock.unlock()
-                default:
-                    break
-                }
-            }
+        lock.lock()
+        guard running else { lock.unlock(); return }
+        var snapshots: [AudioReactiveSnapshot] = []
+        Self.forEachMessage(in: packetList) { byte, hostTime in
+            let timestamp = hostTime == 0
+                ? ProcessInfo.processInfo.systemUptime
+                : AVAudioTime.seconds(forHostTime: hostTime)
+            if let snapshot = clock.receive(byte, at: timestamp) { snapshots.append(snapshot) }
         }
+        lock.unlock()
+        for snapshot in snapshots { onSnapshot(snapshot) }
     }
 
-    private func tick() {
-        let now = ProcessInfo.processInfo.systemUptime
-        lock.lock()
-        if lastTickTime > 0 {
-            let gap = now - lastTickTime
-            if gap > 0, gap < 0.2 {
-                interval = interval * 0.85 + gap * 24 * 0.15
+    /// CoreMIDI can batch several variable-length packets in one callback.
+    /// Walk the original storage rather than copying its first packet.
+    static func forEachMessage(
+        in packetList: UnsafePointer<MIDIPacketList>,
+        _ receive: (UInt8, MIDITimeStamp) -> Void
+    ) {
+        var packet = UnsafeRawPointer(packetList)
+            .advanced(by: MemoryLayout<MIDIPacketList>.offset(of: \.packet)!)
+            .assumingMemoryBound(to: MIDIPacket.self)
+        for _ in 0..<packetList.pointee.numPackets {
+            let bytes = UnsafeRawPointer(packet)
+                .advanced(by: MemoryLayout<MIDIPacket>.offset(of: \.data)!)
+                .assumingMemoryBound(to: UInt8.self)
+            for index in 0..<Int(packet.pointee.length) {
+                receive(bytes[index], packet.pointee.timeStamp)
             }
+            packet = UnsafePointer(MIDIPacketNext(packet))
+        }
+    }
+}
+
+/// Pure MIDI transport and tempo state, independent of connected hardware.
+struct MIDIBeatClockTracker {
+    private var ticks = 0
+    private var lastTickTime: TimeInterval?
+    private var interval: TimeInterval = 0.5
+    private var beatCount = 0
+    private var transportRunning = true
+
+    mutating func receive(_ byte: UInt8, at now: TimeInterval) -> AudioReactiveSnapshot? {
+        switch byte {
+        case 0xFA: // Start returns to the beginning of the song.
+            ticks = 0
+            beatCount = 0
+            lastTickTime = nil
+            transportRunning = true
+            return nil
+        case 0xFB: // Continue preserves song position.
+            lastTickTime = nil
+            transportRunning = true
+            return nil
+        case 0xFC:
+            transportRunning = false
+            lastTickTime = nil
+            return AudioReactiveSnapshot(sourceDescription: "MIDI clock stopped")
+        case 0xF8:
+            guard transportRunning else { return nil }
+        default:
+            return nil
+        }
+        if let lastTickTime {
+            let gap = now - lastTickTime
+            if gap > 0, gap < 0.2 { interval = interval * 0.85 + gap * 24 * 0.15 }
         }
         lastTickTime = now
-        ticks += 1
-        var emit = false
-        if ticks >= 24 {
-            ticks = 0
-            beatCount += 1
-            emit = true
-        }
+        let isBeat = ticks == 0
+        ticks = (ticks + 1) % 24
+        guard isBeat else { return nil }
         let beats = beatCount
+        beatCount += 1
         let beatInterval = max(0.15, min(1.2, interval))
-        lock.unlock()
-        guard emit else { return }
-        let pulse: Double = 1
         let beatInBar = beats % 4
         var snapshot = AudioReactiveSnapshot()
         snapshot.level = 0.55
@@ -516,7 +578,7 @@ final class MIDIClockSource {
         snapshot.highs = 0.35
         snapshot.energy = 0.62
         snapshot.confidence = 1
-        snapshot.pulse = pulse
+        snapshot.pulse = 1
         snapshot.beatCount = beats
         snapshot.tempo = 60 / beatInterval
         snapshot.beatInterval = beatInterval
@@ -530,7 +592,7 @@ final class MIDIClockSource {
         snapshot.feltInterval = beatInterval
         snapshot.feltTempo = 60 / beatInterval
         snapshot.sourceDescription = "MIDI clock"
-        onSnapshot(snapshot)
+        return snapshot
     }
 }
 
@@ -1086,13 +1148,18 @@ final class MusicFeatureAnalyzer {
 
 #if os(macOS)
 /// Result of attempting to start ScreenCaptureKit system-audio capture.
-private enum SystemAudioStartResult {
+enum SystemAudioStartResult {
     case started
     case needsScreenRecording   // Screen Recording not granted (macOS prompts on the first-ever ask)
     case unavailable            // OS too old / no display / capture error
 }
 
-private final class SystemAudioCapture: NSObject, SCStreamOutput {
+protocol SystemAudioCapturing: AnyObject {
+    func start(completion: @escaping (SystemAudioStartResult) -> Void)
+    func stop()
+}
+
+final class SystemAudioCapture: NSObject, SCStreamOutput, SystemAudioCapturing {
     private var stream: SCStream?
     private var startTask: Task<Void, Never>?
     private let onBuffer: (AVAudioPCMBuffer) -> Void

@@ -7,7 +7,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    DEVELOPMENT_TEAM: ""
+    DEVELOPMENT_TEAM: "SW2N54YNK3"
     CODE_SIGN_STYLE: Automatic
 targets:
   LumenDesk:

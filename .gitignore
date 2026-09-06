@@ -16,3 +16,7 @@ xcuserdata/
 Packages/
 Package.resolved
 _site/
+
+# Release packaging
+dist/
+*.xcarchive

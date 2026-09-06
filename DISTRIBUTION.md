@@ -13,7 +13,7 @@ app itself follows.
 
 | Route | Cost | Opens on other Macs | Privacy grants survive updates |
 | --- | --- | --- | --- |
-| Build in Xcode | Free | No | No |
+| Build in Xcode | Free | No | Yes, with a signing team |
 | Ad-hoc DMG | Free | Only after `xattr -dr` | No |
 | Self-signed DMG | Free | Only after `xattr -dr` | Yes |
 | Developer ID, notarized | $99/yr | Yes, double-click | Yes |
@@ -30,9 +30,13 @@ Open `LumenDesk.xcodeproj`, pick the `LumenDesk` scheme and **My Mac**, press
 `⌘R`. To keep the result, choose **Product → Archive**, then **Distribute
 App → Copy App**, and drag the output into `/Applications`.
 
-This is the whole story for one machine. The build is ad-hoc signed, so the
-signature is unique to that compile and macOS treats a rebuilt copy as a
-different app.
+This is the whole story for one machine. The project sets `DEVELOPMENT_TEAM`
+to `SW2N54YNK3` with automatic signing, so a member of that team gets an Apple
+Development signature that stays the same across rebuilds, and the Screen
+Recording and Local Network grants survive. Choose your own team in **Signing
+& Capabilities** if you are not on it. When no team resolves, the build falls
+back to an ad-hoc signature that is unique to each compile, and macOS treats a
+rebuilt copy as a different app.
 
 ## Route 2: a free disk image
 

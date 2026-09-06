@@ -850,6 +850,46 @@ input[type='time'] {
   border: 1px solid var(--border);
 }
 
+/* The meters panel is a grid, so the sentence explaining it has to span the
+   whole row rather than squeezing into a 120px column. */
+.meters .note {
+  grid-column: 1 / -1;
+  margin-top: 4px;
+}
+
+.role-legend {
+  margin: 16px 0 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--raised);
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.role-legend > div {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  gap: 10px;
+  padding: 3px 0;
+}
+
+.role-legend dt {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.role-legend dd {
+  margin: 0;
+}
+
+@media (max-width: 560px) {
+  .role-legend > div {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+}
+
 @media (max-width: 820px) {
   .shell.app {
     grid-template-columns: 1fr;

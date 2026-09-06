@@ -1,5 +1,12 @@
 # Music Mode architecture
 
+This document is the engineering description. If you want to know how to *use*
+Music Mode, read [Music Mode](README.md#music-mode) in the README, which covers
+the same feature in plain language: the three steps to a running show, which
+preset to pick, what each light's job means, and what the meters are telling
+you. The in-app "Explain the controls" switch prints the same explanations
+under each control.
+
 Music Mode extends LumenDesk's existing `music-pulse` effect and effect lifecycle. It does not introduce a second device model, network stack, or persistence store.
 
 ## Data flow

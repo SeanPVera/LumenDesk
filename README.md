@@ -298,6 +298,104 @@ Themes can be applied to all lights or to a specific room.
 
 ### Music Mode
 
+Music Mode makes your lights follow whatever music is playing. Open the Lighting Library, go to Music Mode, pick a room and a preset, press Start. That is the whole thing.
+
+The rest of this section is the plain-English guide. The technical description follows it under [How Music Mode works](#how-music-mode-works), and the data flow lives in [Music Mode architecture](MUSIC_MODE_ARCHITECTURE.md).
+
+#### Get a show running in three steps
+
+**On a Mac**
+
+1. **Play something.** Any app counts — Spotify, YouTube, a game, a DJ set. LumenDesk listens to the sound your Mac is already making.
+2. **Pick a room and a preset.** Choose the room at the top right of Music Mode, then pick a preset. **Balanced** is the safe first choice.
+3. **Press Start Music Mode.** The first time, macOS asks for **Screen Recording** permission. That is the only way any app is allowed to hear your Mac's audio; turn LumenDesk on in System Settings, come back, and press Start again. Nothing is recorded or saved.
+
+**On an iPhone or iPad**
+
+1. **Play the music out loud.** Music Mode listens through the microphone, so it has to be able to hear the room. Grant microphone access the first time you press Start.
+2. **Pick a room and a preset.**
+3. **Press Start Music Mode.** To follow a track the microphone cannot hear — headphones, or a noisy room — use **Open Audio File** and pick the song instead.
+
+Press **Stop** when you are done. Unless you turn it off, every light goes back exactly how it was before the show started.
+
+#### Which preset should I pick?
+
+| Preset | What it feels like | Good for |
+| --- | --- | --- |
+| **Balanced** | Lights pulse with the beat, change colour as the music changes, move a little. | Anything, if you are not sure |
+| **Ambient** | A quiet glow that drifts. Nothing jumps out at you. | Dinner, reading, background music |
+| **Concert** | Loud and punchy. Drums land hard, colour travels fast. | Parties, rock, pop |
+| **Cinematic** | Slow, wide swells that build and release. | Film scores, ambient records |
+| **Club** | Steady pulse on every beat, hard punch on beat one. | House, techno, dance |
+| **Half-time** | Pulses every other beat, so the room nods instead of strobing. | Hip-hop, slow heavy music |
+| **Waltz** | Counts in threes. Beat one takes the room, two and three breathe. | Waltzes, jazz in three, folk |
+| **Soundcheck** | The look LumenDesk had before Music Mode, minus the harsh flashing. | Anyone who liked the old one |
+| **Custom** | Whatever you last changed by hand. | Your own settings |
+
+You can change presets while the music is playing. Moving any slider switches the preset to **Custom** and keeps your version.
+
+#### Giving each light a job
+
+Under **Which light does what**, every light in the room gets a job. **Auto** picks one for you and is fine for most rooms — only change a light if you want that specific light doing something else.
+
+| Job | What that light does |
+| --- | --- |
+| **Auto** | LumenDesk decides: strips get the travelling colour, lights near you take the punch, lights behind you take the second colour, the rest fill the room. |
+| **Wash** | Fills the room. Bright and steady with a soft pulse underneath. |
+| **Hit** | Punches on the beat. Give it to the light you want the kick drum to land in. |
+| **Accent** | Answers the snare and cymbals in a second colour. Best off to one side. |
+| **Motion** | Colour runs across it in time with the music. Best on a strip. |
+| **Off** | Sits the show out and keeps whatever it is showing right now. |
+
+The list order matters, because movement travels down it. Put the lights in the order they actually sit in the room, using the arrows to reorder or one of the ready-made layouts (left to right, front to back, or circular for lights that ring the room). The eye button leaves a light out of the show entirely. Both of those are locked while a show is running, so stop it first.
+
+#### What the meters are telling you
+
+The bars show what LumenDesk is hearing right now: overall volume, then bass, mids and highs. The dot flashes on each beat.
+
+Under the dot is a label. It reads **Beat** at first, then changes to something like **128 · 4/4** once LumenDesk works out the tempo — usually about four seconds of steady rhythm. That means it found 128 beats per minute, four beats to a bar, and the show is now counting along instead of just reacting. While it still reads **Beat**, the lights answer the music as it happens, which is normal and correct for ambient, spoken word, and freely-played acoustic music.
+
+If the label says **No audio playing**, LumenDesk is connected to the right source but hearing silence.
+
+#### The sliders, in plain words
+
+You need none of these to run a show. Turn on **Explain the controls** at the top of Music Mode and the app prints these same lines under each slider.
+
+| Control | What moving it up does |
+| --- | --- |
+| Master brightness | Makes the whole show brighter. Turn it down late at night. |
+| Effect intensity | Makes everything more dramatic. Low is a shimmer, high swings hard between dark and bright. |
+| Beat sensitivity | Makes the lights answer the beat harder. Turn it down if the room feels twitchy. |
+| Bass sensitivity | Gives the kick drum and bass line more control over the lights. |
+| Percussion sensitivity | Brings out snares, hats and claps as accents. |
+| Color-change intensity | Changes colour more often. Low holds one colour a long time. |
+| Movement amount | Sends colour further across the room. At zero, every light does the same thing at once. |
+| Movement speed | Makes that travel faster. |
+| Minimum brightness | Keeps the lights from dropping as dark between beats. |
+| Maximum brightness | Lets a beat push the lights brighter. |
+| Stereo image | Spreads the left and right of the recording across your room. At zero the room reacts as one. |
+
+Three switches are worth knowing:
+
+- **Photosensitivity-safe mode** is on by default and blocks flashing outright, because flashing light can trigger seizures and migraines in some people. Even with it off, LumenDesk never flashes more than three times a second — that limit cannot be raised, by you or by a preset.
+- **Restore previous state when stopped** puts every light back how it was when you press Stop. On by default.
+- **Phrase-aware lifts** lets the show notice when a section is building and lift with it, instead of treating every bar the same.
+
+If **Reduced Motion** is on in your system accessibility settings, LumenDesk keeps movement small and never flashes, whatever the preset says.
+
+#### Things that trip people up
+
+| What you see | What is going on |
+| --- | --- |
+| Lights do nothing | Nothing is playing, or the permission is not granted yet. On a Mac, check Screen Recording; on iPhone, check the microphone. |
+| One light never joins in | It is set to **Off**, or the eye button excluded it. Both are on purpose, and both need the show stopped to change. |
+| The readout never leaves **Beat** | The music has no steady pulse to lock onto. Rubato, free playing and dense percussion all do this. The show still works. |
+| The room feels behind the music | Raise **Beat sensitivity**. If it started mid-song, stop and start again so the tempo locks from a clean beat. |
+| A second room will not start | Every room in a show shares one audio source. Start the second room on the same source, or stop the first one before switching sources. |
+| Colours never change | **Color-change intensity** is low, or the palette is a set of near-identical colours. |
+
+#### How Music Mode works
+
 Music Mode is a first-class section of the Lighting Library. It turns the existing `music-pulse` effect into a configurable choreography session while preserving that identifier for saved-state compatibility.
 
 - Real beat tracking. LumenDesk estimates the tempo of what is playing and choreographs to the beat grid it predicts, rather than reacting to every transient: brightness swells into each beat and accents the downbeat, sweeps travel the room once per bar, and colours change on bar lines. The tracker also listens for 3/4, 5/4, 6/8 and 7/8, and for half- or double-time feel, so a waltz and a head-nod groove do not get forced onto four-four. The detected tempo and metre are shown next to the beat indicator once it locks; music with no clear pulse falls back to the onset-driven show automatically.
@@ -563,7 +661,15 @@ This rewrites `LumenDesk.xcodeproj` from the declarative project configuration.
 - Pick whether to apply to all lights or a room.
 - Stop effects from the library header or room controls when finished.
 
-### 7. Add schedules
+### 7. Light a room to music
+
+- Play music on this device, or have it playing out loud if you are on an iPhone or iPad.
+- Open the Lighting Library and choose **Music Mode**.
+- Pick the room you want at the top, and pick a preset — **Balanced** if you are not sure.
+- Press **Start Music Mode** and grant the permission macOS or iOS asks for the first time.
+- Press **Stop** when you are done; your lights go back to how they were.
+
+### 8. Add schedules
 
 - Open a room's menu.
 - Choose **Edit Schedules**.
@@ -571,13 +677,13 @@ This rewrites `LumenDesk.xcodeproj` from the declarative project configuration.
 - Pick weekdays, time or solar-style timing, and an action.
 - Use automation pause controls when you want to temporarily stop scheduled changes.
 
-### 8. Use the menu bar on macOS
+### 9. Use the menu bar on macOS
 
 - Open the LumenDesk menu bar extra.
 - Control favorites or rooms quickly.
 - Change what appears in the menu bar from Settings.
 
-### 9. Back up configuration
+### 10. Back up configuration
 
 - On macOS, choose **Export Configuration…** from the app commands.
 - Save the JSON file somewhere safe.

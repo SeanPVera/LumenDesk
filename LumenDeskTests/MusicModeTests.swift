@@ -913,3 +913,109 @@ private final class MusicCaptureStub: SystemAudioCapturing {
     func start(completion: @escaping (SystemAudioStartResult) -> Void) { completions.append(completion) }
     func stop() { stops += 1 }
 }
+
+/// The plain-language layer is user-facing writing, so it is guarded the same
+/// way behaviour is: every case has to carry copy, that copy has to say
+/// something the technical `summary` does not, and it may not smuggle desk
+/// jargon back in through the words it uses.
+final class MusicModeHelpCopyTests: XCTestCase {
+    /// Words that mean nothing to someone who just wants their lamps to blink
+    /// along with a song. Appearing in plain-language copy is a failure.
+    private let jargon = [
+        "topology", "fixture", "rgbic", "hsbk", "onset", "vendor",
+        "razer", "ptreal", "downstage", "coalesc", "choreograph",
+        "normalized", "hysteresis", "entitlement", "daw"
+    ]
+
+    func testEveryPresetCarriesPlainCopy() {
+        for preset in MusicModePreset.allCases {
+            XCTAssertFalse(preset.plainSummary.isEmpty, "\(preset) has no plain summary")
+            XCTAssertFalse(preset.bestFor.isEmpty, "\(preset) has no audience line")
+            XCTAssertNotEqual(preset.plainSummary, preset.summary,
+                              "\(preset) plain copy just repeats the technical summary")
+            assertPlain(preset.plainSummary, label: "preset \(preset)")
+            assertPlain(preset.bestFor, label: "preset \(preset) bestFor")
+        }
+    }
+
+    func testEveryRoleExplainsWhatTheLightDoes() {
+        for role in FixtureRole.allCases {
+            XCTAssertFalse(role.plainSummary.isEmpty, "\(role) has no plain summary")
+            XCTAssertNotEqual(role.plainSummary, role.summary,
+                              "\(role) plain copy just repeats the technical summary")
+            assertPlain(role.plainSummary, label: "role \(role)")
+        }
+    }
+
+    func testRemainingChoicesCarryPlainCopy() {
+        for value in MusicSilenceBehavior.allCases { assertPlain(value.plainSummary, label: "silence \(value)") }
+        for value in MusicMetre.allCases { assertPlain(value.plainSummary, label: "metre \(value)") }
+        for value in TimeFeel.allCases { assertPlain(value.plainSummary, label: "feel \(value)") }
+        for value in MusicMovementDirection.allCases { assertPlain(value.plainSummary, label: "direction \(value)") }
+        for value in FixtureTopologyLayout.allCases { assertPlain(value.plainSummary, label: "layout \(value)") }
+    }
+
+    func testPlainCopyIsDistinctPerCase() {
+        let presets = Set(MusicModePreset.allCases.map(\.plainSummary))
+        XCTAssertEqual(presets.count, MusicModePreset.allCases.count, "two presets share the same explanation")
+        let roles = Set(FixtureRole.allCases.map(\.plainSummary))
+        XCTAssertEqual(roles.count, FixtureRole.allCases.count, "two roles share the same explanation")
+    }
+
+    func testQuickStartIsThreeNumberedSteps() {
+        let steps = MusicModeHelp.quickStart
+        XCTAssertEqual(steps.map(\.id), [1, 2, 3])
+        for step in steps {
+            XCTAssertFalse(step.title.isEmpty)
+            assertPlain(step.detail, label: "quick start step \(step.id)")
+        }
+    }
+
+    func testControlHelpAvoidsJargon() {
+        let strings: [(String, String)] = [
+            ("masterBrightness", MusicModeHelp.masterBrightness),
+            ("effectIntensity", MusicModeHelp.effectIntensity),
+            ("beatSensitivity", MusicModeHelp.beatSensitivity),
+            ("bassSensitivity", MusicModeHelp.bassSensitivity),
+            ("percussionSensitivity", MusicModeHelp.percussionSensitivity),
+            ("colorChangeIntensity", MusicModeHelp.colorChangeIntensity),
+            ("movementAmount", MusicModeHelp.movementAmount),
+            ("movementSpeed", MusicModeHelp.movementSpeed),
+            ("minimumBrightness", MusicModeHelp.minimumBrightness),
+            ("maximumBrightness", MusicModeHelp.maximumBrightness),
+            ("allowsFlashes", MusicModeHelp.allowsFlashes),
+            ("flashIntensity", MusicModeHelp.flashIntensity),
+            ("maximumFlashFrequency", MusicModeHelp.maximumFlashFrequency),
+            ("photosensitivitySafeMode", MusicModeHelp.photosensitivitySafeMode),
+            ("palette", MusicModeHelp.palette),
+            ("stereoImage", MusicModeHelp.stereoImage),
+            ("phraseAware", MusicModeHelp.phraseAware),
+            ("restorePreviousState", MusicModeHelp.restorePreviousState),
+            ("reducedMotion", MusicModeHelp.reducedMotion),
+            ("systemAudioSource", MusicModeHelp.systemAudioSource),
+            ("fileSource", MusicModeHelp.fileSource),
+            ("midiSource", MusicModeHelp.midiSource),
+            ("roles", MusicModeHelp.roles),
+            ("order", MusicModeHelp.order),
+            ("sharedSource", MusicModeHelp.sharedSource),
+            ("readout", MusicModeHelp.readout)
+        ]
+        for (name, copy) in strings { assertPlain(copy, label: name) }
+    }
+
+    /// The flash ceiling is a safety promise, so the copy has to keep stating
+    /// it even if someone rewrites the sentence around it.
+    func testFlashCopyStatesTheHardCeiling() {
+        XCTAssertTrue(MusicModeHelp.maximumFlashFrequency.contains("three per second"),
+                      "flash copy must state the hard ceiling in words")
+        XCTAssertEqual(FlashSafetyLimiter.hardMaximumFrequency, 3, accuracy: 0.0001)
+    }
+
+    private func assertPlain(_ copy: String, label: String, file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertFalse(copy.isEmpty, "\(label) is empty", file: file, line: line)
+        let lowered = copy.lowercased()
+        for word in jargon where lowered.contains(word) {
+            XCTFail("\(label) uses desk jargon: \(word)", file: file, line: line)
+        }
+    }
+}

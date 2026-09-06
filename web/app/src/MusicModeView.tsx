@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { Device } from './bridge'
-import { PRESET_COPY, configurationFor } from './music/config'
+import { MUSIC_HELP, PRESET_COPY, ROLE_COPY, SOURCE_COPY, configurationFor } from './music/config'
 import { GROOVES } from './music/grooves'
 import { hsvToRgb } from './music/fixtures'
 import { WebMusicSession, frameToCommands, setFixtureRole } from './music/session'
@@ -57,6 +57,7 @@ export function MusicModeView({
   }, [session, port, postFrame])
 
   const snapshot = state.snapshot
+  const presetCopyKey = state.configuration.preset === 'custom' ? 'balanced' : state.configuration.preset
   const tempo =
     snapshot.isTempoLocked && snapshot.tempo > 0
       ? `${Math.round(snapshot.feltTempo || snapshot.tempo)} · ${snapshot.metre}/${snapshot.metre === 6 ? 8 : 4}`
@@ -66,13 +67,18 @@ export function MusicModeView({
     <section className="music-desk">
       <div className="panel">
         <p className="eyebrow">Music Mode</p>
-        <h2>The room follows the music. DSP stays in this tab.</h2>
+        <h2>Your lights follow the music.</h2>
         <p>
-          The browser tracks tempo, metre and feel, then posts one colour per light to the local
-          bridge twenty times a second. RGBIC strips take a single wash here — the volatile razer
-          stream stays native until it is lockstep-tested. Photosensitivity-safe mode is on: no
-          request can exceed 3 flashes a second.
+          Pick where the sound comes from, pick a preset, press Start. The music is analysed in
+          this browser tab and never uploaded anywhere; only the resulting colours go to the
+          bridge running on your own machine.
         </p>
+        <ol className="steps">
+          {MUSIC_HELP.steps.map(step => (
+            <li key={step}>{step}</li>
+          ))}
+        </ol>
+        <p className="note">{MUSIC_HELP.safety}</p>
         <div className="music-toolbar">
           <button
             className="primary"
@@ -84,13 +90,21 @@ export function MusicModeView({
           <button onClick={() => session.stop()} disabled={!state.running}>
             Stop
           </button>
-          <button onClick={() => session.start('demo')} className={state.source === 'demo' ? 'nav active' : undefined}>
+          <button
+            onClick={() => session.start('demo')}
+            className={state.source === 'demo' ? 'nav active' : undefined}
+            title={SOURCE_COPY.demo.plain}
+          >
             Demo groove
           </button>
-          <button onClick={() => session.start('microphone')} className={state.source === 'microphone' ? 'nav active' : undefined}>
+          <button
+            onClick={() => session.start('microphone')}
+            className={state.source === 'microphone' ? 'nav active' : undefined}
+            title={SOURCE_COPY.microphone.plain}
+          >
             Microphone
           </button>
-          <label className="file-key">
+          <label className="file-key" title={SOURCE_COPY.file.plain}>
             Open audio file
             <input
               type="file"
@@ -103,8 +117,11 @@ export function MusicModeView({
               }}
             />
           </label>
-          <button onClick={() => session.start('midi')}>MIDI clock</button>
+          <button onClick={() => session.start('midi')} title={SOURCE_COPY.midi.plain}>
+            MIDI clock
+          </button>
         </div>
+        <p className="note">{SOURCE_COPY[state.source]?.plain ?? SOURCE_COPY.demo.plain}</p>
         {state.error && (
           <p className="error" role="alert">
             {state.error}
@@ -129,7 +146,10 @@ export function MusicModeView({
             </button>
           ))}
         </div>
-        <p className="meta">{PRESET_COPY[state.configuration.preset === 'custom' ? 'balanced' : state.configuration.preset].summary}</p>
+        <p>{PRESET_COPY[presetCopyKey].plain}</p>
+        <p className="meta">
+          Good for: {PRESET_COPY[presetCopyKey].bestFor} · {PRESET_COPY[presetCopyKey].summary}
+        </p>
         {state.source === 'demo' && (
           <label className="field">
             Demo groove
@@ -156,12 +176,14 @@ export function MusicModeView({
           <span className={`beat-dot${snapshot.beat > 0.25 ? ' lit' : ''}`} />
           <span>{tempo}</span>
         </div>
+        <p className="note">{MUSIC_HELP.readout}</p>
       </div>
 
       <div className="panel">
-        <p className="eyebrow">Fixtures</p>
+        <p className="eyebrow">Which light does what</p>
+        <p>{MUSIC_HELP.roles}</p>
         {state.fixtures.length === 0 ? (
-          <p>No lights yet. Scan from Home, or run a demo groove to watch the engine without hardware.</p>
+          <p>No lights yet. Scan from Home, or run a demo groove to watch the lights move without any hardware.</p>
         ) : (
           <ul className="fixture-list">
             {state.fixtures.map(fixture => {
@@ -176,6 +198,7 @@ export function MusicModeView({
                   <strong>{fixture.label}</strong>
                   <select
                     value={fixture.role}
+                    title={ROLE_COPY[fixture.role].plain}
                     onChange={event => {
                       setFixtureRole(session, fixture.id, event.target.value as FixtureRole)
                       session.patch({})
@@ -183,7 +206,7 @@ export function MusicModeView({
                   >
                     {ROLES.map(role => (
                       <option key={role} value={role}>
-                        {role}
+                        {ROLE_COPY[role].name}
                       </option>
                     ))}
                   </select>
@@ -192,8 +215,18 @@ export function MusicModeView({
             })}
           </ul>
         )}
+        <dl className="role-legend">
+          {ROLES.map(role => (
+            <div key={role}>
+              <dt>{ROLE_COPY[role].name}</dt>
+              <dd>{ROLE_COPY[role].plain}</dd>
+            </div>
+          ))}
+        </dl>
       </div>
-      <p className="meta">Bridge port {port}. One colour per fixture. Catalog id stays music-pulse on native.</p>
+      <p className="meta">
+        {MUSIC_HELP.strips} Colours go to the bridge on port {port}.
+      </p>
     </section>
   )
 }

@@ -43,7 +43,6 @@ struct MusicModeView: View {
         }
         .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.audio], allowsMultipleSelection: false) { result in
             guard case .success(let urls) = result, let url = urls.first else { return }
-            let accessed = url.startAccessingSecurityScopedResource()
             commitConfiguration()
             manager.startMusicMode(
                 configuration: configuration,
@@ -51,10 +50,6 @@ struct MusicModeView: View {
                 reducedMotion: reduceMotion,
                 capture: .file(url)
             )
-            if accessed {
-                // Keep the sandbox grant for the length of the show; stop is
-                // the matching release via the capture service tearing down.
-            }
         }
     }
 
@@ -219,11 +214,13 @@ struct MusicModeView: View {
                         Text("+ \(fixture.segmentCount) segments").font(.caption).foregroundStyle(Lumen.textTertiary)
                     }
                     Picker("Role", selection: roleBinding(fixture.id)) {
-                        ForEach(FixtureRole.allCases) { Text($0.displayName).tag($0) }
+                        ForEach(FixtureRole.allCases.filter { !isRunning || $0 != .off || fixture.role == .off }) {
+                            Text($0.displayName).tag($0)
+                        }
                     }
                     .labelsHidden()
                     .fixedSize()
-                    .disabled(isExcluded)
+                    .disabled(isExcluded || (isRunning && fixture.role == .off))
                     .help(fixture.resolvedRole.summary)
                     Spacer()
                     Button { toggleExclusion(fixture.id) } label: {

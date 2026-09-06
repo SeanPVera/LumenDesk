@@ -65,6 +65,7 @@ final class AudioReactiveSessionController: ObservableObject {
         var fixtures: [MusicFixtureDescriptor]
         var reducedMotion: Bool
         let synthetic: Bool
+        var capture: MusicCapturePreference = .platformDefault
         var groove: MusicGroove
         let startedAt: TimeInterval
         let engine = MusicChoreographyEngine()
@@ -117,7 +118,7 @@ final class AudioReactiveSessionController: ObservableObject {
         self.now = now
         subscriptionToken = captureService.subscribe { [weak self] snapshot in
             Task { @MainActor in
-                guard let self else { return }
+                guard let self, self.sessions.values.contains(where: { !$0.synthetic }) else { return }
                 self.analysisSnapshot = snapshot
                 let isPlaying = snapshot.confidence >= 0.025
                     || snapshot.level >= 0.025
@@ -145,9 +146,13 @@ final class AudioReactiveSessionController: ObservableObject {
         onFrame: @escaping (MusicLightingFrame) -> Void,
         completion: @escaping (AudioCaptureService.AudioStartResult) -> Void
     ) {
+        guard useSyntheticPattern || canStartCapture(capture, replacing: scope) else {
+            completion(.unavailable)
+            return
+        }
         let startTime = now()
         let groove = MusicGroove.all.first { $0.id == selectedGrooveID } ?? MusicGroove.fourOnTheFloor
-        sessions[scope] = Session(
+        let session = Session(
             configuration: configuration,
             topology: topology,
             fixtures: fixtures,
@@ -157,6 +162,8 @@ final class AudioReactiveSessionController: ObservableObject {
             startedAt: startTime,
             onFrame: onFrame
         )
+        session.capture = capture
+        sessions[scope] = session
         activeScopeIDs.insert(scope)
         startRenderTimerIfNeeded()
 
@@ -171,7 +178,7 @@ final class AudioReactiveSessionController: ObservableObject {
         switch capture {
         case .file(let url):
             captureService.startFromFile(url: url) { [weak self] result in
-                guard let self else { return }
+                guard let self, self.sessions[scope] === session else { return }
                 switch result {
                 case .started:
                     self.sourceStatus = .filePlayback
@@ -186,7 +193,7 @@ final class AudioReactiveSessionController: ObservableObject {
             }
         case .midiClock:
             captureService.startFromMIDI { [weak self] result in
-                guard let self else { return }
+                guard let self, self.sessions[scope] === session else { return }
                 switch result {
                 case .started:
                     self.sourceStatus = .midiClock
@@ -198,7 +205,7 @@ final class AudioReactiveSessionController: ObservableObject {
             }
         case .platformDefault:
             captureService.requestAccessAndStart { [weak self] result in
-                guard let self else { return }
+                guard let self, self.sessions[scope] === session else { return }
                 switch result {
                 case .started:
                     #if os(macOS)
@@ -215,6 +222,14 @@ final class AudioReactiveSessionController: ObservableObject {
                 }
                 completion(result)
             }
+        }
+    }
+
+    /// The app owns one live source. A second room may join it, but cannot
+    /// replace another room's source while that room is still running.
+    func canStartCapture(_ capture: MusicCapturePreference, replacing scope: LightScope) -> Bool {
+        sessions.allSatisfy { key, session in
+            key == scope || session.synthetic || session.capture == capture
         }
     }
 
@@ -286,7 +301,6 @@ final class AudioReactiveSessionController: ObservableObject {
                 configuration: session.configuration
             )
             if session.synthetic {
-                analysisSnapshot = snapshot
                 if timestamp - lastSnapshotPublishedAt >= previewPublicationInterval {
                     latestSnapshot = snapshot
                     lastSnapshotPublishedAt = timestamp

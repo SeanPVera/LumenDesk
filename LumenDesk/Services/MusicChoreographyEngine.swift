@@ -296,9 +296,14 @@ final class MusicChoreographyEngine {
         // pays for the transport and firmware delay so the swell lands on the
         // beat rather than a frame or two behind it.
         let predicted = timestamp + Self.outputLatencyCompensation
-        let beats = (predicted - snapshot.beatReferenceTime) / interval
+        let gridInterval = snapshot.beatInterval > 0 ? snapshot.beatInterval : interval
+        let gridBeats = (predicted - snapshot.beatReferenceTime) / gridInterval
+        // The reference advances on every detected beat. Include its position
+        // on the grid before dividing into felt beats, or half-time restarts
+        // its pulse halfway through every cycle.
+        let beats = (Double(snapshot.beatCount) + gridBeats) * gridInterval / interval
         let wholeBeats = floor(beats)
-        let beatInBar = Int(((Double(snapshot.beatInBar) + wholeBeats)
+        let beatInBar = Int(((Double(snapshot.beatInBar) + floor(gridBeats))
             .truncatingRemainder(dividingBy: Double(metre))
             + Double(metre))
             .truncatingRemainder(dividingBy: Double(metre)))
@@ -307,7 +312,7 @@ final class MusicChoreographyEngine {
             beatInBar: beatInBar,
             interval: interval,
             strength: max(0, min(1, snapshot.beatConfidence * 1.6)),
-            barRate: 1 / (interval * Double(metre)),
+            barRate: 1 / (gridInterval * Double(metre)),
             metre: metre
         )
     }

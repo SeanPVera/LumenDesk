@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreMIDI
 import SwiftUI
 import XCTest
 @testable import LumenDesk
@@ -548,6 +549,268 @@ final class MusicModeTests: XCTestCase {
         XCTAssertTrue(migrated.musicModeConfiguration.photosensitivitySafeMode)
     }
 
+    @MainActor
+    func testConcurrentLiveStartsSharePermissionRequestAndBothComplete() {
+        let backend = MusicCaptureStub()
+        var creations = 0
+        let capture = AudioCaptureService(makeSystemAudioCapture: { _ in
+            creations += 1
+            return backend
+        })
+        var results: [AudioCaptureService.AudioStartResult] = []
+        capture.requestAccessAndStart { results.append($0) }
+        capture.requestAccessAndStart { results.append($0) }
+        XCTAssertEqual(creations, 1)
+        backend.completions.last?(.started)
+        XCTAssertEqual(results, [.started, .started])
+        capture.stop()
+    }
+
+    @MainActor
+    func testStopCancelsPendingCaptureImmediately() {
+        let backend = MusicCaptureStub()
+        let capture = AudioCaptureService(makeSystemAudioCapture: { _ in backend })
+        var completed = false
+        capture.requestAccessAndStart { _ in completed = true }
+        capture.stop()
+        XCTAssertGreaterThan(backend.stops, 0)
+        backend.completions.last?(.started)
+        XCTAssertFalse(capture.isRunning)
+        XCTAssertFalse(completed)
+    }
+
+    @MainActor
+    func testStoppedRoomIgnoresSharedCaptureCompletion() {
+        let backend = MusicCaptureStub()
+        let capture = AudioCaptureService(makeSystemAudioCapture: { _ in backend })
+        let controller = AudioReactiveSessionController(captureService: capture)
+        let scopes = [LightScope.room(UUID()), .room(UUID())]
+        var completed: [LightScope] = []
+        for scope in scopes {
+            controller.start(scope: scope, configuration: .configuration(for: .balanced),
+                topology: FixtureTopology(), fixtures: [], reducedMotion: false,
+                useSyntheticPattern: false, onFrame: { _ in },
+                completion: { _ in completed.append(scope) })
+        }
+        controller.stop(scope: scopes[0])
+        backend.completions.last?(.started)
+        XCTAssertEqual(completed, [scopes[1]])
+        XCTAssertEqual(controller.activeScopeIDs, [scopes[1]])
+        controller.stopAll()
+    }
+
+    @MainActor
+    func testOffRoleCannotChangeMembershipDuringShow() throws {
+        let manager = LightManager(persistenceStore: MusicModePersistenceSpy())
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+        let scope = LightScope.room(try XCTUnwrap(manager.rooms.first).id)
+        let devices = manager.devices(in: scope)
+        let omitted = try XCTUnwrap(devices.first)
+        let included = try XCTUnwrap(devices.last)
+        var topology = manager.fixtureTopology(for: scope)
+        topology.roles[omitted.id] = .off
+        manager.setFixtureTopology(topology, for: scope)
+        var config = MusicModeConfiguration.configuration(for: .balanced)
+        config.usesSyntheticDemoPattern = true
+        manager.startMusicMode(configuration: config, scope: scope)
+        topology.roles[omitted.id] = .hit
+        topology.roles[included.id] = .off
+        manager.setFixtureTopology(topology, for: scope)
+        XCTAssertEqual(manager.fixtureTopology(for: scope).role(for: omitted.id), .off)
+        XCTAssertNotEqual(manager.fixtureTopology(for: scope).role(for: included.id), .off)
+        topology = manager.fixtureTopology(for: scope)
+        topology.roles[included.id] = .wash
+        manager.setFixtureTopology(topology, for: scope)
+        XCTAssertEqual(manager.fixtureTopology(for: scope).role(for: included.id), .wash)
+    }
+
+    @MainActor
+    func testSecondRoomCannotReplaceSharedSource() {
+        let backend = MusicCaptureStub()
+        let capture = AudioCaptureService(makeSystemAudioCapture: { _ in backend })
+        let controller = AudioReactiveSessionController(captureService: capture)
+        let first = LightScope.room(UUID())
+        let second = LightScope.room(UUID())
+        controller.start(scope: first, configuration: .configuration(for: .balanced),
+            topology: FixtureTopology(), fixtures: [], reducedMotion: false,
+            useSyntheticPattern: false, onFrame: { _ in }, completion: { _ in })
+        backend.completions.last?(.started)
+        var result: AudioCaptureService.AudioStartResult?
+        controller.start(scope: second, configuration: .configuration(for: .balanced),
+            topology: FixtureTopology(), fixtures: [], reducedMotion: false,
+            useSyntheticPattern: false, capture: .file(URL(fileURLWithPath: "/missing.wav")),
+            onFrame: { _ in }, completion: { result = $0 })
+        XCTAssertEqual(result, .unavailable)
+        XCTAssertTrue(capture.isRunning)
+        XCTAssertEqual(controller.sourceStatus, .systemAudio)
+        XCTAssertEqual(controller.activeScopeIDs, [first])
+        controller.stopAll()
+    }
+
+    func testHalfTimeDoesNotPulseAgainOnInterveningGridBeat() {
+        let engine = MusicChoreographyEngine()
+        let fixture = MusicFixtureDescriptor(id: "hit", label: "Hit", transport: .lifxLAN, role: .hit)
+        var config = MusicModeConfiguration.configuration(for: .halftime)
+        config.movementAmount = 0
+        config.allowsFlashes = false
+        var feltPeaks: [Double] = []
+        var intervening: [Double] = []
+        for index in 0..<400 {
+            let time = 100 + Double(index) * 0.025
+            var snapshot = lockedSnapshot(at: time, reference: 100, interval: 0.5)
+            snapshot.timeFeel = .half
+            snapshot.feltInterval = 1
+            let frame = engine.makeFrame(snapshot: snapshot, configuration: config,
+                topology: FixtureTopology(), fixtures: [fixture], timestamp: time,
+                sequenceNumber: UInt64(index))
+            let phase = (time + 0.045 - 100).truncatingRemainder(dividingBy: 1)
+            guard index > 40, let brightness = frame.states.first?.brightness else { continue }
+            if phase < 0.15 { feltPeaks.append(brightness) }
+            if (0.5..<0.65).contains(phase) { intervening.append(brightness) }
+        }
+        let peak = feltPeaks.reduce(0, +) / Double(feltPeaks.count)
+        let between = intervening.reduce(0, +) / Double(intervening.count)
+        XCTAssertGreaterThan(peak, between * 1.25)
+    }
+
+    func testMIDIClockTracksTempoAndHonorsStopContinueAndStart() {
+        var tracker = MIDIBeatClockTracker()
+        var time = 10.0
+        var latest: AudioReactiveSnapshot?
+        for _ in 0..<240 {
+            time += 60 / (90 * 24)
+            if let snapshot = tracker.receive(0xF8, at: time) { latest = snapshot }
+        }
+        XCTAssertEqual(latest?.tempo ?? 0, 90, accuracy: 0.1)
+        XCTAssertEqual(latest?.beatCount, 9)
+        let stopped = tracker.receive(0xFC, at: time)
+        XCTAssertEqual(stopped?.isTempoLocked, false)
+        for _ in 0..<48 {
+            time += 0.02
+            XCTAssertNil(tracker.receive(0xF8, at: time))
+        }
+        _ = tracker.receive(0xFB, at: time)
+        for _ in 0..<24 {
+            time += 60 / (90 * 24)
+            if let snapshot = tracker.receive(0xF8, at: time) { latest = snapshot }
+        }
+        XCTAssertEqual(latest?.beatCount, 10)
+        _ = tracker.receive(0xFA, at: time)
+        for _ in 0..<24 {
+            time += 60 / (90 * 24)
+            if let snapshot = tracker.receive(0xF8, at: time) { latest = snapshot }
+        }
+        XCTAssertEqual(latest?.beatInBar, 0)
+        XCTAssertEqual(latest?.beatCount, 0)
+    }
+
+    func testMIDIStartPlacesDownbeatOnFirstClockTick() {
+        var tracker = MIDIBeatClockTracker()
+        _ = tracker.receive(0xFA, at: 100)
+        let first = tracker.receive(0xF8, at: 100)
+        XCTAssertEqual(first?.beatInBar, 0)
+        XCTAssertEqual(first?.beatReferenceTime, 100)
+        for tick in 1..<24 {
+            XCTAssertNil(tracker.receive(0xF8, at: 100 + Double(tick) / 48))
+        }
+        XCTAssertEqual(tracker.receive(0xF8, at: 100.5)?.beatInBar, 1)
+    }
+
+    func testMIDIReadsEveryPacketAndPreservesTimestamps() throws {
+        let storage = UnsafeMutableRawPointer.allocate(byteCount: 1024, alignment: 8)
+        defer { storage.deallocate() }
+        let list = storage.bindMemory(to: MIDIPacketList.self, capacity: 1)
+        var packet = MIDIPacketListInit(list)
+        for index in 0..<24 {
+            var byte: UInt8 = 0xF8
+            packet = try XCTUnwrap(MIDIPacketListAdd(list, 1024, packet, UInt64(index + 1), 1, &byte))
+        }
+        var timestamps: [MIDITimeStamp] = []
+        MIDIClockSource.forEachMessage(in: UnsafePointer(list)) { byte, timestamp in
+            XCTAssertEqual(byte, 0xF8)
+            timestamps.append(timestamp)
+        }
+        XCTAssertEqual(timestamps, (1...24).map(UInt64.init))
+    }
+
+    @MainActor
+    func testFailedStartupRestoresLightsEvenWhenRestoreOnStopIsDisabled() throws {
+        let backend = MusicCaptureStub()
+        let controller = AudioReactiveSessionController(
+            captureService: AudioCaptureService(makeSystemAudioCapture: { _ in backend }))
+        let manager = LightManager(persistenceStore: MusicModePersistenceSpy(), musicModeController: controller)
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+        let device = try XCTUnwrap(manager.devices.first)
+        device.isOn = false
+        let brightness = device.brightness
+        let color = device.color
+        var config = MusicModeConfiguration.configuration(for: .balanced)
+        config.usesSyntheticDemoPattern = false
+        config.restorePreviousState = false
+        manager.startMusicMode(configuration: config)
+        XCTAssertTrue(device.isOn)
+        backend.completions.last?(.needsScreenRecording)
+        XCTAssertFalse(device.isOn)
+        XCTAssertEqual(device.brightness, brightness, accuracy: 0.001)
+        XCTAssertLessThan(device.color.rgbDistance(to: color), 0.001)
+        XCTAssertTrue(manager.activeEffects.isEmpty)
+    }
+
+    @MainActor
+    func testRestorePreferenceUpdatesDuringShow() throws {
+        let manager = LightManager(persistenceStore: MusicModePersistenceSpy())
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+        let device = try XCTUnwrap(manager.devices.first)
+        device.isOn = false
+        var config = MusicModeConfiguration.configuration(for: .balanced)
+        config.usesSyntheticDemoPattern = true
+        manager.startMusicMode(configuration: config)
+        config.restorePreviousState = false
+        manager.setMusicModeConfiguration(config)
+        manager.stopAllEffects()
+        XCTAssertTrue(device.isOn)
+    }
+
+    @MainActor
+    func testAudioFilesAtDifferentFormatsReachAnalyzer() async throws {
+        // Silent PCM exercises real file playback and the tap without making
+        // sound or contacting a light. The analyzer must receive both formats.
+        for (sampleRate, channels) in [(44_100.0, AVAudioChannelCount(1)), (48_000.0, AVAudioChannelCount(2))] {
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent("music-\(UUID()).caf")
+            defer { try? FileManager.default.removeItem(at: url) }
+            let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: channels))
+            let pcm = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 8192))
+            pcm.frameLength = 8192
+            for channel in 0..<Int(channels) {
+                pcm.floatChannelData![channel].initialize(repeating: 0, count: 8192)
+            }
+            do {
+                let file = try AVAudioFile(forWriting: url, settings: format.settings)
+                try file.write(from: pcm)
+            }
+            let capture = AudioCaptureService()
+            defer { capture.stop() }
+            let received = expectation(description: "File feeds analyzer at \(sampleRate) Hz, \(channels) channels")
+            var fulfilled = false
+            capture.onSnapshot = { snapshot in
+                guard !fulfilled else { return }
+                fulfilled = true
+                XCTAssertEqual(snapshot.sourceDescription, "Audio file")
+                XCTAssertLessThan(snapshot.level, 0.001)
+                received.fulfill()
+            }
+            var result: AudioCaptureService.AudioStartResult?
+            capture.startFromFile(url: url) { result = $0 }
+            XCTAssertEqual(result, .started)
+            await fulfillment(of: [received], timeout: 5)
+            capture.stop()
+            XCTAssertFalse(capture.isRunning)
+        }
+    }
+
     /// `startSample` continues the waveform across successive buffers. Analysis
     /// is gapless and its windows straddle buffer boundaries, so restarting the
     /// phase every buffer would put a broadband click at each seam and a "steady
@@ -642,4 +905,11 @@ private final class MusicModePersistenceSpy: ApplicationPersistence {
     func importingConfiguration(from data: Data, into currentState: PersistedApplicationState) throws -> PersistedApplicationState {
         try JSONDecoder().decode(PersistedApplicationState.self, from: data)
     }
+}
+
+private final class MusicCaptureStub: SystemAudioCapturing {
+    var completions: [(SystemAudioStartResult) -> Void] = []
+    var stops = 0
+    func start(completion: @escaping (SystemAudioStartResult) -> Void) { completions.append(completion) }
+    func stop() { stops += 1 }
 }

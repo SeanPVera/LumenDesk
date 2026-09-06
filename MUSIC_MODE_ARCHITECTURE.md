@@ -12,11 +12,21 @@ Music Mode extends LumenDesk's existing `music-pulse` effect and effect lifecycl
 6. `MusicLightingRenderer` keeps only the latest pending frame per fixture and enforces independent ceilings for LIFX LAN, ordinary Govee LAN, and Govee real-time segment streams.
 7. `LightManager` joins the pipeline to LumenDesk's existing effect scope, conflict, undo, Demo Mode, and restoration rules. It translates renderer commands through the existing LIFX and Govee clients. It does not make choreography decisions.
 
+## Capture lifecycle
+
+Concurrent system-audio starts join one pending permission/capture operation. Each scope checks session identity before accepting completion; stopping the final live scope cancels capture immediately. Buffers and file-loop callbacks carry their source generation so queued work cannot publish into a later source. Synthetic snapshots remain separate from live analysis.
+
+The controller permits several rooms to share the same source, and rejects a different source before LightManager changes any lights. File access belongs to the capture service: it acquires and releases the security-scoped URL, taps the player at the file's own format, and detaches the player on failure or stop. Rejoining the same file or MIDI source preserves playback position.
+
+MIDI walks every packet in a callback using CoreMIDI's variable-length packet layout and host timestamps. Stop clears the published grid and suppresses clock ticks until Continue or Start; Continue keeps song position and Start resets it.
+
 ## Musical time
 
 The snapshot carries the grid itself — `beatInterval`, `beatReferenceTime` (host clock), `beatInBar`, `beatConfidence`, plus `metre`, `timeFeel`, and `feltInterval` — rather than only "a beat happened". The choreography engine extrapolates its own phase for each render frame from the *felt* interval, so half-time swells on every other beat and a waltz downbeat takes the room. Timing is limited by the render clock rather than by analysis latency, and it evaluates about 45 ms ahead to pay for transport and firmware delay so a swell lands *on* the beat instead of behind it.
 
 `MetreTracker` (folded into `BeatTracker.swift`) scores kick energy across 3/4/5/6/7 and even-versus-odd weight for half/double feel. It never mutates `BeatTracker.beatsPerBar`, which stays 4 so the four-four downbeat heuristic and its tests stay intact. A preset may override the detection (`metreOverride`, `timeFeel`).
+
+Felt-beat phase includes the reference beat's running count before dividing by the felt interval, so refreshing the reference on an intervening detected beat does not restart a half-time pulse. Bar position and bar duration follow the detected grid and metre independently of time feel.
 
 While a grid is available the engine choreographs in musical time:
 
@@ -28,7 +38,7 @@ While a grid is available the engine choreographs in musical time:
 
 ## Topology
 
-`FixtureTopology` is persisted by scope using stable fixture IDs. Explicit order wins; missing fixtures are appended using a deterministic normalized-label and ID sort. Per-fixture `roles` are persisted on the same topology. A segmented Govee fixture expands into contiguous normalized positions, allowing motion to travel across fixtures and then through the segments within the RGBIC device. Circular topology avoids duplicating the end position. Role `.off` is dropped from targets the same way exclusion is, and those fixtures are not powered or snapshotted at start.
+`FixtureTopology` is persisted by scope using stable fixture IDs. Explicit order wins; missing fixtures are appended using a deterministic normalized-label and ID sort. Per-fixture `roles` are persisted on the same topology. A segmented Govee fixture expands into contiguous normalized positions, allowing motion to travel across fixtures and then through the segments within the RGBIC device. Circular topology avoids duplicating the end position. Role `.off` is dropped from targets the same way exclusion is, and those fixtures are not powered or snapshotted at start. Inclusion and transitions into or out of `.off` are frozen while a show runs; changes among active roles remain available.
 
 ## Transport policy
 

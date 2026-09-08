@@ -9,7 +9,7 @@ import SwiftUI
 // switches on a destination had to move.
 
 enum LumenDeskDestination: String, CaseIterable, Identifiable {
-    case home = "Desk"
+    case home = "Plan"
     case library = "Looks"
     case automation = "Cues"
     case devices = "Rig"
@@ -19,7 +19,7 @@ enum LumenDeskDestination: String, CaseIterable, Identifiable {
 
     var symbol: String {
         switch self {
-        case .home: return "slider.vertical.3"
+        case .home: return "square.grid.3x3.topleft.filled"
         case .library: return "square.grid.2x2"
         case .automation: return "clock"
         case .devices: return "lightbulb.2"
@@ -93,7 +93,7 @@ struct LumenDeskShellView: View {
     private var mobileShell: some View {
         TabView(selection: $destination) {
             mobileTab(.home)
-                .tabItem { Label("Desk", systemImage: LumenDeskDestination.home.symbol) }
+                .tabItem { Label("Plan", systemImage: LumenDeskDestination.home.symbol) }
                 .tag(LumenDeskDestination.home)
             mobileTab(.library)
                 .tabItem { Label("Looks", systemImage: LumenDeskDestination.library.symbol) }
@@ -125,7 +125,7 @@ struct LumenDeskShellView: View {
     @ViewBuilder
     private func destinationView(_ item: LumenDeskDestination) -> some View {
         switch item {
-        case .home: HomeWorkspaceView()
+        case .home: PlanWorkspaceView()
         case .library: LibraryWorkspaceView()
         case .automation: AutomationWorkspaceView()
         case .devices: DevicesWorkspaceView()
@@ -217,468 +217,11 @@ private struct WashRail: View {
 }
 #endif
 
-// MARK: - The Desk
-
-/// The strip field. Every discovered fixture as a channel, grouped by room,
-/// with the master pinned at the head of the field and the inspector holding
-/// the selected fixture on the trailing edge.
-///
-/// This replaces a Home screen that put the fixtures in tenth position, behind
-/// a greeting, three metric tiles, a master card, a favourites strip, a room
-/// grid, and a filter bar. The strips are the screen now.
-struct HomeWorkspaceView: View {
-    @EnvironmentObject private var manager: LightManager
-    @State private var searchText = ""
-    @State private var filter: DeskFilter = .all
-    @State private var selectedID: String?
-    @State private var selectedRoom: Room?
-    @State private var showingNewRoom = false
-
-    enum DeskFilter: String, CaseIterable, Identifiable {
-        case all = "All"
-        case lit = "Lit"
-        case attention = "Needs attention"
-        var id: String { rawValue }
-    }
-
-    var body: some View {
-        HStack(spacing: 0) {
-            stage
-
-            #if os(macOS)
-            if let device = selectedDevice {
-                Divider().overlay(Lumen.ruleSoft)
-                DeskInspector(device: device)
-                    .frame(width: 288)
-                    .transition(.identity)
-            }
-            #endif
-        }
-        .background(Lumen.stage)
-        .navigationTitle("Desk")
-        .searchable(text: $searchText, prompt: "Search fixtures and rooms")
-        .sheet(item: $selectedRoom) { room in
-            RoomDetailSheet(room: room).environmentObject(manager)
-        }
-        .sheet(isPresented: $showingNewRoom) {
-            NewRoomSheet().environmentObject(manager)
-        }
-        .onAppear(perform: selectFirstIfNeeded)
-        .onChange(of: manager.devices.map(\.id)) { ids in
-            if let selectedID, !ids.contains(selectedID) { self.selectedID = nil }
-            selectFirstIfNeeded()
-        }
-    }
-
-    // MARK: Stage
-
-    private var stage: some View {
-        VStack(spacing: 0) {
-            stageBar
-            Divider().overlay(Lumen.ruleSoft)
-
-            if manager.devices.isEmpty {
-                ScrollView {
-                    EmptyWorkspaceView(
-                        icon: "lightbulb.slash",
-                        title: "No fixtures found",
-                        message: "Scan this network for LIFX and Govee, or take the desk for a run on an isolated demo rig.",
-                        primaryTitle: "Scan This Network",
-                        primaryAction: manager.scan,
-                        secondaryTitle: "Try the Demo Rig",
-                        secondaryAction: manager.enterDemoMode
-                    )
-                    .padding(24)
-                }
-            } else {
-                field
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private var stageBar: some View {
-        HStack(spacing: 12) {
-            Text("Desk")
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(Lumen.chalk)
-            Text(fieldSummary)
-                .font(LumenType.readout(size: 11, weight: .regular))
-                .foregroundStyle(Lumen.muted)
-
-            Spacer(minLength: 12)
-
-            ForEach(DeskFilter.allCases) { option in
-                Button { filter = option } label: {
-                    Text(option.rawValue)
-                        .font(.system(size: 11.5, weight: .medium))
-                        .foregroundStyle(filter == option ? Lumen.chalk : Lumen.meter)
-                        .padding(.horizontal, 11)
-                        .padding(.vertical, 5)
-                        .background(
-                            RoundedRectangle(cornerRadius: Lumen.controlRadius, style: .continuous)
-                                .fill(filter == option ? Lumen.stripLoud : Lumen.strip)
-                        )
-                }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(filter == option ? [.isButton, .isSelected] : .isButton)
-            }
-
-            Menu {
-                Button { showingNewRoom = true } label: {
-                    Label("New Room", systemImage: "rectangle.stack.badge.plus")
-                }
-                Divider()
-                Button {
-                    if manager.napPhase == .inactive { manager.startNapMode() }
-                    else { manager.cancelNapMode() }
-                } label: {
-                    Label(manager.napPhase == .inactive ? "Start Nap Mode" : "Cancel Nap Mode",
-                          systemImage: "moon")
-                }
-            } label: {
-                Image(systemName: "ellipsis")
-            }
-            .menuStyle(.borderlessButton)
-            .fixedSize()
-            .accessibilityLabel("Desk actions")
-        }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 13)
-    }
-
-    private var field: some View {
-        ScrollView(.horizontal, showsIndicators: true) {
-            HStack(alignment: .top, spacing: 26) {
-                group(title: "Master", count: nil) {
-                    MasterStrip()
-                }
-
-                ForEach(populatedGroups, id: \.id) { entry in
-                    group(title: entry.title, count: entry.lit) {
-                        ForEach(Array(entry.devices.enumerated()), id: \.element.id) { _, device in
-                            FixtureStrip(
-                                device: device,
-                                channel: channelNumber(for: device),
-                                isSelected: selectedID == device.id,
-                                onSelect: { selectedID = device.id }
-                            )
-                        }
-                    }
-                }
-            }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 20)
-        }
-        .frame(maxHeight: .infinity, alignment: .top)
-    }
-
-    @ViewBuilder
-    private func group<Content: View>(title: String,
-                                      count: (lit: Int, total: Int)?,
-                                      @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 9) {
-            HStack(spacing: 8) {
-                Text(title)
-                    .font(.system(size: 11.5, weight: .semibold))
-                    .foregroundStyle(Lumen.meter)
-                if let count {
-                    Text("\(count.lit)/\(count.total)")
-                        .font(LumenType.readout(size: 10, weight: .regular))
-                        .foregroundStyle(Lumen.faint)
-                }
-            }
-            .frame(height: 20)
-            .padding(.leading, 2)
-
-            HStack(alignment: .top, spacing: 7) { content() }
-        }
-    }
-
-    // MARK: Grouping
-
-    private struct DeskGroup {
-        let id: String
-        let title: String
-        let devices: [LightDevice]
-        var lit: (lit: Int, total: Int) {
-            (devices.filter { $0.isOn && !$0.isStale }.count, devices.count)
-        }
-    }
-
-    /// Room order first, then anything the user has not filed yet. Unassigned
-    /// fixtures used to fall off Home entirely unless a filter surfaced them.
-    private var allGroups: [DeskGroup] {
-        var groups = manager.rooms.map {
-            DeskGroup(id: $0.id.uuidString, title: $0.name, devices: manager.devices(in: $0))
-        }
-        let assigned = Set(manager.rooms.flatMap(\.lightIDs))
-        let loose = manager.devices.filter { !assigned.contains($0.id) }
-        if !loose.isEmpty {
-            groups.append(DeskGroup(id: "unassigned", title: "Unassigned", devices: loose))
-        }
-        return groups
-    }
-
-    private var populatedGroups: [DeskGroup] {
-        allGroups.compactMap { entry in
-            let kept = entry.devices.filter(passes)
-            return kept.isEmpty ? nil : DeskGroup(id: entry.id, title: entry.title, devices: kept)
-        }
-    }
-
-    private func passes(_ device: LightDevice) -> Bool {
-        let matchesSearch = searchText.isEmpty || manager.device(device, matchesQuery: searchText)
-        guard matchesSearch else { return false }
-        switch filter {
-        case .all: return true
-        case .lit: return device.isOn && !device.isStale
-        case .attention:
-            return device.isStale || manager.commandState(for: device.id).phase == .failed
-        }
-    }
-
-    /// Channel numbers follow the field, so the addresses on screen read in the
-    /// order the strips are laid out.
-    private func channelNumber(for device: LightDevice) -> String {
-        let ordered = allGroups.flatMap(\.devices)
-        guard let index = ordered.firstIndex(where: { $0.id == device.id }) else { return "--" }
-        return String(format: "%02d", index + 1)
-    }
-
-    private var selectedDevice: LightDevice? {
-        guard let selectedID else { return nil }
-        return manager.devices.first { $0.id == selectedID }
-    }
-
-    private func selectFirstIfNeeded() {
-        guard selectedID == nil else { return }
-        selectedID = populatedGroups.first?.devices.first?.id
-    }
-
-    private var fieldSummary: String {
-        let shown = populatedGroups.reduce(0) { $0 + $1.devices.count }
-        let rooms = populatedGroups.count
-        return "\(shown) fixture\(shown == 1 ? "" : "s") · \(rooms) group\(rooms == 1 ? "" : "s")"
-    }
-}
-
-// MARK: - Strips
-
-/// One fixture's channel. Observes the device directly so a level arriving off
-/// the network repaints this strip and nothing else on the field.
-private struct FixtureStrip: View {
-    @EnvironmentObject private var manager: LightManager
-    @ObservedObject var device: LightDevice
-    let channel: String
-    let isSelected: Bool
-    let onSelect: () -> Void
-
-    private var state: WashChannelState {
-        if device.isStale { return .offline }
-        switch manager.commandState(for: device.id).phase {
-        case .queued: return .queued
-        case .sending: return .inFlight
-        case .failed: return .failed
-        case .applied, .idle: return .confirmed
-        }
-    }
-
-    private var meta: String {
-        device.isLIFXLuna ? "Matrix" : "\(device.kelvin) K"
-    }
-
-    var body: some View {
-        WashChannelStrip(
-            channel: channel,
-            name: device.label,
-            meta: meta,
-            vendorTag: device.brand == .lifx ? "LFX" : "GVE",
-            colour: device.color,
-            level: Binding(get: { device.brightness },
-                           set: { manager.setBrightness(device, value: $0) }),
-            isOn: Binding(get: { device.isOn },
-                          set: { manager.setPower(device, on: $0) }),
-            state: state,
-            isSelected: isSelected,
-            onSelect: onSelect
-        )
-    }
-}
-
-/// The master. Chalk rather than a lamp colour, because it is not a lamp.
-private struct MasterStrip: View {
-    @EnvironmentObject private var manager: LightManager
-
-    private var lit: [LightDevice] { manager.devices.filter(\.isOn) }
-
-    private var averageBrightness: Double {
-        guard !lit.isEmpty else { return 0 }
-        return lit.reduce(0) { $0 + $1.brightness } / Double(lit.count)
-    }
-
-    var body: some View {
-        WashChannelStrip(
-            channel: "Master",
-            name: "All fixtures",
-            meta: "\(lit.count) of \(manager.devices.count) lit",
-            colour: Lumen.chalk,
-            level: Binding(get: { averageBrightness }, set: manager.setAllBrightness),
-            isOn: Binding(get: { !lit.isEmpty }, set: { manager.setAllPower(on: $0) }),
-            isMaster: true
-        )
-        .disabled(manager.devices.isEmpty)
-    }
-}
-
-// MARK: - Inspector
-
-#if os(macOS)
-/// The selected fixture, in full, in a column that is always there.
-///
-/// Replaces `LightDetailSheet`, which wrapped `LightRowView` in a 720 pt modal
-/// so that a person could change one brightness value. The fader on the strip
-/// already did that without the modal; this column is for everything a strip
-/// is too narrow to carry.
-private struct DeskInspector: View {
-    @EnvironmentObject private var manager: LightManager
-    @ObservedObject var device: LightDevice
-    @State private var showingSegments = false
-    @State private var showingMatrix = false
-
-    private var command: DeviceCommandState { manager.commandState(for: device.id) }
-
-    private var transport: String {
-        device.brand == .lifx ? "LIFX LAN · UDP 56700" : "Govee LAN · UDP 4003"
-    }
-
-    private var modelLine: String {
-        if let sku = device.sku, !sku.isEmpty {
-            return "\(device.brand.displayName) \(sku)"
-        }
-        return device.brand.displayName
-    }
-
-    private var lastCommand: String {
-        switch command.phase {
-        case .idle: return "idle"
-        case .queued: return "queued"
-        case .sending: return "in flight"
-        case .applied: return "confirmed"
-        case .failed: return "failed"
-        }
-    }
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 15) {
-                // The fixture's colour at the fixture's level, at the largest
-                // size anywhere in the product. The old interface showed this
-                // as a 40 pt swatch, which is why "colour means light" never
-                // paid off on screen.
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .fill(device.isOn ? device.color : Lumen.stage)
-                    .opacity(device.isOn ? 0.35 + device.brightness * 0.65 : 1)
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 9, style: .continuous)
-                            .fill(LinearGradient(
-                                colors: [Color.white.opacity(device.isOn ? 0.14 : 0.03), .clear],
-                                startPoint: .topLeading, endPoint: .bottomTrailing))
-                    }
-                    .overlay {
-                        if !device.isOn || device.isStale {
-                            Text(device.isStale ? "UNREACHABLE" : "OFF")
-                                .font(LumenType.readout(size: 10, weight: .medium))
-                                .foregroundStyle(Lumen.muted)
-                        }
-                    }
-                    .frame(height: 92)
-                    .accessibilityHidden(true)
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(device.label)
-                        .font(.system(size: 19, weight: .semibold))
-                        .foregroundStyle(Lumen.chalk)
-                        .lineLimit(2)
-                    Text(modelLine)
-                        .font(LumenType.readout(size: 10, weight: .regular))
-                        .foregroundStyle(Lumen.muted)
-                }
-
-                Toggle("Power", isOn: Binding(get: { device.isOn },
-                                              set: { manager.setPower(device, on: $0) }))
-                    .toggleStyle(LumenRockerStyle())
-
-                LumenFader(
-                    label: "Level",
-                    value: Binding(get: { device.brightness },
-                                   set: { manager.setBrightness(device, value: $0) }),
-                    track: .tint(device.color)
-                )
-
-                LumenFader(
-                    label: "Colour temperature",
-                    value: Binding(get: { Double(device.kelvin) },
-                                   set: { manager.setKelvin(device, kelvin: Int($0)) }),
-                    range: 2500...9000,
-                    step: 50,
-                    track: .kelvin,
-                    format: { "\(Int($0)) K" }
-                )
-
-                ColorPicker("Colour",
-                            selection: Binding(get: { device.color },
-                                               set: { manager.setColor(device, color: $0) }),
-                            supportsOpacity: false)
-                    .font(.system(size: 11.5, weight: .medium))
-                    .foregroundStyle(Lumen.meter)
-
-                if device.brand == .govee, manager.segmentStudioProfile(for: device) != nil {
-                    Button("Segment Studio") { showingSegments = true }
-                        .buttonStyle(LumenSecondaryButtonStyle(compact: true))
-                        .frame(maxWidth: .infinity)
-                }
-
-                if device.isLIFXLuna {
-                    Button("Matrix Editor") { showingMatrix = true }
-                        .buttonStyle(LumenSecondaryButtonStyle(compact: true))
-                        .frame(maxWidth: .infinity)
-                }
-
-                if command.phase == .failed {
-                    Button("Retry") { manager.retryCommand(for: device) }
-                        .buttonStyle(LumenPrimaryButtonStyle(compact: true))
-                        .frame(maxWidth: .infinity)
-                }
-
-                Spacer(minLength: 12)
-
-                // Network truth, and the only place the product spends its one
-                // authored hue.
-                VStack(spacing: 5) {
-                    Divider().overlay(Lumen.ruleSoft).padding(.bottom, 6)
-                    WashLinkFact(key: "ADDRESS", value: device.address, dead: device.isStale)
-                    WashLinkFact(key: "TRANSPORT", value: transport)
-                    WashLinkFact(key: "REACHABLE",
-                                 value: device.isStale ? "no reply" : "yes",
-                                 dead: device.isStale)
-                    WashLinkFact(key: "LAST COMMAND", value: lastCommand,
-                                 dead: command.phase == .failed)
-                }
-            }
-            .padding(16)
-            .frame(maxHeight: .infinity, alignment: .top)
-        }
-        .background(Lumen.deck)
-        .sheet(isPresented: $showingSegments) {
-            GoveeSegmentEditorView(device: device).environmentObject(manager)
-        }
-        .sheet(isPresented: $showingMatrix) {
-            LIFXLunaEditorView(device: device).environmentObject(manager)
-        }
-    }
-}
-#endif
+// The Wash "Desk" screen lived here: a field of channel strips with the
+// fixture as the primary object. The product went with Plan instead, where
+// the room is primary, so that screen is `PlanWorkspaceView` now and this one
+// is gone rather than left wired to nothing. It is in the history if the
+// channel-strip idea is ever wanted back.
 
 // MARK: - Shared list components
 //
@@ -803,7 +346,7 @@ private struct DeviceStateBadge: View {
 }
 
 
-private struct RoomDetailSheet: View {
+struct RoomDetailSheet: View {
     @EnvironmentObject private var manager: LightManager
     @Environment(\.dismiss) private var dismiss
     let room: Room
@@ -883,7 +426,7 @@ private struct RoomDetailSheet: View {
     }
 }
 
-private struct NewRoomSheet: View {
+struct NewRoomSheet: View {
     @EnvironmentObject private var manager: LightManager
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
@@ -1713,7 +1256,7 @@ private struct SectionHeader: View {
     }
 }
 
-private struct EmptyWorkspaceView: View {
+struct EmptyWorkspaceView: View {
     let icon: String
     let title: String
     let message: String

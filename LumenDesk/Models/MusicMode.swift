@@ -648,3 +648,210 @@ extension Double {
         return value < 0 ? value + 1 : value
     }
 }
+
+// MARK: - Plain-language help
+//
+// Everything below is user-facing copy, written for someone who has never run
+// a lighting desk and does not know what "wash", "metre" or "topology" mean.
+// The existing `summary` strings stay as they are — those describe the show in
+// the language of the feature. `plainSummary` is what the interface leads
+// with, and it is the string the README's plain-English guide mirrors.
+
+extension MusicModePreset {
+    /// What this preset feels like in the room, and when to pick it.
+    var plainSummary: String {
+        switch self {
+        case .ambient:
+            return "Quiet background glow. Colors drift slowly and nothing jumps out at you. Good for dinner, reading, or a room where the lights should not steal attention."
+        case .balanced:
+            return "The everyday setting. Lights pulse with the beat, change color as the music changes, and move a little. Start here if you are not sure what you want."
+        case .concert:
+            return "Loud and punchy. Drums land hard and color travels across the room quickly. Built for a party."
+        case .cinematic:
+            return "Slow, wide swells that build and release. Suits film scores, ambient records, and anything with long build-ups."
+        case .soundcheck:
+            return "The look LumenDesk shipped with before Music Mode, kept the same but without the harsh flashing."
+        case .club:
+            return "Steady pulse on every beat with a hard punch on the first beat of each bar. Made for dance music with a constant kick drum."
+        case .halftime:
+            return "Pulses on every other beat, so the room nods along instead of strobing. Good for hip-hop and anything slow and heavy."
+        case .waltz:
+            return "Counts in threes. The first beat takes the room, the next two breathe. For waltzes, jazz in three, and a lot of folk music."
+        case .custom:
+            return "Your own settings. Moving any slider or switch puts you here. Picking a named preset afterwards writes over these values, so there is no going back to them."
+        }
+    }
+
+    /// The short "what am I listening to?" line shown beside the preset.
+    var bestFor: String {
+        switch self {
+        case .ambient: return "Dinner and background music"
+        case .balanced: return "Anything, if you are unsure"
+        case .concert: return "Rock, pop, parties"
+        case .cinematic: return "Scores and ambient"
+        case .soundcheck: return "The old LumenDesk look"
+        case .club: return "House, techno, dance"
+        case .halftime: return "Hip-hop and slow, heavy music"
+        case .waltz: return "Music that counts in threes"
+        case .custom: return "Your saved settings"
+        }
+    }
+}
+
+extension FixtureRole {
+    /// What this one light does during the show.
+    var plainSummary: String {
+        switch self {
+        case .auto:
+            return "Let LumenDesk choose from the light itself. Anything with segments gets the traveling color. A light with \"kick\" or \"downstage\" in its name takes the punch, one with \"rear\" or \"accent\" takes the second color, and the rest fill the room. Rename a light if you want it picked for a job."
+        case .wash:
+            return "Fills the room with light. Bright and steady, with a soft pulse underneath."
+        case .hit:
+            return "Punches on the beat. Give this to the light you want the kick drum to land in."
+        case .accent:
+            return "Answers the snare and cymbals in a second color. Works best on a light off to one side."
+        case .motion:
+            return "Colour runs across it in time with the music. Best on a strip or any light with segments."
+        case .off:
+            return "Sits this song out. It keeps whatever it is showing right now and Music Mode never touches it."
+        }
+    }
+}
+
+extension MusicSilenceBehavior {
+    /// What the lights do when the music stops.
+    var plainSummary: String {
+        switch self {
+        case .settle: return "When the music stops, the lights sink to their dimmest setting and wait."
+        case .holdPalette: return "When the music stops, the lights hold a soft color instead of dropping away."
+        case .fadeOut: return "When the music stops, the lights fade down toward off."
+        }
+    }
+}
+
+extension MusicMetre {
+    /// What the time signature means without reading music.
+    var plainSummary: String {
+        switch self {
+        case .three: return "Three beats to a bar. Waltz time."
+        case .four: return "Four beats to a bar. Most pop, rock and dance music."
+        case .five: return "Five beats to a bar. Unusual, and it will feel like it."
+        case .six: return "Six quick beats, felt as two groups of three."
+        case .seven: return "Seven beats to a bar. Deliberately lopsided."
+        }
+    }
+}
+
+extension TimeFeel {
+    /// How fast the room should feel compared to the beat.
+    var plainSummary: String {
+        switch self {
+        case .auto: return "LumenDesk decides how fast the room should feel."
+        case .straight: return "One pulse for every beat."
+        case .half: return "One pulse every two beats. Slower and heavier."
+        case .double: return "Two pulses for every beat. Faster and busier."
+        }
+    }
+}
+
+extension MusicMovementDirection {
+    /// Which way color travels across your lights.
+    var plainSummary: String {
+        switch self {
+        case .forward: return "Travels from the first light in your list to the last."
+        case .reverse: return "Travels from the last light back to the first."
+        case .alternating: return "Travels one way, then comes back the other."
+        case .expanding: return "Starts in the middle of the room and spreads outward."
+        case .contracting: return "Starts at the outside and closes toward the middle."
+        case .clockwise: return "Circles the room one way. Set the layout to Circular first."
+        case .counterclockwise: return "Circles the room the other way. Set the layout to Circular first."
+        }
+    }
+}
+
+extension FixtureTopologyLayout {
+    /// How to describe where the lights are without the word "topology".
+    var plainSummary: String {
+        switch self {
+        case .leftToRight: return "A label for a list you have put in left-to-right order yourself. The sweep runs from the first light to the last."
+        case .frontToBack: return "A label for a list you have put in near-to-far order yourself. The sweep runs the same way, first light to last."
+        case .circular: return "The one that changes the show: the sweep wraps from the last light back to the first, for lights that ring the room."
+        case .custom: return "Your own order, set with the arrows. The sweep runs first light to last, the same as the two named orders."
+        }
+    }
+}
+
+/// Plain-language copy for the Music Mode controls that are not enum cases:
+/// the sliders, the switches, the audio sources, and the first-run walkthrough.
+/// Kept in one place so the whole body of writing can be reviewed at once.
+enum MusicModeHelp {
+    /// Three sentences that get a first-time user to a working show.
+    struct Step: Identifiable {
+        let id: Int
+        let title: String
+        let detail: String
+    }
+
+    static var quickStart: [Step] {
+        #if os(macOS)
+        return [
+            Step(id: 1,
+                 title: "Play something",
+                 detail: "Start music in any app on this Mac. LumenDesk listens to the sound your Mac is already playing, so Spotify, YouTube, a DJ set and a game all work the same way. The first time you press Start, macOS asks for Screen Recording permission — that is the only way an app is allowed to hear your Mac's audio, and nothing is recorded or saved."),
+            Step(id: 2,
+                 title: "Pick a room and a preset",
+                 detail: "Choose which lights are in the show at the top right, then pick a preset. Balanced is the safe first choice. You can change presets while the music is playing."),
+            Step(id: 3,
+                 title: "Press Start Music Mode",
+                 detail: "The meters below start moving and your lights follow the music. Press Stop when you are done. Every light goes back to how you left it, unless you switch off Restore previous state in the advanced controls.")
+        ]
+        #else
+        return [
+            Step(id: 1,
+                 title: "Play something out loud",
+                 detail: "On iPhone and iPad, Music Mode listens through the microphone, so the music has to be audible in the room. Grant microphone access the first time you press Start. Nothing is recorded or saved. If you want to follow a track the microphone cannot hear, use Open Audio File instead."),
+            Step(id: 2,
+                 title: "Pick a room and a preset",
+                 detail: "Choose which lights are in the show at the top, then pick a preset. Balanced is the safe first choice. You can change presets while the music is playing."),
+            Step(id: 3,
+                 title: "Press Start Music Mode",
+                 detail: "The meters below start moving and your lights follow the music. Press Stop when you are done. Every light goes back to how you left it, unless you switch off Restore previous state in the advanced controls.")
+        ]
+        #endif
+    }
+
+    /// What the beat readout is telling you.
+    static let readout = "The bars show what LumenDesk is hearing right now: overall volume, then bass, mids and highs. The dot flashes on each beat. Once it works out the tempo — usually about four seconds of steady rhythm — the label under it changes from \"Beat\" to the speed in beats per minute and how many beats are in a bar. While it still reads \"Beat\", the lights are reacting to the music as it happens instead of following a count, which is normal for ambient, spoken word and free-time playing."
+
+    static let masterBrightness = "How bright the show gets overall. Turn it down late at night, up for a bright room."
+    static let effectIntensity = "How dramatic the show is. Low is a gentle shimmer; high swings hard between dark and bright."
+    static let beatSensitivity = "How strongly the lights answer the beat. Turn it up if the room feels flat, down if it feels twitchy."
+    static let bassSensitivity = "How much the low end — kick drum and bass — drives the lights."
+    static let percussionSensitivity = "How much snares, hats and claps show up as accents."
+    static let colorChangeIntensity = "How often the color changes, and how far apart the colors sit across the room. Low holds one color for a long time and keeps the room close to a single shade."
+    static let movementAmount = "How far the brightness wave travels across your lights. At zero the wave stops, though color still spreads across the room and the stereo setting can still lift one end of it."
+    static let movementSpeed = "How fast that travel crosses the room."
+    static let minimumBrightness = "The dimmest the lights are allowed to go between beats. Raise it if the room keeps going too dark."
+    static let maximumBrightness = "The brightest a beat is allowed to push the lights."
+    static let allowsFlashes = "Lets the show use short, sharp flashes on big moments. Off unless you turn safe mode off first."
+    static let flashIntensity = "How strong those flashes are."
+    static let maximumFlashFrequency = "The most flashes allowed per second. LumenDesk never goes above three per second no matter what this says."
+    static let photosensitivitySafeMode = "On by default. Blocks flashing outright, because flashing light can trigger seizures and migraines in some people. Leave it on unless you know everyone in the room is fine with it."
+    static let palette = "The set of colors the show picks from. It changes the mood more than any other single control."
+    static let stereoImage = "How much the balance of the recording tilts the room. At zero every light gets the same level. Turn it up and a mix leaning one way brightens the lights at that end of your list."
+    static let phraseAware = "Lets the show notice when a section is building and lift with it, instead of treating every bar the same."
+    static let restorePreviousState = "When you press Stop, put every light back exactly how it was before the show started."
+    static let reducedMotion = "If Reduced Motion is on in your system accessibility settings, LumenDesk keeps movement small and never flashes."
+
+    #if os(macOS)
+    static let systemAudioSource = "Listens to whatever this Mac is playing — any app, not just a music app. Needs Screen Recording permission, which is how macOS gates access to system audio."
+    #else
+    static let systemAudioSource = "Listens through the microphone, so the music has to be audible in the room. Needs microphone permission."
+    #endif
+    static let fileSource = "Pick a song file and LumenDesk plays it and lights to it. Useful on iPhone and iPad, or when you want one specific track rather than everything the device is playing."
+    static let midiSource = "Follows a beat sent by DJ software, a drum machine, or recording software over MIDI. Use this when you want the lights locked to that clock instead of working the tempo out by ear."
+
+    static let roles = "Every light gets a job. Auto reads the light's own name and segment count rather than knowing where it sits, so set a job by hand whenever you want a specific light doing a specific thing."
+    static let order = "Movement runs down this list in order, so the list should match where the lights actually sit in the room. The arrows are what reorder it; the layout above is a label for the order you have already set, apart from Circular, which wraps the sweep from the last light back to the first. The eye button leaves a light out of the show entirely."
+    static let sharedSource = "Every room in a show listens to the same audio source. To run a second room, start it on the same source; to switch sources, stop the shows that are already running."
+}

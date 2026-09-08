@@ -10,6 +10,11 @@ struct MusicModeView: View {
     @State private var advancedExpanded = false
     @State private var showUnsafeWarning = false
     @State private var showFileImporter = false
+    /// Lightweight view preferences, stored the way the rest of the app stores
+    /// them. Both start on so a first-time user gets the walkthrough and the
+    /// plain-English captions without going looking for them.
+    @AppStorage("LumenDesk.musicMode.quickStart.v1") private var showsQuickStart = true
+    @AppStorage("LumenDesk.musicMode.plainHelp.v1") private var showsPlainHelp = true
 
     private var fixtures: [MusicFixtureDescriptor] { manager.musicFixtureDescriptors(in: scope) }
     private var includedFixtures: [MusicFixtureDescriptor] { topology.includedFixtures(fixtures) }
@@ -18,6 +23,7 @@ struct MusicModeView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             intro
+            quickStart
             sourceAndInput
             presetPicker
             MusicModeVisualizerView(
@@ -71,10 +77,14 @@ struct MusicModeView: View {
                     .foregroundStyle(Lumen.textPrimary)
                 SpectrumRule(height: 2, tapered: true).frame(width: 120)
                 #if os(macOS)
-                Text("LumenDesk analyzes system audio locally and choreographs your lights without recording or retaining audio. Open an audio file or follow MIDI clock when you want a source that is not the system mix.")
+                Text("Your lights follow whatever this Mac is playing. Any app counts, not just a music app. The sound is analyzed on this Mac and never recorded, saved, or sent anywhere.")
                 #else
-                Text("LumenDesk analyzes microphone input locally and choreographs your lights without recording or retaining audio. Open an audio file on this device when you want a track the microphone cannot hear.")
+                Text("Your lights follow music playing in the room, heard through the microphone. The sound is analyzed on this device and never recorded, saved, or sent anywhere.")
                 #endif
+                Toggle("Explain the controls", isOn: $showsPlainHelp)
+                    .toggleStyle(LumenRockerStyle())
+                    .font(.caption)
+                    .help("Shows a plain-English line under each control. Turn it off once you know your way around.")
                 Text("Soundcheck remains available as a built-in preset, and saved music-pulse effects remain compatible.")
                     .font(.caption)
                     .foregroundStyle(Lumen.textTertiary)
@@ -105,9 +115,11 @@ struct MusicModeView: View {
                         }
                         .buttonStyle(LumenPrimaryButtonStyle())
                         .disabled(includedFixtures.isEmpty)
+                        .help(MusicModeHelp.systemAudioSource)
                         Button("Open Audio File…") { showFileImporter = true }
                             .buttonStyle(LumenSecondaryButtonStyle())
                             .disabled(includedFixtures.isEmpty)
+                            .help(MusicModeHelp.fileSource)
                         Button("MIDI Clock") {
                             commitConfiguration()
                             manager.startMusicMode(
@@ -119,6 +131,14 @@ struct MusicModeView: View {
                         }
                         .buttonStyle(LumenSecondaryButtonStyle())
                         .disabled(includedFixtures.isEmpty)
+                        .help(MusicModeHelp.midiSource)
+                    }
+                    if includedFixtures.isEmpty {
+                        Text("No lights in this show yet. Pick a room with lights in it, or switch a light back on in the list below.")
+                            .font(.caption)
+                            .foregroundStyle(Lumen.warning)
+                            .multilineTextAlignment(.trailing)
+                            .frame(maxWidth: 220)
                     }
                 }
             }
@@ -127,8 +147,49 @@ struct MusicModeView: View {
         .lumenCard(highlighted: isRunning, glowColor: isRunning ? Lumen.pink : nil)
     }
 
+    /// A first-run walkthrough, collapsible and remembered, so the desk does
+    /// not open cold for someone who has never used it.
+    private var quickStart: some View {
+        DisclosureGroup(isExpanded: $showsQuickStart) {
+            VStack(alignment: .leading, spacing: 14) {
+                ForEach(MusicModeHelp.quickStart) { step in
+                    HStack(alignment: .top, spacing: 12) {
+                        Text("\(step.id)")
+                            .font(LumenType.display(size: 15, weight: .bold).monospacedDigit())
+                            .foregroundStyle(Lumen.beamBright)
+                            .frame(width: 22, alignment: .center)
+                            .accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(step.title)
+                                .font(LumenType.display(size: 14, weight: .semibold))
+                                .foregroundStyle(Lumen.textPrimary)
+                            Text(step.detail)
+                                .font(.caption)
+                                .foregroundStyle(Lumen.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("Step \(step.id). \(step.title). \(step.detail)")
+                }
+                Text(MusicModeHelp.sharedSource)
+                    .font(.caption)
+                    .foregroundStyle(Lumen.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.top, 12)
+        } label: {
+            Text("How to get a show running")
+                .font(LumenType.display(size: 15, weight: .semibold))
+        }
+        .padding(16)
+        .lumenCard()
+    }
+
     private var sourceAndInput: some View {
-        MusicModeInputStatusView(controller: manager.musicModeController, isRunning: isRunning)
+        MusicModeInputStatusView(controller: manager.musicModeController,
+                                 isRunning: isRunning,
+                                 showsPlainHelp: showsPlainHelp)
     }
 
     private var presetPicker: some View {
@@ -136,10 +197,9 @@ struct MusicModeView: View {
             HStack {
                 LumenEyebrow(text: "Preset", tint: Lumen.beamDim, size: 10)
                 Spacer()
-                Text(configuration.preset.summary)
-                    .font(.caption)
+                Text(configuration.preset.bestFor)
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(Lumen.textSecondary)
-                    .lineLimit(2)
             }
             LumenSelector(label: "Preset", selection: Binding(
                 get: { configuration.preset },
@@ -157,6 +217,16 @@ struct MusicModeView: View {
             ), options: MusicModePreset.allCases.map {
                 LumenOption(value: $0, title: $0.displayName)
             })
+            if showsPlainHelp {
+                Text(configuration.preset.plainSummary)
+                    .font(.caption)
+                    .foregroundStyle(Lumen.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Text(configuration.preset.summary)
+                .font(.caption)
+                .foregroundStyle(Lumen.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(16)
         .lumenCard()
@@ -165,11 +235,22 @@ struct MusicModeView: View {
     private var primaryControls: some View {
         VStack(alignment: .leading, spacing: 14) {
             LumenEyebrow(text: "Show balance", tint: Lumen.beamDim, size: 10)
-            musicSlider("Master brightness", value: binding(\.masterBrightness), icon: "sun.max.fill")
-            musicSlider("Effect intensity", value: binding(\.effectIntensity), icon: "waveform")
-            musicSlider("Beat sensitivity", value: binding(\.beatSensitivity), icon: "metronome.fill")
-            musicSlider("Bass sensitivity", value: binding(\.bassSensitivity), icon: "speaker.wave.3.fill")
-            musicSlider("Percussion sensitivity", value: binding(\.percussionSensitivity), icon: "hands.clap.fill")
+            if showsPlainHelp {
+                Text("A preset sets all of these for you. Move one and the preset becomes Custom. Picking a named preset afterwards writes over what you changed.")
+                    .font(.caption)
+                    .foregroundStyle(Lumen.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            musicSlider("Master brightness", value: binding(\.masterBrightness), icon: "sun.max.fill",
+                        help: MusicModeHelp.masterBrightness)
+            musicSlider("Effect intensity", value: binding(\.effectIntensity), icon: "waveform",
+                        help: MusicModeHelp.effectIntensity)
+            musicSlider("Beat sensitivity", value: binding(\.beatSensitivity), icon: "metronome.fill",
+                        help: MusicModeHelp.beatSensitivity)
+            musicSlider("Bass sensitivity", value: binding(\.bassSensitivity), icon: "speaker.wave.3.fill",
+                        help: MusicModeHelp.bassSensitivity)
+            musicSlider("Percussion sensitivity", value: binding(\.percussionSensitivity), icon: "hands.clap.fill",
+                        help: MusicModeHelp.percussionSensitivity)
         }
         .padding(16)
         .lumenCard()
@@ -179,18 +260,62 @@ struct MusicModeView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Spatial topology").font(LumenType.display(size: 15, weight: .semibold))
-                    Text("Position is explicit and never inferred from discovery order. RGBIC segments continue the path inside their fixture. Assign a role to split wash, hit, accent, and motion across the room. Exclude a light or set it to Off to leave it out of this room's show without changing its current state.\(isRunning ? " Stop the show to change which lights are included." : "")")
+                    Text("Which light does what")
+                        .font(LumenType.display(size: 15, weight: .semibold))
+                    Text("Give each light a job and put the list in the order the lights sit in the room. LumenDesk never guesses the order from how the lights were found.\(isRunning ? " Stop the show to change which lights are included." : "")")
                         .font(.caption).foregroundStyle(Lumen.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer()
-                Picker("Layout", selection: Binding(
-                    get: { topology.layout },
-                    set: { topology.layout = $0; commitTopology() }
-                )) {
-                    ForEach(FixtureTopologyLayout.allCases) { Text($0.displayName).tag($0) }
+                VStack(alignment: .trailing, spacing: 3) {
+                    Picker("Layout", selection: Binding(
+                        get: { topology.layout },
+                        set: { topology.layout = $0; commitTopology() }
+                    )) {
+                        ForEach(FixtureTopologyLayout.allCases) { Text($0.displayName).tag($0) }
+                    }
+                    .fixedSize()
+                    .help(topology.layout.plainSummary)
+                    if showsPlainHelp {
+                        Text(topology.layout.plainSummary)
+                            .font(.caption)
+                            .foregroundStyle(Lumen.textTertiary)
+                            .multilineTextAlignment(.trailing)
+                            .frame(maxWidth: 260)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
-                .fixedSize()
+            }
+
+            if showsPlainHelp {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(MusicModeHelp.roles)
+                        .font(.caption)
+                        .foregroundStyle(Lumen.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    ForEach(FixtureRole.allCases) { role in
+                        HStack(alignment: .top, spacing: 8) {
+                            Text(role.displayName)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(Lumen.textPrimary)
+                                .frame(width: 58, alignment: .leading)
+                            Text(role.plainSummary)
+                                .font(.caption)
+                                .foregroundStyle(Lumen.textTertiary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
+                    Text(MusicModeHelp.order)
+                        .font(.caption)
+                        .foregroundStyle(Lumen.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(12)
+                .background(
+                    LumenPanelShape(radius: 3, chamfer: 10)
+                        .fill(Lumen.surfaceRaised)
+                )
             }
 
             let ordered = topology.orderedFixtures(fixtures)
@@ -221,7 +346,8 @@ struct MusicModeView: View {
                     .labelsHidden()
                     .fixedSize()
                     .disabled(isExcluded || (isRunning && fixture.role == .off))
-                    .help(fixture.resolvedRole.summary)
+                    .help(fixture.resolvedRole.plainSummary)
+                    .accessibilityHint(fixture.resolvedRole.plainSummary)
                     Spacer()
                     Button { toggleExclusion(fixture.id) } label: {
                         Image(systemName: isExcluded ? "eye.slash" : "eye")
@@ -254,19 +380,29 @@ struct MusicModeView: View {
     private var advancedControls: some View {
         DisclosureGroup(isExpanded: $advancedExpanded) {
             VStack(alignment: .leading, spacing: 14) {
-                musicSlider("Color-change intensity", value: binding(\.colorChangeIntensity), icon: "paintpalette.fill")
-                musicSlider("Movement amount", value: binding(\.movementAmount), icon: "arrow.left.and.right")
-                musicSlider("Movement speed", value: binding(\.movementSpeed), icon: "speedometer")
+                musicSlider("Color-change intensity", value: binding(\.colorChangeIntensity), icon: "paintpalette.fill",
+                            help: MusicModeHelp.colorChangeIntensity)
+                musicSlider("Movement amount", value: binding(\.movementAmount), icon: "arrow.left.and.right",
+                            help: MusicModeHelp.movementAmount)
+                musicSlider("Movement speed", value: binding(\.movementSpeed), icon: "speedometer",
+                            help: MusicModeHelp.movementSpeed)
                 Picker("Movement direction", selection: binding(\.movementDirection)) {
                     ForEach(MusicMovementDirection.allCases) { Text($0.displayName).tag($0) }
                 }
-                musicSlider("Minimum brightness", value: binding(\.minimumBrightness), icon: "sun.min")
-                musicSlider("Maximum brightness", value: binding(\.maximumBrightness), icon: "sun.max")
+                .help(configuration.movementDirection.plainSummary)
+                helpCaption(configuration.movementDirection.plainSummary)
+                musicSlider("Minimum brightness", value: binding(\.minimumBrightness), icon: "sun.min",
+                            help: MusicModeHelp.minimumBrightness)
+                musicSlider("Maximum brightness", value: binding(\.maximumBrightness), icon: "sun.max",
+                            help: MusicModeHelp.maximumBrightness)
 
                 Divider().overlay(Lumen.hairline)
                 Toggle("Allow controlled flashes", isOn: binding(\.allowsFlashes))
                     .toggleStyle(LumenRockerStyle())
-                musicSlider("Flash intensity", value: binding(\.flashIntensity), icon: "bolt.fill")
+                    .help(MusicModeHelp.allowsFlashes)
+                helpCaption(MusicModeHelp.allowsFlashes)
+                musicSlider("Flash intensity", value: binding(\.flashIntensity), icon: "bolt.fill",
+                            help: MusicModeHelp.flashIntensity)
                     .disabled(configuration.photosensitivitySafeMode || !configuration.allowsFlashes)
                 LumenFader(label: "Maximum flash frequency",
                            value: frequencyBinding,
@@ -275,6 +411,9 @@ struct MusicModeView: View {
                            track: .tint(Lumen.warning),
                            format: { String(format: "%.2f/s", $0) })
                 .disabled(configuration.photosensitivitySafeMode || !configuration.allowsFlashes)
+                .help(MusicModeHelp.maximumFlashFrequency)
+                .accessibilityHint(MusicModeHelp.maximumFlashFrequency)
+                helpCaption(MusicModeHelp.maximumFlashFrequency)
 
                 Toggle("Photosensitivity-safe mode", isOn: Binding(
                     get: { configuration.photosensitivitySafeMode },
@@ -288,6 +427,8 @@ struct MusicModeView: View {
                         }
                     }
                 ))
+                .help(MusicModeHelp.photosensitivitySafeMode)
+                helpCaption(MusicModeHelp.photosensitivitySafeMode)
                 Text(configuration.photosensitivitySafeMode
                      ? "Enabled by default: flashes are disabled. Reduced Motion also limits movement and flashes."
                      : "Absolute enforcement remains active: no request can exceed 3 flashes per second or your lower selected limit.")
@@ -301,25 +442,38 @@ struct MusicModeView: View {
                     Text("Ocean").tag("ocean")
                     Text("Club").tag("club")
                 }
+                .help(MusicModeHelp.palette)
+                helpCaption(MusicModeHelp.palette)
                 Picker("Silence behavior", selection: binding(\.silenceBehavior)) {
                     ForEach(MusicSilenceBehavior.allCases) { Text($0.displayName).tag($0) }
                 }
+                .help(configuration.silenceBehavior.plainSummary)
+                helpCaption(configuration.silenceBehavior.plainSummary)
 
                 Divider().overlay(Lumen.hairline)
                 Picker("Metre", selection: metreBinding) {
                     Text("Auto").tag("auto")
                     ForEach(MusicMetre.allCases) { Text($0.displayName).tag(String($0.rawValue)) }
                 }
+                .help(metreHelp)
+                helpCaption(metreHelp)
                 Picker("Time feel", selection: binding(\.timeFeel)) {
                     ForEach(TimeFeel.allCases) { Text($0.displayName).tag($0) }
                 }
-                musicSlider("Stereo image", value: binding(\.stereoImage), icon: "headphones")
+                .help(configuration.timeFeel.plainSummary)
+                helpCaption(configuration.timeFeel.plainSummary)
+                musicSlider("Stereo image", value: binding(\.stereoImage), icon: "headphones",
+                            help: MusicModeHelp.stereoImage)
                 Toggle("Phrase-aware lifts", isOn: binding(\.phraseAware))
                     .toggleStyle(LumenRockerStyle())
+                    .help(MusicModeHelp.phraseAware)
+                helpCaption(MusicModeHelp.phraseAware)
                 Text("Auto metre listens for 3/4, 5/4, 6/8 and 7/8. Half-time feels every other beat. Roles and metre stay inside the 3 flashes/second ceiling.")
                     .font(.caption).foregroundStyle(Lumen.textSecondary)
 
                 Toggle("Restore previous state when stopped", isOn: binding(\.restorePreviousState))
+                    .help(MusicModeHelp.restorePreviousState)
+                helpCaption(MusicModeHelp.restorePreviousState)
                 if manager.isDemoMode {
                     Toggle("Use deterministic demo rhythm", isOn: binding(\.usesSyntheticDemoPattern))
                     Picker("Demo groove", selection: Binding(
@@ -336,21 +490,64 @@ struct MusicModeView: View {
             }
             .padding(.top, 14)
         } label: {
-            Text("Advanced controls").font(LumenType.display(size: 15, weight: .semibold))
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Advanced controls").font(LumenType.display(size: 15, weight: .semibold))
+                Text("Nothing in here is needed to run a show. Open it to shape one preset into exactly what you want.")
+                    .font(.caption)
+                    .foregroundStyle(Lumen.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(16)
         .lumenCard()
     }
 
-    private func musicSlider(_ title: String, value: Binding<Double>, icon: String) -> some View {
-        HStack(alignment: .center, spacing: 12) {
-            Image(systemName: icon)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(Lumen.beamDim)
-                .frame(width: 18)
-                .accessibilityHidden(true)
-            LumenFader(label: title, value: value, track: .spectrum, showsScale: false)
+    /// One fader plus the sentence that says what moving it does. The caption
+    /// follows the "Explain the controls" preference; the tooltip and the
+    /// accessibility hint carry the same words either way, so the explanation
+    /// is never only available to a sighted user with a mouse.
+    private func musicSlider(_ title: String, value: Binding<Double>, icon: String, help: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .center, spacing: 12) {
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Lumen.beamDim)
+                    .frame(width: 18)
+                    .accessibilityHidden(true)
+                LumenFader(label: title, value: value, track: .spectrum, showsScale: false)
+                    .accessibilityHint(help)
+            }
+            if showsPlainHelp {
+                Text(help)
+                    .font(.caption)
+                    .foregroundStyle(Lumen.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.leading, 30)
+                    .accessibilityHidden(true)
+            }
         }
+        .help(help)
+    }
+
+    /// A plain-English line under a control, shown while "Explain the
+    /// controls" is on. Pickers and toggles carry the same words in `.help`,
+    /// so nothing here is the only copy of an explanation.
+    @ViewBuilder
+    private func helpCaption(_ text: String) -> some View {
+        if showsPlainHelp {
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(Lumen.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityHidden(true)
+        }
+    }
+
+    private var metreHelp: String {
+        guard let metre = configuration.metreOverride else {
+            return "Auto works out how many beats are in a bar by listening. Set it by hand only if the room is counting the music wrong."
+        }
+        return metre.plainSummary
     }
 
     private func binding<Value>(_ keyPath: WritableKeyPath<MusicModeConfiguration, Value>) -> Binding<Value> {
@@ -460,6 +657,7 @@ struct MusicModeView: View {
 private struct MusicModeInputStatusView: View {
     @ObservedObject var controller: AudioReactiveSessionController
     let isRunning: Bool
+    let showsPlainHelp: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -502,6 +700,12 @@ private struct MusicModeInputStatusView: View {
             } else if controller.sourceStatus == .unavailable {
                 Text("The audio source is unavailable. Check permission and try starting Music Mode again.")
                     .font(.caption).foregroundStyle(Lumen.warning)
+            }
+            if showsPlainHelp {
+                Text(MusicModeHelp.readout)
+                    .font(.caption)
+                    .foregroundStyle(Lumen.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(16)

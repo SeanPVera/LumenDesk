@@ -78,6 +78,24 @@ final class LightManager: ObservableObject {
     private let persistenceStore: ApplicationPersistence
     private let commandCoordinator: CommandCoordinator
     private var rehearsalSnapshot: [LightRuntimeSnapshot] = []
+
+    /// State saved before a held identify, so the fixture can be put back
+    /// exactly as it was however the question ends. Lives here rather than
+    /// beside `beginSustainedIdentify` because that sits in an extension, and
+    /// an extension may not hold stored properties.
+    private struct IdentifyHold {
+        let deviceID: String
+        let power: Bool
+        let color: Color
+        let brightness: Double
+        let segments: GoveeSegmentState?
+        let matrix: LIFXMatrixState?
+        var task: Task<Void, Never>?
+    }
+
+    private var identifyHold: IdentifyHold?
+
+    var isHoldingIdentify: Bool { identifyHold != nil }
     // Devices with a live razer overlay, including both editor previews and
     // applied layouts that must be held through the stream.
     private var razerActiveIDs: Set<String> = []
@@ -2851,22 +2869,6 @@ extension LightManager {
     }
 
     // MARK: - Sustained identify
-
-    /// State saved before a held identify, so the fixture can be put back
-    /// exactly as it was however the question ends.
-    private struct IdentifyHold {
-        let deviceID: String
-        let power: Bool
-        let color: Color
-        let brightness: Double
-        let segments: GoveeSegmentState?
-        let matrix: LIFXMatrixState?
-        var task: Task<Void, Never>?
-    }
-
-    private var identifyHold: IdentifyHold?
-
-    var isHoldingIdentify: Bool { identifyHold != nil }
 
     /// Breathe a fixture until told to stop.
     ///

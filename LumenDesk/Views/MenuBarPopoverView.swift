@@ -101,13 +101,11 @@ struct MenuBarPopoverView: View {
         HStack {
             LumenMark(size: 18)
             VStack(alignment: .leading, spacing: 0) {
-                Text("LUMENDESK")
+                Text("LumenDesk")
                     .font(LumenType.display(size: 13, weight: .bold))
-                    .tracking(1.1)
                 if manager.isDemoMode {
-                    Text("SAFE DEMO")
+                    Text("Demo rig")
                         .font(LumenType.instrumentLabel(size: 8))
-                        .tracking(0.9)
                         .foregroundStyle(Lumen.warning)
                 }
             }

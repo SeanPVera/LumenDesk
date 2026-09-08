@@ -280,7 +280,7 @@ struct ComplianceSuiteView: View {
             image.lockFocus(); NSColor.white.setFill(); NSRect(x: 0, y: 0, width: 612, height: 792).fill()
             let title = "INTERNATIONAL BUREAU OF LUMENS\nCompliance Dossier · Page \(pageNumber) of 47"
             title.draw(in: NSRect(x: 48, y: 650, width: 516, height: 90), withAttributes: [.font: NSFont.boldSystemFont(ofSize: 18), .foregroundColor: NSColor.black])
-            let body = "Treaty code: \(certificate.treatyCode)\nSeal: \(certificate.seal.rawValue.uppercased())\nScore: \(certificate.score)/100\n\n\(certificate.findings.joined(separator: "\n\n"))\n\nAppendix \(pageNumber): This page exists solely because the specification demanded unreasonable complexity."
+            let body = "Treaty code: \(certificate.treatyCode)\nSeal: \(certificate.seal.rawValue)\nScore: \(certificate.score)/100\n\n\(certificate.findings.joined(separator: "\n\n"))\n\nAppendix \(pageNumber): This page exists solely because the specification demanded unreasonable complexity."
             body.draw(in: NSRect(x: 48, y: 120, width: 516, height: 500), withAttributes: [.font: NSFont.systemFont(ofSize: 12), .foregroundColor: NSColor.black])
             image.unlockFocus(); if let page = PDFPage(image: image) { document.insert(page, at: document.pageCount) }
         }

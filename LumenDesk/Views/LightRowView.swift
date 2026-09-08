@@ -185,7 +185,6 @@ struct LightRowView: View {
             } else {
                 Text(device.label)
                     .font(LumenType.display(size: 20, weight: .bold))
-                    .tracking(0.3)
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .help(device.label)
@@ -214,9 +213,8 @@ struct LightRowView: View {
 
     private var metadataRow: some View {
         HStack(spacing: 6) {
-            Text(device.brand.displayName.uppercased())
+            Text(device.brand.displayName)
                 .font(LumenType.instrumentLabel(size: 9))
-                .tracking(0.9)
                 .padding(.horizontal, 6).padding(.vertical, 2)
                 .background(
                     RoundedRectangle(cornerRadius: 2, style: .continuous)
@@ -420,9 +418,8 @@ struct LightRowView: View {
                 swatchButton(swatch)
             }
             Spacer(minLength: 0)
-            Text(colorDescription.uppercased())
+            Text(colorDescription)
                 .font(LumenType.instrumentLabel(size: 9))
-                .tracking(0.7)
                 .foregroundStyle(Lumen.textTertiary)
             ColorPicker("", selection: colorBinding, supportsOpacity: false)
                 .labelsHidden()

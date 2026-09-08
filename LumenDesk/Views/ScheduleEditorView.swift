@@ -62,9 +62,8 @@ struct ScheduleEditorView: View {
                 HStack(spacing: 8) {
                     Text(entry.timeString)
                         .font(LumenType.readout(size: 15, weight: .semibold))
-                    Text(entry.daySummary.uppercased())
+                    Text(entry.daySummary)
                         .font(LumenType.instrumentLabel(size: 9))
-                        .tracking(0.8)
                         .foregroundStyle(Lumen.textTertiary)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)

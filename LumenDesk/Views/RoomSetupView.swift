@@ -312,51 +312,64 @@ struct RoomSetupView: View {
             VStack(alignment: .leading, spacing: 18) {
                 stepHeading("Look up. Which room is flashing?",
                             "The fixture is breathing on your network right now. Answer with the room you can see it in — you never have to know what it is called.")
-
-                if let device = currentDevice {
-                    HStack(alignment: .top, spacing: 26) {
-                        IdentifyLamp(device: device)
-                            .frame(width: 210)
-
-                        VStack(alignment: .leading, spacing: 14) {
-                            if device.isStale {
-                                Label("This fixture is not answering, so it cannot be flashed. Put it in a room from memory, or skip it and it will wait in the tray.",
-                                      systemImage: "wifi.slash")
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(Lumen.warn)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-
-                            roomChoices
-
-                            if showingNewRoomField {
-                                HStack(spacing: 7) {
-                                    TextField("Room name", text: $newRoomName)
-                                        .textFieldStyle(.roundedBorder)
-                                        .onSubmit(createRoomAndAssign)
-                                    Button("Add", action: createRoomAndAssign)
-                                        .buttonStyle(LumenPrimaryButtonStyle(compact: true))
-                                        .disabled(newRoomName.trimmingCharacters(in: .whitespaces).isEmpty)
-                                }
-                            }
-
-                            HStack(spacing: 16) {
-                                Button("I cannot see it", action: skipCurrent)
-                                    .buttonStyle(.plain)
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(Lumen.muted)
-                                Button("Skip for now", action: skipCurrent)
-                                    .buttonStyle(.plain)
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(Lumen.muted)
-                            }
-
-                            if !manager.rooms.isEmpty { sortedSoFar }
-                        }
-                    }
-                }
+                question
             }
             .padding(20)
+        }
+    }
+
+    // Broken out of `identifyStep` because SwiftUI type-checks a view body as
+    // a single expression, and nesting the lamp, the choices, a conditional
+    // text field and the escape hatches in one HStack takes the compiler past
+    // its budget.
+    @ViewBuilder
+    private var question: some View {
+        if let device = currentDevice {
+            HStack(alignment: .top, spacing: 26) {
+                IdentifyLamp(device: device).frame(width: 210)
+                VStack(alignment: .leading, spacing: 14) {
+                    if device.isStale { staleNotice }
+                    roomChoices
+                    if showingNewRoomField { newRoomRow }
+                    escapeRow
+                    if !manager.rooms.isEmpty { sortedSoFar }
+                }
+            }
+        }
+    }
+
+    private var staleNotice: some View {
+        Label("This fixture is not answering, so it cannot be flashed. Put it in a room from memory, or skip it and it will wait in the tray.",
+              systemImage: "wifi.slash")
+            .font(.system(size: 12))
+            .foregroundStyle(Lumen.warn)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var newRoomRow: some View {
+        HStack(spacing: 7) {
+            TextField("Room name", text: $newRoomName)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit(createRoomAndAssign)
+            Button("Add", action: createRoomAndAssign)
+                .buttonStyle(LumenPrimaryButtonStyle(compact: true))
+                .disabled(newRoomName.trimmingCharacters(in: .whitespaces).isEmpty)
+        }
+    }
+
+    /// "I cannot see it" is a real answer: the lamp may be off at the wall or
+    /// in a cupboard. Those fixtures wait in the tray with their reason rather
+    /// than being dumped into a junk room nobody asked for.
+    private var escapeRow: some View {
+        HStack(spacing: 16) {
+            Button("I cannot see it", action: skipCurrent)
+                .buttonStyle(.plain)
+                .font(.system(size: 12))
+                .foregroundStyle(Lumen.muted)
+            Button("Skip for now", action: skipCurrent)
+                .buttonStyle(.plain)
+                .font(.system(size: 12))
+                .foregroundStyle(Lumen.muted)
         }
     }
 

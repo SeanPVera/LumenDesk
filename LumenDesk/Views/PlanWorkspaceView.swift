@@ -100,36 +100,43 @@ struct PlanWorkspaceView: View {
                 .foregroundStyle(Lumen.muted)
 
             Spacer(minLength: 12)
-
-            Toggle("Arrange", isOn: $arranging)
-                .toggleStyle(LumenChipStyle())
-                .help("Move and resize room blocks")
-
-            if arranging {
-                Button("Reset layout") { manager.resetPlanLayout() }
-                    .buttonStyle(LumenSecondaryButtonStyle(compact: true))
-            }
-
-            Menu {
-                Button { showingSetup = true } label: {
-                    Label("Sort Fixtures Into Rooms", systemImage: "square.grid.3x3.topleft.filled")
-                }
-                Button { showingNewRoom = true } label: {
-                    Label("New Room", systemImage: "rectangle.stack.badge.plus")
-                }
-                Divider()
-                Button { manager.resetPlanLayout() } label: {
-                    Label("Reset Plan Layout", systemImage: "arrow.counterclockwise")
-                }
-            } label: {
-                Image(systemName: "ellipsis")
-            }
-            .menuStyle(.borderlessButton)
-            .fixedSize()
-            .accessibilityLabel("Plan actions")
+            arrangeControls
+            actionsMenu
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 13)
+    }
+
+    @ViewBuilder
+    private var arrangeControls: some View {
+        Toggle("Arrange", isOn: $arranging)
+            .toggleStyle(LumenChipStyle())
+            .help("Move and resize room blocks")
+
+        if arranging {
+            Button("Reset layout") { manager.resetPlanLayout() }
+                .buttonStyle(LumenSecondaryButtonStyle(compact: true))
+        }
+    }
+
+    private var actionsMenu: some View {
+        Menu {
+            Button { showingSetup = true } label: {
+                Label("Sort Fixtures Into Rooms", systemImage: "square.grid.3x3.topleft.filled")
+            }
+            Button { showingNewRoom = true } label: {
+                Label("New Room", systemImage: "rectangle.stack.badge.plus")
+            }
+            Divider()
+            Button { manager.resetPlanLayout() } label: {
+                Label("Reset Plan Layout", systemImage: "arrow.counterclockwise")
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .accessibilityLabel("Plan actions")
     }
 
     private var linkSummary: String {
@@ -167,16 +174,18 @@ struct PlanWorkspaceView: View {
         }
         .padding(.horizontal, 15)
         .padding(.vertical, 11)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Lumen.strip)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(Lumen.warn.opacity(0.45), lineWidth: 1)
-                )
-        )
+        .background(trayBackground)
         .padding(.horizontal, 18)
         .padding(.top, 16)
+    }
+
+    private var trayBackground: some View {
+        RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .fill(Lumen.strip)
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(Lumen.warn.opacity(0.45), lineWidth: 1)
+            )
     }
 
     private var unsortedTitle: String {
@@ -227,6 +236,17 @@ struct PlanCellDelta {
     var rows: Int
 }
 
+extension RoomPlanFrame {
+    /// The frame's pixel rect on a board whose cells are `cell`, inset so
+    /// neighbouring blocks read as separate objects.
+    func rect(cell: CGSize, inset: CGFloat = 2.5) -> CGRect {
+        CGRect(x: cell.width * CGFloat(column) + inset,
+               y: cell.height * CGFloat(row) + inset,
+               width: max(0, cell.width * CGFloat(width) - inset * 2),
+               height: max(0, cell.height * CGFloat(height) - inset * 2))
+    }
+}
+
 // MARK: - Board
 
 /// The grid of room blocks. Six columns wide, growing downward.
@@ -239,11 +259,19 @@ struct PlanBoardView: View {
 
     /// A move or resize in progress, held here so the ghost and the block can
     /// be drawn from the same source.
-    @State private var draft: (roomID: UUID, frame: RoomPlanFrame, valid: Bool)?
+    @State private var draft: PlanDraft?
+
+    struct PlanDraft {
+        let roomID: UUID
+        let frame: RoomPlanFrame
+        let valid: Bool
+    }
 
     private var rows: Int {
         var frames: [UUID: RoomPlanFrame] = [:]
-        for room in manager.rooms { if let f = room.planFrame { frames[room.id] = f } }
+        for room in manager.rooms {
+            if let frame = room.planFrame { frames[room.id] = frame }
+        }
         return PlanLayout.rowCount(for: frames)
     }
 
@@ -253,64 +281,78 @@ struct PlanBoardView: View {
                               height: proxy.size.height / CGFloat(rows))
             ZStack(alignment: .topLeading) {
                 if arranging { grid(cell: cell) }
-
                 ForEach(manager.rooms) { room in
-                    if let frame = displayFrame(for: room) {
-                        RoomBlockView(
-                            room: room,
-                            arranging: arranging,
-                            dimmed: !matchesQuery(room),
-                            selected: selectedRoomID == room.id,
-                            selectedLightID: $selectedLightID,
-                            onSelect: { selectedRoomID = room.id },
-                            onLevel: { manager.setBrightness(in: room, value: $0) },
-                            onMove: { delta, committing in
-                                move(room: room, by: delta, resize: false, committing: committing)
-                            },
-                            onResize: { delta, committing in
-                                move(room: room, by: delta, resize: true, committing: committing)
-                            },
-                            cell: cell
-                        )
-                        .frame(width: cell.width * CGFloat(frame.width) - 5,
-                               height: cell.height * CGFloat(frame.height) - 5)
-                        .offset(x: cell.width * CGFloat(frame.column) + 2.5,
-                                y: cell.height * CGFloat(frame.row) + 2.5)
-                        .zIndex(draft?.roomID == room.id ? 10 : 0)
-                    }
+                    block(for: room, cell: cell)
                 }
-
-                if let draft, !draft.valid {
-                    RoundedRectangle(cornerRadius: 3, style: .continuous)
-                        .stroke(Lumen.fail, style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
-                        .background(
-                            RoundedRectangle(cornerRadius: 3, style: .continuous)
-                                .fill(Lumen.fail.opacity(0.09))
-                        )
-                        .frame(width: cell.width * CGFloat(draft.frame.width) - 5,
-                               height: cell.height * CGFloat(draft.frame.height) - 5)
-                        .offset(x: cell.width * CGFloat(draft.frame.column) + 2.5,
-                                y: cell.height * CGFloat(draft.frame.row) + 2.5)
-                        .allowsHitTesting(false)
-                }
+                refusal(cell: cell)
             }
         }
         .frame(minHeight: CGFloat(rows) * 96)
+    }
+
+    // MARK: Pieces
+    //
+    // Split out of `body` deliberately. SwiftUI type-checks a view body as one
+    // expression, and a single ZStack carrying a ForEach, two conditionals and
+    // a dozen geometry expressions takes the compiler past its budget.
+
+    @ViewBuilder
+    private func block(for room: Room, cell: CGSize) -> some View {
+        if let frame = displayFrame(for: room) {
+            let rect = frame.rect(cell: cell)
+            RoomBlockView(
+                room: room,
+                arranging: arranging,
+                dimmed: !matchesQuery(room),
+                selected: selectedRoomID == room.id,
+                selectedLightID: $selectedLightID,
+                onSelect: { selectedRoomID = room.id },
+                onLevel: { manager.setBrightness(in: room, value: $0) },
+                onMove: { delta, committing in
+                    move(room: room, by: delta, resize: false, committing: committing)
+                },
+                onResize: { delta, committing in
+                    move(room: room, by: delta, resize: true, committing: committing)
+                },
+                cell: cell
+            )
+            .frame(width: rect.width, height: rect.height)
+            .offset(x: rect.minX, y: rect.minY)
+            .zIndex(draft?.roomID == room.id ? 10 : 0)
+        }
+    }
+
+    /// A drop that would overlap, shown in red where it would have landed.
+    /// The block itself does not move, because a refused drop reverts.
+    @ViewBuilder
+    private func refusal(cell: CGSize) -> some View {
+        if let draft, !draft.valid {
+            let rect = draft.frame.rect(cell: cell)
+            RoundedRectangle(cornerRadius: 3, style: .continuous)
+                .fill(Lumen.fail.opacity(0.09))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .stroke(Lumen.fail, style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                )
+                .frame(width: rect.width, height: rect.height)
+                .offset(x: rect.minX, y: rect.minY)
+                .allowsHitTesting(false)
+        }
     }
 
     private func grid(cell: CGSize) -> some View {
         Canvas { context, size in
             let line = Color(hex: 0xFFFFFF, alpha: 0.045)
             for column in 1..<PlanLayout.columns {
-                var path = Path()
                 let x = cell.width * CGFloat(column)
+                var path = Path()
                 path.move(to: CGPoint(x: x, y: 0))
                 path.addLine(to: CGPoint(x: x, y: size.height))
                 context.stroke(path, with: .color(line), lineWidth: 1)
             }
             for row in 1..<max(2, rows) {
-                var path = Path()
                 let y = cell.height * CGFloat(row)
+                var path = Path()
                 path.move(to: CGPoint(x: 0, y: y))
                 path.addLine(to: CGPoint(x: size.width, y: y))
                 context.stroke(path, with: .color(line), lineWidth: 1)
@@ -318,6 +360,8 @@ struct PlanBoardView: View {
         }
         .accessibilityHidden(true)
     }
+
+    // MARK: Placement
 
     /// The frame to draw: the live draft while a block is being dragged, and
     /// the committed frame otherwise.
@@ -337,11 +381,16 @@ struct PlanBoardView: View {
     private func move(room: Room, by delta: PlanCellDelta,
                       resize: Bool, committing: Bool) {
         guard let base = room.planFrame else { return }
-        let candidate = resize
-            ? RoomPlanFrame(column: base.column, row: base.row,
-                            width: base.width + delta.columns, height: base.height + delta.rows)
-            : RoomPlanFrame(column: base.column + delta.columns, row: base.row + delta.rows,
-                            width: base.width, height: base.height)
+        let candidate: RoomPlanFrame
+        if resize {
+            candidate = RoomPlanFrame(column: base.column, row: base.row,
+                                      width: base.width + delta.columns,
+                                      height: base.height + delta.rows)
+        } else {
+            candidate = RoomPlanFrame(column: base.column + delta.columns,
+                                      row: base.row + delta.rows,
+                                      width: base.width, height: base.height)
+        }
 
         var others: [UUID: RoomPlanFrame] = [:]
         for other in manager.rooms where other.id != room.id {
@@ -354,7 +403,7 @@ struct PlanBoardView: View {
             // A refused drop reverts. Never reflow a board somebody arranged.
             if valid { manager.setPlanFrame(candidate, for: room.id) }
         } else {
-            draft = (room.id, candidate, valid)
+            draft = PlanDraft(roomID: room.id, frame: candidate, valid: valid)
         }
     }
 }
@@ -384,10 +433,23 @@ private struct RoomBlockView: View {
         return litLights.reduce(0) { $0 + $1.brightness } / Double(litLights.count)
     }
 
+    private var percent: Int { Int((level * 100).rounded()) }
+    private var levelText: String { lights.isEmpty ? "—" : "\(percent)" }
+    private var countText: String { "\(litLights.count)/\(lights.count)" }
+    private var spokenValue: String {
+        "\(percent) percent, \(litLights.count) of \(lights.count) lit"
+    }
+
+    private var fillColour: Color { selected ? Lumen.stripRaised : Lumen.strip }
+
+    private var borderColour: Color {
+        if selected { return Lumen.link.opacity(0.7) }
+        return arranging ? Lumen.rule : Lumen.ruleSoft
+    }
+
     var body: some View {
         ZStack(alignment: .topLeading) {
-            RoundedRectangle(cornerRadius: 3, style: .continuous)
-                .fill(selected ? Lumen.stripRaised : Lumen.strip)
+            RoundedRectangle(cornerRadius: 3, style: .continuous).fill(fillColour)
 
             // The pools. This is the status display: what a room is doing is
             // legible from across the desk without reading anything.
@@ -395,51 +457,54 @@ private struct RoomBlockView: View {
                 .allowsHitTesting(false)
 
             fixtureDots
-
-            VStack(alignment: .leading, spacing: 0) {
-                Text(room.name)
-                    .font(.system(size: 10.5, weight: .regular))
-                    .kerning(1.5)
-                    .textCase(.uppercase)
-                    .foregroundStyle(Lumen.chalk)
-                    .lineLimit(1)
-
-                Spacer(minLength: 6)
-
-                levelRule
-
-                HStack(alignment: .lastTextBaseline) {
-                    Text(lights.isEmpty ? "—" : "\(Int((level * 100).rounded()))")
-                        .font(LumenType.readout(size: 24, weight: .medium))
-                        .monospacedDigit()
-                        .foregroundStyle(Lumen.chalk)
-                        .shadow(color: Lumen.stage.opacity(0.9), radius: 6)
-                    Spacer(minLength: 6)
-                    Text("\(litLights.count)/\(lights.count)")
-                        .font(LumenType.readout(size: 9))
-                        .foregroundStyle(Lumen.muted)
-                }
-            }
-            .padding(10)
+            labelStack
 
             if arranging { resizeGrip }
         }
-        .overlay(
-            RoundedRectangle(cornerRadius: 3, style: .continuous)
-                .stroke(borderColour, lineWidth: 1)
-        )
+        .overlay(border)
         .opacity(dimmed ? 0.35 : 1)
         .contentShape(Rectangle())
         .onTapGesture { if !arranging { onSelect() } }
-        .gesture(arranging ? moveGesture : levelGesture)
+        .gesture(blockGesture)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(room.name)
-        .accessibilityValue("\(Int((level * 100).rounded())) percent, \(litLights.count) of \(lights.count) lit")
+        .accessibilityValue(spokenValue)
     }
 
-    private var borderColour: Color {
-        if selected { return Lumen.link.opacity(0.7) }
-        return arranging ? Lumen.rule : Lumen.ruleSoft
+    private var border: some View {
+        RoundedRectangle(cornerRadius: 3, style: .continuous)
+            .stroke(borderColour, lineWidth: 1)
+    }
+
+    private var labelStack: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(room.name)
+                .font(.system(size: 10.5, weight: .regular))
+                .kerning(1.5)
+                .textCase(.uppercase)
+                .foregroundStyle(Lumen.chalk)
+                .lineLimit(1)
+
+            Spacer(minLength: 6)
+
+            levelRule
+            readoutRow
+        }
+        .padding(10)
+    }
+
+    private var readoutRow: some View {
+        HStack(alignment: .lastTextBaseline) {
+            Text(levelText)
+                .font(LumenType.readout(size: 24, weight: .medium))
+                .monospacedDigit()
+                .foregroundStyle(Lumen.chalk)
+                .shadow(color: Lumen.stage.opacity(0.9), radius: 6)
+            Spacer(minLength: 6)
+            Text(countText)
+                .font(LumenType.readout(size: 9))
+                .foregroundStyle(Lumen.muted)
+        }
     }
 
     /// Room level as a dimension line under the plan rather than a slider,
@@ -462,8 +527,7 @@ private struct RoomBlockView: View {
     private var pools: [RoomPoolCanvas.Pool] {
         lights.compactMap { light in
             guard light.isOn, !light.isStale else { return nil }
-            let anchor = manager.planAnchor(for: light.id, in: room)
-            return RoomPoolCanvas.Pool(anchor: anchor,
+            return RoomPoolCanvas.Pool(anchor: manager.planAnchor(for: light.id, in: room),
                                        colour: light.color,
                                        opacity: 0.14 + light.brightness * 0.5)
         }
@@ -475,28 +539,36 @@ private struct RoomBlockView: View {
     private var fixtureDots: some View {
         GeometryReader { proxy in
             ForEach(lights) { light in
-                let anchor = manager.planAnchor(for: light.id, in: room)
-                Button {
-                    onSelect()
-                    selectedLightID = light.id
-                } label: {
-                    Circle()
-                        .fill(light.isOn && !light.isStale ? light.color : Lumen.faint)
-                        .frame(width: 11, height: 11)
-                        .overlay(Circle().stroke(Color.white.opacity(0.19), lineWidth: 1))
-                        .shadow(color: light.isOn ? light.color.opacity(0.8) : .clear, radius: 5)
-                        .overlay {
-                            if selectedLightID == light.id {
-                                Circle().stroke(Lumen.link, lineWidth: 2).padding(-3)
-                            }
-                        }
-                }
-                .buttonStyle(.plain)
-                .disabled(arranging)
-                .position(x: proxy.size.width * anchor.x, y: proxy.size.height * anchor.y)
-                .help(light.label)
-                .accessibilityLabel("Select \(light.label)")
+                dot(for: light)
+                    .position(x: proxy.size.width * manager.planAnchor(for: light.id, in: room).x,
+                              y: proxy.size.height * manager.planAnchor(for: light.id, in: room).y)
             }
+        }
+    }
+
+    private func dot(for light: LightDevice) -> some View {
+        let lit = light.isOn && !light.isStale
+        return Button {
+            onSelect()
+            selectedLightID = light.id
+        } label: {
+            Circle()
+                .fill(lit ? light.color : Lumen.faint)
+                .frame(width: 11, height: 11)
+                .overlay(Circle().stroke(Color.white.opacity(0.19), lineWidth: 1))
+                .shadow(color: lit ? light.color.opacity(0.8) : .clear, radius: 5)
+                .overlay(dotSelection(for: light))
+        }
+        .buttonStyle(.plain)
+        .disabled(arranging)
+        .help(light.label)
+        .accessibilityLabel("Select \(light.label)")
+    }
+
+    @ViewBuilder
+    private func dotSelection(for light: LightDevice) -> some View {
+        if selectedLightID == light.id {
+            Circle().stroke(Lumen.link, lineWidth: 2).padding(-3)
         }
     }
 
@@ -517,30 +589,40 @@ private struct RoomBlockView: View {
 
     // MARK: Gestures
 
-    /// Drag anywhere inside a room to set the whole room. The room is the
-    /// object here, so the room is what a plain drag controls.
-    private var levelGesture: some Gesture {
+    /// One gesture that branches inside, rather than a ternary between two.
+    ///
+    /// Two computed properties returning `some Gesture` have two *distinct*
+    /// opaque types even when the underlying gesture is identical, so
+    /// `arranging ? moveGesture : levelGesture` can never type-check. Doing the
+    /// branch in the handlers keeps a single concrete type.
+    ///
+    /// Plain drags set the whole room, because the room is the object here. A
+    /// tap only selects: a zero-distance drag meant clicking a block to look at
+    /// it slammed its level to wherever the pointer landed.
+    private var blockGesture: some Gesture {
         DragGesture(minimumDistance: 4)
-            .onChanged { value in commitLevel(at: value.location.x) }
-            .onEnded { value in commitLevel(at: value.location.x) }
+            .onChanged { value in handleDrag(value, committing: false) }
+            .onEnded { value in handleDrag(value, committing: true) }
     }
 
-    private func commitLevel(at x: CGFloat) {
-        onSelect()
-        let width = max(1, cell.width * CGFloat(room.planFrame?.width ?? 1) - 5)
-        onLevel(min(1, max(0, Double(x / width))))
-    }
-
-    private var moveGesture: some Gesture {
-        DragGesture(minimumDistance: 3)
-            .onChanged { value in onMove(cellDelta(value.translation), false) }
-            .onEnded { value in onMove(cellDelta(value.translation), true) }
+    private func handleDrag(_ value: DragGesture.Value, committing: Bool) {
+        if arranging {
+            onMove(cellDelta(value.translation), committing)
+        } else {
+            commitLevel(at: value.location.x)
+        }
     }
 
     private var resizeGesture: some Gesture {
         DragGesture(minimumDistance: 3)
             .onChanged { value in onResize(cellDelta(value.translation), false) }
             .onEnded { value in onResize(cellDelta(value.translation), true) }
+    }
+
+    private func commitLevel(at x: CGFloat) {
+        onSelect()
+        let width = max(1, cell.width * CGFloat(room.planFrame?.width ?? 1) - 5)
+        onLevel(min(1, max(0, Double(x / width))))
     }
 
     private func cellDelta(_ translation: CGSize) -> PlanCellDelta {
@@ -613,34 +695,18 @@ private struct PlanInspector: View {
 
     private var lights: [LightDevice] { manager.devices(in: room) }
 
+    private var roomPower: Binding<Bool> {
+        Binding(get: { lights.contains(where: \.isOn) },
+                set: { manager.setPower(in: room, on: $0) })
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 header
-
-                Toggle("All in this room",
-                       isOn: Binding(get: { lights.contains(where: \.isOn) },
-                                     set: { manager.setPower(in: room, on: $0) }))
-                    .toggleStyle(LumenRockerStyle())
-                    .disabled(lights.isEmpty)
-
-                if lights.isEmpty {
-                    Text("No fixtures in this room yet. Sort one in from the plan's tray, or drag it here from another room.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(Lumen.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                } else {
-                    ForEach(lights) { light in
-                        PlanFixtureRow(light: light,
-                                       selected: selectedLightID == light.id,
-                                       onSelect: { selectedLightID = light.id })
-                    }
-                }
-
-                Button("Room settings") { showingRoomDetail = true }
-                    .buttonStyle(LumenSecondaryButtonStyle(compact: true))
-                    .frame(maxWidth: .infinity)
-
+                masterToggle
+                fixtureList
+                settingsButton
                 Spacer(minLength: 12)
                 planFacts
             }
@@ -653,6 +719,34 @@ private struct PlanInspector: View {
         .sheet(isPresented: $showingRoomDetail) {
             RoomDetailSheet(room: room).environmentObject(manager)
         }
+    }
+
+    private var masterToggle: some View {
+        Toggle("All in this room", isOn: roomPower)
+            .toggleStyle(LumenRockerStyle())
+            .disabled(lights.isEmpty)
+    }
+
+    @ViewBuilder
+    private var fixtureList: some View {
+        if lights.isEmpty {
+            Text("No fixtures in this room yet. Sort one in from the plan's tray, or move it here from another room.")
+                .font(.system(size: 12))
+                .foregroundStyle(Lumen.muted)
+                .fixedSize(horizontal: false, vertical: true)
+        } else {
+            ForEach(lights) { light in
+                PlanFixtureRow(light: light,
+                               selected: selectedLightID == light.id,
+                               onSelect: { selectedLightID = light.id })
+            }
+        }
+    }
+
+    private var settingsButton: some View {
+        Button("Room settings") { showingRoomDetail = true }
+            .buttonStyle(LumenSecondaryButtonStyle(compact: true))
+            .frame(maxWidth: .infinity)
     }
 
     private var header: some View {
@@ -713,59 +807,88 @@ private struct PlanFixtureRow: View {
     let selected: Bool
     let onSelect: () -> Void
 
+    private var lit: Bool { light.isOn && !light.isStale }
+    private var dotColour: Color { lit ? light.color : Lumen.faint }
+    private var nameColour: Color { light.isStale ? Lumen.muted : Lumen.chalk }
+    private var nameWeight: Font.Weight { selected ? .semibold : .regular }
+
+    private var statusText: String {
+        if light.isStale { return "N/R" }
+        guard light.isOn else { return "OFF" }
+        return "\(Int((light.brightness * 100).rounded()))%"
+    }
+
+    private var levelBinding: Binding<Double> {
+        Binding(get: { light.brightness },
+                set: { manager.setBrightness(light, value: $0) })
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
-            HStack(spacing: 8) {
-                Circle()
-                    .fill(light.isOn && !light.isStale ? light.color : Lumen.faint)
-                    .frame(width: 8, height: 8)
-                    .shadow(color: light.isOn ? light.color.opacity(0.7) : .clear, radius: 4)
-
-                Text(light.label)
-                    .font(.system(size: 12, weight: selected ? .semibold : .regular))
-                    .foregroundStyle(light.isStale ? Lumen.muted : Lumen.chalk)
-                    .lineLimit(1)
-
-                Spacer(minLength: 6)
-
-                Text(light.isStale ? "N/R" : light.isOn ? "\(Int((light.brightness * 100).rounded()))%" : "OFF")
-                    .font(LumenType.readout(size: 10))
-                    .monospacedDigit()
-                    .foregroundStyle(Lumen.muted)
-
-                Button {
-                    manager.setPower(light, on: !light.isOn)
-                } label: {
-                    Image(systemName: "power")
-                        .font(.system(size: 9, weight: .semibold))
-                }
-                .buttonStyle(LumenIconButtonStyle(size: 20, prominent: light.isOn && !light.isStale))
-                .disabled(light.isStale)
-                .accessibilityLabel("Power for \(light.label)")
-            }
-
-            LumenFader(
-                label: light.label,
-                value: Binding(get: { light.brightness },
-                               set: { manager.setBrightness(light, value: $0) }),
-                track: .tint(light.color),
-                showsHeader: false
-            )
-            .disabled(light.isStale)
-
-            Button("Identify") { manager.identify(light) }
-                .buttonStyle(.plain)
-                .font(.system(size: 10.5))
-                .foregroundStyle(Lumen.link)
-                .accessibilityLabel("Flash \(light.label)")
+            identityRow
+            levelFader
+            identifyButton
         }
         .padding(.vertical, 8)
         .padding(.horizontal, selected ? 8 : 0)
-        .background(
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(selected ? Lumen.stripRaised : Color.clear)
-        )
+        .background(rowBackground)
         .contentShape(Rectangle())
         .onTapGesture(perform: onSelect)
+    }
+
+    private var identityRow: some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(dotColour)
+                .frame(width: 8, height: 8)
+                .shadow(color: lit ? light.color.opacity(0.7) : .clear, radius: 4)
+
+            Text(light.label)
+                .font(.system(size: 12, weight: nameWeight))
+                .foregroundStyle(nameColour)
+                .lineLimit(1)
+
+            Spacer(minLength: 6)
+
+            Text(statusText)
+                .font(LumenType.readout(size: 10))
+                .monospacedDigit()
+                .foregroundStyle(Lumen.muted)
+
+            powerButton
+        }
+    }
+
+    private var powerButton: some View {
+        Button {
+            manager.setPower(light, on: !light.isOn)
+        } label: {
+            Image(systemName: "power")
+                .font(.system(size: 9, weight: .semibold))
+        }
+        .buttonStyle(LumenIconButtonStyle(size: 20, prominent: lit))
+        .disabled(light.isStale)
+        .accessibilityLabel("Power for \(light.label)")
+    }
+
+    private var levelFader: some View {
+        LumenFader(label: light.label,
+                   value: levelBinding,
+                   track: .tint(light.color),
+                   showsHeader: false)
+            .disabled(light.isStale)
+    }
+
+    private var identifyButton: some View {
+        Button("Identify") { manager.identify(light) }
+            .buttonStyle(.plain)
+            .font(.system(size: 10.5))
+            .foregroundStyle(Lumen.link)
+            .accessibilityLabel("Flash \(light.label)")
+    }
+
+    private var rowBackground: some View {
+        RoundedRectangle(cornerRadius: 6, style: .continuous)
+            .fill(selected ? Lumen.stripRaised : Color.clear)
     }
 }

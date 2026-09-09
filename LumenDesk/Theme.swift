@@ -42,11 +42,16 @@ enum Lumen {
     /// Large working areas: the inspector, sheets, secondary panels.
     static let deck         = Color(hex: 0x080D13)
     /// A room's floor, and the standard panel fill everywhere else.
-    static let floor        = Color(hex: 0x0B111A)
+    ///
+    /// The whole cool ramp from here up was lifted one step after the first
+    /// build rendered: at the original values a room read as a hole in the
+    /// page and the walls barely separated from the floor they enclosed. A
+    /// drawing needs its sheet to be visibly lighter than the dark around it.
+    static let floor        = Color(hex: 0x0E141D)
     /// The selected room's floor, and any hovered or raised surface.
-    static let floorRaised  = Color(hex: 0x101923)
+    static let floorRaised  = Color(hex: 0x151F2B)
     /// The loudest surface in the system, used for grouped controls.
-    static let stripLoud    = Color(hex: 0x18222F)
+    static let stripLoud    = Color(hex: 0x1D2836)
 
     // MARK: Walls
     //
@@ -55,11 +60,11 @@ enum Lumen {
     // reads as having thickness rather than as a hairline.
 
     /// The filled band a wall line sits on.
-    static let poche      = Color(hex: 0x141E2A)
+    static let poche      = Color(hex: 0x1A2734)
     /// Interior partitions.
-    static let wall       = Color(hex: 0x26343F)
+    static let wall       = Color(hex: 0x33475A)
     /// The exterior envelope, and any structural edge.
-    static let wallOuter  = Color(hex: 0x48606F)
+    static let wallOuter  = Color(hex: 0x63839B)
 
     // MARK: Separators
     //
@@ -67,14 +72,14 @@ enum Lumen {
     // appears where two areas share a value and still need a boundary.
 
     static let ruleSoft = Color(hex: 0x131C26)
-    static let rule     = Color(hex: 0x26343F)
+    static let rule     = Color(hex: 0x2B3B4B)
 
     // MARK: Text
 
-    static let chalk = Color(hex: 0xDDE7F3)
-    static let meter = Color(hex: 0x8FA3B9)
-    static let muted = Color(hex: 0x5A6C82)
-    static let faint = Color(hex: 0x33404F)
+    static let chalk = Color(hex: 0xE4EDF7)
+    static let meter = Color(hex: 0x9DB0C6)
+    static let muted = Color(hex: 0x6A7F96)
+    static let faint = Color(hex: 0x3D4E60)
 
     /// Illumination. A lit key face, a fader cap, a powered legend.
     static let lit = Color(hex: 0xF2F7FD)
@@ -82,7 +87,7 @@ enum Lumen {
     /// The drawing's annotation colour — the blue pencil a drafter reaches
     /// for. Dimensions and selection outlines only; it is not an accent and
     /// nothing decorative may spend it.
-    static let mark = Color(hex: 0xB9D4F0)
+    static let mark = Color(hex: 0xBFD9F5)
 
     // MARK: The one hue
     //

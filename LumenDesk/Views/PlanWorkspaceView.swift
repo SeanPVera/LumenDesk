@@ -494,10 +494,15 @@ struct PlanWallLayer: View {
 
     /// The selected room is marked up with a heavier outline, the way a zone
     /// is highlighted on a drawing.
+    ///
+    /// It lands on the room's own edges rather than inside them. An inset
+    /// outline sits a hair off the wall it is marking, and what you read is
+    /// two parallel lines where there should be one — a rendering fault, not
+    /// a highlight.
     private func markSelection(in context: inout GraphicsContext) {
         guard let selected else { return }
-        let rect = selected.rect(cell: cell, origin: inset).insetBy(dx: 1.5, dy: 1.5)
-        context.stroke(Path(rect), with: .color(Lumen.mark.opacity(0.55)), lineWidth: 1.5)
+        let rect = selected.rect(cell: cell, origin: inset)
+        context.stroke(Path(rect), with: .color(Lumen.mark.opacity(0.85)), lineWidth: 2.5)
     }
 }
 
@@ -616,12 +621,12 @@ struct PlanDimensionLine: View {
         GeometryReader { proxy in
             ZStack(alignment: .leading) {
                 Rectangle()
-                    .fill(Lumen.wallOuter)
+                    .fill(Lumen.faint)
                     .frame(height: 1)
                 Rectangle()
                     .fill(Lumen.mark)
-                    .frame(width: max(0, proxy.size.width * level), height: 3)
-                    .shadow(color: Lumen.mark.opacity(0.55), radius: 4)
+                    .frame(width: max(0, proxy.size.width * level), height: 2)
+                    .shadow(color: Lumen.mark.opacity(0.45), radius: 2.5)
                 tick.offset(x: 0)
                 tick.offset(x: proxy.size.width - 1)
             }
@@ -642,7 +647,7 @@ struct PlanDimensionLine: View {
     private var tick: some View {
         Rectangle()
             .fill(Lumen.wallOuter)
-            .frame(width: 1, height: 11)
+            .frame(width: 1, height: 13)
     }
 }
 
@@ -727,7 +732,12 @@ private struct RoomBlockView: View {
         "\(percent) percent, \(litLights.count) of \(lights.count) lit"
     }
 
-    private var hasUnreachable: Bool { lights.contains(where: \.isStale) }
+    /// The pool's shape and the drawn symbol read the same fixture, so they
+    /// go through one classifier rather than two that can drift apart.
+    private func symbol(for light: LightDevice) -> FixtureSymbol {
+        FixtureSymbol.classify(isMatrix: light.isLIFXLuna,
+                               hasSegments: manager.segmentStudioProfile(for: light) != nil)
+    }
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -738,9 +748,11 @@ private struct RoomBlockView: View {
             RoomPoolCanvas(pools: pools, flat: reduceTransparency)
                 .allowsHitTesting(false)
 
-            // A plan hatches an area that is out of scope, which is exactly
-            // what an unreachable fixture makes of its room.
-            if hasUnreachable { hatch }
+            // A plan hatches what is shown for reference rather than built.
+            // That is what an unreachable fixture is — but it is the fixture,
+            // not the room: one dead strip does not put the bedroom out of
+            // contract, and hatching the whole floor said it did.
+            hatchPatches
 
             fixtureSymbols
             labelStack
@@ -757,17 +769,12 @@ private struct RoomBlockView: View {
         .accessibilityValue(spokenValue)
     }
 
-    private var hatch: some View {
-        Canvas { context, size in
-            let spacing: CGFloat = 8
-            let colour = Lumen.wallOuter.opacity(0.32)
-            var offset = -size.height
-            while offset < size.width {
-                var path = Path()
-                path.move(to: CGPoint(x: offset, y: size.height))
-                path.addLine(to: CGPoint(x: offset + size.height, y: 0))
-                context.stroke(path, with: .color(colour), lineWidth: 1)
-                offset += spacing
+    private var hatchPatches: some View {
+        GeometryReader { proxy in
+            ForEach(lights.filter(\.isStale)) { light in
+                PlanHatchPatch()
+                    .position(x: proxy.size.width * manager.planAnchor(for: light.id, in: room).x,
+                              y: proxy.size.height * manager.planAnchor(for: light.id, in: room).y)
             }
         }
         .allowsHitTesting(false)
@@ -794,7 +801,8 @@ private struct RoomBlockView: View {
             guard light.isOn, !light.isStale else { return nil }
             return RoomPoolCanvas.Pool(anchor: manager.planAnchor(for: light.id, in: room),
                                        colour: light.color,
-                                       opacity: 0.10 + light.brightness * 0.34)
+                                       opacity: 0.09 + light.brightness * 0.36,
+                                       symbol: symbol(for: light))
         }
     }
 
@@ -809,15 +817,12 @@ private struct RoomBlockView: View {
     }
 
     private func symbolButton(for light: LightDevice) -> some View {
-        let symbol = FixtureSymbol.classify(
-            isMatrix: light.isLIFXLuna,
-            hasSegments: manager.segmentStudioProfile(for: light) != nil
-        )
+        let kind = symbol(for: light)
         return Button {
             onSelect()
             selectedLightID = light.id
         } label: {
-            PlanFixtureSymbol(symbol: symbol,
+            PlanFixtureSymbol(symbol: kind,
                               colour: light.color,
                               isLit: light.isOn,
                               isReachable: !light.isStale,
@@ -825,8 +830,8 @@ private struct RoomBlockView: View {
         }
         .buttonStyle(.plain)
         .disabled(arranging)
-        .help("\(light.label) · \(symbol.spokenName)")
-        .accessibilityLabel("Select \(light.label), \(symbol.spokenName)")
+        .help("\(light.label) · \(kind.spokenName)")
+        .accessibilityLabel("Select \(light.label), \(kind.spokenName)")
     }
 
     private var resizeGrip: some View {
@@ -888,6 +893,42 @@ private struct RoomBlockView: View {
     }
 }
 
+// MARK: - Hatch
+
+/// The drafting mark for something shown for reference rather than built.
+///
+/// Scoped to one fixture's patch of floor: an unreachable strip is not in
+/// contract, but the room around it still is. The diagonals fade out at the
+/// edge so the patch reads as a zone on the drawing and not as a sticker
+/// laid on top of it.
+struct PlanHatchPatch: View {
+    var size: CGFloat = 62
+    var spacing: CGFloat = 5
+
+    var body: some View {
+        Canvas { context, canvas in
+            let colour = Lumen.wallOuter.opacity(0.34)
+            var offset = -canvas.height
+            while offset < canvas.width {
+                var path = Path()
+                path.move(to: CGPoint(x: offset, y: canvas.height))
+                path.addLine(to: CGPoint(x: offset + canvas.height, y: 0))
+                context.stroke(path, with: .color(colour), lineWidth: 1)
+                offset += spacing
+            }
+        }
+        .frame(width: size, height: size)
+        .mask {
+            RadialGradient(stops: [
+                .init(color: .black, location: 0.34),
+                .init(color: .clear, location: 0.70)
+            ], center: .center, startRadius: 0, endRadius: size / 2)
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
 // MARK: - Pools
 
 /// Light falling on the drawing.
@@ -896,11 +937,36 @@ private struct RoomBlockView: View {
 /// the way light actually does, and blurred so the edge of a pool is a
 /// falloff rather than a circle. Reduce Transparency swaps the blur for flat
 /// discs, which keeps the information and drops the cost.
+///
+/// A pool is shaped by what is throwing it: a strip lays down a wide shallow
+/// wash, a ceiling fixture a round one, a panel something between. The aspect
+/// says which before you read the symbol. Sizes are deliberately well under
+/// half the room — pools that fill the room stop reading as pools and turn
+/// the floor into one flat wash.
 struct RoomPoolCanvas: View {
     struct Pool {
         let anchor: PlanAnchor
         let colour: Color
         let opacity: Double
+        let symbol: FixtureSymbol
+
+        /// Half-width as a fraction of the room's short-ish dimension.
+        var extent: Double {
+            switch symbol {
+            case .strip: return 0.27
+            case .bulb:  return 0.22
+            case .panel: return 0.20
+            }
+        }
+
+        /// Width over height. A strip throws wide and shallow.
+        var aspect: Double {
+            switch symbol {
+            case .strip: return 1.75
+            case .bulb:  return 1.0
+            case .panel: return 1.15
+            }
+        }
     }
 
     let pools: [Pool]
@@ -911,21 +977,27 @@ struct RoomPoolCanvas: View {
             context.blendMode = .screen
             if !flat { context.addFilter(.blur(radius: 9)) }
 
-            let radius = min(size.width, size.height) * 0.36
             for pool in pools {
+                // Taking the base off the width alone would spill a pool out
+                // of a tall narrow room; off the height alone it would vanish
+                // in a wide one. The smaller of the two, with the aspect
+                // folded in, behaves in both.
+                let base = min(size.width, size.height * pool.aspect)
+                let rx = base * pool.extent
+                let ry = rx / pool.aspect
                 let centre = CGPoint(x: size.width * pool.anchor.x,
                                      y: size.height * pool.anchor.y)
-                let rect = CGRect(x: centre.x - radius, y: centre.y - radius,
-                                  width: radius * 2, height: radius * 2)
+                let rect = CGRect(x: centre.x - rx, y: centre.y - ry,
+                                  width: rx * 2, height: ry * 2)
                 let shading: GraphicsContext.Shading = flat
                     ? .color(pool.colour.opacity(pool.opacity * 0.6))
                     : .radialGradient(
                         Gradient(stops: [
                             .init(color: pool.colour.opacity(pool.opacity), location: 0),
-                            .init(color: pool.colour.opacity(pool.opacity), location: 0.08),
-                            .init(color: pool.colour.opacity(0), location: 0.68)
+                            .init(color: pool.colour.opacity(pool.opacity), location: 0.06),
+                            .init(color: pool.colour.opacity(0), location: 0.66)
                         ]),
-                        center: centre, startRadius: 0, endRadius: radius)
+                        center: centre, startRadius: 0, endRadius: max(rx, ry))
                 context.fill(Ellipse().path(in: rect), with: shading)
             }
         }
@@ -965,6 +1037,7 @@ private struct PlanInspector: View {
                 fixtureList
                 settingsButton
                 Spacer(minLength: 12)
+                deviceFacts
                 planFacts
             }
             .padding(16)
@@ -1040,12 +1113,64 @@ private struct PlanInspector: View {
         renaming = false
     }
 
+    /// What the drawing cannot say.
+    ///
+    /// The plan already states how many fixtures a room has and how many are
+    /// lit, so repeating that here fills the column with an echo. These are
+    /// the facts only the inspector has: what the selected fixture actually
+    /// is, where it lives on the network, and when it last answered. The
+    /// network facts take the one authored hue; the catalogue facts do not.
+    @ViewBuilder
+    private var deviceFacts: some View {
+        if let light = selectedLight {
+            VStack(spacing: 5) {
+                Divider().overlay(Lumen.ruleSoft).padding(.bottom, 6)
+                PlanCatalogueFact(key: "MAKE", value: makeLine(for: light))
+                PlanCatalogueFact(key: "MODE", value: modeLine(for: light))
+                WashLinkFact(key: "LINK", value: light.address, dead: light.isStale)
+                WashLinkFact(key: "SEEN",
+                             value: light.isStale ? "no reply" : lastSeenLine(for: light),
+                             dead: light.isStale)
+            }
+        }
+    }
+
+    private var selectedLight: LightDevice? {
+        guard let id = selectedLightID else { return lights.first }
+        return lights.first { $0.id == id } ?? lights.first
+    }
+
+    private func makeLine(for light: LightDevice) -> String {
+        let brand = light.brand == .lifx ? "LIFX" : "Govee"
+        guard let sku = light.sku, !sku.isEmpty else { return brand }
+        return "\(brand) \(sku)"
+    }
+
+    private func modeLine(for light: LightDevice) -> String {
+        if light.isLIFXLuna { return "Matrix" }
+        if let profile = manager.segmentStudioProfile(for: light) {
+            let held = profile.appliesViaStream ? " · held" : ""
+            return "\(profile.defaultSegmentCount) segments\(held)"
+        }
+        return "\(light.kelvin) K"
+    }
+
+    private func lastSeenLine(for light: LightDevice) -> String {
+        let seconds = Int(Date().timeIntervalSince(light.lastSeen))
+        if seconds < 60 { return "\(max(0, seconds)) s ago" }
+        if seconds < 3_600 { return "\(seconds / 60) min ago" }
+        return "\(seconds / 3_600) h ago"
+    }
+
+    /// The two room facts the drawing does not already state. Its count of
+    /// lit fixtures is on the room label and its hatched patches mark the
+    /// unreachable ones, so FIXTURES and LIT used to sit here saying twice
+    /// what you can read once. The unreachable tally stays because the hatch
+    /// is deliberately quiet, and the block figure is arranging information
+    /// the drawing has no room for.
     private var planFacts: some View {
         VStack(spacing: 5) {
             Divider().overlay(Lumen.ruleSoft).padding(.bottom, 6)
-            WashLinkFact(key: "FIXTURES", value: "\(lights.count)")
-            WashLinkFact(key: "LIT",
-                         value: "\(lights.filter { $0.isOn && !$0.isStale }.count)")
             WashLinkFact(key: "UNREACHABLE",
                          value: "\(lights.filter(\.isStale).count)",
                          dead: lights.contains(where: \.isStale))
@@ -1054,6 +1179,28 @@ private struct PlanInspector: View {
                              value: "\(frame.width)×\(frame.height) @ \(frame.column),\(frame.row)")
             }
         }
+    }
+}
+
+/// A catalogue fact: the same ruled row as `WashLinkFact`, in chalk rather
+/// than the authored hue, because what a fixture *is* is not network truth.
+private struct PlanCatalogueFact: View {
+    let key: String
+    let value: String
+
+    var body: some View {
+        HStack {
+            Text(key)
+                .font(LumenType.readout(size: 9.5, weight: .regular))
+                .foregroundStyle(Lumen.muted)
+            Spacer(minLength: 8)
+            Text(value)
+                .font(LumenType.readout(size: 9.5, weight: .medium))
+                .foregroundStyle(Lumen.meter)
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 

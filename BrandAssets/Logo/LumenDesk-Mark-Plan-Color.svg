@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <clipPath id="room0"><rect x="56.3" y="56.3" width="533.1" height="911.4"/></clipPath>
+    <clipPath id="room1"><rect x="589.5" y="56.3" width="378.2" height="350.9"/></clipPath>
+    <radialGradient id="pool0" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0%" stop-color="#FFEBCB" stop-opacity="1.000"/>
+      <stop offset="10%" stop-color="#FFE2BC" stop-opacity="0.867"/>
+      <stop offset="20%" stop-color="#FFD9AC" stop-opacity="0.740"/>
+      <stop offset="30%" stop-color="#FFD19C" stop-opacity="0.618"/>
+      <stop offset="40%" stop-color="#FFC88D" stop-opacity="0.502"/>
+      <stop offset="50%" stop-color="#FFBF7E" stop-opacity="0.392"/>
+      <stop offset="60%" stop-color="#FFB66E" stop-opacity="0.290"/>
+      <stop offset="70%" stop-color="#FFAD5E" stop-opacity="0.197"/>
+      <stop offset="80%" stop-color="#FFA54F" stop-opacity="0.114"/>
+      <stop offset="90%" stop-color="#FF9C40" stop-opacity="0.045"/>
+      <stop offset="100%" stop-color="#FF9330" stop-opacity="0.000"/>
+    </radialGradient>
+    <radialGradient id="pool1" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0%" stop-color="#E6F1FF" stop-opacity="1.000"/>
+      <stop offset="10%" stop-color="#D5E6FA" stop-opacity="0.867"/>
+      <stop offset="20%" stop-color="#C5DAF5" stop-opacity="0.740"/>
+      <stop offset="30%" stop-color="#B4CFEF" stop-opacity="0.618"/>
+      <stop offset="40%" stop-color="#A3C3EA" stop-opacity="0.502"/>
+      <stop offset="50%" stop-color="#92B8E5" stop-opacity="0.392"/>
+      <stop offset="60%" stop-color="#82ADE0" stop-opacity="0.290"/>
+      <stop offset="70%" stop-color="#71A1DB" stop-opacity="0.197"/>
+      <stop offset="80%" stop-color="#6096D5" stop-opacity="0.114"/>
+      <stop offset="90%" stop-color="#508AD0" stop-opacity="0.045"/>
+      <stop offset="100%" stop-color="#3F7FCB" stop-opacity="0.000"/>
+    </radialGradient>
+  </defs>
+  <rect x="56.3" y="56.3" width="911.4" height="911.4" fill="#0E141D"/>
+  <circle cx="316.1" cy="603.1" r="291.6" fill="url(#pool0)" clip-path="url(#room0)"/>
+  <circle cx="780.9" cy="220.4" r="195.9" fill="url(#pool1)" clip-path="url(#room1)"/>
+  <circle cx="316.1" cy="603.1" r="9.7" fill="#FFFFFF" fill-opacity="0.94"/>
+  <circle cx="780.9" cy="220.4" r="9.7" fill="#FFFFFF" fill-opacity="0.94"/>
+  <line x1="589.5" y1="56.3" x2="589.5" y2="967.7" stroke="#3B5468" stroke-width="11.8"/>
+  <line x1="589.5" y1="407.2" x2="967.7" y2="407.2" stroke="#3B5468" stroke-width="11.8"/>
+  <rect x="66.6" y="66.6" width="890.9" height="890.9" fill="none" stroke="#8AACC6" stroke-width="20.5"/>
+</svg>

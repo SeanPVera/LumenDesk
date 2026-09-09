@@ -34,10 +34,15 @@ struct PlanWorkspaceView: View {
             #if os(macOS)
             if let room = selectedRoom {
                 Divider().overlay(Lumen.ruleSoft)
+                // Not a fixed width. The inspector gives ground before the
+                // drawing does, and between its minimum and the board's the
+                // window inherits a floor it cannot be dragged under —
+                // better than a panel that vanishes and strands the only
+                // per-fixture control there is.
                 PlanInspector(room: room,
                               selectedLightID: $selectedLightID,
                               arranging: arranging)
-                    .frame(width: 268)
+                    .frame(minWidth: 228, idealWidth: 268, maxWidth: 292)
             }
             #endif
         }
@@ -304,7 +309,8 @@ struct PlanBoardView: View {
                 refusal(cell: cell)
             }
         }
-        .frame(minHeight: CGFloat(rows) * 96)
+        .frame(minWidth: CGFloat(PlanLayout.columns) * 74,
+               minHeight: CGFloat(rows) * 96)
     }
 
     private func cellSize(in size: CGSize) -> CGSize {

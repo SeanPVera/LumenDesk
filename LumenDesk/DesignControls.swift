@@ -603,11 +603,11 @@ struct WashLinkFact: View {
     var body: some View {
         HStack {
             Text(key)
-                .font(LumenType.readout(size: 9.5, weight: .regular))
+                .font(LumenType.readout(size: 11, weight: .regular))
                 .foregroundStyle(Lumen.muted)
             Spacer(minLength: 8)
             Text(value)
-                .font(LumenType.readout(size: 9.5, weight: .medium))
+                .font(LumenType.readout(size: 11))
                 .foregroundStyle(dead ? Lumen.faint : Lumen.link)
                 .monospacedDigit()
                 .lineLimit(1)

@@ -98,15 +98,15 @@ struct PlanWorkspaceView: View {
             // surface in the product where that is correct, because it is a
             // drawing and drawings label that way.
             Text("Ground floor")
-                .font(.system(size: 14, weight: .light))
-                .kerning(1.4)
+                .font(.system(size: 15, weight: .semibold))
+                .kerning(0.7)
                 .textCase(.uppercase)
-                .foregroundStyle(Lumen.chalk)
+                .foregroundStyle(Lumen.lit)
 
             Text("1:50")
-                .font(LumenType.readout(size: 9.5))
-                .kerning(0.8)
-                .foregroundStyle(Lumen.muted)
+                .font(LumenType.readout(size: 11, weight: .regular))
+                .kerning(0.4)
+                .foregroundStyle(Lumen.meter)
 
             Spacer(minLength: 12)
             arrangeControls
@@ -638,13 +638,17 @@ struct PlanDimensionLine: View {
             }
             .frame(maxHeight: .infinity, alignment: .center)
             .overlay(alignment: .topTrailing) {
+                // The figure sits above the line rather than on it, so a
+                // knocked-out background was never holding a break open — it
+                // was a dark rectangle punched through whatever pool happened
+                // to be behind it. A halo instead.
                 Text(figure)
-                    .font(LumenType.readout(size: 11, weight: .regular))
+                    .font(LumenType.readout(size: 12.5))
                     .monospacedDigit()
-                    .foregroundStyle(Lumen.chalk)
-                    .padding(.horizontal, 4)
-                    .background(Lumen.floor)
-                    .offset(y: -9)
+                    .foregroundStyle(Lumen.lit)
+                    .shadow(color: Lumen.stage.opacity(0.92), radius: 1.5)
+                    .shadow(color: Lumen.stage.opacity(0.9), radius: 7)
+                    .offset(y: -10)
             }
         }
         .frame(height: 14)
@@ -688,13 +692,13 @@ struct PlanTitleBlock: View {
     private func cell(key: String, value: String?, isLink: Bool = false) -> some View {
         HStack(spacing: 5) {
             Text(key)
-                .font(LumenType.readout(size: 9))
-                .kerning(0.6)
-                .foregroundStyle(Lumen.muted)
+                .font(LumenType.readout(size: 10.5, weight: .regular))
+                .kerning(0.4)
+                .foregroundStyle(Lumen.meter)
             if let value {
                 Text(value)
-                    .font(LumenType.readout(size: 9))
-                    .foregroundStyle(isLink ? Lumen.link : Lumen.chalk)
+                    .font(LumenType.readout(size: 10.5))
+                    .foregroundStyle(isLink ? Lumen.link : Lumen.lit)
             }
         }
         .padding(.horizontal, 11)
@@ -788,18 +792,33 @@ private struct RoomBlockView: View {
 
     private var labelStack: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(room.name)
-                .font(.system(size: 10, weight: .light))
-                .kerning(1.8)
-                .textCase(.uppercase)
-                .foregroundStyle(Lumen.chalk)
-                .shadow(color: Lumen.stage.opacity(0.95), radius: 5)
-                .lineLimit(1)
+            roomLabel
             Spacer(minLength: 6)
             PlanDimensionLine(level: level, figure: figure)
         }
         .padding(.horizontal, 13)
         .padding(.vertical, 12)
+    }
+
+    private var roomLabel: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 9) {
+            Text(room.name)
+                .font(.system(size: 13, weight: .semibold))
+                .kerning(0.65)
+                .textCase(.uppercase)
+                .foregroundStyle(Lumen.lit)
+                .lineLimit(1)
+
+            // How many of this room's fixtures are actually lit. The drawing
+            // shows you the light; this says whether any of it is missing.
+            Text("\(litLights.count)/\(lights.count)")
+                .font(LumenType.readout(size: 11, weight: .regular))
+                .foregroundStyle(Lumen.meter)
+        }
+        // A tight shadow for edge definition and a wide one to hold the
+        // label together where it crosses a bright pool.
+        .shadow(color: Lumen.stage.opacity(0.92), radius: 1.5)
+        .shadow(color: Lumen.stage.opacity(0.85), radius: 8)
     }
 
     private var pools: [RoomPoolCanvas.Pool] {
@@ -1092,17 +1111,19 @@ private struct PlanInspector: View {
             if renaming {
                 TextField("Room name", text: $draftName)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 15, weight: .light))
-                    .foregroundStyle(Lumen.chalk)
+                    // Matches the Text it stands in for, so the room name
+                    // does not change weight the moment you click rename.
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Lumen.lit)
                     .onSubmit(commitRename)
                 Button("Save", action: commitRename)
                     .buttonStyle(LumenSecondaryButtonStyle(compact: true))
             } else {
                 Text(room.name)
-                    .font(.system(size: 15, weight: .light))
-                    .kerning(1.3)
+                    .font(.system(size: 15, weight: .semibold))
+                    .kerning(0.7)
                     .textCase(.uppercase)
-                    .foregroundStyle(Lumen.chalk)
+                    .foregroundStyle(Lumen.lit)
                 Spacer(minLength: 6)
                 Button {
                     draftName = room.name
@@ -1199,11 +1220,11 @@ private struct PlanCatalogueFact: View {
     var body: some View {
         HStack {
             Text(key)
-                .font(LumenType.readout(size: 9.5, weight: .regular))
+                .font(LumenType.readout(size: 11, weight: .regular))
                 .foregroundStyle(Lumen.muted)
             Spacer(minLength: 8)
             Text(value)
-                .font(LumenType.readout(size: 9.5, weight: .medium))
+                .font(LumenType.readout(size: 11))
                 .foregroundStyle(Lumen.meter)
                 .lineLimit(1)
                 .truncationMode(.middle)
@@ -1221,7 +1242,7 @@ private struct PlanFixtureRow: View {
 
     private var lit: Bool { light.isOn && !light.isStale }
     private var dotColour: Color { lit ? light.color : Lumen.faint }
-    private var nameColour: Color { light.isStale ? Lumen.muted : Lumen.chalk }
+    private var nameColour: Color { light.isStale ? Lumen.muted : Lumen.lit }
     private var nameWeight: Font.Weight { selected ? .semibold : .regular }
 
     private var statusText: String {
@@ -1256,16 +1277,16 @@ private struct PlanFixtureRow: View {
                 .shadow(color: lit ? light.color.opacity(0.7) : .clear, radius: 4)
 
             Text(light.label)
-                .font(.system(size: 12, weight: nameWeight))
+                .font(.system(size: 13.5, weight: nameWeight))
                 .foregroundStyle(nameColour)
                 .lineLimit(1)
 
             Spacer(minLength: 6)
 
             Text(statusText)
-                .font(LumenType.readout(size: 10))
+                .font(LumenType.readout(size: 12))
                 .monospacedDigit()
-                .foregroundStyle(Lumen.muted)
+                .foregroundStyle(Lumen.meter)
 
             powerButton
         }

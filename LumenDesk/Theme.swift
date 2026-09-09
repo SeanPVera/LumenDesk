@@ -82,7 +82,7 @@ enum Lumen {
     static let faint = Color(hex: 0x3D4E60)
 
     /// Illumination. A lit key face, a fader cap, a powered legend.
-    static let lit = Color(hex: 0xF2F7FD)
+    static let lit = Color(hex: 0xF4F8FE)
 
     /// The drawing's annotation colour — the blue pencil a drafter reaches
     /// for. Dimensions and selection outlines only; it is not an accent and
@@ -253,23 +253,32 @@ enum Lumen {
 /// of their shape. Wash carries hierarchy in size and weight so a fixture name
 /// gets to look like language.
 enum LumenType {
+    /// The smallest size anything in the product renders at.
+    ///
+    /// Sizes of 9 and 9.5 are all over the call sites, left from when labels
+    /// were meant to read as engraving on an instrument rather than as text.
+    /// On an obsidian ground they do not read at all, so the floor is applied
+    /// here instead of at forty call sites, and it holds for the next one
+    /// somebody writes.
+    static let minimumSize: CGFloat = 10.5
+
     /// Names and titles. Standard-width SF Pro, sentence case at call sites.
     static func display(size: CGFloat, weight: Font.Weight = .semibold) -> Font {
-        .system(size: size, weight: weight)
+        .system(size: max(size, minimumSize), weight: weight)
     }
 
     /// Measured values: levels, kelvin, counts, timings, addresses. Monospaced
     /// and tabular, because the whole point of a strip field is comparing
     /// numbers down a column.
     static func readout(size: CGFloat, weight: Font.Weight = .medium) -> Font {
-        .system(size: size, weight: weight, design: .monospaced)
+        .system(size: max(size, minimumSize), weight: weight, design: .monospaced)
     }
 
     /// Control labels. Sentence case in new code; the face is sans so that
     /// legacy call sites still uppercasing their text read as small caps
     /// rather than as engraving.
     static func instrumentLabel(size: CGFloat = 10) -> Font {
-        .system(size: size + 1, weight: .semibold)
+        .system(size: max(size + 1, minimumSize), weight: .semibold)
     }
 }
 

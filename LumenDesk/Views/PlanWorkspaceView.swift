@@ -951,7 +951,9 @@ struct RoomPoolCanvas: View {
         let symbol: FixtureSymbol
 
         /// Half-width as a fraction of the room's short-ish dimension.
-        var extent: Double {
+        /// `CGFloat` rather than `Double` so the geometry below never leans
+        /// on the implicit conversion between the two.
+        var extent: CGFloat {
             switch symbol {
             case .strip: return 0.27
             case .bulb:  return 0.22
@@ -960,7 +962,7 @@ struct RoomPoolCanvas: View {
         }
 
         /// Width over height. A strip throws wide and shallow.
-        var aspect: Double {
+        var aspect: CGFloat {
             switch symbol {
             case .strip: return 1.75
             case .bulb:  return 1.0

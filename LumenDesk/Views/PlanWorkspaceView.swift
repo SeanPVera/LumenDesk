@@ -77,7 +77,11 @@ struct PlanWorkspaceView: View {
                               selectedRoomID: $selectedRoomID,
                               selectedLightID: $selectedLightID,
                               query: searchText)
-                    .padding(18)
+                    .padding(.horizontal, 18)
+                    .padding(.top, 18)
+                PlanTitleBlock()
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 14)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -94,7 +98,7 @@ struct PlanWorkspaceView: View {
                 .textCase(.uppercase)
                 .foregroundStyle(Lumen.chalk)
 
-            Text(linkSummary)
+            Text("1:50")
                 .font(LumenType.readout(size: 9.5))
                 .kerning(0.8)
                 .foregroundStyle(Lumen.muted)
@@ -137,11 +141,6 @@ struct PlanWorkspaceView: View {
         .menuStyle(.borderlessButton)
         .fixedSize()
         .accessibilityLabel("Plan actions")
-    }
-
-    private var linkSummary: String {
-        let reachable = manager.devices.filter { !$0.isStale }.count
-        return "\(reachable) of \(manager.devices.count) linked"
     }
 
     // MARK: Trays and empty states
@@ -237,13 +236,17 @@ struct PlanCellDelta {
 }
 
 extension RoomPlanFrame {
-    /// The frame's pixel rect on a board whose cells are `cell`, inset so
-    /// neighbouring blocks read as separate objects.
-    func rect(cell: CGSize, inset: CGFloat = 2.5) -> CGRect {
-        CGRect(x: cell.width * CGFloat(column) + inset,
-               y: cell.height * CGFloat(row) + inset,
-               width: max(0, cell.width * CGFloat(width) - inset * 2),
-               height: max(0, cell.height * CGFloat(height) - inset * 2))
+    /// The frame's pixel rect on a board whose cells are `cell`.
+    ///
+    /// Rooms tile exactly — no gap, no inset. Two rooms that touch share one
+    /// wall, and the walls are drawn once on top as their own layer. Giving
+    /// each block its own inset border is what made the first pass read as a
+    /// grid of cards rather than as a drawing.
+    func rect(cell: CGSize, origin: CGFloat = 0) -> CGRect {
+        CGRect(x: origin + cell.width * CGFloat(column),
+               y: origin + cell.height * CGFloat(row),
+               width: max(0, cell.width * CGFloat(width)),
+               height: max(0, cell.height * CGFloat(height)))
     }
 }
 
@@ -267,6 +270,10 @@ struct PlanBoardView: View {
         let valid: Bool
     }
 
+    /// Half the exterior wall's stroke width. The envelope is drawn centred on
+    /// the board's edge, so without this half of it would hang outside.
+    private let boardInset: CGFloat = 3
+
     private var rows: Int {
         var frames: [UUID: RoomPlanFrame] = [:]
         for room in manager.rooms {
@@ -275,19 +282,39 @@ struct PlanBoardView: View {
         return PlanLayout.rowCount(for: frames)
     }
 
+    private var placedFrames: [RoomPlanFrame] {
+        manager.rooms.compactMap { displayFrame(for: $0) }
+    }
+
     var body: some View {
         GeometryReader { proxy in
-            let cell = CGSize(width: proxy.size.width / CGFloat(PlanLayout.columns),
-                              height: proxy.size.height / CGFloat(rows))
+            let cell = cellSize(in: proxy.size)
             ZStack(alignment: .topLeading) {
-                if arranging { grid(cell: cell) }
                 ForEach(manager.rooms) { room in
                     block(for: room, cell: cell)
                 }
+                // Walls last so they sit over every floor, and inert so a
+                // partition never swallows a click meant for a fixture.
+                PlanWallLayer(frames: placedFrames,
+                              cell: cell,
+                              inset: boardInset,
+                              bounds: proxy.size,
+                              selected: selectedFrame)
+                    .allowsHitTesting(false)
                 refusal(cell: cell)
             }
         }
         .frame(minHeight: CGFloat(rows) * 96)
+    }
+
+    private func cellSize(in size: CGSize) -> CGSize {
+        CGSize(width: max(1, (size.width - boardInset * 2) / CGFloat(PlanLayout.columns)),
+               height: max(1, (size.height - boardInset * 2) / CGFloat(rows)))
+    }
+
+    private var selectedFrame: RoomPlanFrame? {
+        guard let selectedRoomID else { return nil }
+        return manager.rooms.first { $0.id == selectedRoomID }?.planFrame
     }
 
     // MARK: Pieces
@@ -299,7 +326,7 @@ struct PlanBoardView: View {
     @ViewBuilder
     private func block(for room: Room, cell: CGSize) -> some View {
         if let frame = displayFrame(for: room) {
-            let rect = frame.rect(cell: cell)
+            let rect = frame.rect(cell: cell, origin: boardInset)
             RoomBlockView(
                 room: room,
                 arranging: arranging,
@@ -327,38 +354,18 @@ struct PlanBoardView: View {
     @ViewBuilder
     private func refusal(cell: CGSize) -> some View {
         if let draft, !draft.valid {
-            let rect = draft.frame.rect(cell: cell)
-            RoundedRectangle(cornerRadius: 3, style: .continuous)
-                .fill(Lumen.fail.opacity(0.09))
+            let rect = draft.frame.rect(cell: cell, origin: boardInset)
+            Rectangle()
+                .fill(Lumen.fail.opacity(0.10))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 3, style: .continuous)
-                        .stroke(Lumen.fail, style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                    Rectangle()
+                        .stroke(Lumen.fail, style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
                 )
                 .frame(width: rect.width, height: rect.height)
                 .offset(x: rect.minX, y: rect.minY)
                 .allowsHitTesting(false)
+                .zIndex(20)
         }
-    }
-
-    private func grid(cell: CGSize) -> some View {
-        Canvas { context, size in
-            let line = Color(hex: 0xFFFFFF, alpha: 0.045)
-            for column in 1..<PlanLayout.columns {
-                let x = cell.width * CGFloat(column)
-                var path = Path()
-                path.move(to: CGPoint(x: x, y: 0))
-                path.addLine(to: CGPoint(x: x, y: size.height))
-                context.stroke(path, with: .color(line), lineWidth: 1)
-            }
-            for row in 1..<max(2, rows) {
-                let y = cell.height * CGFloat(row)
-                var path = Path()
-                path.move(to: CGPoint(x: 0, y: y))
-                path.addLine(to: CGPoint(x: size.width, y: y))
-                context.stroke(path, with: .color(line), lineWidth: 1)
-            }
-        }
-        .accessibilityHidden(true)
     }
 
     // MARK: Placement
@@ -408,6 +415,285 @@ struct PlanBoardView: View {
     }
 }
 
+// MARK: - Walls
+
+/// Every wall on the plan, drawn once.
+///
+/// Two rooms that touch produce the same edge twice, so edges are collected
+/// into a set first and the shared one is stroked a single time. That is the
+/// difference between a plan and a grid of bordered tiles.
+///
+/// Line weight carries the hierarchy the way it does on any drawing: the
+/// exterior envelope is heavy, interior partitions are light, and both sit on
+/// a wider poché band so a wall reads as having thickness.
+struct PlanWallLayer: View {
+    let frames: [RoomPlanFrame]
+    let cell: CGSize
+    let inset: CGFloat
+    let bounds: CGSize
+    var selected: RoomPlanFrame?
+
+    /// An edge rounded to whole points, so the two rooms either side of a
+    /// shared wall collapse to one entry.
+    private struct Edge: Hashable {
+        let x1: Int, y1: Int, x2: Int, y2: Int
+    }
+
+    var body: some View {
+        Canvas { context, size in
+            let edges = collectEdges()
+            // Poché first, then the line on top of it.
+            for pass in 0..<2 {
+                for edge in edges {
+                    let outer = isOuter(edge, in: size)
+                    var path = Path()
+                    path.move(to: CGPoint(x: CGFloat(edge.x1), y: CGFloat(edge.y1)))
+                    path.addLine(to: CGPoint(x: CGFloat(edge.x2), y: CGFloat(edge.y2)))
+                    context.stroke(path,
+                                   with: .color(pass == 0 ? Lumen.poche
+                                                          : (outer ? Lumen.wallOuter : Lumen.wall)),
+                                   style: StrokeStyle(lineWidth: strokeWidth(pass: pass, outer: outer),
+                                                      lineCap: .square))
+                }
+            }
+            markSelection(in: &context)
+        }
+        .accessibilityHidden(true)
+    }
+
+    private func strokeWidth(pass: Int, outer: Bool) -> CGFloat {
+        if pass == 0 { return outer ? 9 : 6 }
+        return outer ? 5 : 2
+    }
+
+    private func collectEdges() -> Set<Edge> {
+        var edges: Set<Edge> = []
+        for frame in frames {
+            let rect = frame.rect(cell: cell, origin: inset)
+            let minX = Int(rect.minX.rounded()), maxX = Int(rect.maxX.rounded())
+            let minY = Int(rect.minY.rounded()), maxY = Int(rect.maxY.rounded())
+            edges.insert(Edge(x1: minX, y1: minY, x2: maxX, y2: minY))
+            edges.insert(Edge(x1: minX, y1: maxY, x2: maxX, y2: maxY))
+            edges.insert(Edge(x1: minX, y1: minY, x2: minX, y2: maxY))
+            edges.insert(Edge(x1: maxX, y1: minY, x2: maxX, y2: maxY))
+        }
+        return edges
+    }
+
+    /// An edge belongs to the envelope when it lies on the board's inset
+    /// bounds rather than between two rooms.
+    private func isOuter(_ edge: Edge, in size: CGSize) -> Bool {
+        let epsilon: CGFloat = 1.5
+        if edge.x1 == edge.x2 {
+            let x = CGFloat(edge.x1)
+            return abs(x - inset) < epsilon || abs(x - (size.width - inset)) < epsilon
+        }
+        let y = CGFloat(edge.y1)
+        return abs(y - inset) < epsilon || abs(y - (size.height - inset)) < epsilon
+    }
+
+    /// The selected room is marked up with a heavier outline, the way a zone
+    /// is highlighted on a drawing.
+    private func markSelection(in context: inout GraphicsContext) {
+        guard let selected else { return }
+        let rect = selected.rect(cell: cell, origin: inset).insetBy(dx: 1.5, dy: 1.5)
+        context.stroke(Path(rect), with: .color(Lumen.mark.opacity(0.55)), lineWidth: 1.5)
+    }
+}
+
+// MARK: - Fixture symbols
+
+/// A fixture as an electrical-plan symbol.
+///
+/// A circle with a cross through it is a ceiling fixture, a bar is a strip, a
+/// square is a panel. The vocabulary is a century old and free, and it means
+/// the drawing states what kind of fixture is there rather than only where.
+/// An unreachable one is drawn hollow and dashed, which is the same convention
+/// as an item shown for reference.
+struct PlanFixtureSymbol: View {
+    let symbol: FixtureSymbol
+    let colour: Color
+    let isLit: Bool
+    let isReachable: Bool
+    var isSelected: Bool = false
+    var size: CGFloat = 21
+
+    private var strokeColour: Color {
+        if !isReachable { return Lumen.wallOuter }
+        return isLit ? colour : Lumen.faint
+    }
+
+    private var strokeStyle: StrokeStyle {
+        StrokeStyle(lineWidth: 1.3, dash: isReachable ? [] : [2, 2])
+    }
+
+    var body: some View {
+        ZStack {
+            if isSelected {
+                Circle()
+                    .stroke(Lumen.mark, lineWidth: 1.4)
+                    .frame(width: size * 0.95, height: size * 0.95)
+            }
+            glyph
+            // The fixture is the source, so a lit one carries a bright core
+            // and the pool reads as coming from it.
+            if isLit && isReachable {
+                Circle()
+                    .fill(Color.white.opacity(0.92))
+                    .frame(width: size * 0.145, height: size * 0.145)
+            }
+        }
+        .frame(width: size, height: size)
+    }
+
+    @ViewBuilder
+    private var glyph: some View {
+        switch symbol {
+        case .bulb:  bulb
+        case .strip: strip
+        case .panel: panel
+        }
+    }
+
+    /// The cross runs through the circle, not around it. That is what
+    /// separates a fixture symbol from a coloured dot.
+    private var bulb: some View {
+        ZStack {
+            Circle()
+                .fill(isLit ? colour.opacity(0.5) : Color.clear)
+                .frame(width: size * 0.6, height: size * 0.6)
+            Circle()
+                .stroke(strokeColour, style: strokeStyle)
+                .frame(width: size * 0.6, height: size * 0.6)
+            Path { path in
+                path.move(to: CGPoint(x: size / 2, y: size * 0.12))
+                path.addLine(to: CGPoint(x: size / 2, y: size * 0.88))
+                path.move(to: CGPoint(x: size * 0.12, y: size / 2))
+                path.addLine(to: CGPoint(x: size * 0.88, y: size / 2))
+            }
+            .stroke(strokeColour, style: StrokeStyle(lineWidth: 1.1, lineCap: .round))
+        }
+    }
+
+    private var strip: some View {
+        Capsule()
+            .fill(isLit ? colour.opacity(0.55) : Color.clear)
+            .overlay(Capsule().stroke(strokeColour, style: strokeStyle))
+            .frame(width: size * 0.87, height: size * 0.2)
+    }
+
+    private var panel: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 1, style: .continuous)
+                .fill(isLit ? colour.opacity(0.5) : Color.clear)
+            RoundedRectangle(cornerRadius: 1, style: .continuous)
+                .stroke(strokeColour, style: strokeStyle)
+            Path { path in
+                path.move(to: CGPoint(x: 0, y: size * 0.32))
+                path.addLine(to: CGPoint(x: size * 0.64, y: size * 0.32))
+                path.move(to: CGPoint(x: size * 0.32, y: 0))
+                path.addLine(to: CGPoint(x: size * 0.32, y: size * 0.64))
+            }
+            .stroke(strokeColour.opacity(0.75), lineWidth: 0.9)
+        }
+        .frame(width: size * 0.64, height: size * 0.64)
+    }
+}
+
+// MARK: - Dimension line
+
+/// A room's level, drawn the way a drawing states a measurement: a tick at
+/// each end, the fill on the line, and the figure sitting on it.
+///
+/// This replaces a 24 pt mono figure in the corner of each block, which
+/// competed with the drawing and read as a dashboard tile. The pools carry the
+/// impression of brightness; the dimension carries the exact number.
+struct PlanDimensionLine: View {
+    let level: Double
+    let figure: String
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .leading) {
+                Rectangle()
+                    .fill(Lumen.wallOuter)
+                    .frame(height: 1)
+                Rectangle()
+                    .fill(Lumen.mark)
+                    .frame(width: max(0, proxy.size.width * level), height: 3)
+                    .shadow(color: Lumen.mark.opacity(0.55), radius: 4)
+                tick.offset(x: 0)
+                tick.offset(x: proxy.size.width - 1)
+            }
+            .frame(maxHeight: .infinity, alignment: .center)
+            .overlay(alignment: .topTrailing) {
+                Text(figure)
+                    .font(LumenType.readout(size: 11, weight: .regular))
+                    .monospacedDigit()
+                    .foregroundStyle(Lumen.chalk)
+                    .padding(.horizontal, 4)
+                    .background(Lumen.floor)
+                    .offset(y: -9)
+            }
+        }
+        .frame(height: 14)
+    }
+
+    private var tick: some View {
+        Rectangle()
+            .fill(Lumen.wallOuter)
+            .frame(width: 1, height: 11)
+    }
+}
+
+// MARK: - Title block
+
+/// The drawing's metadata, in the drawing's own language.
+///
+/// Ruled cells along the foot of the sheet, carrying the facts that used to
+/// sit in a header strip: rooms, fixtures, how many are linked, when the
+/// network was last scanned. The one authored hue still means network truth;
+/// it just lives where a drawing puts its metadata.
+struct PlanTitleBlock: View {
+    @EnvironmentObject private var manager: LightManager
+
+    private var lit: Int { manager.devices.filter { $0.isOn && !$0.isStale }.count }
+    private var linked: Int { manager.devices.filter { !$0.isStale }.count }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            cell(key: "LUMENDESK", value: nil)
+            cell(key: "ROOMS", value: "\(manager.rooms.count)")
+            cell(key: "FIXTURES", value: "\(manager.devices.count)")
+            cell(key: "LIT", value: "\(lit)")
+            cell(key: "LINKED", value: "\(linked)/\(manager.devices.count)", isLink: true)
+            Spacer(minLength: 0)
+        }
+        .overlay(Rectangle().stroke(Lumen.wallOuter, lineWidth: 1))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(manager.rooms.count) rooms, \(manager.devices.count) fixtures, \(linked) linked")
+    }
+
+    private func cell(key: String, value: String?, isLink: Bool = false) -> some View {
+        HStack(spacing: 5) {
+            Text(key)
+                .font(LumenType.readout(size: 9))
+                .kerning(0.6)
+                .foregroundStyle(Lumen.muted)
+            if let value {
+                Text(value)
+                    .font(LumenType.readout(size: 9))
+                    .foregroundStyle(isLink ? Lumen.link : Lumen.chalk)
+            }
+        }
+        .padding(.horizontal, 11)
+        .padding(.vertical, 6)
+        .overlay(alignment: .trailing) {
+            Rectangle().fill(Lumen.wall).frame(width: 1)
+        }
+    }
+}
+
 // MARK: - One room
 
 private struct RoomBlockView: View {
@@ -434,34 +720,34 @@ private struct RoomBlockView: View {
     }
 
     private var percent: Int { Int((level * 100).rounded()) }
-    private var levelText: String { lights.isEmpty ? "—" : "\(percent)" }
-    private var countText: String { "\(litLights.count)/\(lights.count)" }
+    private var figure: String {
+        lights.isEmpty ? "—" : "\(percent)  \(litLights.count)/\(lights.count)"
+    }
     private var spokenValue: String {
         "\(percent) percent, \(litLights.count) of \(lights.count) lit"
     }
 
-    private var fillColour: Color { selected ? Lumen.stripRaised : Lumen.strip }
-
-    private var borderColour: Color {
-        if selected { return Lumen.link.opacity(0.7) }
-        return arranging ? Lumen.rule : Lumen.ruleSoft
-    }
+    private var hasUnreachable: Bool { lights.contains(where: \.isStale) }
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            RoundedRectangle(cornerRadius: 3, style: .continuous).fill(fillColour)
+            Rectangle().fill(selected ? Lumen.floorRaised : Lumen.floor)
 
             // The pools. This is the status display: what a room is doing is
             // legible from across the desk without reading anything.
             RoomPoolCanvas(pools: pools, flat: reduceTransparency)
                 .allowsHitTesting(false)
 
-            fixtureDots
+            // A plan hatches an area that is out of scope, which is exactly
+            // what an unreachable fixture makes of its room.
+            if hasUnreachable { hatch }
+
+            fixtureSymbols
             labelStack
 
             if arranging { resizeGrip }
         }
-        .overlay(border)
+        .clipped()
         .opacity(dimmed ? 0.35 : 1)
         .contentShape(Rectangle())
         .onTapGesture { if !arranging { onSelect() } }
@@ -471,57 +757,36 @@ private struct RoomBlockView: View {
         .accessibilityValue(spokenValue)
     }
 
-    private var border: some View {
-        RoundedRectangle(cornerRadius: 3, style: .continuous)
-            .stroke(borderColour, lineWidth: 1)
+    private var hatch: some View {
+        Canvas { context, size in
+            let spacing: CGFloat = 8
+            let colour = Lumen.wallOuter.opacity(0.32)
+            var offset = -size.height
+            while offset < size.width {
+                var path = Path()
+                path.move(to: CGPoint(x: offset, y: size.height))
+                path.addLine(to: CGPoint(x: offset + size.height, y: 0))
+                context.stroke(path, with: .color(colour), lineWidth: 1)
+                offset += spacing
+            }
+        }
+        .allowsHitTesting(false)
     }
 
     private var labelStack: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(room.name)
-                .font(.system(size: 10.5, weight: .regular))
-                .kerning(1.5)
+                .font(.system(size: 10, weight: .light))
+                .kerning(1.8)
                 .textCase(.uppercase)
                 .foregroundStyle(Lumen.chalk)
+                .shadow(color: Lumen.stage.opacity(0.95), radius: 5)
                 .lineLimit(1)
-
             Spacer(minLength: 6)
-
-            levelRule
-            readoutRow
+            PlanDimensionLine(level: level, figure: figure)
         }
-        .padding(10)
-    }
-
-    private var readoutRow: some View {
-        HStack(alignment: .lastTextBaseline) {
-            Text(levelText)
-                .font(LumenType.readout(size: 24, weight: .medium))
-                .monospacedDigit()
-                .foregroundStyle(Lumen.chalk)
-                .shadow(color: Lumen.stage.opacity(0.9), radius: 6)
-            Spacer(minLength: 6)
-            Text(countText)
-                .font(LumenType.readout(size: 9))
-                .foregroundStyle(Lumen.muted)
-        }
-    }
-
-    /// Room level as a dimension line under the plan rather than a slider,
-    /// because a drawing measures with a rule.
-    private var levelRule: some View {
-        GeometryReader { proxy in
-            ZStack(alignment: .leading) {
-                Capsule().fill(Lumen.rule).frame(height: 2)
-                Capsule()
-                    .fill(Lumen.link)
-                    .frame(width: max(0, proxy.size.width * level), height: 2)
-                    .shadow(color: Lumen.link.opacity(0.6), radius: 4)
-            }
-            .frame(maxHeight: .infinity, alignment: .center)
-        }
-        .frame(height: 6)
-        .padding(.bottom, 5)
+        .padding(.horizontal, 13)
+        .padding(.vertical, 12)
     }
 
     private var pools: [RoomPoolCanvas.Pool] {
@@ -529,47 +794,39 @@ private struct RoomBlockView: View {
             guard light.isOn, !light.isStale else { return nil }
             return RoomPoolCanvas.Pool(anchor: manager.planAnchor(for: light.id, in: room),
                                        colour: light.color,
-                                       opacity: 0.14 + light.brightness * 0.5)
+                                       opacity: 0.10 + light.brightness * 0.34)
         }
     }
 
-    /// The fixture itself, where it stands. Click one and you never have to
-    /// remember which lamp is called "Bed Left", because you are pointing at
-    /// it instead of naming it.
-    private var fixtureDots: some View {
+    private var fixtureSymbols: some View {
         GeometryReader { proxy in
             ForEach(lights) { light in
-                dot(for: light)
+                symbolButton(for: light)
                     .position(x: proxy.size.width * manager.planAnchor(for: light.id, in: room).x,
                               y: proxy.size.height * manager.planAnchor(for: light.id, in: room).y)
             }
         }
     }
 
-    private func dot(for light: LightDevice) -> some View {
-        let lit = light.isOn && !light.isStale
+    private func symbolButton(for light: LightDevice) -> some View {
+        let symbol = FixtureSymbol.classify(
+            isMatrix: light.isLIFXLuna,
+            hasSegments: manager.segmentStudioProfile(for: light) != nil
+        )
         return Button {
             onSelect()
             selectedLightID = light.id
         } label: {
-            Circle()
-                .fill(lit ? light.color : Lumen.faint)
-                .frame(width: 11, height: 11)
-                .overlay(Circle().stroke(Color.white.opacity(0.19), lineWidth: 1))
-                .shadow(color: lit ? light.color.opacity(0.8) : .clear, radius: 5)
-                .overlay(dotSelection(for: light))
+            PlanFixtureSymbol(symbol: symbol,
+                              colour: light.color,
+                              isLit: light.isOn,
+                              isReachable: !light.isStale,
+                              isSelected: selectedLightID == light.id)
         }
         .buttonStyle(.plain)
         .disabled(arranging)
-        .help(light.label)
-        .accessibilityLabel("Select \(light.label)")
-    }
-
-    @ViewBuilder
-    private func dotSelection(for light: LightDevice) -> some View {
-        if selectedLightID == light.id {
-            Circle().stroke(Lumen.link, lineWidth: 2).padding(-3)
-        }
+        .help("\(light.label) · \(symbol.spokenName)")
+        .accessibilityLabel("Select \(light.label), \(symbol.spokenName)")
     }
 
     private var resizeGrip: some View {
@@ -621,7 +878,7 @@ private struct RoomBlockView: View {
 
     private func commitLevel(at x: CGFloat) {
         onSelect()
-        let width = max(1, cell.width * CGFloat(room.planFrame?.width ?? 1) - 5)
+        let width = max(1, cell.width * CGFloat(room.planFrame?.width ?? 1))
         onLevel(min(1, max(0, Double(x / width))))
     }
 
@@ -652,9 +909,9 @@ struct RoomPoolCanvas: View {
     var body: some View {
         Canvas { context, size in
             context.blendMode = .screen
-            if !flat { context.addFilter(.blur(radius: 13)) }
+            if !flat { context.addFilter(.blur(radius: 9)) }
 
-            let radius = min(size.width, size.height) * 0.58
+            let radius = min(size.width, size.height) * 0.36
             for pool in pools {
                 let centre = CGPoint(x: size.width * pool.anchor.x,
                                      y: size.height * pool.anchor.y)
@@ -665,8 +922,8 @@ struct RoomPoolCanvas: View {
                     : .radialGradient(
                         Gradient(stops: [
                             .init(color: pool.colour.opacity(pool.opacity), location: 0),
-                            .init(color: pool.colour.opacity(pool.opacity), location: 0.18),
-                            .init(color: pool.colour.opacity(0), location: 0.66)
+                            .init(color: pool.colour.opacity(pool.opacity), location: 0.08),
+                            .init(color: pool.colour.opacity(0), location: 0.68)
                         ]),
                         center: centre, startRadius: 0, endRadius: radius)
                 context.fill(Ellipse().path(in: rect), with: shading)

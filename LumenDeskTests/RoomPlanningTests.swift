@@ -101,6 +101,27 @@ final class RoomNameParserTests: XCTestCase {
     }
 }
 
+// MARK: - Fixture symbols
+
+final class FixtureSymbolTests: XCTestCase {
+
+    /// A Luna is both a matrix and segmented; the square is the more specific
+    /// statement, so it has to win.
+    func testMatrixBeatsSegments() {
+        XCTAssertEqual(FixtureSymbol.classify(isMatrix: true, hasSegments: true), .panel)
+        XCTAssertEqual(FixtureSymbol.classify(isMatrix: true, hasSegments: false), .panel)
+    }
+
+    func testSegmentedFixturesAreStrips() {
+        XCTAssertEqual(FixtureSymbol.classify(isMatrix: false, hasSegments: true), .strip)
+    }
+
+    /// A fixture the catalog has never seen still has to land somewhere.
+    func testAnythingElseIsABulb() {
+        XCTAssertEqual(FixtureSymbol.classify(isMatrix: false, hasSegments: false), .bulb)
+    }
+}
+
 // MARK: - Board layout
 
 final class PlanLayoutTests: XCTestCase {

@@ -5,63 +5,84 @@ import AppKit
 import UIKit
 #endif
 
-// MARK: - LumenDesk design system — "Wash"
+// MARK: - LumenDesk design system — "Plan"
 //
-// A wash is what a fixture lays down over a surface. That is the whole system.
+// The room is the primary object. The screen is a drawing of the home, and
+// every lit fixture pools its own colour onto it, so a dark room reads from
+// across the desk without reading a word.
 //
-//     Every fixture owns a strip, and the strip is lit by the fixture.
+//     The plan is not a floor plan. It is a seating chart.
 //
-// Structure comes from a lighting board: every controllable thing is a channel
-// strip, strips sit side by side, and the level on each one is always visible
-// and always live. Material comes from the light itself: surfaces separate by
-// luminance rather than by borders, elevation is brightness, and a powered
-// fixture washes its own strip in its own colour at its own level.
+// It does not have to be architecturally correct, it has to be consistent. A
+// kitchen that stays top-right is learned in about a day and never unlearned,
+// which is why an overlapping drop is refused rather than tidied away and why
+// every default position in `PlanLayout` is deterministic.
 //
-// Exactly one hue is authored into the interface, and it is rationed to
-// network truth — discovery, confirmed packets, round-trip time, addresses.
-// Every other colour on screen is a real fixture reporting a real state.
+// The ground is cold. An earlier direction argued for warm near-black on the
+// grounds that home light lives at 2200-4000 K, but that reasoning belongs to
+// an interface standing *inside* the lamp's own colour. A plan looks down at a
+// room from outside it, at night, and a cold floor is what makes a 2200 K
+// bedside lamp read as warm when it pools on one.
 //
-// Replaces "Spectral Bench", which put console cues (a chamfered corner, an
-// etched fader scale, uppercase mono legends, a dispersion ramp) on top of a
-// dashboard skeleton. The cues read as instrumentation, the layout read as a
-// web admin panel, and the gap between them is what felt wrong.
+// Two colours are authored into the interface and no more. Link cyan means
+// network truth and nothing else. Mark is the drawing's annotation colour, the
+// blue pencil a drafter reaches for, and it is reserved for dimensions and
+// selection. Every other colour on screen is a fixture reporting its own.
 
 enum Lumen {
 
-    // MARK: The bench — warm neutrals
+    // MARK: The sheet — cold neutrals
     //
-    // Home light lives between 2200 K and 4000 K. A blue-black chrome argues
-    // with every lamp in the house, so the ground is warm near-black and a
-    // tungsten wash sits on it without looking like a colour cast.
+    // A plan looks down at a room from outside it, at night. The ground is
+    // cold so that a fixture's own colour, pooled on a floor, is unmistakably
+    // its own and not a property of the surface it lands on.
 
     /// Ground beneath everything, and the well a control recesses into.
-    static let stage        = Color(hex: 0x0C0B0A)
-    /// The strip field and other large working areas.
-    static let deck         = Color(hex: 0x141210)
-    /// An unlit channel strip, and the standard panel fill.
-    static let strip        = Color(hex: 0x1C1917)
-    /// Hovered, selected, or otherwise raised. Elevation is brightness.
-    static let stripRaised  = Color(hex: 0x262220)
+    static let stage        = Color(hex: 0x05080C)
+    /// Large working areas: the inspector, sheets, secondary panels.
+    static let deck         = Color(hex: 0x080D13)
+    /// A room's floor, and the standard panel fill everywhere else.
+    static let floor        = Color(hex: 0x0B111A)
+    /// The selected room's floor, and any hovered or raised surface.
+    static let floorRaised  = Color(hex: 0x101923)
     /// The loudest surface in the system, used for grouped controls.
-    static let stripLoud    = Color(hex: 0x302B27)
+    static let stripLoud    = Color(hex: 0x18222F)
+
+    // MARK: Walls
+    //
+    // Line weight is how a drawing states hierarchy, and the eye reads it
+    // before it reads a word. Both weights sit on a wider poché band so a wall
+    // reads as having thickness rather than as a hairline.
+
+    /// The filled band a wall line sits on.
+    static let poche      = Color(hex: 0x141E2A)
+    /// Interior partitions.
+    static let wall       = Color(hex: 0x26343F)
+    /// The exterior envelope, and any structural edge.
+    static let wallOuter  = Color(hex: 0x48606F)
 
     // MARK: Separators
     //
-    // Used sparingly. Wash separates surfaces by value first; a rule only
+    // Used sparingly. Plan separates surfaces by value and by wall; a rule only
     // appears where two areas share a value and still need a boundary.
 
-    static let ruleSoft = Color(hex: 0x221F1C)
-    static let rule     = Color(hex: 0x2E2926)
+    static let ruleSoft = Color(hex: 0x131C26)
+    static let rule     = Color(hex: 0x26343F)
 
     // MARK: Text
 
-    static let chalk = Color(hex: 0xF4F0EA)
-    static let meter = Color(hex: 0xA79F96)
-    static let muted = Color(hex: 0x6B645D)
-    static let faint = Color(hex: 0x423D38)
+    static let chalk = Color(hex: 0xDDE7F3)
+    static let meter = Color(hex: 0x8FA3B9)
+    static let muted = Color(hex: 0x5A6C82)
+    static let faint = Color(hex: 0x33404F)
 
     /// Illumination. A lit key face, a fader cap, a powered legend.
-    static let lit = Color(hex: 0xFFFCF6)
+    static let lit = Color(hex: 0xF2F7FD)
+
+    /// The drawing's annotation colour — the blue pencil a drafter reaches
+    /// for. Dimensions and selection outlines only; it is not an accent and
+    /// nothing decorative may spend it.
+    static let mark = Color(hex: 0xB9D4F0)
 
     // MARK: The one hue
     //
@@ -76,13 +97,14 @@ enum Lumen {
     /// Status. Both are rare and both always ship with an icon, because hue
     /// alone cannot carry meaning on a screen full of coloured fixtures.
     static let warn = Color(hex: 0xF0B03C)
-    static let fail = Color(hex: 0xFF5A52)
+    static let fail = Color(hex: 0xE38A7C)
 
-    // MARK: Wash geometry
+    // MARK: Row wash
     //
-    // How much of its own colour a fixture pours into its strip. Compressed so
-    // an 18% bedside lamp still tints legibly and a 100% key light does not
-    // flood the readout sitting on top of it.
+    // How much of its own colour a fixture pours into a list row, used by the
+    // Rig workspace. Compressed so an 18% bedside lamp still tints legibly and
+    // a 100% key light does not flood the readout sitting on top of it. The
+    // plan's own pools are tuned separately in `RoomPoolCanvas`.
 
     /// Opacity of the colour wash across a strip at a given 0…1 level.
     static func washOpacity(level: Double, isOn: Bool) -> Double {
@@ -143,16 +165,16 @@ enum Lumen {
 
     // MARK: - Compatibility aliases
     //
-    // Spectral Bench names, remapped onto Wash values. Roughly 375 call sites
-    // across the app referred to the old tokens; rebinding the names re-skins
+    // Older names, remapped onto Plan values. Roughly 375 call sites across
+    // the app referred to the original tokens; rebinding the names re-skins
     // every one of them without touching a single view. New code should use
-    // the Wash names above.
+    // the names above.
 
     static let void          = stage
     static let ink           = stage
     static let inkDeep       = stage
-    static let surface       = strip
-    static let surfaceRaised = stripRaised
+    static let surface       = floor
+    static let surfaceRaised = floorRaised
     static let surfaceLoud   = stripLoud
 
     static let hairline       = ruleSoft
@@ -180,6 +202,10 @@ enum Lumen {
 
     /// Vendor identity is a three-letter mono tag in Wash, never a colour, so
     /// both former brand tints collapse to neutral.
+    /// Kept for the call sites that still name the old strip surfaces.
+    static let strip        = floor
+    static let stripRaised  = floorRaised
+
     static let violet       = meter
     static let violetBright = meter
     static let copper       = meter

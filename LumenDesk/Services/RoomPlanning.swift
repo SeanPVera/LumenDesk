@@ -174,6 +174,44 @@ enum PlanLayout {
     }
 }
 
+// MARK: - Fixture symbols
+
+/// How a fixture is drawn on the plan.
+///
+/// Electrical drawings have had a symbol vocabulary for a century: a circle
+/// with a cross through it is a ceiling fixture, a bar is a strip, a square is
+/// a panel. Adopting it means the plan says *what kind* of fixture is there
+/// rather than only where it is, which a coloured dot could never do.
+enum FixtureSymbol: Equatable {
+    /// Ceiling fixture, lamp, bulb. A circle with a cross running through it.
+    case bulb
+    /// A run of addressable LEDs. A rounded bar.
+    case strip
+    /// A matrix or panel. A square, quartered.
+    case panel
+
+    var spokenName: String {
+        switch self {
+        case .bulb:  return "Ceiling or lamp"
+        case .strip: return "Strip"
+        case .panel: return "Panel"
+        }
+    }
+}
+
+extension FixtureSymbol {
+    /// Classify from capability rather than from the model string, so a
+    /// fixture the catalog has never seen still lands somewhere sensible.
+    ///
+    /// A matrix wins over segments because a Luna is both, and the square is
+    /// the more specific statement.
+    static func classify(isMatrix: Bool, hasSegments: Bool) -> FixtureSymbol {
+        if isMatrix { return .panel }
+        if hasSegments { return .strip }
+        return .bulb
+    }
+}
+
 // MARK: - Name parsing
 
 /// Reads the room out of a fixture's name, when there is one to read.

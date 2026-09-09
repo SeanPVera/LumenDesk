@@ -78,6 +78,24 @@ final class LightManager: ObservableObject {
     private let persistenceStore: ApplicationPersistence
     private let commandCoordinator: CommandCoordinator
     private var rehearsalSnapshot: [LightRuntimeSnapshot] = []
+
+    /// State saved before a held identify, so the fixture can be put back
+    /// exactly as it was however the question ends. Lives here rather than
+    /// beside `beginSustainedIdentify` because that sits in an extension, and
+    /// an extension may not hold stored properties.
+    private struct IdentifyHold {
+        let deviceID: String
+        let power: Bool
+        let color: Color
+        let brightness: Double
+        let segments: GoveeSegmentState?
+        let matrix: LIFXMatrixState?
+        var task: Task<Void, Never>?
+    }
+
+    private var identifyHold: IdentifyHold?
+
+    var isHoldingIdentify: Bool { identifyHold != nil }
     // Devices with a live razer overlay, including both editor previews and
     // applied layouts that must be held through the stream.
     private var razerActiveIDs: Set<String> = []
@@ -1979,6 +1997,94 @@ extension LightManager {
         rooms.first { $0.lightIDs.contains(lightID) }
     }
 
+    // MARK: - Plan layout
+
+    /// Give every room a block on the board, leaving existing blocks alone.
+    ///
+    /// Layout is lazy rather than migrated: an archive written before the plan
+    /// existed simply has no frames, and the first draw fills them in. Rooms
+    /// that already carry a frame are never moved, so adding a room in March
+    /// does not rearrange the home you learned in January.
+    func ensurePlanLayout() {
+        guard rooms.contains(where: { $0.planFrame == nil }) else { return }
+
+        var occupied: [RoomPlanFrame] = rooms.compactMap(\.planFrame)
+        for index in rooms.indices where rooms[index].planFrame == nil {
+            let span = PlanLayout.defaultSpan(fixtureCount: rooms[index].lightIDs.count)
+            let frame = PlanLayout.firstFreeFrame(width: span.width, height: span.height,
+                                                  among: occupied)
+                ?? RoomPlanFrame(column: 0, row: occupied.map(\.maxRow).max() ?? 0)
+            rooms[index].planFrame = frame
+            occupied.append(frame)
+        }
+        persistApplicationState()
+    }
+
+    /// Move or resize a room's block.
+    ///
+    /// Returns false and changes nothing when the frame would overlap another
+    /// room or leave the board. A refused drop is the point: silently
+    /// reflowing a board somebody arranged by hand destroys the spatial
+    /// memory the plan is built on.
+    @discardableResult
+    func setPlanFrame(_ frame: RoomPlanFrame, for roomID: UUID) -> Bool {
+        var others: [UUID: RoomPlanFrame] = [:]
+        for room in rooms where room.id != roomID {
+            if let existing = room.planFrame { others[room.id] = existing }
+        }
+        guard PlanLayout.canPlace(frame, for: roomID, among: others),
+              let index = rooms.firstIndex(where: { $0.id == roomID }) else { return false }
+        rooms[index].planFrame = frame
+        persistApplicationState()
+        return true
+    }
+
+    /// Throw the board away and lay every room out from scratch.
+    func resetPlanLayout() {
+        let frames = PlanLayout.autoArrange(rooms.map { (id: $0.id, fixtureCount: $0.lightIDs.count) })
+        for index in rooms.indices { rooms[index].planFrame = frames[rooms[index].id] }
+        persistApplicationState()
+    }
+
+    /// Where a fixture stands inside its room, falling back to the
+    /// deterministic default so a room draws correctly before anyone has
+    /// dragged a single dot.
+    func planAnchor(for lightID: String, in room: Room) -> PlanAnchor {
+        if let stored = room.fixtureAnchors[lightID] { return stored }
+        guard let index = room.lightIDs.firstIndex(of: lightID) else {
+            return PlanAnchor(x: 0.5, y: 0.5)
+        }
+        let defaults = PlanLayout.defaultAnchors(count: room.lightIDs.count)
+        return defaults.indices.contains(index) ? defaults[index] : PlanAnchor(x: 0.5, y: 0.5)
+    }
+
+    func setPlanAnchor(_ anchor: PlanAnchor, for lightID: String, in roomID: UUID) {
+        guard let index = rooms.firstIndex(where: { $0.id == roomID }) else { return }
+        rooms[index].fixtureAnchors[lightID] = anchor
+        persistApplicationState()
+    }
+
+    /// Create a room and hand back its identifier, so a setup flow can assign
+    /// a fixture into it in the same gesture that names it. `createRoom(name:)`
+    /// keeps its existing signature for the call sites that do not need this.
+    @discardableResult
+    func addRoom(named name: String) -> UUID? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let room = Room(name: trimmed)
+        rooms.append(room)
+        persistApplicationState()
+        return room.id
+    }
+
+    /// Fixtures discovered but never sorted onto the plan. They surface in a
+    /// tray on the plan itself rather than being dumped into a junk room, so
+    /// the sorting flow keeps working long after onboarding is over.
+    var unplacedDevices: [LightDevice] {
+        let assigned = Set(rooms.flatMap(\.lightIDs))
+        return devices.filter { !assigned.contains($0.id) }
+    }
+
     typealias ExportedConfiguration = PersistenceStore.ConfigurationArchive
 
     func exportRoomsData() -> Data? { exportConfigurationData() }
@@ -2760,6 +2866,67 @@ extension LightManager {
             }
             self.sendBrightness(device, value: originalBrightness); self.sendPower(device, on: originalPower)
         }
+    }
+
+    // MARK: - Sustained identify
+
+    /// Breathe a fixture until told to stop.
+    ///
+    /// `identify(_:)` flashes for two seconds, which is right for "which one
+    /// is this?" asked about a row on screen. Sorting a rig asks the opposite
+    /// question: the user is looking at the room, not at the app, and the
+    /// bulb has to stay findable for as long as the question is up.
+    ///
+    /// It breathes between full and a third rather than strobing, at roughly
+    /// 0.7 Hz. That is well under any flash threshold and it reads as "this
+    /// one" from the other side of a room without being unpleasant to sit in.
+    func beginSustainedIdentify(_ device: LightDevice) {
+        endSustainedIdentify()
+        var hold = IdentifyHold(deviceID: device.id,
+                                power: device.isOn,
+                                color: device.color,
+                                brightness: device.brightness,
+                                segments: activeSegmentState(for: device.id),
+                                matrix: activeLIFXMatrixState(for: device.id),
+                                task: nil)
+        logActivity(.recovery, title: "Identifying light", detail: device.label)
+        hold.task = Task { @MainActor [weak self, weak device] in
+            var full = true
+            while !Task.isCancelled {
+                guard let self, let device else { return }
+                let level = full ? 1.0 : 0.35
+                device.isOn = true
+                device.color = .cyan
+                device.brightness = level
+                self.sendPower(device, on: true)
+                self.sendColor(device, color: .cyan)
+                self.sendBrightness(device, value: level)
+                full.toggle()
+                try? await Task.sleep(for: .milliseconds(700))
+            }
+        }
+        identifyHold = hold
+    }
+
+    /// Stop the breathing and restore the fixture, including any held segment
+    /// or matrix layout it was carrying before the question was asked.
+    func endSustainedIdentify() {
+        guard let hold = identifyHold else { return }
+        identifyHold = nil
+        hold.task?.cancel()
+        guard let device = devicesByID[hold.deviceID] else { return }
+        device.color = hold.color
+        device.brightness = hold.brightness
+        device.isOn = hold.power
+        if let matrix = hold.matrix {
+            applyLIFXMatrix(device, state: matrix, recordUndo: false, turnOn: false, announce: false)
+        } else if let segments = hold.segments {
+            applySegments(device, state: segments, recordUndo: false, turnOn: false, announce: false)
+        } else {
+            sendColor(device, color: hold.color)
+        }
+        sendBrightness(device, value: hold.brightness)
+        sendPower(device, on: hold.power)
     }
 
     func retry(_ device: LightDevice) {

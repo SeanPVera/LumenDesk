@@ -184,7 +184,7 @@ struct ContentView: View {
                         .font(.system(size: 36, weight: .black, design: .rounded))
                         .kerning(-1.2)
                         .foregroundStyle(Lumen.brandGradient)
-                    Text(headerSubtitle.uppercased())
+                    Text(headerSubtitle)
                         .font(.system(size: 11, weight: .heavy, design: .rounded))
                         .kerning(1.5)
                         .foregroundStyle(Lumen.acid)
@@ -996,9 +996,8 @@ struct DiscoveryDiagnosticsCard: View {
                 Image(systemName: "wave.3.right.circle")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(Lumen.cyan)
-                Text("DISCOVERY DIAGNOSTICS")
+                Text("Discovery diagnostics")
                     .font(LumenType.instrumentLabel(size: 10))
-                    .tracking(1.1)
             }
             HStack {
                 Text(manager.scanPhase)
@@ -1046,9 +1045,8 @@ struct KeyboardShortcutsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("KEYBOARD SHORTCUTS")
+            Text("Keyboard shortcuts")
                 .font(LumenType.display(size: 18, weight: .bold))
-                .tracking(1.2)
             SpectrumRule(height: 2, tapered: true).frame(width: 120)
             ForEach(shortcuts, id: \.0) { item in
                 HStack {

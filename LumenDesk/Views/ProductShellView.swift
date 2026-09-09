@@ -1,39 +1,41 @@
 import SwiftUI
 
-// MARK: - Stable product navigation
+// MARK: - Product navigation
+//
+// Five destinations, named in the vocabulary of the thing the app controls.
+// "Home", "Library", "Automation", and "Devices" described the software; Desk,
+// Looks, Cues, and Rig describe the lighting, and every one of them is shorter
+// than the word it replaced. The case names are unchanged so nothing that
+// switches on a destination had to move.
 
 enum LumenDeskDestination: String, CaseIterable, Identifiable {
-    case home = "Home"
-    case library = "Library"
-    case automation = "Automation"
-    case devices = "Devices"
+    case home = "Plan"
+    case library = "Looks"
+    case automation = "Cues"
+    case devices = "Rig"
     case settings = "Settings"
 
     var id: String { rawValue }
 
     var symbol: String {
         switch self {
-        case .home: return "house"
+        case .home: return "square.grid.3x3.topleft.filled"
         case .library: return "square.grid.2x2"
-        case .automation: return "clock.arrow.2.circlepath"
+        case .automation: return "clock"
         case .devices: return "lightbulb.2"
         case .settings: return "gearshape"
         }
     }
-
-    /// Channel number. A lighting desk addresses its destinations by number,
-    /// and the numbers make the sidebar scannable without reading the words.
-    var channel: String {
-        switch self {
-        case .home: return "01"
-        case .library: return "02"
-        case .automation: return "03"
-        case .devices: return "04"
-        case .settings: return "05"
-        }
-    }
 }
 
+// MARK: - Shell
+
+/// The window. On macOS a fixed icon rail beside the working area, with the
+/// inspector living inside the Desk itself; on iPhone a four-item tab bar.
+///
+/// The rail replaced a 228 pt sidebar that spent its top on a three-line
+/// wordmark and gave each destination a channel number. A list of five things
+/// does not need addressing, and the space it cost belonged to the fixtures.
 struct LumenDeskShellView: View {
     @EnvironmentObject private var manager: LightManager
     @State private var destination: LumenDeskDestination = .home
@@ -49,7 +51,8 @@ struct LumenDeskShellView: View {
 
             statusOverlays
         }
-        .tint(Lumen.signal)
+        .tint(Lumen.chalk)
+        .background(Lumen.stage)
         .safeAreaInset(edge: .top, spacing: 0) {
             if manager.isDemoMode { DemoModeBanner() }
         }
@@ -61,52 +64,12 @@ struct LumenDeskShellView: View {
 
     #if os(macOS)
     private var desktopShell: some View {
-        NavigationSplitView {
-            ZStack {
-                LumenToken.Background.subtle
-                    .ignoresSafeArea()
-                VStack(alignment: .leading, spacing: 0) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        LumenWordmark(size: 17)
-                        Text("LOCAL LIGHTING DESK")
-                            .font(LumenType.instrumentLabel(size: 8))
-                            .tracking(1.6)
-                            .foregroundStyle(Lumen.textTertiary)
-                    }
-                    .padding(.horizontal, 18)
-                    .padding(.top, 18)
-                    .padding(.bottom, 20)
-
-                    Rectangle()
-                        .fill(Lumen.hairline)
-                        .frame(height: 1)
-                        .padding(.bottom, 14)
-
-                    VStack(spacing: 2) {
-                        ForEach(LumenDeskDestination.allCases) { item in
-                            Button {
-                                destination = item
-                            } label: {
-                                SidebarDestinationRow(item: item, selected: destination == item)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .padding(.horizontal, 10)
-
-                    Spacer(minLength: 12)
-
-                    ConnectionSummary()
-                        .padding(12)
-                        .lumenCard(radius: 3)
-                        .padding(12)
-                }
-            }
-            .navigationTitle("LumenDesk")
-            .navigationSplitViewColumnWidth(min: 200, ideal: 228, max: 260)
-        } detail: {
+        HStack(spacing: 0) {
+            WashRail(destination: $destination)
+            Divider().overlay(Lumen.ruleSoft)
             NavigationStack { destinationView(destination) }
         }
+        .background(Lumen.stage)
         .toolbar {
             ToolbarItemGroup {
                 if manager.isScanning {
@@ -130,16 +93,16 @@ struct LumenDeskShellView: View {
     private var mobileShell: some View {
         TabView(selection: $destination) {
             mobileTab(.home)
-                .tabItem { Label("Home", systemImage: LumenDeskDestination.home.symbol) }
+                .tabItem { Label("Plan", systemImage: LumenDeskDestination.home.symbol) }
                 .tag(LumenDeskDestination.home)
             mobileTab(.library)
-                .tabItem { Label("Library", systemImage: LumenDeskDestination.library.symbol) }
+                .tabItem { Label("Looks", systemImage: LumenDeskDestination.library.symbol) }
                 .tag(LumenDeskDestination.library)
             mobileTab(.automation)
-                .tabItem { Label("Automation", systemImage: LumenDeskDestination.automation.symbol) }
+                .tabItem { Label("Cues", systemImage: LumenDeskDestination.automation.symbol) }
                 .tag(LumenDeskDestination.automation)
             mobileTab(.devices)
-                .tabItem { Label("Devices", systemImage: LumenDeskDestination.devices.symbol) }
+                .tabItem { Label("Rig", systemImage: LumenDeskDestination.devices.symbol) }
                 .tag(LumenDeskDestination.devices)
         }
     }
@@ -162,7 +125,7 @@ struct LumenDeskShellView: View {
     @ViewBuilder
     private func destinationView(_ item: LumenDeskDestination) -> some View {
         switch item {
-        case .home: HomeWorkspaceView()
+        case .home: PlanWorkspaceView()
         case .library: LibraryWorkspaceView()
         case .automation: AutomationWorkspaceView()
         case .devices: DevicesWorkspaceView()
@@ -175,7 +138,7 @@ struct LumenDeskShellView: View {
         VStack(spacing: 8) {
             if let summary = manager.lastActionSummary {
                 HStack(spacing: 10) {
-                    Label(summary, systemImage: "arrow.uturn.backward.circle")
+                    Label(summary, systemImage: "arrow.uturn.backward")
                     Button("Undo") { manager.undo() }
                         .disabled(!manager.canUndo)
                     Button { manager.dismissLastActionSummary() } label: {
@@ -184,15 +147,11 @@ struct LumenDeskShellView: View {
                     .buttonStyle(.plain)
                     .accessibilityLabel("Dismiss")
                 }
-                .font(.caption)
+                .font(.system(size: 12))
                 .padding(.horizontal, 14)
                 .padding(.vertical, 9)
-                .background(Lumen.surfaceRaised, in: LumenPanelShape(radius: 3, chamfer: 12))
-                .overlay(
-                    LumenPanelShape(radius: 3, chamfer: 12)
-                        .stroke(Lumen.hairlineStrong, lineWidth: 1)
-                )
-                .shadow(color: .black.opacity(0.45), radius: 14, y: 4)
+                .background(Lumen.stripRaised,
+                            in: RoundedRectangle(cornerRadius: Lumen.controlRadius, style: .continuous))
             }
 
             if let error = manager.commandError {
@@ -208,237 +167,66 @@ struct LumenDeskShellView: View {
     }
 }
 
-private struct SidebarDestinationRow: View {
-    let item: LumenDeskDestination
-    let selected: Bool
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Text(item.channel)
-                .font(LumenType.readout(size: 10, weight: .semibold))
-                .foregroundStyle(selected ? Lumen.beamBright : Lumen.textTertiary)
-            Image(systemName: item.symbol)
-                .font(.system(size: 13, weight: selected ? .semibold : .regular))
-                .foregroundStyle(selected ? Lumen.beamBright : Lumen.textSecondary)
-                .frame(width: 20)
-            Text(item.rawValue)
-                .font(LumenType.display(size: 14, weight: selected ? .bold : .medium))
-                .tracking(0.3)
-                .foregroundStyle(selected ? Lumen.textPrimary : Lumen.textSecondary)
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 12)
-        .frame(minHeight: 38)
-        .background(
-            LumenPanelShape(radius: 2, chamfer: selected ? 10 : 0)
-                .fill(selected ? Lumen.surfaceRaised : Color.clear)
-        )
-        .overlay(alignment: .leading) {
-            if selected {
-                Rectangle()
-                    .fill(Lumen.spectrum)
-                    .frame(width: 2, height: 22)
-            }
-        }
-        .contentShape(Rectangle())
-        .accessibilityAddTraits(selected ? .isSelected : [])
-    }
-}
-
-// MARK: - Home
-
-struct HomeWorkspaceView: View {
+#if os(macOS)
+/// The icon rail. Fifty-eight points of chrome for the whole navigation model.
+private struct WashRail: View {
     @EnvironmentObject private var manager: LightManager
-    @State private var searchText = ""
-    @State private var showOnlyOn = false
-    @State private var showOfflineOnly = false
-    @State private var selectionMode = false
-    @State private var selectedIDs: Set<String> = []
-    @State private var selectedDevice: LightDevice?
-    @State private var selectedRoom: Room?
-    @State private var showingNewRoom = false
+    @Binding var destination: LumenDeskDestination
 
-    private var visibleDevices: [LightDevice] {
-        manager.devices.filter { device in
-            (searchText.isEmpty || manager.device(device, matchesQuery: searchText)) &&
-            (!showOnlyOn || device.isOn) &&
-            (!showOfflineOnly || device.isStale)
-        }
+    private var reachableCount: Int {
+        manager.devices.filter { !$0.isStale }.count
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: LumenToken.Spacing.s6) {
-                PageHeader(
-                    eyebrow: "Live desk · \(greeting)",
-                    title: "Home",
-                    subtitle: "Power, level, and device response at a glance."
-                ) {
-                    Menu {
-                        Button { showingNewRoom = true } label: {
-                            Label("New Room", systemImage: "rectangle.stack.badge.plus")
-                        }
-                        Button {
-                            selectionMode.toggle()
-                            if !selectionMode { selectedIDs.removeAll() }
-                        } label: {
-                            Label(selectionMode ? "Finish Selection" : "Select Lights",
-                                  systemImage: "checkmark.circle")
-                        }
-                        Divider()
-                        Button {
-                            if manager.napPhase == .inactive { manager.startNapMode() }
-                            else { manager.cancelNapMode() }
-                        } label: {
-                            Label(manager.napPhase == .inactive ? "Start Nap Mode" : "Cancel Nap Mode",
-                                  systemImage: "moon")
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
-                    }
-                    .menuStyle(.borderlessButton)
-                    .fixedSize()
-                    .lumenInteractiveTarget()
-                    .accessibilityLabel("Home actions")
+        VStack(spacing: 4) {
+            LumenMark(size: 22)
+                .padding(.top, 14)
+                .padding(.bottom, 16)
+
+            ForEach(LumenDeskDestination.allCases) { item in
+                Button { destination = item } label: {
+                    Image(systemName: item.symbol)
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(destination == item ? Lumen.chalk : Lumen.muted)
+                        .frame(width: 38, height: 38)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(destination == item ? Lumen.stripRaised : Color.clear)
+                        )
+                        .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .help(item.rawValue)
+                .accessibilityLabel(item.rawValue)
+                .accessibilityAddTraits(destination == item ? [.isButton, .isSelected] : .isButton)
 
-                if manager.devices.isEmpty {
-                    EmptyWorkspaceView(
-                        icon: "lightbulb.slash",
-                        title: "No lights discovered",
-                        message: "Scan this network for LIFX and Govee, or try the controls on an isolated demo rig.",
-                        primaryTitle: "Scan This Network",
-                        primaryAction: manager.scan,
-                        secondaryTitle: "Try the Demo Rig",
-                        secondaryAction: manager.enterDemoMode
-                    )
-                } else {
-                    ActiveLightingSummary()
-                    GlobalLightingControl()
-
-                    if hasFavorites {
-                        SectionHeader(title: "Favorites", detail: "Pinned controls")
-                        FavoritesQuickStrip(onOpenDevice: { selectedDevice = $0 },
-                                            onOpenRoom: { selectedRoom = $0 })
-                    }
-
-                    if !manager.rooms.isEmpty {
-                        SectionHeader(title: "Rooms", detail: "\(manager.rooms.count) spaces")
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 250), spacing: 12)], spacing: 12) {
-                            ForEach(filteredRooms) { room in
-                                RoomSummaryCard(room: room, onOpen: { selectedRoom = room })
-                            }
-                        }
-                    }
-
-                    HStack(alignment: .firstTextBaseline) {
-                        SectionHeader(title: "Lights", detail: "\(visibleDevices.count) shown")
-                        Spacer()
-                        if selectionMode {
-                            Button("Select Visible") { selectedIDs = Set(visibleDevices.map(\.id)) }
-                                .buttonStyle(LumenSecondaryButtonStyle(compact: true))
-                        }
-                    }
-
-                    WorkspaceFilters(showOnlyOn: $showOnlyOn, showOfflineOnly: $showOfflineOnly)
-
-                    LazyVStack(spacing: 10) {
-                        ForEach(visibleDevices) { device in
-                            DeviceCompactRow(
-                                device: device,
-                                selectionMode: selectionMode,
-                                selected: selectedIDs.contains(device.id),
-                                onOpen: { selectedDevice = device },
-                                onToggleSelection: { toggleSelection(device.id) }
-                            )
-                        }
-                    }
-
-                    if visibleDevices.isEmpty {
-                        EmptyInlineView(icon: "magnifyingglass", title: "No matching lights",
-                                        message: "Clear search or filters to show the rest of your devices.")
-                    }
-                }
+                if item == .devices { Spacer(minLength: 12) }
             }
-            .frame(maxWidth: 1120)
-            .padding(24)
-            .frame(maxWidth: .infinity)
-        }
-        .background(LumenBackground(glow: false))
-        .navigationTitle("Home")
-        .searchable(text: $searchText, prompt: "Search lights and rooms")
-        .safeAreaInset(edge: .bottom) {
-            if selectionMode && !selectedIDs.isEmpty {
-                BulkActionBar(selectedIDs: $selectedIDs, selectionMode: $selectionMode)
-                    .padding(12)
-                    .background(LumenToken.Background.subtle.opacity(0.96))
-            }
-        }
-        .sheet(item: $selectedDevice) { device in
-            LightDetailSheet(device: device)
-                .environmentObject(manager)
-        }
-        .sheet(item: $selectedRoom) { room in
-            RoomDetailSheet(room: room)
-                .environmentObject(manager)
-        }
-        .sheet(isPresented: $showingNewRoom) {
-            NewRoomSheet()
-                .environmentObject(manager)
-        }
-        .onChange(of: manager.devices.map(\.id)) { ids in
-            selectedIDs.formIntersection(Set(ids))
-        }
-    }
 
-    private var greeting: String {
-        switch Calendar.current.component(.hour, from: Date()) {
-        case 5..<12: return "Good morning"
-        case 12..<18: return "Good afternoon"
-        default: return "Good evening"
+            // The one authored hue, spent on the one thing that is about the
+            // network rather than about the lights.
+            LumenStatusDot(color: reachableCount > 0 ? Lumen.link : Lumen.faint,
+                           size: 7,
+                           lit: reachableCount > 0)
+                .padding(.bottom, 14)
+                .help("\(reachableCount) of \(manager.devices.count) fixtures linked")
         }
-    }
-
-    private var hasFavorites: Bool {
-        !manager.favoriteDevices.isEmpty || !manager.favoriteRooms.isEmpty || !manager.favoriteScenes.isEmpty
-    }
-
-    private var filteredRooms: [Room] {
-        guard !searchText.isEmpty else { return manager.rooms }
-        return manager.rooms.filter { manager.room($0, matchesQuery: searchText) }
-    }
-
-    private func toggleSelection(_ id: String) {
-        if selectedIDs.contains(id) { selectedIDs.remove(id) }
-        else { selectedIDs.insert(id) }
+        .frame(width: 58)
+        .background(Lumen.stage)
     }
 }
+#endif
 
-private struct ActiveLightingSummary: View {
-    @EnvironmentObject private var manager: LightManager
+// The Wash "Desk" screen lived here: a field of channel strips with the
+// fixture as the primary object. The product went with Plan instead, where
+// the room is primary, so that screen is `PlanWorkspaceView` now and this one
+// is gone rather than left wired to nothing. It is in the history if the
+// channel-strip idea is ever wanted back.
 
-    var body: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 12)], spacing: 12) {
-            SummaryMetric(icon: manager.isScanning ? "dot.radiowaves.left.and.right" : "wifi",
-                          tint: manager.devices.contains(where: \.isStale) ? Lumen.warning : Lumen.success,
-                          value: manager.isScanning ? "Scanning" : connectionValue,
-                          label: manager.isScanning ? manager.scanPhase : "Local link")
-            SummaryMetric(icon: "waveform",
-                          tint: manager.activeEffects.isEmpty ? Lumen.textTertiary : Lumen.pinkBright,
-                          value: manager.activeEffects.isEmpty ? "None" : "\(manager.activeEffects.count) running",
-                          label: "Live motion")
-            SummaryMetric(icon: "clock.badge.exclamationmark",
-                          tint: manager.missedAutomations.isEmpty ? Lumen.textTertiary : Lumen.warning,
-                          value: manager.missedAutomations.isEmpty ? "On track" : "\(manager.missedAutomations.count) missed",
-                          label: "Cue status")
-        }
-    }
-
-    private var connectionValue: String {
-        let reachable = manager.devices.filter { !$0.isStale }.count
-        return "\(reachable) of \(manager.devices.count) online"
-    }
-}
+// MARK: - Shared list components
+//
+// Kept because the Rig and Cues workspaces still use them. Restyled onto Wash
+// tokens; the composition is unchanged.
 
 private struct SummaryMetric: View {
     let icon: String
@@ -448,294 +236,16 @@ private struct SummaryMetric: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            LumenStatusDot(color: tint, size: 6)
-                .padding(.top, 5)
             LumenReadout(value: value, caption: label, size: 17)
             Spacer(minLength: 0)
             Image(systemName: icon)
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(tint)
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .lumenCard(radius: 4)
+        .lumenCard(radius: 8)
         .accessibilityElement(children: .combine)
-    }
-}
-
-private struct GlobalLightingControl: View {
-    @EnvironmentObject private var manager: LightManager
-
-    private var onCount: Int { manager.devices.filter(\.isOn).count }
-    private var averageBrightness: Double {
-        let active = manager.devices.filter(\.isOn)
-        guard !active.isEmpty else { return 0 }
-        return active.reduce(0) { $0 + $1.brightness } / Double(active.count)
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack(alignment: .top, spacing: 16) {
-                VStack(alignment: .leading, spacing: 10) {
-                    LumenEyebrow(text: "Master", tint: Lumen.beamBright, size: 10)
-                    HStack(alignment: .lastTextBaseline, spacing: 4) {
-                        Text("\(Int(averageBrightness * 100))")
-                            .font(LumenType.readout(size: 50, weight: .semibold))
-                            .foregroundStyle(Lumen.textPrimary)
-                            .monospacedDigit()
-                        Text("%")
-                            .font(LumenType.readout(size: 16, weight: .medium))
-                            .foregroundStyle(Lumen.textTertiary)
-                    }
-                }
-                Spacer(minLength: 0)
-                VStack(alignment: .trailing, spacing: 12) {
-                    HStack(spacing: 7) {
-                        LumenStatusDot(color: onCount > 0 ? Lumen.beamBright : Lumen.offline,
-                                       size: 6, lit: onCount > 0)
-                        Text("\(onCount) ON · \(manager.devices.count - onCount) OFF")
-                            .font(LumenType.instrumentLabel(size: 10))
-                            .tracking(0.9)
-                            .foregroundStyle(Lumen.textSecondary)
-                    }
-                    Button {
-                        manager.setAllPower(on: onCount == 0)
-                    } label: {
-                        Text(onCount == 0 ? "All On" : "All Off")
-                    }
-                    .buttonStyle(LumenPrimaryButtonStyle())
-                    .disabled(manager.devices.isEmpty)
-                    .accessibilityLabel(onCount == 0 ? "Turn all lights on" : "Turn all lights off")
-                }
-            }
-
-            LumenFader(
-                label: "All lights",
-                value: Binding(get: { averageBrightness }, set: manager.setAllBrightness),
-                track: .beam
-            )
-            .disabled(manager.devices.isEmpty)
-        }
-        .padding(20)
-        .lumenCard(fill: Lumen.surfaceRaised, highlighted: true)
-    }
-}
-
-private struct WorkspaceFilters: View {
-    @Binding var showOnlyOn: Bool
-    @Binding var showOfflineOnly: Bool
-
-    var body: some View {
-        HStack(spacing: 8) {
-            LumenEyebrow(text: "Filter")
-            Toggle("On", isOn: $showOnlyOn)
-                .toggleStyle(LumenChipStyle())
-            Toggle("Needs attention", isOn: $showOfflineOnly)
-                .toggleStyle(LumenChipStyle())
-            if showOnlyOn || showOfflineOnly {
-                Button("Clear") {
-                    showOnlyOn = false
-                    showOfflineOnly = false
-                }
-                .buttonStyle(.plain)
-                .font(LumenType.instrumentLabel(size: 10))
-                .foregroundStyle(Lumen.cyan)
-            }
-            Spacer()
-        }
-        .controlSize(.small)
-    }
-}
-
-private struct FavoritesQuickStrip: View {
-    @EnvironmentObject private var manager: LightManager
-    let onOpenDevice: (LightDevice) -> Void
-    let onOpenRoom: (Room) -> Void
-    @State private var previewScene: LightingScene?
-
-    var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 10) {
-                ForEach(manager.favoriteDevices) { device in
-                    FavoriteDeviceTile(device: device, onOpen: { onOpenDevice(device) })
-                }
-                ForEach(manager.favoriteRooms) { room in
-                    FavoriteRoomTile(room: room, onOpen: { onOpenRoom(room) })
-                }
-                ForEach(manager.favoriteScenes) { scene in
-                    FavoriteSceneTile(scene: scene, onPreview: { previewScene = scene })
-                }
-            }
-            .padding(.vertical, 2)
-        }
-        .sheet(item: $previewScene) { scene in
-            ScenePreviewView(scene: scene).environmentObject(manager)
-        }
-    }
-}
-
-private struct FavoriteDeviceTile: View {
-    @EnvironmentObject private var manager: LightManager
-    @ObservedObject var device: LightDevice
-    let onOpen: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                LumenLens(color: device.color, isOn: device.isOn, size: 30, isStale: device.isStale)
-                Spacer()
-                Toggle("", isOn: Binding(get: { device.isOn }, set: { manager.setPower(device, on: $0) }))
-                    .labelsHidden()
-                    .toggleStyle(LumenPowerKeyStyle(size: 28, spokenLabel: "Power for \(device.label)"))
-            }
-            Button(action: onOpen) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(device.label).font(LumenType.display(size: 15, weight: .semibold)).lineLimit(1)
-                    Text("\(Int(device.brightness * 100))% · \(device.isStale ? "OFFLINE" : "ONLINE")")
-                        .font(LumenType.instrumentLabel(size: 9))
-                        .tracking(0.7)
-                        .foregroundStyle(Lumen.textTertiary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .buttonStyle(.plain)
-            .lumenInteractiveTarget()
-        }
-        .padding(14)
-        .frame(width: 180)
-        .lumenCard(highlighted: true)
-    }
-}
-
-private struct FavoriteRoomTile: View {
-    @EnvironmentObject private var manager: LightManager
-    let room: Room
-    let onOpen: () -> Void
-
-    private var lights: [LightDevice] { manager.devices(in: room) }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                LumenIconTile(systemName: "rectangle.stack.fill", tint: Lumen.beamDim, size: 30)
-                Spacer()
-                Button { manager.setPower(in: room, on: lights.filter(\.isOn).count < lights.count) } label: {
-                    Image(systemName: manager.aggregatePowerState(for: lights).symbol)
-                }
-                .buttonStyle(LumenIconButtonStyle(size: 28))
-                .disabled(lights.isEmpty)
-                .accessibilityLabel("Toggle all lights in \(room.name)")
-            }
-            Button(action: onOpen) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(room.name).font(LumenType.display(size: 15, weight: .semibold)).lineLimit(1)
-                    Text(lights.isEmpty ? "NO LIGHTS" : "\(lights.filter(\.isOn).count) OF \(lights.count) ON")
-                        .font(LumenType.instrumentLabel(size: 9))
-                        .tracking(0.7)
-                        .foregroundStyle(Lumen.textTertiary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .buttonStyle(.plain)
-            .lumenInteractiveTarget()
-        }
-        .padding(14)
-        .frame(width: 180)
-        .lumenCard(highlighted: true)
-    }
-}
-
-private struct FavoriteSceneTile: View {
-    @EnvironmentObject private var manager: LightManager
-    let scene: LightingScene
-    let onPreview: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            LumenIconTile(systemName: "wand.and.stars", tint: Lumen.beamDim, size: 30)
-            Text(scene.name).font(LumenType.display(size: 15, weight: .semibold)).lineLimit(1)
-            Text("\(scene.snapshots.count) LIGHTS")
-                .font(LumenType.instrumentLabel(size: 9))
-                .tracking(0.7)
-                .foregroundStyle(Lumen.textTertiary)
-            Button("Preview", action: onPreview)
-                .buttonStyle(LumenSecondaryButtonStyle())
-                .disabled(manager.availableDeviceIDs(for: scene).isEmpty)
-            if manager.availableDeviceIDs(for: scene).isEmpty {
-                Text("No available lights")
-                    .font(.caption2).foregroundStyle(Lumen.warning)
-            }
-        }
-        .padding(14)
-        .frame(width: 180, alignment: .leading)
-        .lumenCard(highlighted: true)
-    }
-}
-
-private struct RoomSummaryCard: View {
-    @EnvironmentObject private var manager: LightManager
-    let room: Room
-    let onOpen: () -> Void
-
-    private var lights: [LightDevice] { manager.devices(in: room) }
-    private var onCount: Int { lights.filter(\.isOn).count }
-    private var staleCount: Int { lights.filter(\.isStale).count }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top) {
-                Button(action: onOpen) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(room.name).font(LumenType.display(size: 19, weight: .bold)).lineLimit(1)
-                        Text(lights.isEmpty ? "NO LIGHTS" : "\(onCount) OF \(lights.count) ON")
-                            .font(LumenType.instrumentLabel(size: 10))
-                            .tracking(0.9)
-                            .foregroundStyle(Lumen.textSecondary)
-                    }
-                }
-                .buttonStyle(.plain)
-                .lumenInteractiveTarget()
-                Spacer()
-                Button { manager.setPower(in: room, on: lights.filter(\.isOn).count < lights.count) } label: {
-                    Image(systemName: manager.aggregatePowerState(for: lights).symbol)
-                }
-                .buttonStyle(LumenIconButtonStyle(size: 30, prominent: onCount > 0))
-                .disabled(lights.isEmpty)
-                .accessibilityLabel("Toggle all lights in \(room.name)")
-            }
-
-            if !lights.isEmpty {
-                HStack(spacing: 4) {
-                    ForEach(lights.prefix(8)) { light in
-                        LumenLens(color: light.color, isOn: light.isOn, size: 16)
-                    }
-                    Spacer()
-                    if staleCount > 0 {
-                        Label("\(staleCount) offline", systemImage: "wifi.slash")
-                            .font(.caption).foregroundStyle(Lumen.warning)
-                    } else {
-                        Label("Online", systemImage: "checkmark.circle")
-                            .font(.caption).foregroundStyle(Lumen.success)
-                    }
-                }
-            } else {
-                Label("No lights are assigned to this room.", systemImage: "lightbulb.slash")
-                    .font(.caption).foregroundStyle(Lumen.textSecondary)
-            }
-
-            HStack {
-                Label("\(room.schedules.filter(\.isEnabled).count) schedules", systemImage: "clock")
-                    .font(.caption).foregroundStyle(Lumen.textSecondary)
-                Spacer()
-                Button("Open", action: onOpen)
-                    .buttonStyle(.plain)
-                    .foregroundStyle(Lumen.cyan)
-                    .lumenInteractiveTarget()
-            }
-        }
-        .padding(16)
-        .lumenCard(fill: onCount > 0 ? Lumen.surfaceRaised : Lumen.surface, highlighted: onCount > 0)
-        .accessibilityElement(children: .contain)
     }
 }
 
@@ -755,27 +265,32 @@ private struct DeviceCompactRow: View {
                 Button(action: onToggleSelection) {
                     Image(systemName: selected ? "checkmark.square.fill" : "square")
                         .font(.system(size: 18, weight: .medium))
-                        .foregroundStyle(selected ? Lumen.beamBright : Lumen.textTertiary)
+                        .foregroundStyle(selected ? Lumen.lit : Lumen.muted)
                 }
                 .buttonStyle(.plain)
                 .lumenInteractiveTarget()
                 .accessibilityLabel(selected ? "Deselect \(device.label)" : "Select \(device.label)")
             }
 
-            LumenLens(color: device.color, isOn: device.isOn, size: 40, isStale: device.isStale)
+            LumenLens(color: device.color, isOn: device.isOn, size: 36,
+                      isStale: device.isStale, level: device.brightness)
 
             Button(action: selectionMode ? onToggleSelection : onOpen) {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
-                        Text(device.label).font(LumenType.display(size: 15, weight: .semibold)).lineLimit(1)
+                        Text(device.label)
+                            .font(.system(size: 13.5, weight: .medium))
+                            .foregroundStyle(Lumen.chalk)
+                            .lineLimit(1)
                         if manager.isFavorite(device.id) {
-                            Image(systemName: "star.fill").font(.caption2).foregroundStyle(Lumen.gold)
+                            Image(systemName: "star.fill")
+                                .font(.system(size: 9))
+                                .foregroundStyle(Lumen.warn)
                         }
                     }
-                    Text("\(device.brand.displayName.uppercased()) · \(Int(device.brightness * 100))% · \(device.kelvin)K")
-                        .font(LumenType.instrumentLabel(size: 9))
-                        .tracking(0.7)
-                        .foregroundStyle(Lumen.textTertiary)
+                    Text("\(device.brand.displayName) · \(Int(device.brightness * 100))% · \(device.kelvin) K")
+                        .font(LumenType.readout(size: 9.5, weight: .regular))
+                        .foregroundStyle(Lumen.muted)
                         .lineLimit(1)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -788,16 +303,19 @@ private struct DeviceCompactRow: View {
             if !selectionMode {
                 if command.phase == .failed {
                     Button("Retry") { manager.retryCommand(for: device) }
-                        .buttonStyle(LumenSecondaryButtonStyle())
+                        .buttonStyle(LumenSecondaryButtonStyle(compact: true))
                 }
-                Toggle("", isOn: Binding(get: { device.isOn }, set: { manager.setPower(device, on: $0) }))
+                Toggle("", isOn: Binding(get: { device.isOn },
+                                         set: { manager.setPower(device, on: $0) }))
                     .labelsHidden()
-                    .toggleStyle(LumenPowerKeyStyle(size: 32, spokenLabel: "Power for \(device.label)"))
+                    .toggleStyle(LumenPowerKeyStyle(size: 30, spokenLabel: "Power for \(device.label)"))
             }
         }
-        .padding(14)
-        .lumenCard(fill: selected ? Lumen.surfaceLoud : Lumen.surface, highlighted: selected)
-        .opacity(device.isStale ? 0.82 : 1)
+        .padding(13)
+        .lumenCard(radius: 8, fill: selected ? Lumen.stripLoud : Lumen.strip, highlighted: selected)
+        .washed(color: device.color, level: device.brightness,
+                isOn: device.isOn && !device.isStale, radius: 8)
+        .opacity(device.isStale ? 0.8 : 1)
     }
 }
 
@@ -805,64 +323,30 @@ private struct DeviceStateBadge: View {
     let device: LightDevice
     let command: DeviceCommandState
 
-    private var presentation: (title: String, icon: String, color: Color) {
+    private var presentation: (title: String, color: Color) {
         switch command.phase {
-        case .queued: return ("Queued", "clock", Lumen.warning)
-        case .sending: return ("Sending", "arrow.up.circle", Lumen.cyan)
-        case .applied: return ("Confirmed", "checkmark.circle.fill", Lumen.success)
-        case .failed: return ("Failed", "exclamationmark.triangle.fill", Lumen.danger)
+        case .queued: return ("Queued", Lumen.warn)
+        case .sending: return ("Sending", Lumen.link)
+        case .applied: return ("Confirmed", Lumen.link)
+        case .failed: return ("Failed", Lumen.fail)
         case .idle:
-            return device.isStale
-                ? ("Offline", "wifi.slash", Lumen.offline)
-                : ("Online", "checkmark.circle", Lumen.success)
+            return device.isStale ? ("Unreachable", Lumen.faint) : ("Linked", Lumen.link)
         }
     }
 
     var body: some View {
         HStack(spacing: 6) {
-            LumenStatusDot(color: presentation.color, size: 6)
-            Text(presentation.title.uppercased())
-                .font(LumenType.instrumentLabel(size: 9))
-                .tracking(0.9)
+            LumenStatusDot(color: presentation.color, size: 5)
+            Text(presentation.title)
+                .font(LumenType.readout(size: 9.5, weight: .medium))
                 .foregroundStyle(presentation.color)
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
-        .background(
-            RoundedRectangle(cornerRadius: 2, style: .continuous)
-                .fill(presentation.color.opacity(0.10))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 2, style: .continuous)
-                .stroke(presentation.color.opacity(0.3), lineWidth: 1)
-        )
         .accessibilityLabel("Status: \(presentation.title)")
     }
 }
 
-private struct LightDetailSheet: View {
-    @Environment(\.dismiss) private var dismiss
-    @ObservedObject var device: LightDevice
 
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                LightRowView(device: device)
-                    .padding(20)
-            }
-            .background(LumenBackground(glow: false))
-            .navigationTitle(device.label)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") { dismiss() }
-                }
-            }
-        }
-        .sheetFrame(minWidth: 600, idealWidth: 720, minHeight: 560, idealHeight: 700)
-    }
-}
-
-private struct RoomDetailSheet: View {
+struct RoomDetailSheet: View {
     @EnvironmentObject private var manager: LightManager
     @Environment(\.dismiss) private var dismiss
     let room: Room
@@ -942,7 +426,7 @@ private struct RoomDetailSheet: View {
     }
 }
 
-private struct NewRoomSheet: View {
+struct NewRoomSheet: View {
     @EnvironmentObject private var manager: LightManager
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
@@ -1005,7 +489,7 @@ struct LibraryWorkspaceView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                PageHeader(eyebrow: "Scenes · Color · Motion", title: "Library",
+                PageHeader(eyebrow: "Scenes, colour, motion", title: "Looks",
                            subtitle: "Recall a room, build a mood, or put motion on cue.")
 
                 if !manager.activeEffects.isEmpty { runningEffects }
@@ -1045,7 +529,7 @@ struct LibraryWorkspaceView: View {
             .frame(maxWidth: .infinity)
         }
         .background(LumenBackground(glow: false))
-        .navigationTitle("Library")
+        .navigationTitle("Looks")
         .searchable(text: $searchText, prompt: "Search library")
         .onAppear { restoreRunningShowIfNeeded() }
         .sheet(item: $previewScene) { scene in
@@ -1130,7 +614,7 @@ struct LibraryWorkspaceView: View {
                     HStack {
                         Image(systemName: theme.icon).font(LumenType.display(size: 21, weight: .semibold)).foregroundStyle(theme.colors.first?.color ?? Lumen.violetBright)
                         Spacer()
-                        Text(theme.category.rawValue.uppercased())
+                        Text(theme.category.rawValue)
                             .font(.caption2.weight(.semibold)).foregroundStyle(Lumen.textTertiary)
                     }
                     Text(theme.name).font(LumenType.display(size: 15, weight: .semibold))
@@ -1314,7 +798,7 @@ struct AutomationWorkspaceView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                PageHeader(eyebrow: "Cues and timing", title: "Automation",
+                PageHeader(eyebrow: "Cues and timing", title: "Cues",
                            subtitle: "Let the house keep time. Pauses and missed cues stay visible until you decide.") {
                     Button { showingSolarSettings = true } label: {
                         Label("Solar Times", systemImage: "sunrise")
@@ -1365,7 +849,7 @@ struct AutomationWorkspaceView: View {
             .frame(maxWidth: .infinity)
         }
         .background(LumenBackground(glow: false))
-        .navigationTitle("Automation")
+        .navigationTitle("Cues")
         .sheet(item: $scheduleRoom) { room in
             ScheduleEditorView(room: room).environmentObject(manager)
         }
@@ -1475,7 +959,7 @@ struct DevicesWorkspaceView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                PageHeader(eyebrow: "Local link", title: "Devices",
+                PageHeader(eyebrow: "Local link", title: "Rig",
                            subtitle: "Discovery, command response, and recovery from this network in one place.") {
                     Button { manager.scan() } label: {
                         Label(manager.isScanning ? "Scanning" : "Scan", systemImage: "arrow.clockwise")
@@ -1537,7 +1021,7 @@ struct DevicesWorkspaceView: View {
             .frame(maxWidth: .infinity)
         }
         .background(LumenBackground(glow: false))
-        .navigationTitle("Devices")
+        .navigationTitle("Rig")
         .sheet(item: $selectedDevice) { device in
             DeviceInspectorView(device: device).environmentObject(manager)
         }
@@ -1696,10 +1180,10 @@ private struct SettingsSection<Content: View>: View {
                 Image(systemName: icon)
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(Lumen.beamDim)
-                Text(title.uppercased())
-                    .font(LumenType.display(size: 15, weight: .bold))
-                    .tracking(1.1)
-                Rectangle().fill(Lumen.hairline).frame(height: 1)
+                Text(title)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Lumen.chalk)
+                Rectangle().fill(Lumen.ruleSoft).frame(height: 1)
             }
             content
                 .toggleStyle(LumenRockerStyle())
@@ -1760,12 +1244,11 @@ private struct SectionHeader: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
-            Text(title.uppercased())
-                .font(LumenType.display(size: 17, weight: .bold))
-                .tracking(1.1)
-                .foregroundStyle(Lumen.textPrimary)
+            Text(title)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Lumen.chalk)
             Rectangle()
-                .fill(Lumen.hairline)
+                .fill(Lumen.ruleSoft)
                 .frame(height: 1)
             LumenEyebrow(text: detail)
         }
@@ -1773,7 +1256,7 @@ private struct SectionHeader: View {
     }
 }
 
-private struct EmptyWorkspaceView: View {
+struct EmptyWorkspaceView: View {
     let icon: String
     let title: String
     let message: String
@@ -1785,9 +1268,9 @@ private struct EmptyWorkspaceView: View {
     var body: some View {
         VStack(spacing: 14) {
             LumenIconTile(systemName: icon, tint: Lumen.textTertiary, size: 52)
-            Text(title.uppercased())
-                .font(LumenType.display(size: 20, weight: .bold))
-                .tracking(1.1)
+            Text(title)
+                .font(.system(size: 19, weight: .semibold))
+                .foregroundStyle(Lumen.chalk)
             Text(message).font(.callout).foregroundStyle(Lumen.textSecondary).multilineTextAlignment(.center)
             HStack {
                 Button(primaryTitle, action: primaryAction).buttonStyle(LumenPrimaryButtonStyle())
@@ -1808,9 +1291,9 @@ private struct EmptyInlineView: View {
     var body: some View {
         VStack(spacing: 8) {
             LumenIconTile(systemName: icon, tint: Lumen.textTertiary, size: 40)
-            Text(title.uppercased())
-                .font(LumenType.display(size: 15, weight: .bold))
-                .tracking(0.9)
+            Text(title)
+                .font(.system(size: 14.5, weight: .semibold))
+                .foregroundStyle(Lumen.chalk)
             Text(message).font(.caption).foregroundStyle(Lumen.textSecondary).multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
@@ -1828,10 +1311,9 @@ private struct ConnectionSummary: View {
                            size: 7,
                            lit: !manager.devices.isEmpty)
             VStack(alignment: .leading, spacing: 3) {
-                Text(manager.devices.isEmpty ? "NO LIGHTS" : "LOCAL LINK")
-                    .font(LumenType.instrumentLabel(size: 9))
-                    .tracking(1.2)
-                    .foregroundStyle(Lumen.textPrimary)
+                Text(manager.devices.isEmpty ? "No fixtures" : "Local link")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Lumen.chalk)
                 Text(manager.devices.isEmpty ? "Scan to connect" : "\(manager.devices.filter { !$0.isStale }.count) online")
                     .font(LumenType.readout(size: 10))
                     .foregroundStyle(Lumen.textTertiary)
@@ -1849,9 +1331,8 @@ private struct DemoModeBanner: View {
         HStack(spacing: 10) {
             Image(systemName: "testtube.2")
                 .font(.system(size: 11, weight: .semibold))
-            Text("DEMO MODE — NO PHYSICAL LIGHTS ARE BEING CONTROLLED")
-                .font(LumenType.instrumentLabel(size: 9))
-                .tracking(1.1)
+            Text("Demo rig. No physical fixtures are being controlled.")
+                .font(.system(size: 12, weight: .medium))
             Spacer()
             Button("Return to Live") { manager.exitDemoMode() }
                 .buttonStyle(LumenSecondaryButtonStyle(compact: true))

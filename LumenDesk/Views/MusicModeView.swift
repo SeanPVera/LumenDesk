@@ -71,9 +71,8 @@ struct MusicModeView: View {
             .frame(width: 56, height: 56)
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("MUSIC MODE")
+                Text("Music Mode")
                     .font(LumenType.display(size: 22, weight: .bold))
-                    .tracking(1.3)
                     .foregroundStyle(Lumen.textPrimary)
                 SpectrumRule(height: 2, tapered: true).frame(width: 120)
                 #if os(macOS)
@@ -676,9 +675,9 @@ private struct MusicModeInputStatusView: View {
             }
             meter("Input", value: controller.latestSnapshot.level, color: Lumen.beamBright, segments: 32)
             HStack(alignment: .bottom, spacing: 12) {
-                meter("Bass", value: controller.latestSnapshot.bass, color: Lumen.wave660, segments: 12)
-                meter("Mids", value: controller.latestSnapshot.mids, color: Lumen.wave530, segments: 12)
-                meter("Highs", value: controller.latestSnapshot.highs, color: Lumen.wave490, segments: 12)
+                meter("Bass", value: controller.latestSnapshot.bass, color: Lumen.chalk, segments: 12)
+                meter("Mids", value: controller.latestSnapshot.mids, color: Lumen.meter, segments: 12)
+                meter("Highs", value: controller.latestSnapshot.highs, color: Lumen.muted, segments: 12)
                 VStack(spacing: 5) {
                     LumenStatusDot(color: Lumen.beamBright,
                                    size: 18,

@@ -84,9 +84,8 @@ struct ScenesView: View {
         HStack(spacing: 12) {
             LumenIconTile(systemName: "wand.and.stars", tint: Lumen.beamBright, size: 38)
             VStack(alignment: .leading, spacing: 4) {
-                Text("LIGHTING LIBRARY")
+                Text("Looks")
                     .font(LumenType.display(size: 19, weight: .bold))
-                    .tracking(1.2)
                 SpectrumRule(height: 2, tapered: true).frame(width: 110)
                 Text("Color and motion designed for both LIFX and Govee bulbs.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -217,7 +216,7 @@ struct ScenesView: View {
                 Image(systemName: theme.icon)
                     .font(LumenType.display(size: 21, weight: .semibold)).foregroundStyle(theme.colors.first?.color ?? Lumen.violetBright)
                 Spacer()
-                Text(theme.category.rawValue.uppercased())
+                Text(theme.category.rawValue)
                     .font(.system(size: 9, weight: .bold)).tracking(0.7)
                     .foregroundStyle(.secondary)
             }
@@ -279,10 +278,10 @@ struct ScenesView: View {
                     .foregroundStyle(isActive ? Lumen.pinkBright : Lumen.violetBright)
                 Spacer()
                 if effect.isAudioReactive {
-                    Label("AUDIO", systemImage: "mic.fill").font(.system(size: 9, weight: .bold))
+                    Label("Audio", systemImage: "mic.fill").font(.system(size: 9, weight: .bold))
                         .foregroundStyle(Lumen.pinkBright)
                 } else if effect.isHighEnergy {
-                    Label("ENERGY", systemImage: "bolt.fill").font(.system(size: 9, weight: .bold))
+                    Label("Energy", systemImage: "bolt.fill").font(.system(size: 9, weight: .bold))
                         .foregroundStyle(Lumen.warning)
                 }
             }

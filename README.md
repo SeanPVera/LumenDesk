@@ -600,7 +600,7 @@ A scan does not rely on one broadcast. `255.255.255.255` is not routed: the kern
 - **The limited broadcast**, as a fallback for anything the directed form misses.
 - **A unicast probe of every host on those subnets.** Bulbs answer a probe addressed straight to them, and the reply is an ordinary unicast datagram that no router or OS gates. This is what carries discovery on routers with client isolation or broadcast filtering, and on iOS, where Apple restricts broadcast and multicast without the `com.apple.developer.networking.multicast` entitlement.
 
-The sweep is paced in small bursts and runs twice with a short gap. macOS parks a single datagram per unresolved neighbour while it resolves ARP and drops it if resolution is slow, so a cold cache eats most of a single pass; the second pass runs against warm entries. A network wider than a `/24` is capped to the `/24` around your own address, and a narrower netmask is honoured exactly.
+The broadcast rounds are repeated a few times a fraction of a second apart, because Wi-Fi carries broadcast unacknowledged at its lowest rate and a bulb in power save will drop a single one. The unicast sweep is paced in small bursts and runs twice with a short gap. macOS parks a single datagram per unresolved neighbour while it resolves ARP and drops it if resolution is slow, so a cold cache eats most of a single pass; the second pass runs against warm entries. A network wider than a `/24` is capped to the `/24` around your own address, and a narrower netmask is honoured exactly.
 
 Discovery diagnostics report what each pass actually put on the wire, in three separate counts:
 

@@ -33,7 +33,7 @@ before(async () => {
 
   registry = new Registry()
   // Point discovery at the fake bulb on loopback instead of the LAN broadcast.
-  lifx = new LifxClient({ registry, discoveryAddress: '127.0.0.1', port: bulbPort, sweep: false })
+  lifx = new LifxClient({ registry, discoveryAddress: '127.0.0.1', port: bulbPort, sweep: false, broadcastRounds: 1 })
 
   // 192.0.2.0/24 is TEST-NET-1: guaranteed unroutable. The device announces
   // it while actually answering from loopback, which is the shape of the bug
@@ -45,6 +45,7 @@ before(async () => {
     responsePort: 0,
     joinMulticast: false,
     sweep: false,
+    broadcastRounds: 1,
   })
   await lifx.start()
   await govee.start()

@@ -186,6 +186,8 @@ export async function probeSubnets(socket, packet, port, {
   interfaces = listInterfaces(),
   extraTargets = [],
   warmupDelay = 700,
+  broadcastRounds = 3,
+  broadcastGap = 200,
 } = {}) {
   const report = {
     interfaces: interfaces.map(item => item.description),
@@ -194,16 +196,24 @@ export async function probeSubnets(socket, packet, port, {
     failed: 0,
     lastError: null,
   }
+  // Broadcast is the one route that needs no address resolution, so it
+  // reaches a light the unicast sweep cannot. It is also the easiest to lose:
+  // Wi-Fi carries broadcast at the lowest basic rate with no acknowledgement,
+  // and a device in power save simply drops it. Sending once was a single roll
+  // of the dice per scan; a few spaced rounds cost a handful of packets.
   const targets = [...extraTargets, ...directedBroadcasts(interfaces)]
-  for (const target of targets) {
-    const err = await sendTo(socket, packet, port, target)
-    if (!err) {
-      report.sent += 1
-    } else if (isUnoccupied(err)) {
-      report.unoccupied += 1
-    } else {
-      report.failed += 1
-      report.lastError = err.message ?? String(err)
+  for (let round = 0; round < Math.max(1, broadcastRounds); round += 1) {
+    if (round > 0) await sleep(broadcastGap)
+    for (const target of targets) {
+      const err = await sendTo(socket, packet, port, target)
+      if (!err) {
+        report.sent += 1
+      } else if (isUnoccupied(err)) {
+        report.unoccupied += 1
+      } else {
+        report.failed += 1
+        report.lastError = err.message ?? String(err)
+      }
     }
   }
   const hosts = probeHosts(interfaces)

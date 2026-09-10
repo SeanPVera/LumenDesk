@@ -314,30 +314,70 @@ final class UDPSocket {
                       interfaces: [LocalSubnet.Interface],
                       extraTargets: [String] = [],
                       warmupDelay: TimeInterval = 0.7,
+                      broadcastRounds: Int = 3,
+                      broadcastGap: TimeInterval = 0.2,
                       completion: @escaping (DiscoveryProbeReport) -> Void) {
         let hosts = LocalSubnet.probeHosts(interfaces: interfaces)
         let broadcasts = extraTargets + LocalSubnet.directedBroadcasts(interfaces: interfaces)
 
         queue.async { [weak self] in
             guard let self else { return }
-            var report = DiscoveryProbeReport(interfaces: interfaces.map(\.description))
-            for address in broadcasts {
-                if let code = self.sendReturningErrno(packet, to: address, port: port) {
-                    report.datagramsFailed += 1
-                    report.lastError = Self.errorText(code)
-                } else {
-                    report.datagramsSent += 1
-                }
-            }
-            self.sweep(packet, hosts: hosts, port: port) { first in
-                report.absorb(first)
-                self.queue.asyncAfter(deadline: .now() + warmupDelay) {
-                    self.sweep(packet, hosts: hosts, port: port) { second in
-                        report.absorb(second)
-                        completion(report)
+            let start = DiscoveryProbeReport(interfaces: interfaces.map(\.description))
+            self.broadcastRound(packet, targets: broadcasts, port: port,
+                                remaining: max(1, broadcastRounds), gap: broadcastGap,
+                                report: start) { afterBroadcast in
+                var report = afterBroadcast
+                self.sweep(packet, hosts: hosts, port: port) { first in
+                    report.absorb(first)
+                    self.queue.asyncAfter(deadline: .now() + warmupDelay) {
+                        self.sweep(packet, hosts: hosts, port: port) { second in
+                            report.absorb(second)
+                            completion(report)
+                        }
                     }
                 }
             }
+        }
+    }
+
+    /// Sends every broadcast target, `remaining` times, `gap` apart.
+    ///
+    /// Broadcast is the one route that needs no address resolution, so it
+    /// reaches a bulb the unicast sweep cannot. It is also the easiest to
+    /// lose: Wi-Fi carries broadcast at the lowest basic rate with no
+    /// acknowledgement, and a bulb in power save simply drops it. Sending once
+    /// was a single roll of the dice per scan. A few spaced rounds cost a
+    /// handful of packets and pick up the bulbs that missed the first.
+    ///
+    /// The report is threaded through rather than captured so every round is
+    /// counted before the sweeps start folding into it.
+    private func broadcastRound(_ packet: Data,
+                                targets: [String],
+                                port: UInt16,
+                                remaining: Int,
+                                gap: TimeInterval,
+                                report: DiscoveryProbeReport,
+                                completion: @escaping (DiscoveryProbeReport) -> Void) {
+        var report = report
+        for address in targets {
+            if let code = sendReturningErrno(packet, to: address, port: port) {
+                if Self.isUnoccupied(code) {
+                    report.addressesUnoccupied += 1
+                } else {
+                    report.datagramsFailed += 1
+                    report.lastError = Self.errorText(code)
+                }
+            } else {
+                report.datagramsSent += 1
+            }
+        }
+        guard remaining > 1 else { return completion(report) }
+        let carried = report
+        queue.asyncAfter(deadline: .now() + gap) { [weak self] in
+            guard let self else { return completion(carried) }
+            self.broadcastRound(packet, targets: targets, port: port,
+                                remaining: remaining - 1, gap: gap,
+                                report: carried, completion: completion)
         }
     }
 

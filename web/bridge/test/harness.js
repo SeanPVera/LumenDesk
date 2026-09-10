@@ -23,13 +23,14 @@ const registry = new Registry()
 // Isolated store so the harness never touches a real user's state.
 const store = new Store({ file: path.join(os.tmpdir(), `lumendesk-harness-${process.pid}.json`) })
 store.load()
-const lifx = new LifxClient({ registry, discoveryAddress: '127.0.0.1', port: bulbPort, sweep: false })
+const lifx = new LifxClient({ registry, discoveryAddress: '127.0.0.1', port: bulbPort, sweep: false, broadcastRounds: 1 })
 const govee = new GoveeClient({
   registry,
   discoveryAddress: '127.0.0.1',
   responsePort: 0,
   joinMulticast: false,
   sweep: false,
+  broadcastRounds: 1,
 })
 await lifx.start()
 await govee.start()

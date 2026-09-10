@@ -295,10 +295,11 @@ final class LightManager: ObservableObject {
                 self.scanPhase = "Querying bulb state"
             }
         }
-        // Discovery now sends two paced unicast sweeps with an ARP-warming gap
-        // between them, so the last probe does not leave the machine until
-        // roughly a second in. Closing the window at three seconds declared
-        // "no responses" while the scan was still going out.
+        // Discovery sends several spaced broadcast rounds and then two paced
+        // unicast sweeps with an ARP-warming gap between them, so the last
+        // probe does not leave the machine until roughly a second and a half
+        // in. Closing the window at three seconds declared "no responses"
+        // while the scan was still going out.
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.scanWindow) { [weak self] in
             Task { @MainActor in
                 guard let self, self.scanGeneration == gen else { return }

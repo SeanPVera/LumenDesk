@@ -13,6 +13,7 @@ export class LifxClient {
     discoveryAddress = lifx.BROADCAST_ADDRESS,
     port = lifx.PORT,
     sweep = true,
+    broadcastRounds = 3,
   }) {
     this.registry = registry
     this.log = log
@@ -21,6 +22,9 @@ export class LifxClient {
     // Off in tests, where discovery is pointed at a fake bulb on loopback and
     // a real subnet sweep would spray the machine running the suite.
     this.sweep = sweep
+    // Wi-Fi broadcast is unacknowledged and a bulb in power save drops it, so
+    // the round is repeated. Tests use one, against a loopback fake.
+    this.broadcastRounds = broadcastRounds
     /** What the last discovery pass put on the wire. */
     this.lastProbe = null
     /** In-flight pass, so a rescan joins it instead of stacking sweeps. */
@@ -76,6 +80,7 @@ export class LifxClient {
     const report = await probeSubnets(this.socket, pkt, this.port, {
       interfaces: this.sweep ? listInterfaces() : [],
       extraTargets: [this.discoveryAddress],
+      broadcastRounds: this.broadcastRounds,
     })
     this.lastProbe = report
     if (!report.sent) this.log(`LIFX discovery reached nothing: ${describeReport(report)}`)

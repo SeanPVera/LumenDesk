@@ -602,7 +602,13 @@ A scan does not rely on one broadcast. `255.255.255.255` is not routed: the kern
 
 The sweep is paced in small bursts and runs twice with a short gap. macOS parks a single datagram per unresolved neighbour while it resolves ARP and drops it if resolution is slow, so a cold cache eats most of a single pass; the second pass runs against warm entries. A network wider than a `/24` is capped to the `/24` around your own address, and a narrower netmask is honoured exactly.
 
-Discovery diagnostics report what each pass actually put on the wire — the interfaces used, how many probes went out, and how many the system refused — so "nothing on this network answered" is distinguishable from "nothing we sent ever left the machine."
+Discovery diagnostics report what each pass actually put on the wire, in three separate counts:
+
+- **Probes** — datagrams that left the machine.
+- **Addresses empty** — the kernel could not resolve a link-layer address, so nothing is at that address. On a home `/24` holding a handful of devices this is most of the subnet, and a line like `9 probes on en0 192.168.1.57/24 · 499 addresses empty` is a healthy scan, not a fault.
+- **Refused** — the system rejected the send: no permission, no route to the network, no buffers. These are real faults and are the only count that colours the row.
+
+That split is what separates "nothing on this network answered" from "nothing we sent ever left the machine."
 
 ## Optional: regenerate the Xcode project
 
@@ -743,7 +749,7 @@ LumenDesk/
 Open **Discovery diagnostics** first — it names the cause instead of leaving you to guess. The rows to read are **Network interface** (which interfaces the scan used) and **LIFX/Govee probes** (how many datagrams went out and how many the system refused).
 
 - **"No probe reached the network"** — nothing left the machine. A VPN is almost always holding the default route; disconnect it, or exclude the local subnet, and scan again.
-- **"Most probes were refused"** — a firewall or filtering VPN is intercepting local traffic. Allow LumenDesk to send and receive local UDP.
+- **"Some sends were refused"** — a firewall or filtering VPN is intercepting local traffic. Allow LumenDesk to send and receive local UDP. Note that *addresses empty* is not a refusal: on a typical home network most of the subnet is empty and that count will be large.
 - **Probes went out and nothing answered** — the packets are on the wire and the lights are not replying. Work through the list below.
 - **The interface shown is not the one your lights are on** — a Thunderbolt bridge, a container network, or a phone tether can be listed alongside your real network. Discovery probes all of them, so this is informational unless the real one is missing entirely.
 
@@ -756,6 +762,12 @@ Then:
 - On macOS 15 and later, check **System Settings → Privacy & Security → Local Network** and confirm LumenDesk is enabled. A denied grant drops packets silently, with no error at the socket. The **Local Network** button in Discovery diagnostics opens that pane.
 - Debug builds run from a temporary DerivedData path, which macOS treats as a different app each time it is rebuilt; the Local Network grant does not carry over. Use a stable signed build for permission testing (see [`DISTRIBUTION.md`](DISTRIBUTION.md)).
 - Try running Scan again after power-cycling a bulb.
+
+### Govee lights are found but commands fail with "no route to host"
+
+LumenDesk sends commands to the address a scan reply arrived *from*, not the address the device announces in that reply. Govee firmware fixes its announced address when it joins the network and keeps announcing it after a DHCP renewal, so the two can disagree; when they do, the app logs the mismatch and uses the address that provably works.
+
+If a light still stops answering, it has usually powered off or moved networks. LumenDesk marks it as not seen recently rather than raising an error, and a rescan picks it back up at its new address.
 
 ### Govee bulbs do not appear
 

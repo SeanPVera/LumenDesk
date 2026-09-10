@@ -11,17 +11,37 @@ struct DiscoveryProbeReport: Equatable {
     /// Interfaces the sweep addressed, e.g. `en0 192.168.1.42/24`.
     var interfaces: [String] = []
     var datagramsSent = 0
+    /// Addresses the kernel could not resolve at the link layer, meaning
+    /// nothing is listening there.
+    ///
+    /// This is counted apart from a real failure because on a home /24 it is
+    /// most of the subnet: a sweep of 254 addresses on a network with nine
+    /// devices *should* come back with 245 of these. Lumping them in with
+    /// refusals made a perfectly healthy scan read as "most probes were
+    /// refused, a VPN is intercepting your traffic", which is the opposite of
+    /// what happened.
+    var addressesUnoccupied = 0
+    /// Sends the system actually refused: no permission, no route to the
+    /// network, no buffers. These are faults.
     var datagramsFailed = 0
-    /// `strerror` text for the most recent failure, when there was one.
+    /// `strerror` text for the most recent genuine failure.
     var lastError: String?
 
     var reachedNetwork: Bool { datagramsSent > 0 }
 
+    mutating func absorb(_ tally: UDPSocket.SweepTally) {
+        datagramsSent += tally.sent
+        addressesUnoccupied += tally.unoccupied
+        datagramsFailed += tally.failed
+        if let error = tally.lastError { lastError = error }
+    }
+
     var summary: String {
         guard !interfaces.isEmpty else { return "No IPv4 network interface" }
         var text = "\(datagramsSent) probe\(datagramsSent == 1 ? "" : "s") on \(interfaces.joined(separator: ", "))"
+        if addressesUnoccupied > 0 { text += " · \(addressesUnoccupied) address\(addressesUnoccupied == 1 ? "" : "es") empty" }
         if datagramsFailed > 0 {
-            text += " · \(datagramsFailed) failed"
+            text += " · \(datagramsFailed) refused"
             if let lastError { text += " (\(lastError))" }
         }
         return text
@@ -36,6 +56,15 @@ final class UDPSocket {
         case bind(Int32)
         case send(Int32)
         case option(String, Int32)
+
+        /// The underlying errno, for callers that need to tell "nothing is at
+        /// that address" apart from "the system refused this".
+        var errnoCode: Int32 {
+            switch self {
+            case .create(let e), .bind(let e), .send(let e): return e
+            case .option(_, let e): return e
+            }
+        }
 
         var description: String {
             switch self {
@@ -204,17 +233,25 @@ final class UDPSocket {
                port: UInt16,
                burst: Int = 24,
                gap: TimeInterval = 0.012,
-               completion: @escaping (_ sent: Int, _ failed: Int, _ lastError: String?) -> Void) {
+               completion: @escaping (SweepTally) -> Void) {
         guard !hosts.isEmpty else {
-            queue.async { completion(0, 0, nil) }
+            queue.async { completion(SweepTally()) }
             return
         }
         queue.async { [weak self] in
-            guard let self else { return completion(0, 0, nil) }
+            guard let self else { return completion(SweepTally()) }
             self.sweepChunk(packet, hosts: hosts, port: port, from: 0,
                             burst: max(1, burst), gap: gap,
-                            sent: 0, failed: 0, lastError: nil, completion: completion)
+                            tally: SweepTally(), completion: completion)
         }
+    }
+
+    /// Running totals for one sweep pass.
+    struct SweepTally: Equatable {
+        var sent = 0
+        var unoccupied = 0
+        var failed = 0
+        var lastError: String?
     }
 
     /// One burst of the sweep, then the next scheduled a `gap` later. Tallies
@@ -226,13 +263,9 @@ final class UDPSocket {
                             from index: Int,
                             burst: Int,
                             gap: TimeInterval,
-                            sent: Int,
-                            failed: Int,
-                            lastError: String?,
-                            completion: @escaping (Int, Int, String?) -> Void) {
-        var sent = sent
-        var failed = failed
-        var lastError = lastError
+                            tally: SweepTally,
+                            completion: @escaping (SweepTally) -> Void) {
+        var tally = tally
         let end = min(index + burst, hosts.count)
         for cursor in index..<end {
             var code = sendReturningErrno(packet, to: hosts[cursor], port: port)
@@ -243,23 +276,23 @@ final class UDPSocket {
                 _ = usleep(2000)
                 code = sendReturningErrno(packet, to: hosts[cursor], port: port)
             }
-            if let code {
-                failed += 1
-                lastError = Self.errorText(code)
+            guard let code else { tally.sent += 1; continue }
+            if Self.isUnoccupied(code) {
+                tally.unoccupied += 1
             } else {
-                sent += 1
+                tally.failed += 1
+                tally.lastError = Self.errorText(code)
             }
         }
         guard end < hosts.count else {
-            completion(sent, failed, lastError)
+            completion(tally)
             return
         }
-        let tally = (sent, failed, lastError)
+        let carried = tally
         queue.asyncAfter(deadline: .now() + gap) { [weak self] in
-            guard let self else { return completion(tally.0, tally.1, tally.2) }
+            guard let self else { return completion(carried) }
             self.sweepChunk(packet, hosts: hosts, port: port, from: end,
-                            burst: burst, gap: gap,
-                            sent: tally.0, failed: tally.1, lastError: tally.2,
+                            burst: burst, gap: gap, tally: carried,
                             completion: completion)
         }
     }
@@ -296,15 +329,11 @@ final class UDPSocket {
                     report.datagramsSent += 1
                 }
             }
-            self.sweep(packet, hosts: hosts, port: port) { sent, failed, error in
-                report.datagramsSent += sent
-                report.datagramsFailed += failed
-                if let error { report.lastError = error }
+            self.sweep(packet, hosts: hosts, port: port) { first in
+                report.absorb(first)
                 self.queue.asyncAfter(deadline: .now() + warmupDelay) {
-                    self.sweep(packet, hosts: hosts, port: port) { sent, failed, error in
-                        report.datagramsSent += sent
-                        report.datagramsFailed += failed
-                        if let error { report.lastError = error }
+                    self.sweep(packet, hosts: hosts, port: port) { second in
+                        report.absorb(second)
                         completion(report)
                     }
                 }
@@ -313,6 +342,18 @@ final class UDPSocket {
     }
 
     static func errorText(_ code: Int32) -> String { String(cString: strerror(code)) }
+
+    /// Whether an errno means "nothing is at that address" rather than "the
+    /// send was refused".
+    ///
+    /// On a directly-connected subnet these come from ARP giving up, which is
+    /// the normal answer for an address with no device on it — exactly what a
+    /// sweep exists to discover. `ENETUNREACH` is deliberately absent: no route
+    /// to the *network* is a real fault, and it is the signature of a VPN
+    /// holding the default route.
+    static func isUnoccupied(_ code: Int32) -> Bool {
+        code == EHOSTUNREACH || code == EHOSTDOWN
+    }
 
     private static func ipString(_ addr: in_addr) -> String {
         var a = addr

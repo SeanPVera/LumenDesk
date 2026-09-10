@@ -7,6 +7,7 @@ import {
   describeReport,
   directedBroadcasts,
   isContiguousMask,
+  isUnoccupied,
   listInterfaces,
   prefixLength,
   probeHosts,
@@ -129,18 +130,44 @@ test('numeric IPv4 family values are accepted', () => {
   assert.equal(interfaces.length, 1)
 })
 
-test('a report distinguishes refusal from silence', () => {
+test('an empty address is not counted as a refusal', () => {
+  // EHOSTUNREACH on a directly-connected subnet means nothing is at that
+  // address, which on a home /24 is most of it. Reporting that as a failure
+  // made a healthy scan read as though a firewall were eating the traffic.
+  assert.equal(isUnoccupied({ code: 'EHOSTUNREACH' }), true)
+  assert.equal(isUnoccupied({ code: 'EHOSTDOWN' }), true)
+  assert.equal(isUnoccupied({ code: 'ENETUNREACH' }), false, 'no route to the network is a real fault')
+  assert.equal(isUnoccupied({ code: 'EACCES' }), false)
+  assert.equal(isUnoccupied(undefined), false)
+})
+
+test('a report separates empty addresses, refusals, and silence', () => {
   assert.equal(
-    describeReport({ interfaces: ['en0 192.168.1.42/24'], sent: 254, failed: 0, lastError: null }),
+    describeReport({ interfaces: ['en0 192.168.1.42/24'], sent: 254, unoccupied: 0, failed: 0, lastError: null }),
     '254 probes on en0 192.168.1.42/24',
   )
+
+  // The shape the user actually hit: nine live hosts on a /24, the rest empty.
+  const sparse = describeReport({
+    interfaces: ['en0 192.168.1.57/24'],
+    sent: 9,
+    unoccupied: 499,
+    failed: 0,
+    lastError: null,
+  })
+  assert.ok(sparse.includes('9 probes'))
+  assert.ok(sparse.includes('499 addresses empty'))
+  assert.ok(!sparse.includes('refused'), 'an empty subnet must not read as a refusal')
+
   const refused = describeReport({
     interfaces: ['en0 192.168.1.42/24'],
     sent: 0,
+    unoccupied: 0,
     failed: 254,
-    lastError: 'EHOSTUNREACH',
+    lastError: 'EACCES',
   })
-  assert.ok(refused.includes('254 failed'))
-  assert.ok(refused.includes('EHOSTUNREACH'))
-  assert.equal(describeReport({ interfaces: [], sent: 0, failed: 0 }), 'no IPv4 network interface')
+  assert.ok(refused.includes('254 refused'))
+  assert.ok(refused.includes('EACCES'))
+
+  assert.equal(describeReport({ interfaces: [], sent: 0, unoccupied: 0, failed: 0 }), 'no IPv4 network interface')
 })

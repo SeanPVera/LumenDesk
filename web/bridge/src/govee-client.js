@@ -199,12 +199,22 @@ export class GoveeClient {
     const scan = govee.decodeScanResponse(msg)
     if (scan) {
       const id = `govee:${scan.device}`
+      // Use the address the datagram actually came from, not the one the
+      // device announces. Govee firmware bakes that field at join time and
+      // keeps announcing a stale address after a DHCP renewal, which sent
+      // every command to a dead IP and came back EHOSTUNREACH while discovery
+      // still reported the light as present. The LIFX client has always used
+      // the source address; this makes Govee agree.
+      const ip = rinfo?.address || scan.ip
+      if (scan.ip && scan.ip !== ip) {
+        this.log(`Govee device reports ${scan.ip} but answered from ${ip}; using ${ip}`)
+      }
       this.registry.upsert(id, {
-        ip: scan.ip,
+        ip,
         name: scan.deviceName || scan.sku || id,
         sku: scan.sku,
       })
-      this.#enqueue(scan.ip, 'devStatus', govee.statusRequest())
+      this.#enqueue(ip, 'devStatus', govee.statusRequest())
       return
     }
 

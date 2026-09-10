@@ -156,6 +156,69 @@ final class NetworkUtilityTests: XCTestCase {
         }
     }
 
+    // MARK: - Telling an empty address apart from a refused send
+
+    func testUnoccupiedCodesAreNotFailures() {
+        // EHOSTUNREACH on a directly-connected subnet is ARP giving up: nothing
+        // is at that address. On a home /24 that is most of the subnet, and
+        // counting it as a failure made a healthy scan read as though a
+        // firewall were eating the traffic.
+        XCTAssertTrue(UDPSocket.isUnoccupied(EHOSTUNREACH))
+        XCTAssertTrue(UDPSocket.isUnoccupied(EHOSTDOWN))
+        // No route to the *network* is a real fault, and the signature of a
+        // VPN holding the default route.
+        XCTAssertFalse(UDPSocket.isUnoccupied(ENETUNREACH))
+        XCTAssertFalse(UDPSocket.isUnoccupied(EACCES))
+        XCTAssertFalse(UDPSocket.isUnoccupied(ENOBUFS))
+    }
+
+    func testProbeReportSeparatesEmptyAddressesFromRefusals() {
+        var report = DiscoveryProbeReport(interfaces: ["en0 192.168.1.57/24"])
+        // The shape a real /24 produces: a handful of live hosts, the rest empty.
+        report.absorb(UDPSocket.SweepTally(sent: 9, unoccupied: 499))
+
+        XCTAssertTrue(report.reachedNetwork)
+        XCTAssertEqual(report.datagramsFailed, 0)
+        XCTAssertTrue(report.summary.contains("9 probes"))
+        XCTAssertTrue(report.summary.contains("499 addresses empty"))
+        XCTAssertFalse(report.summary.contains("refused"),
+                       "a sparse subnet must not read as a refusal")
+    }
+
+    func testProbeReportSurfacesGenuineRefusals() {
+        var report = DiscoveryProbeReport(interfaces: ["en0 192.168.1.57/24"])
+        report.absorb(UDPSocket.SweepTally(sent: 0, unoccupied: 0, failed: 254,
+                                           lastError: "Permission denied"))
+
+        XCTAssertFalse(report.reachedNetwork)
+        XCTAssertTrue(report.summary.contains("254 refused"))
+        XCTAssertTrue(report.summary.contains("Permission denied"))
+        XCTAssertEqual(DiscoveryProbeReport().summary, "No IPv4 network interface")
+    }
+
+    func testSocketErrorExposesItsErrno() {
+        XCTAssertEqual(UDPSocket.SocketError.send(EHOSTUNREACH).errnoCode, EHOSTUNREACH)
+        XCTAssertEqual(UDPSocket.SocketError.bind(EADDRINUSE).errnoCode, EADDRINUSE)
+        XCTAssertEqual(UDPSocket.SocketError.option("IP_MULTICAST_IF", EINVAL).errnoCode, EINVAL)
+    }
+
+    // MARK: - Govee command addressing
+
+    func testGoveeCommandsUseTheAddressTheReplyCameFrom() {
+        // Govee firmware bakes its `ip` field at join time and keeps announcing
+        // the address it had before a DHCP renewal. Trusting the claim pointed
+        // every command at a dead address and sendto answered EHOSTUNREACH,
+        // while discovery still listed the light as present.
+        XCTAssertEqual(GoveeClient.commandAddress(source: "192.168.1.57", reported: "192.0.2.99"),
+                       "192.168.1.57")
+        XCTAssertEqual(GoveeClient.commandAddress(source: "192.168.1.57", reported: "192.168.1.57"),
+                       "192.168.1.57")
+        XCTAssertEqual(GoveeClient.commandAddress(source: "192.168.1.57", reported: nil),
+                       "192.168.1.57")
+        XCTAssertEqual(GoveeClient.commandAddress(source: "192.168.1.57", reported: ""),
+                       "192.168.1.57")
+    }
+
     func testBoundUDPPortIsExclusive() throws {
         let first = try UDPSocket(boundPort: 0, queue: DispatchQueue(label: "LumenDeskTests.udp.first"))
         var address = sockaddr_in()

@@ -123,6 +123,15 @@ export function probeHosts(interfaces, max = MAX_PROBE_HOSTS) {
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 
+/** Errno codes meaning "nothing is at that address" rather than "the send was
+ *  refused". On a directly-connected subnet these come from ARP giving up,
+ *  which is the normal answer for an address with no device on it — exactly
+ *  what a sweep exists to discover, and most of a home /24. ENETUNREACH is
+ *  deliberately absent: no route to the network is a real fault. */
+const UNOCCUPIED_CODES = new Set(['EHOSTUNREACH', 'EHOSTDOWN'])
+
+export const isUnoccupied = err => UNOCCUPIED_CODES.has(err?.code)
+
 export function sendTo(socket, packet, port, address) {
   return new Promise(resolve => {
     try {
@@ -143,22 +152,25 @@ export function sendTo(socket, packet, port, address) {
  */
 export async function sweep(socket, packet, hosts, port, { burst = 24, gap = 12 } = {}) {
   let sent = 0
+  let unoccupied = 0
   let failed = 0
   let lastError = null
   for (let index = 0; index < hosts.length; index += burst) {
     const chunk = hosts.slice(index, index + burst)
     const results = await Promise.all(chunk.map(host => sendTo(socket, packet, port, host)))
     for (const err of results) {
-      if (err) {
+      if (!err) {
+        sent += 1
+      } else if (isUnoccupied(err)) {
+        unoccupied += 1
+      } else {
         failed += 1
         lastError = err.message ?? String(err)
-      } else {
-        sent += 1
       }
     }
     if (index + burst < hosts.length) await sleep(gap)
   }
-  return { sent, failed, lastError }
+  return { sent, unoccupied, failed, lastError }
 }
 
 /**
@@ -178,17 +190,20 @@ export async function probeSubnets(socket, packet, port, {
   const report = {
     interfaces: interfaces.map(item => item.description),
     sent: 0,
+    unoccupied: 0,
     failed: 0,
     lastError: null,
   }
   const targets = [...extraTargets, ...directedBroadcasts(interfaces)]
   for (const target of targets) {
     const err = await sendTo(socket, packet, port, target)
-    if (err) {
+    if (!err) {
+      report.sent += 1
+    } else if (isUnoccupied(err)) {
+      report.unoccupied += 1
+    } else {
       report.failed += 1
       report.lastError = err.message ?? String(err)
-    } else {
-      report.sent += 1
     }
   }
   const hosts = probeHosts(interfaces)
@@ -196,6 +211,7 @@ export async function probeSubnets(socket, packet, port, {
     if (pass === 1) await sleep(warmupDelay)
     const tally = await sweep(socket, packet, hosts, port)
     report.sent += tally.sent
+    report.unoccupied += tally.unoccupied
     report.failed += tally.failed
     if (tally.lastError) report.lastError = tally.lastError
   }
@@ -206,8 +222,9 @@ export async function probeSubnets(socket, packet, port, {
 export function describeReport(report) {
   if (!report.interfaces.length) return 'no IPv4 network interface'
   let text = `${report.sent} probe${report.sent === 1 ? '' : 's'} on ${report.interfaces.join(', ')}`
+  if (report.unoccupied) text += ` · ${report.unoccupied} address${report.unoccupied === 1 ? '' : 'es'} empty`
   if (report.failed) {
-    text += ` · ${report.failed} failed`
+    text += ` · ${report.failed} refused`
     if (report.lastError) text += ` (${report.lastError})`
   }
   return text

@@ -4,6 +4,8 @@ protocol GoveeClientDelegate: AnyObject {
     func goveeDiscovered(deviceID: String, address: String, sku: String?)
     func goveeDidUpdate(deviceID: String, isOn: Bool, brightness: Int, r: Int, g: Int, b: Int, kelvin: Int)
     func goveeCommandFailed(_ error: Error)
+    /// What the last discovery pass actually put on the wire.
+    func goveeDiscoveryProbe(_ report: DiscoveryProbeReport)
 }
 
 /// Drives Govee LAN discovery and control. The bulbs respond to scan and
@@ -27,11 +29,18 @@ final class GoveeClient {
     private var queuedPayloads: [String: [String: Data]] = [:] // deviceID -> kind -> latest payload
     private var drainScheduled: Set<String> = []
     private var earliestSend: [String: DispatchTime] = [:]
+    /// Interface addresses we already hold a multicast membership on, so a
+    /// rescan does not re-join and collect `EADDRINUSE` for each one.
+    private var joinedInterfaces: Set<UInt32> = []
 
     init() throws {
         socket = try UDPSocket(boundPort: GoveeProtocol.responsePort, queue: queue)
         do {
+            // A baseline join on the default multicast interface. `discover`
+            // adds one per real interface; this covers the window before the
+            // first scan.
             try socket.joinMulticast(GoveeProtocol.multicastGroup)
+            joinedInterfaces.insert(0)
         } catch {
             // iOS denies multicast membership without the restricted
             // entitlement; discovery still works via the unicast sweep below.
@@ -44,17 +53,69 @@ final class GoveeClient {
 
     func discover() {
         let pkt = GoveeProtocol.scanRequest()
-        do {
-            try socket.send(pkt, to: GoveeProtocol.multicastGroup, port: GoveeProtocol.discoveryPort)
-        } catch {
-            NSLog("Govee discover send failed: \(error)")
-        }
-        // Govee bulbs also answer scan requests sent directly to their IP.
-        // This is required on iOS without the multicast entitlement and gives
-        // macOS a deterministic fallback on routers that suppress multicast.
-        queue.async { [socket] in
-            for host in LocalSubnet.probeHosts() {
-                try? socket.send(pkt, to: host, port: GoveeProtocol.discoveryPort)
+        let interfaces = LocalSubnet.interfaces()
+
+        queue.async { [weak self] in
+            guard let self else { return }
+            var multicastSent = 0
+            var multicastFailed = 0
+            var lastError: String?
+
+            // One multicast send per interface, each pinned with
+            // IP_MULTICAST_IF. Left unset, the kernel sends the scan out
+            // whichever interface the default route names — on a Mac holding a
+            // VPN route, bridging a Thunderbolt link, or tethered to a phone,
+            // that is reliably not the one the lights are on. The membership is
+            // pinned the same way for the same reason: INADDR_ANY joins one
+            // interface, not all of them.
+            for interface in interfaces {
+                if self.joinedInterfaces.insert(interface.address).inserted {
+                    do {
+                        try self.socket.joinMulticast(GoveeProtocol.multicastGroup,
+                                                      interfaceAddress: interface.address)
+                    } catch {
+                        self.joinedInterfaces.remove(interface.address)
+                    }
+                }
+                // Best effort: the directed broadcast and the unicast sweep
+                // below do not depend on multicast working at all.
+                try? self.socket.setMulticastInterface(interface.address)
+                if let code = self.socket.sendReturningErrno(pkt,
+                                                             to: GoveeProtocol.multicastGroup,
+                                                             port: GoveeProtocol.discoveryPort) {
+                    multicastFailed += 1
+                    lastError = UDPSocket.errorText(code)
+                } else {
+                    multicastSent += 1
+                }
+            }
+            if interfaces.isEmpty {
+                // Nothing to pin to. Still send one unpinned multicast so a
+                // host whose only interface the enumerator rejected is no
+                // worse off than before it existed.
+                if let code = self.socket.sendReturningErrno(pkt,
+                                                             to: GoveeProtocol.multicastGroup,
+                                                             port: GoveeProtocol.discoveryPort) {
+                    multicastFailed += 1
+                    lastError = UDPSocket.errorText(code)
+                } else {
+                    multicastSent += 1
+                }
+            }
+            try? self.socket.setMulticastInterface(0)
+
+            // Govee bulbs also answer a scan sent to their own address or to
+            // the subnet broadcast, which is what carries discovery on iOS
+            // (no multicast entitlement) and on any router that filters
+            // multicast.
+            self.socket.probeSubnets(pkt,
+                                     port: GoveeProtocol.discoveryPort,
+                                     interfaces: interfaces) { [weak self] report in
+                var merged = report
+                merged.datagramsSent += multicastSent
+                merged.datagramsFailed += multicastFailed
+                if merged.lastError == nil { merged.lastError = lastError }
+                self?.delegate?.goveeDiscoveryProbe(merged)
             }
         }
     }

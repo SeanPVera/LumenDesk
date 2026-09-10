@@ -1012,9 +1012,17 @@ struct DiscoveryDiagnosticsCard: View {
                 Text("Last scan: \(date.formatted(.relative(presentation: .named)))")
                     .font(.caption2).foregroundStyle(.tertiary)
             }
-            if manager.likelyLocalNetworkPermissionIssue {
-                Label("No UDP replies were received. Local Network access may be denied; verify it in System Settings.", systemImage: "lock.trianglebadge.exclamationmark")
+            // The per-probe detail only earns its space when a scan came back
+            // empty; a healthy first run should not open on seven rows of
+            // socket telemetry.
+            if let hint = manager.discoveryFailureHint {
+                Label(hint, systemImage: "lock.trianglebadge.exclamationmark")
                     .font(.caption).foregroundStyle(Lumen.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+                ForEach(manager.scanDiagnostics) { diagnostic in
+                    DiagnosticRow(diagnostic: diagnostic)
+                        .font(.caption)
+                }
             }
             HStack {
                 Button("Local Network") {

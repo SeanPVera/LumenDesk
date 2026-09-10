@@ -89,7 +89,7 @@ struct DeviceInspectorView: View {
     }
 }
 
-private struct DiagnosticRow: View {
+struct DiagnosticRow: View {
     let diagnostic: ScanDiagnostic
     var body: some View {
         HStack {

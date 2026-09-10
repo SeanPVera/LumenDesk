@@ -7,6 +7,7 @@ import { GoveeClient } from './govee-client.js'
 import { createServer } from './server.js'
 import { isBuiltApp } from './static.js'
 import { Store } from './store.js'
+import { describeReport } from './net.js'
 import { due, commandsFor } from './schedules.js'
 import { runSchedule } from './actions.js'
 
@@ -111,14 +112,22 @@ server.listen(options.port, options.host, () => {
     log(`API only on ${base} (--no-serve)`)
   }
   log(`allowed origins: ${options.origins.join(', ')}`)
-  lifx.discover()
-  govee.discover()
+  runDiscovery()
 })
 
-const discoverTimer = setInterval(() => {
-  lifx.discover()
-  govee.discover()
-}, options.discoverEvery)
+// A pass now spans two paced sweeps, so it is awaited and its outcome logged
+// rather than fired and forgotten. The clients coalesce overlapping calls.
+function runDiscovery() {
+  Promise.all([lifx.discover(), govee.discover()])
+    .then(([lifxProbe, goveeProbe]) => {
+      for (const [vendor, probe] of [['LIFX', lifxProbe], ['Govee', goveeProbe]]) {
+        if (probe && !probe.sent) log(`${vendor} discovery reached nothing: ${describeReport(probe)}`)
+      }
+    })
+    .catch(err => log(`discovery failed: ${err.message}`))
+}
+
+const discoverTimer = setInterval(runDiscovery, options.discoverEvery)
 
 const refreshTimer = setInterval(() => {
   lifx.refresh()

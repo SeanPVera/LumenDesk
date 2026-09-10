@@ -3,6 +3,12 @@ import Darwin
 @testable import LumenDesk
 
 final class NetworkUtilityTests: XCTestCase {
+    private func interface(_ name: String, _ address: String, prefix: Int) throws -> LocalSubnet.Interface {
+        let value = try XCTUnwrap(LocalSubnet.ipv4Address(from: address))
+        let mask: UInt32 = prefix == 0 ? 0 : ~UInt32(0) << (32 - prefix)
+        return LocalSubnet.Interface(name: name, address: value, netmask: mask)
+    }
+
     func testIPv4Conversion() {
         let address = LocalSubnet.ipv4Address(from: "192.168.40.7")
         XCTAssertEqual(address, 0xC0A8_2807)
@@ -15,8 +21,7 @@ final class NetworkUtilityTests: XCTestCase {
     }
 
     func testSlash24HostEnumeration() throws {
-        let local = try XCTUnwrap(LocalSubnet.ipv4Address(from: "192.168.10.42"))
-        let hosts = LocalSubnet.probeHosts(localAddresses: [local])
+        let hosts = LocalSubnet.probeHosts(interfaces: [try interface("en0", "192.168.10.42", prefix: 24)])
 
         XCTAssertEqual(hosts.count, 253)
         XCTAssertEqual(hosts.first, "192.168.10.1")
@@ -26,23 +31,129 @@ final class NetworkUtilityTests: XCTestCase {
     }
 
     func testDuplicateInterfaceSuppression() throws {
-        let local = try XCTUnwrap(LocalSubnet.ipv4Address(from: "10.0.4.20"))
-        let hosts = LocalSubnet.probeHosts(localAddresses: [local, local, local])
+        let duplicate = try interface("en0", "10.0.4.20", prefix: 24)
+        let hosts = LocalSubnet.probeHosts(interfaces: [duplicate, duplicate, duplicate])
 
         XCTAssertEqual(hosts.count, 253)
         XCTAssertEqual(Set(hosts).count, hosts.count)
     }
 
     func testLocalNetworkAndBroadcastAddressesAreExcluded() throws {
-        let firstLocal = try XCTUnwrap(LocalSubnet.ipv4Address(from: "172.16.8.20"))
-        let secondLocal = try XCTUnwrap(LocalSubnet.ipv4Address(from: "172.16.8.21"))
-        let hosts = LocalSubnet.probeHosts(localAddresses: [firstLocal, secondLocal])
+        let hosts = LocalSubnet.probeHosts(interfaces: [
+            try interface("en0", "172.16.8.20", prefix: 24),
+            try interface("en1", "172.16.8.21", prefix: 24)
+        ])
 
         XCTAssertEqual(hosts.count, 252)
         XCTAssertFalse(hosts.contains("172.16.8.0"))
         XCTAssertFalse(hosts.contains("172.16.8.20"))
         XCTAssertFalse(hosts.contains("172.16.8.21"))
         XCTAssertFalse(hosts.contains("172.16.8.255"))
+    }
+
+    // MARK: - Interface-aware discovery targets
+
+    func testInterfaceDerivesNetworkAndBroadcast() throws {
+        let en0 = try interface("en0", "192.168.1.42", prefix: 24)
+        XCTAssertEqual(en0.prefixLength, 24)
+        XCTAssertEqual(LocalSubnet.ipv4String(from: en0.network), "192.168.1.0")
+        XCTAssertEqual(LocalSubnet.ipv4String(from: en0.broadcast), "192.168.1.255")
+        XCTAssertEqual(en0.description, "en0 192.168.1.42/24")
+
+        let narrow = try interface("en1", "10.0.0.130", prefix: 25)
+        XCTAssertEqual(LocalSubnet.ipv4String(from: narrow.network), "10.0.0.128")
+        XCTAssertEqual(LocalSubnet.ipv4String(from: narrow.broadcast), "10.0.0.255")
+    }
+
+    func testDirectedBroadcastPerInterface() throws {
+        let broadcasts = LocalSubnet.directedBroadcasts(interfaces: [
+            try interface("en0", "192.168.1.42", prefix: 24),
+            try interface("en1", "10.4.0.9", prefix: 16)
+        ])
+        XCTAssertEqual(broadcasts, ["192.168.1.255", "10.4.255.255"])
+    }
+
+    func testDirectedBroadcastFoldsInterfacesSharingASubnet() throws {
+        let broadcasts = LocalSubnet.directedBroadcasts(interfaces: [
+            try interface("en0", "192.168.1.42", prefix: 24),
+            try interface("en1", "192.168.1.43", prefix: 24)
+        ])
+        XCTAssertEqual(broadcasts, ["192.168.1.255"])
+    }
+
+    func testSweepHonoursANetmaskNarrowerThanSlash24() throws {
+        // A /25 must not spray the other half of the /24: those addresses are
+        // off-link, so every probe to them leaves by the default route.
+        let hosts = LocalSubnet.probeHosts(interfaces: [try interface("en0", "10.0.0.130", prefix: 25)])
+        XCTAssertEqual(hosts.count, 125)
+        XCTAssertEqual(hosts.first, "10.0.0.129")
+        XCTAssertEqual(hosts.last, "10.0.0.254")
+        XCTAssertFalse(hosts.contains("10.0.0.1"))
+        XCTAssertFalse(hosts.contains("10.0.0.128"))
+        XCTAssertFalse(hosts.contains("10.0.0.130"))
+    }
+
+    func testSweepCapsANetworkWiderThanSlash24() throws {
+        // A /16 sweep would be 65,000 datagrams aimed at our own router.
+        let hosts = LocalSubnet.probeHosts(interfaces: [try interface("en0", "172.16.9.20", prefix: 16)])
+        XCTAssertEqual(hosts.count, 253)
+        XCTAssertEqual(hosts.first, "172.16.9.1")
+        XCTAssertEqual(hosts.last, "172.16.9.254")
+    }
+
+    func testSweepCoversEveryInterfaceAndStaysBounded() throws {
+        let hosts = LocalSubnet.probeHosts(interfaces: [
+            try interface("en0", "192.168.1.42", prefix: 24),
+            try interface("en1", "10.0.7.5", prefix: 24)
+        ])
+        XCTAssertTrue(hosts.contains("192.168.1.1"))
+        XCTAssertTrue(hosts.contains("10.0.7.200"))
+        XCTAssertFalse(hosts.contains("192.168.1.42"))
+        XCTAssertFalse(hosts.contains("10.0.7.5"))
+        XCTAssertLessThanOrEqual(hosts.count, LocalSubnet.maximumProbeHosts)
+        XCTAssertEqual(Set(hosts).count, hosts.count)
+    }
+
+    func testSweepStopsAtTheProbeCeiling() throws {
+        let many = try (0..<8).map { try interface("en\($0)", "10.\($0).0.5", prefix: 24) }
+        let hosts = LocalSubnet.probeHosts(interfaces: many)
+        XCTAssertEqual(hosts.count, LocalSubnet.maximumProbeHosts)
+    }
+
+    func testNoncontiguousNetmasksAreRejected() {
+        XCTAssertTrue(LocalSubnet.isContiguous(0xFFFF_FF00))
+        XCTAssertTrue(LocalSubnet.isContiguous(0xFFFF_FF80))
+        XCTAssertTrue(LocalSubnet.isContiguous(0x8000_0000))
+        XCTAssertFalse(LocalSubnet.isContiguous(0))
+        XCTAssertFalse(LocalSubnet.isContiguous(0xFFFF_FF0F))
+        XCTAssertFalse(LocalSubnet.isContiguous(0x00FF_0000))
+    }
+
+    func testProbeReportSummaryDistinguishesFailureFromSilence() {
+        let clean = DiscoveryProbeReport(interfaces: ["en0 192.168.1.42/24"], datagramsSent: 254)
+        XCTAssertTrue(clean.reachedNetwork)
+        XCTAssertEqual(clean.summary, "254 probes on en0 192.168.1.42/24")
+
+        let refused = DiscoveryProbeReport(interfaces: ["en0 192.168.1.42/24"],
+                                           datagramsSent: 0,
+                                           datagramsFailed: 254,
+                                           lastError: "No route to host")
+        XCTAssertFalse(refused.reachedNetwork)
+        XCTAssertTrue(refused.summary.contains("254 failed"))
+        XCTAssertTrue(refused.summary.contains("No route to host"))
+
+        XCTAssertEqual(DiscoveryProbeReport().summary, "No IPv4 network interface")
+    }
+
+    func testLiveInterfacesAreUsableWhenPresent() {
+        // The host running the tests may have no IPv4 network at all, so this
+        // asserts the shape of whatever is there rather than its presence.
+        for interface in LocalSubnet.interfaces() {
+            XCTAssertTrue(LocalSubnet.isContiguous(interface.netmask), "\(interface.description)")
+            XCTAssertLessThanOrEqual(interface.prefixLength, 30)
+            XCTAssertFalse(interface.name.hasPrefix("utun"))
+            XCTAssertFalse(interface.name.hasPrefix("awdl"))
+        }
     }
 
     func testBoundUDPPortIsExclusive() throws {

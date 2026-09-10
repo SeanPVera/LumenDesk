@@ -7,6 +7,8 @@ protocol LIFXClientDelegate: AnyObject {
     func lifxDidUpdateMatrix(macHex: String, productID: UInt32,
                              width: Int, height: Int, colors: [LIFXHSBK])
     func lifxCommandFailed(_ error: Error)
+    /// What the last discovery pass actually put on the wire.
+    func lifxDiscoveryProbe(_ report: DiscoveryProbeReport)
 }
 
 /// Drives LIFX LAN discovery and control. Discovery broadcasts a GetService
@@ -36,20 +38,18 @@ final class LIFXClient {
                                       source: source,
                                       target: Data(),
                                       payload: Data())
-        do {
-            try socket.send(pkt, to: LIFXProtocol.broadcastAddress, port: LIFXProtocol.port)
-        } catch {
-            NSLog("LIFX discover send failed: \(error)")
+        // The unicast sweep is no longer iOS-only. iOS needs it because
+        // broadcast is gated behind the restricted multicast entitlement, but
+        // macOS needs it just as badly: routers with AP client isolation or
+        // broadcast filtering drop the GetService, and a Mac holding a VPN
+        // default route never puts it on the LAN at all. Bulbs answer a probe
+        // addressed straight to them, and the reply is ordinary unicast.
+        socket.probeSubnets(pkt,
+                            port: LIFXProtocol.port,
+                            interfaces: LocalSubnet.interfaces(),
+                            extraTargets: [LIFXProtocol.broadcastAddress]) { [weak self] report in
+            self?.delegate?.lifxDiscoveryProbe(report)
         }
-        #if os(iOS)
-        // Broadcast requires the restricted multicast entitlement on iOS, so
-        // also probe each subnet host directly; bulbs answer via unicast.
-        queue.async { [socket] in
-            for host in LocalSubnet.probeHosts() {
-                try? socket.send(pkt, to: host, port: LIFXProtocol.port)
-            }
-        }
-        #endif
     }
 
     func refresh(macHex: String) {

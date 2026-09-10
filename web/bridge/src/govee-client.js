@@ -18,6 +18,7 @@ export class GoveeClient {
     controlPort = govee.CONTROL_PORT,
     joinMulticast = true,
     sweep = true,
+    broadcastRounds = 3,
   }) {
     this.registry = registry
     this.log = log
@@ -29,6 +30,9 @@ export class GoveeClient {
     // Off in tests, where discovery is pointed at a fake device on loopback and
     // a real subnet sweep would spray the machine running the suite.
     this.sweep = sweep
+    // Wi-Fi broadcast is unacknowledged and a device in power save drops it,
+    // so the round is repeated. Tests use one, against a loopback fake.
+    this.broadcastRounds = broadcastRounds
     /** Interface addresses we already hold a multicast membership on. */
     this.joined = new Set()
     /** What the last discovery pass put on the wire. */
@@ -128,6 +132,7 @@ export class GoveeClient {
       // With no interfaces to enumerate (tests, or a host with no IPv4
       // network) this is the only target left, so it must still be sent.
       extraTargets: interfaces.length && this.joinMulticast ? [] : [this.discoveryAddress],
+      broadcastRounds: this.broadcastRounds,
     })
     report.sent += multicastSent
     report.failed += multicastFailed
@@ -199,12 +204,22 @@ export class GoveeClient {
     const scan = govee.decodeScanResponse(msg)
     if (scan) {
       const id = `govee:${scan.device}`
+      // Use the address the datagram actually came from, not the one the
+      // device announces. Govee firmware bakes that field at join time and
+      // keeps announcing a stale address after a DHCP renewal, which sent
+      // every command to a dead IP and came back EHOSTUNREACH while discovery
+      // still reported the light as present. The LIFX client has always used
+      // the source address; this makes Govee agree.
+      const ip = rinfo?.address || scan.ip
+      if (scan.ip && scan.ip !== ip) {
+        this.log(`Govee device reports ${scan.ip} but answered from ${ip}; using ${ip}`)
+      }
       this.registry.upsert(id, {
-        ip: scan.ip,
+        ip,
         name: scan.deviceName || scan.sku || id,
         sku: scan.sku,
       })
-      this.#enqueue(scan.ip, 'devStatus', govee.statusRequest())
+      this.#enqueue(ip, 'devStatus', govee.statusRequest())
       return
     }
 

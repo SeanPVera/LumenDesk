@@ -33,15 +33,19 @@ before(async () => {
 
   registry = new Registry()
   // Point discovery at the fake bulb on loopback instead of the LAN broadcast.
-  lifx = new LifxClient({ registry, discoveryAddress: '127.0.0.1', port: bulbPort, sweep: false })
+  lifx = new LifxClient({ registry, discoveryAddress: '127.0.0.1', port: bulbPort, sweep: false, broadcastRounds: 1 })
 
-  strip = new FakeGoveeDevice({ name: 'Fake Strip' })
+  // 192.0.2.0/24 is TEST-NET-1: guaranteed unroutable. The device announces
+  // it while actually answering from loopback, which is the shape of the bug
+  // that made every command come back EHOSTUNREACH.
+  strip = new FakeGoveeDevice({ name: 'Fake Strip', reportedIP: '192.0.2.99' })
   govee = new GoveeClient({
     registry,
     discoveryAddress: '127.0.0.1',
     responsePort: 0,
     joinMulticast: false,
     sweep: false,
+    broadcastRounds: 1,
   })
   await lifx.start()
   await govee.start()
@@ -290,4 +294,23 @@ test('bad input is rejected rather than sent to a light', async () => {
     body: JSON.stringify({ rgb: { r: 999, g: 0, b: 0 } }),
   })
   assert.equal(badColor.status, 400)
+})
+
+test('a Govee device that announces a stale address is still commandable', async () => {
+  // The scan reply claims 192.0.2.99 but arrives from loopback. Trusting the
+  // claim pointed every command at a dead address: sendto answered
+  // EHOSTUNREACH ("no route to host") while discovery kept listing the light
+  // as present. The source address is the one that provably works.
+  const device = await waitFor(() => registry.get(`govee:${strip.device}`))
+  assert.equal(device.ip, '127.0.0.1', 'the address the reply came from wins')
+  assert.notEqual(device.ip, '192.0.2.99', 'the self-reported address must not be trusted')
+
+  // And it is actually reachable at that address.
+  const id = encodeURIComponent(`govee:${strip.device}`)
+  await api(`/devices/${id}/brightness`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ value: 61 }),
+  })
+  await waitFor(() => strip.brightness === 61)
 })

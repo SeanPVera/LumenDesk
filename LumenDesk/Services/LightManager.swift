@@ -295,10 +295,11 @@ final class LightManager: ObservableObject {
                 self.scanPhase = "Querying bulb state"
             }
         }
-        // Discovery now sends two paced unicast sweeps with an ARP-warming gap
-        // between them, so the last probe does not leave the machine until
-        // roughly a second in. Closing the window at three seconds declared
-        // "no responses" while the scan was still going out.
+        // Discovery sends several spaced broadcast rounds and then two paced
+        // unicast sweeps with an ARP-warming gap between them, so the last
+        // probe does not leave the machine until roughly a second and a half
+        // in. Closing the window at three seconds declared "no responses"
+        // while the scan was still going out.
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.scanWindow) { [weak self] in
             Task { @MainActor in
                 guard let self, self.scanGeneration == gen else { return }
@@ -1558,13 +1559,31 @@ extension LightManager: GoveeClientDelegate {
         }
     }
 
-    nonisolated func goveeCommandFailed(_ error: Error) {
+    nonisolated func goveeCommandFailed(deviceID: String, kind: String, error: Error) {
         Task { @MainActor in
             guard self.demoWorkspaceController.acceptsLiveNetworkCallbacks else { return }
-            let affected = Set(self.devices.lazy
-                .filter { $0.brand == .govee && self.commandPendingIDs.contains($0.id) }
-                .map(\.id))
-            self.commandCoordinator.fail(deviceIDs: affected, summary: "Govee rejected the command")
+            let id = "govee:\(deviceID)"
+            // Only the light that actually failed. Failing every pending Govee
+            // command on one bad send reported errors for lights that were fine.
+            if self.commandPendingIDs.contains(id) {
+                self.commandCoordinator.fail(deviceIDs: [id], summary: "Govee light did not accept the command")
+            }
+            let device = self.device(withID: id)
+            let code = (error as? UDPSocket.SocketError)?.errnoCode
+            if let code, UDPSocket.isUnoccupied(code) {
+                // "No route to host" for a light that was discovered a moment
+                // ago means it stopped answering ARP: powered off, asleep, or
+                // moved. That is staleness, and the recovery is a rescan — not
+                // a raw errno in a toast.
+                device?.isStale = true
+                guard kind != GoveeClient.backgroundPollKind else { return }
+                let name = device?.label ?? "A Govee light"
+                self.publishError("\(name) is not answering at \(device?.address ?? "its last address"). It may be powered off or on another network — scan again to find it.")
+                return
+            }
+            // A background status poll should not raise the same alarm as
+            // something the user asked for.
+            guard kind != GoveeClient.backgroundPollKind else { return }
             self.publishError("Govee command failed: \(error)")
         }
     }
@@ -3008,15 +3027,24 @@ extension LightManager {
 
         let reports = [lifxProbe, goveeProbe].compactMap { $0 }
         if reports.isEmpty { return nil }
+
+        // An empty address is not a fault. Sweeping a /24 that holds nine
+        // devices means ~245 of them answer "nothing here", which is the
+        // sweep working. Only a refusal — no permission, no route to the
+        // network, no buffers — says something is wrong with this machine.
+        let refusals = reports.reduce(0) { $0 + $1.datagramsFailed }
+        let reason = reports.compactMap(\.lastError).first
+
         if reports.allSatisfy({ !$0.reachedNetwork }) {
-            let reason = reports.compactMap(\.lastError).first ?? "every send was refused"
-            return "No probe reached the network (\(reason)). Check whether a VPN is holding the default route."
+            if refusals > 0 {
+                return "No probe left this machine (\(reason ?? "every send was refused")). A VPN holding the default route, or a firewall filtering local traffic, is the usual cause."
+            }
+            return "Every address on \(scanInterfaces.joined(separator: ", ")) came back unreachable. Nothing is responding on this subnet — check that this machine is on the same network as the lights."
         }
-        if reports.contains(where: { $0.datagramsFailed > $0.datagramsSent }) {
-            let reason = reports.compactMap(\.lastError).first ?? "sends were refused"
-            return "Most probes were refused by the system (\(reason)). A VPN or firewall is likely intercepting local traffic."
+        if refusals > 0 {
+            return "Probes went out on \(scanInterfaces.joined(separator: ", ")), but \(refusals) send\(refusals == 1 ? " was" : "s were") refused (\(reason ?? "unknown")). A VPN or firewall may be filtering local traffic."
         }
-        return "Probes went out on \(scanInterfaces.joined(separator: ", ")) and nothing answered. Check that Local Network access is allowed, that the lights are on the same network and band (2.4 GHz for Govee), and that LAN control is enabled in the Govee Home app."
+        return "Probes went out on \(scanInterfaces.joined(separator: ", ")) and nothing answered. Check that Local Network access is allowed, that the lights are powered on and on the same network and band (2.4 GHz for Govee), and that LAN control is enabled in the Govee Home app."
     }
 
     var scanDiagnostics: [ScanDiagnostic] {
@@ -3051,15 +3079,12 @@ extension LightManager {
     }
 
     private func probeDiagnostic(title: String, report: DiscoveryProbeReport) -> ScanDiagnostic {
-        let status: ScanDiagnostic.Status
-        if !report.reachedNetwork {
-            status = .warning
-        } else if report.datagramsFailed > 0 {
-            status = .neutral
-        } else {
-            status = .good
-        }
-        return ScanDiagnostic(title: title, value: report.summary, status: status)
+        // Unoccupied addresses are the expected bulk of a sweep, so they do
+        // not colour the row; only a refusal, or a pass that never got out at
+        // all, does.
+        let healthy = report.reachedNetwork && report.datagramsFailed == 0
+        return ScanDiagnostic(title: title, value: report.summary,
+                              status: healthy ? .good : .warning)
     }
 
     func updateSchedule(_ entry: ScheduleEntry, in roomID: UUID) {

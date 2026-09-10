@@ -81,7 +81,12 @@ export class FakeLifxBulb {
 }
 
 export class FakeGoveeDevice {
-  constructor({ device = 'AA:BB:CC:DD:EE:FF:11:22', sku = 'H6159', name = 'Fake Strip' } = {}) {
+  constructor({ device = 'AA:BB:CC:DD:EE:FF:11:22', sku = 'H6159', name = 'Fake Strip',
+                // What the device claims its address is. Real Govee firmware
+                // bakes this at join time and keeps announcing it after a DHCP
+                // renewal, so a test can point it somewhere it does not live.
+                reportedIP = '127.0.0.1' } = {}) {
+    this.reportedIP = reportedIP
     this.device = device
     this.sku = sku
     this.name = name
@@ -134,7 +139,7 @@ export class FakeGoveeDevice {
       this.#send({
         msg: {
           cmd: 'scan',
-          data: { ip: '127.0.0.1', device: this.device, sku: this.sku, deviceName: this.name },
+          data: { ip: this.reportedIP, device: this.device, sku: this.sku, deviceName: this.name },
         },
       })
       return

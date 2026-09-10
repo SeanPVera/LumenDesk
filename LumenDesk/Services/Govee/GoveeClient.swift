@@ -3,7 +3,9 @@ import Foundation
 protocol GoveeClientDelegate: AnyObject {
     func goveeDiscovered(deviceID: String, address: String, sku: String?)
     func goveeDidUpdate(deviceID: String, isOn: Bool, brightness: Int, r: Int, g: Int, b: Int, kelvin: Int)
-    func goveeCommandFailed(_ error: Error)
+    /// One send failed. `kind` is the queue kind (`turn`, `status`, …) so a
+    /// background poll can be told apart from something the user asked for.
+    func goveeCommandFailed(deviceID: String, kind: String, error: Error)
     /// What the last discovery pass actually put on the wire.
     func goveeDiscoveryProbe(_ report: DiscoveryProbeReport)
 }
@@ -58,6 +60,7 @@ final class GoveeClient {
         queue.async { [weak self] in
             guard let self else { return }
             var multicastSent = 0
+            var multicastUnoccupied = 0
             var multicastFailed = 0
             var lastError: String?
 
@@ -83,8 +86,12 @@ final class GoveeClient {
                 if let code = self.socket.sendReturningErrno(pkt,
                                                              to: GoveeProtocol.multicastGroup,
                                                              port: GoveeProtocol.discoveryPort) {
-                    multicastFailed += 1
-                    lastError = UDPSocket.errorText(code)
+                    if UDPSocket.isUnoccupied(code) {
+                        multicastUnoccupied += 1
+                    } else {
+                        multicastFailed += 1
+                        lastError = UDPSocket.errorText(code)
+                    }
                 } else {
                     multicastSent += 1
                 }
@@ -96,8 +103,12 @@ final class GoveeClient {
                 if let code = self.socket.sendReturningErrno(pkt,
                                                              to: GoveeProtocol.multicastGroup,
                                                              port: GoveeProtocol.discoveryPort) {
-                    multicastFailed += 1
-                    lastError = UDPSocket.errorText(code)
+                    if UDPSocket.isUnoccupied(code) {
+                        multicastUnoccupied += 1
+                    } else {
+                        multicastFailed += 1
+                        lastError = UDPSocket.errorText(code)
+                    }
                 } else {
                     multicastSent += 1
                 }
@@ -113,6 +124,7 @@ final class GoveeClient {
                                      interfaces: interfaces) { [weak self] report in
                 var merged = report
                 merged.datagramsSent += multicastSent
+                merged.addressesUnoccupied += multicastUnoccupied
                 merged.datagramsFailed += multicastFailed
                 if merged.lastError == nil { merged.lastError = lastError }
                 self?.delegate?.goveeDiscoveryProbe(merged)
@@ -120,8 +132,12 @@ final class GoveeClient {
         }
     }
 
+    /// Queue kind for the automatic status poll, which runs on a timer and
+    /// after every discovery response rather than at the user's request.
+    static let backgroundPollKind = "status"
+
     func refresh(deviceID: String) {
-        enqueue(deviceID: deviceID, kind: "status", payload: GoveeProtocol.statusRequest())
+        enqueue(deviceID: deviceID, kind: Self.backgroundPollKind, payload: GoveeProtocol.statusRequest())
     }
 
     func setPower(deviceID: String, on: Bool) {
@@ -243,7 +259,7 @@ final class GoveeClient {
             return
         }
         earliestSend[deviceID] = DispatchTime.now() + commandGap
-        sendCommand(payload, to: host)
+        sendCommand(payload, to: host, deviceID: deviceID, kind: kind)
         if order.isEmpty {
             queuedOrder.removeValue(forKey: deviceID)
             if queuedPayloads[deviceID]?.isEmpty == true {
@@ -254,21 +270,37 @@ final class GoveeClient {
         }
     }
 
-    private func sendCommand(_ data: Data, to host: String) {
+    private func sendCommand(_ data: Data, to host: String, deviceID: String, kind: String) {
         do {
             try socket.send(data, to: host, port: GoveeProtocol.controlPort)
         } catch {
-            delegate?.goveeCommandFailed(error)
+            delegate?.goveeCommandFailed(deviceID: deviceID, kind: kind, error: error)
         }
     }
 
     // MARK: - Receive
 
+    /// Which address to send commands to.
+    ///
+    /// The datagram we are holding arrived *from* `source`, which proves that
+    /// address is reachable. `reported` is the device's own claim about its
+    /// address, and Govee firmware bakes that field at join time: after a DHCP
+    /// renewal it keeps announcing the address it no longer has. Trusting the
+    /// claim pointed every command at a dead address and `sendto` answered
+    /// with `EHOSTUNREACH` — "no route to host" — while discovery kept
+    /// reporting the light as present. LIFX has always used the source
+    /// address; this makes Govee agree.
+    static func commandAddress(source: String, reported: String?) -> String {
+        guard let reported, !reported.isEmpty, reported != source else { return source }
+        NSLog("Govee device reports \(reported) but answered from \(source); using \(source)")
+        return source
+    }
+
     private func handle(data: Data, from host: String) {
         // Govee occasionally emits truncated/duplicated frames; ignore failures.
         if let scan = GoveeProtocol.decodeScanResponse(data) {
             let id = scan.msg.data.device
-            let address = scan.msg.data.ip
+            let address = Self.commandAddress(source: host, reported: scan.msg.data.ip)
             if let oldAddress = addressByDevice[id], oldAddress != address {
                 deviceByAddress.removeValue(forKey: oldAddress)
             }

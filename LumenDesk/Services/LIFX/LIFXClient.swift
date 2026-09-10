@@ -153,10 +153,17 @@ final class LIFXClient {
 
         switch type {
         case .stateService:
-            if addressesByMac[macHex] != host {
-                addressesByMac[macHex] = host
-                delegate?.lifxDiscovered(macHex: macHex, address: host)
-            }
+            // Announce every response, not only an address that changed.
+            // Suppressing repeats meant a rescan never counted a bulb that had
+            // kept its address, never re-marked it as seen — so it aged into
+            // "not seen recently" while it was answering every scan — and, if
+            // the one announcement it did make was dropped downstream (Demo
+            // Mode swallows live callbacks), left the bulb invisible until its
+            // address changed or the app restarted. LightManager already folds
+            // a repeat into the existing device. Govee was fixed for exactly
+            // this; LIFX was missed.
+            addressesByMac[macHex] = host
+            delegate?.lifxDiscovered(macHex: macHex, address: host)
             // Immediately query state.
             let packet = LIFXProtocol.packet(type: .lightGet, source: source,
                                              target: header.target, payload: Data())

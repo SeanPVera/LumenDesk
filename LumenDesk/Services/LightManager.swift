@@ -23,6 +23,15 @@ final class LightManager: ObservableObject {
     @Published private(set) var scanPhase: String = "Idle"
     @Published private(set) var lastScanDate: Date?
     @Published private(set) var scanResponseCount: Int = 0
+    /// What the last LIFX and Govee discovery passes actually put on the wire.
+    /// A scan that failed at the socket layer used to be indistinguishable from
+    /// a scan that reached a healthy network with nothing on it.
+    @Published private(set) var lifxProbe: DiscoveryProbeReport?
+    @Published private(set) var goveeProbe: DiscoveryProbeReport?
+    /// Interfaces the last scan went out on, sampled once when the scan starts.
+    /// The diagnostics card renders on every state change, so reading
+    /// `getifaddrs` from its body would mean a syscall per frame.
+    @Published private(set) var scanInterfaces: [String] = []
     @Published var statusMessage: String = ""
     @Published var commandError: String?
     @Published var commandErrorUndo: (() -> Void)?  // optional undo action on the error toast
@@ -251,6 +260,9 @@ final class LightManager: ObservableObject {
             scanPhase = "Scanning simulated lights"
             lastScanDate = Date()
             scanResponseCount = 0
+            lifxProbe = nil
+            goveeProbe = nil
+            scanInterfaces = []
             scanGeneration += 1
             let generation = scanGeneration
             demoWorkspaceController.simulateDiscovery(devices: devices) { [weak self] result in
@@ -262,14 +274,17 @@ final class LightManager: ObservableObject {
             }
             return
         }
-        logActivity(.scan, title: "Discovery scan started", detail: "Broadcasting to LIFX and Govee devices.")
+        logActivity(.scan, title: "Discovery scan started", detail: "Broadcasting and probing every host on the local subnet for LIFX and Govee devices.")
         isScanning = true
         discoveryChanges = []
         scanStartingIDs = Set(devices.map(\.id))
         scanStartingAddresses = Dictionary(uniqueKeysWithValues: devices.map { ($0.id, $0.address) })
-        scanPhase = "Sending discovery broadcasts"
+        scanPhase = "Probing the local network"
         lastScanDate = Date()
         scanResponseCount = 0
+        lifxProbe = nil
+        goveeProbe = nil
+        scanInterfaces = LocalSubnet.interfaces().map(\.description)
         lifx?.discover()
         govee?.discover()
         scanGeneration += 1
@@ -280,7 +295,11 @@ final class LightManager: ObservableObject {
                 self.scanPhase = "Querying bulb state"
             }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+        // Discovery now sends two paced unicast sweeps with an ARP-warming gap
+        // between them, so the last probe does not leave the machine until
+        // roughly a second in. Closing the window at three seconds declared
+        // "no responses" while the scan was still going out.
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.scanWindow) { [weak self] in
             Task { @MainActor in
                 guard let self, self.scanGeneration == gen else { return }
                 self.isScanning = false
@@ -295,6 +314,10 @@ final class LightManager: ObservableObject {
             }
         }
     }
+
+    /// How long a scan stays open before it reports what it found. Covers the
+    /// paced sweeps, the ARP warm-up gap, and a bulb's reply latency.
+    static let scanWindow: TimeInterval = 5
 
     private func scheduleRefresh() {
         refreshTimer?.invalidate()
@@ -1453,6 +1476,10 @@ extension LightManager: LIFXClientDelegate {
             self.publishError("LIFX command failed: \(error)")
         }
     }
+
+    nonisolated func lifxDiscoveryProbe(_ report: DiscoveryProbeReport) {
+        Task { @MainActor in self.lifxProbe = report }
+    }
 }
 
 // MARK: - Govee delegate
@@ -1540,6 +1567,10 @@ extension LightManager: GoveeClientDelegate {
             self.commandCoordinator.fail(deviceIDs: affected, summary: "Govee rejected the command")
             self.publishError("Govee command failed: \(error)")
         }
+    }
+
+    nonisolated func goveeDiscoveryProbe(_ report: DiscoveryProbeReport) {
+        Task { @MainActor in self.goveeProbe = report }
     }
 }
 
@@ -2956,14 +2987,79 @@ extension LightManager {
         lastScanDate != nil && scanResponseCount == 0 && devices.isEmpty
     }
 
+    /// Why the last scan came back empty, in the user's terms.
+    ///
+    /// "No devices found" has at least four unrelated causes and the app used
+    /// to name only one of them. The probe reports separate "we never got on
+    /// the network" from "we probed every host and nothing answered", which are
+    /// different problems with different fixes.
+    var discoveryFailureHint: String? {
+        guard !isDemoMode, !isScanning, lastScanDate != nil, devices.isEmpty else { return nil }
+
+        if govee == nil && lifx == nil {
+            return "Neither protocol could open a socket. Another app may hold UDP 4002, or the app was denied network access."
+        }
+        if govee == nil {
+            return "Govee could not bind UDP 4002. Quit the Govee Home desktop app, the LumenDesk web bridge, or a second copy of LumenDesk, then scan again."
+        }
+        if scanInterfaces.isEmpty {
+            return "No active IPv4 network interface. Join a Wi-Fi network or plug in Ethernet, then scan again."
+        }
+
+        let reports = [lifxProbe, goveeProbe].compactMap { $0 }
+        if reports.isEmpty { return nil }
+        if reports.allSatisfy({ !$0.reachedNetwork }) {
+            let reason = reports.compactMap(\.lastError).first ?? "every send was refused"
+            return "No probe reached the network (\(reason)). Check whether a VPN is holding the default route."
+        }
+        if reports.contains(where: { $0.datagramsFailed > $0.datagramsSent }) {
+            let reason = reports.compactMap(\.lastError).first ?? "sends were refused"
+            return "Most probes were refused by the system (\(reason)). A VPN or firewall is likely intercepting local traffic."
+        }
+        return "Probes went out on \(scanInterfaces.joined(separator: ", ")) and nothing answered. Check that Local Network access is allowed, that the lights are on the same network and band (2.4 GHz for Govee), and that LAN control is enabled in the Govee Home app."
+    }
+
     var scanDiagnostics: [ScanDiagnostic] {
-        [
+        var rows = [
             ScanDiagnostic(title: "LIFX protocol", value: lifx == nil ? "Unavailable" : "Ready on UDP 56700", status: lifx == nil ? .warning : .good),
-            ScanDiagnostic(title: "Govee protocol", value: govee == nil ? "Unavailable" : "Ready on UDP 4001–4003", status: govee == nil ? .warning : .good),
+            ScanDiagnostic(title: "Govee protocol", value: govee == nil ? "Unavailable" : "Ready on UDP 4001–4003", status: govee == nil ? .warning : .good)
+        ]
+        // The probe rows are the difference between "your network has no
+        // lights" and "nothing we sent ever left the machine". Without them a
+        // wrong interface, a refused route, and a denied Local Network grant
+        // all read as an empty room.
+        rows.append(networkInterfaceDiagnostic)
+        if let lifxProbe { rows.append(probeDiagnostic(title: "LIFX probes", report: lifxProbe)) }
+        if let goveeProbe { rows.append(probeDiagnostic(title: "Govee probes", report: goveeProbe)) }
+        rows.append(contentsOf: [
             ScanDiagnostic(title: "Last scan", value: lastScanDate?.formatted(date: .abbreviated, time: .standard) ?? "Not yet scanned", status: .neutral),
             ScanDiagnostic(title: "Responses", value: "\(scanResponseCount)", status: scanResponseCount == 0 ? .warning : .good),
             ScanDiagnostic(title: "Discovered lights", value: "\(devices.count)", status: devices.isEmpty ? .warning : .good)
-        ]
+        ])
+        return rows
+    }
+
+    private var networkInterfaceDiagnostic: ScanDiagnostic {
+        guard !scanInterfaces.isEmpty else {
+            return ScanDiagnostic(title: "Network interface",
+                                  value: lastScanDate == nil ? "Not yet scanned" : "No active IPv4 network",
+                                  status: lastScanDate == nil ? .neutral : .warning)
+        }
+        return ScanDiagnostic(title: "Network interface",
+                              value: scanInterfaces.joined(separator: ", "),
+                              status: .good)
+    }
+
+    private func probeDiagnostic(title: String, report: DiscoveryProbeReport) -> ScanDiagnostic {
+        let status: ScanDiagnostic.Status
+        if !report.reachedNetwork {
+            status = .warning
+        } else if report.datagramsFailed > 0 {
+            status = .neutral
+        } else {
+            status = .good
+        }
+        return ScanDiagnostic(title: title, value: report.summary, status: status)
     }
 
     func updateSchedule(_ entry: ScheduleEntry, in roomID: UUID) {

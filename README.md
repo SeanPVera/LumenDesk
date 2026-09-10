@@ -592,16 +592,17 @@ To produce a `.app` you can keep or hand to someone else, use `./scripts/package
 8. Launch LumenDesk and accept the **Local Network** permission prompt.
 9. Run discovery.
 
-### iOS discovery behavior
+### How a scan actually finds lights
 
-Apple restricts UDP broadcast and multicast on iOS unless the app has the restricted `com.apple.developer.networking.multicast` entitlement. To remain usable without that entitlement, LumenDesk falls back to a unicast sweep on iOS:
+A scan does not rely on one broadcast. `255.255.255.255` is not routed: the kernel picks a single interface from the default route, so on a Mac holding a VPN route, bridging a Thunderbolt link, or running a container network, that one datagram leaves by an interface with no lights on it. The same goes for multicast with no outgoing interface set. Every scan therefore uses three routes at once, on both platforms:
 
-- It probes addresses on the local `/24` subnet.
-- It sends LIFX discovery probes to UDP `56700`.
-- It sends Govee scan messages to UDP `4001`.
-- Bulbs reply unicast when they support the relevant LAN protocol.
+- **Subnet-directed broadcast per interface.** `192.168.1.255` and its equivalents have a connected route, so the kernel picks the interface that matches. Govee multicast is sent once per interface with the outgoing interface pinned, and the group is joined per interface too.
+- **The limited broadcast**, as a fallback for anything the directed form misses.
+- **A unicast probe of every host on those subnets.** Bulbs answer a probe addressed straight to them, and the reply is an ordinary unicast datagram that no router or OS gates. This is what carries discovery on routers with client isolation or broadcast filtering, and on iOS, where Apple restricts broadcast and multicast without the `com.apple.developer.networking.multicast` entitlement.
 
-This works on many home networks. If your network is larger than a `/24`, only the nearby `/24` address range is probed unless you add the multicast entitlement and update the project capabilities.
+The sweep is paced in small bursts and runs twice with a short gap. macOS parks a single datagram per unresolved neighbour while it resolves ARP and drops it if resolution is slow, so a cold cache eats most of a single pass; the second pass runs against warm entries. A network wider than a `/24` is capped to the `/24` around your own address, and a narrower netmask is honoured exactly.
+
+Discovery diagnostics report what each pass actually put on the wire — the interfaces used, how many probes went out, and how many the system refused — so "nothing on this network answered" is distinguishable from "nothing we sent ever left the machine."
 
 ## Optional: regenerate the Xcode project
 
@@ -739,10 +740,21 @@ LumenDesk/
 
 ### No bulbs found
 
+Open **Discovery diagnostics** first — it names the cause instead of leaving you to guess. The rows to read are **Network interface** (which interfaces the scan used) and **LIFX/Govee probes** (how many datagrams went out and how many the system refused).
+
+- **"No probe reached the network"** — nothing left the machine. A VPN is almost always holding the default route; disconnect it, or exclude the local subnet, and scan again.
+- **"Most probes were refused"** — a firewall or filtering VPN is intercepting local traffic. Allow LumenDesk to send and receive local UDP.
+- **Probes went out and nothing answered** — the packets are on the wire and the lights are not replying. Work through the list below.
+- **The interface shown is not the one your lights are on** — a Thunderbolt bridge, a container network, or a phone tether can be listed alongside your real network. Discovery probes all of them, so this is informational unless the real one is missing entirely.
+
+Then:
+
 - Confirm the computer/phone and bulbs are on the same LAN or VLAN.
 - Make sure the Wi-Fi network does not enable client isolation.
+- Govee LAN control is 2.4 GHz only; a controller on a 5 GHz or 6 GHz SSID that is isolated from the 2.4 GHz one will not reach them.
 - Avoid guest Wi-Fi networks for either the controller or bulbs.
-- Check that your firewall allows LumenDesk to send and receive local UDP traffic.
+- On macOS 15 and later, check **System Settings → Privacy & Security → Local Network** and confirm LumenDesk is enabled. A denied grant drops packets silently, with no error at the socket. The **Local Network** button in Discovery diagnostics opens that pane.
+- Debug builds run from a temporary DerivedData path, which macOS treats as a different app each time it is rebuilt; the Local Network grant does not carry over. Use a stable signed build for permission testing (see [`DISTRIBUTION.md`](DISTRIBUTION.md)).
 - Try running Scan again after power-cycling a bulb.
 
 ### Govee bulbs do not appear
@@ -763,9 +775,9 @@ LumenDesk/
 
 ### iPhone finds fewer lights than Mac
 
-- iOS discovery may be using the unicast `/24` fallback if the app does not have Apple's multicast entitlement.
-- Make sure the iPhone's IP address is in the same `/24` range as the bulbs.
-- If your home network uses a larger or segmented subnet, test from the same Wi-Fi segment as the bulbs.
+- Without Apple's multicast entitlement, iOS has only the unicast sweep, so a light that answers broadcast but not a direct probe is invisible there.
+- Make sure the iPhone's IP address is in the same subnet range as the bulbs.
+- If your home network is larger than a `/24` or segmented, only the `/24` around the phone's own address is probed; test from the same Wi-Fi segment as the bulbs.
 
 ### Govee bind errors
 

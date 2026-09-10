@@ -271,9 +271,14 @@ export function createServer({
       }
 
       if (req.method === 'POST' && path === '/discover') {
-        lifx.discover()
-        govee.discover()
-        return json(res, 202, { ok: true })
+        // Awaited so the caller gets the probe reports back. "Nothing found"
+        // and "nothing we sent ever left the machine" are different problems,
+        // and the client can only tell them apart if it is told.
+        const [lifxProbe, goveeProbe] = await Promise.all([
+          lifx.discover().catch(err => ({ error: err.message })),
+          govee.discover().catch(err => ({ error: err.message })),
+        ])
+        return json(res, 200, { ok: true, probes: { lifx: lifxProbe, govee: goveeProbe } })
       }
 
       if (req.method === 'POST' && path === '/refresh') {

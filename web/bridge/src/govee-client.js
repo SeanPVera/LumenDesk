@@ -1,6 +1,7 @@
 import dgram from 'node:dgram'
 import * as govee from './govee.js'
 import { clampPercent } from './color.js'
+import { describeReport, listInterfaces, probeSubnets, sendTo, toDotted } from './net.js'
 
 // Govee firmware drops back-to-back datagrams, so — exactly as GoveeClient.swift
 // does — commands are paced at least MIN_GAP_MS apart per device and queued
@@ -16,6 +17,7 @@ export class GoveeClient {
     responsePort = govee.RESPONSE_PORT,
     controlPort = govee.CONTROL_PORT,
     joinMulticast = true,
+    sweep = true,
   }) {
     this.registry = registry
     this.log = log
@@ -24,6 +26,15 @@ export class GoveeClient {
     this.responsePort = responsePort
     this.controlPort = controlPort
     this.joinMulticast = joinMulticast
+    // Off in tests, where discovery is pointed at a fake device on loopback and
+    // a real subnet sweep would spray the machine running the suite.
+    this.sweep = sweep
+    /** Interface addresses we already hold a multicast membership on. */
+    this.joined = new Set()
+    /** What the last discovery pass put on the wire. */
+    this.lastProbe = null
+    /** In-flight pass, so a rescan joins it instead of stacking sweeps. */
+    this.discovering = null
     this.socket = null
     this.queues = new Map() // ip -> { pending: Map<kind, Buffer>, timer, lastSent }
   }
@@ -35,7 +46,10 @@ export class GoveeClient {
       socket.on('error', err => this.log(`Govee socket error: ${err.message}`))
       socket.on('message', (msg, rinfo) => this.#handle(msg, rinfo))
       socket.bind(this.responsePort, () => {
+        socket.setBroadcast(true)
         try {
+          // A baseline join on the default multicast interface; `discover`
+          // adds one per real interface once it can enumerate them.
           if (this.joinMulticast) socket.addMembership(this.discoveryAddress)
         } catch (err) {
           // Without multicast membership discovery still works on networks that
@@ -55,12 +69,72 @@ export class GoveeClient {
     this.socket = null
   }
 
+  /**
+   * One discovery pass. Multicast is sent once per interface with the outgoing
+   * interface pinned: left unset, the OS sends the scan out whichever
+   * interface the default route names, which on a host running a VPN or a
+   * container bridge is reliably not the one the lights are on. Devices also
+   * answer a scan sent to their own address or the subnet broadcast, which is
+   * what carries discovery on networks that filter multicast.
+   */
   discover() {
-    if (!this.socket) return
+    if (!this.socket) return Promise.resolve(null)
+    if (this.discovering) return this.discovering
+    this.discovering = this.#runDiscovery().finally(() => { this.discovering = null })
+    return this.discovering
+  }
+
+  async #runDiscovery() {
     const req = govee.scanRequest()
-    this.socket.send(req, this.discoveryPort, this.discoveryAddress, err => {
-      if (err) this.log(`Govee discovery send failed: ${err.message}`)
+    const interfaces = this.sweep ? listInterfaces() : []
+    let multicastSent = 0
+    let multicastFailed = 0
+    let multicastError = null
+
+    if (this.joinMulticast && interfaces.length) {
+      for (const item of interfaces) {
+        const address = toDotted(item.address)
+        if (!this.joined.has(address)) {
+          try {
+            this.socket.addMembership(this.discoveryAddress, address)
+            this.joined.add(address)
+          } catch {
+            // Already joined, or the interface refuses membership. The
+            // directed broadcast and the sweep do not depend on it.
+          }
+        }
+        try {
+          this.socket.setMulticastInterface(address)
+        } catch {
+          // Keep going for the same reason.
+        }
+        const err = await sendTo(this.socket, req, this.discoveryPort, this.discoveryAddress)
+        if (err) {
+          multicastFailed += 1
+          multicastError = err.message ?? String(err)
+        } else {
+          multicastSent += 1
+        }
+      }
+      try {
+        this.socket.setMulticastInterface('0.0.0.0')
+      } catch {
+        // Restoring the default is best effort.
+      }
+    }
+
+    const report = await probeSubnets(this.socket, req, this.discoveryPort, {
+      interfaces,
+      // With no interfaces to enumerate (tests, or a host with no IPv4
+      // network) this is the only target left, so it must still be sent.
+      extraTargets: interfaces.length && this.joinMulticast ? [] : [this.discoveryAddress],
     })
+    report.sent += multicastSent
+    report.failed += multicastFailed
+    if (!report.lastError) report.lastError = multicastError
+    this.lastProbe = report
+    if (!report.sent) this.log(`Govee discovery reached nothing: ${describeReport(report)}`)
+    return report
   }
 
   refresh() {

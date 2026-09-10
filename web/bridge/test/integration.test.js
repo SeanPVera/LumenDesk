@@ -33,7 +33,7 @@ before(async () => {
 
   registry = new Registry()
   // Point discovery at the fake bulb on loopback instead of the LAN broadcast.
-  lifx = new LifxClient({ registry, discoveryAddress: '127.0.0.1', port: bulbPort })
+  lifx = new LifxClient({ registry, discoveryAddress: '127.0.0.1', port: bulbPort, sweep: false })
 
   strip = new FakeGoveeDevice({ name: 'Fake Strip' })
   govee = new GoveeClient({
@@ -41,6 +41,7 @@ before(async () => {
     discoveryAddress: '127.0.0.1',
     responsePort: 0,
     joinMulticast: false,
+    sweep: false,
   })
   await lifx.start()
   await govee.start()

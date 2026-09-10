@@ -1,6 +1,7 @@
 import dgram from 'node:dgram'
 import * as lifx from './lifx.js'
 import { hsbkToRgb, percentToU16, rgbToHsv, u16ToPercent } from './color.js'
+import { describeReport, listInterfaces, probeSubnets } from './net.js'
 
 // Discovery broadcasts GetService on 56700; every responder is then asked for
 // its full light state. Devices reply to the port we sent from, so one
@@ -11,11 +12,19 @@ export class LifxClient {
     log = () => {},
     discoveryAddress = lifx.BROADCAST_ADDRESS,
     port = lifx.PORT,
+    sweep = true,
   }) {
     this.registry = registry
     this.log = log
     this.discoveryAddress = discoveryAddress
     this.port = port
+    // Off in tests, where discovery is pointed at a fake bulb on loopback and
+    // a real subnet sweep would spray the machine running the suite.
+    this.sweep = sweep
+    /** What the last discovery pass put on the wire. */
+    this.lastProbe = null
+    /** In-flight pass, so a rescan joins it instead of stacking sweeps. */
+    this.discovering = null
     this.socket = null
     this.source = 0x4c554d45 // "LUME"
     this.sequence = 0
@@ -44,16 +53,33 @@ export class LifxClient {
     this.socket = null
   }
 
+  /**
+   * One discovery pass. The limited broadcast alone finds nothing on a host
+   * whose default route belongs to a VPN or a container bridge, and consumer
+   * routers with AP client isolation drop it outright, so each interface also
+   * gets its own directed broadcast and a paced unicast probe of every host on
+   * its subnet. Bulbs answer a probe addressed straight to them.
+   */
   discover() {
-    if (!this.socket) return
+    if (!this.socket) return Promise.resolve(null)
+    if (this.discovering) return this.discovering
+    this.discovering = this.#runDiscovery().finally(() => { this.discovering = null })
+    return this.discovering
+  }
+
+  async #runDiscovery() {
     const pkt = lifx.packet({
       type: lifx.Message.getService,
       source: this.source,
       sequence: this.#nextSequence(),
     })
-    this.socket.send(pkt, this.port, this.discoveryAddress, err => {
-      if (err) this.log(`LIFX discovery send failed: ${err.message}`)
+    const report = await probeSubnets(this.socket, pkt, this.port, {
+      interfaces: this.sweep ? listInterfaces() : [],
+      extraTargets: [this.discoveryAddress],
     })
+    this.lastProbe = report
+    if (!report.sent) this.log(`LIFX discovery reached nothing: ${describeReport(report)}`)
+    return report
   }
 
   /** Ask every known device for its current colour/power/label. */

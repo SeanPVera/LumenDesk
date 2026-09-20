@@ -129,22 +129,6 @@ final class NetworkUtilityTests: XCTestCase {
         XCTAssertFalse(LocalSubnet.isContiguous(0x00FF_0000))
     }
 
-    func testProbeReportSummaryDistinguishesFailureFromSilence() {
-        let clean = DiscoveryProbeReport(interfaces: ["en0 192.168.1.42/24"], datagramsSent: 254)
-        XCTAssertTrue(clean.reachedNetwork)
-        XCTAssertEqual(clean.summary, "254 probes on en0 192.168.1.42/24")
-
-        let refused = DiscoveryProbeReport(interfaces: ["en0 192.168.1.42/24"],
-                                           datagramsSent: 0,
-                                           datagramsFailed: 254,
-                                           lastError: "No route to host")
-        XCTAssertFalse(refused.reachedNetwork)
-        XCTAssertTrue(refused.summary.contains("254 failed"))
-        XCTAssertTrue(refused.summary.contains("No route to host"))
-
-        XCTAssertEqual(DiscoveryProbeReport().summary, "No IPv4 network interface")
-    }
-
     func testLiveInterfacesAreUsableWhenPresent() {
         // The host running the tests may have no IPv4 network at all, so this
         // asserts the shape of whatever is there rather than its presence.
@@ -183,6 +167,11 @@ final class NetworkUtilityTests: XCTestCase {
         XCTAssertTrue(report.summary.contains("499 addresses empty"))
         XCTAssertFalse(report.summary.contains("refused"),
                        "a sparse subnet must not read as a refusal")
+
+        // A pass with nothing to qualify carries no extra clause at all.
+        var quiet = DiscoveryProbeReport(interfaces: ["en0 192.168.1.42/24"])
+        quiet.absorb(UDPSocket.SweepTally(sent: 254))
+        XCTAssertEqual(quiet.summary, "254 probes on en0 192.168.1.42/24")
     }
 
     func testProbeReportSurfacesGenuineRefusals() {

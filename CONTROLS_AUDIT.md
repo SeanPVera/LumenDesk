@@ -282,4 +282,3 @@ Software tests cannot establish any of this. Before shipping:
 5. **Same H60B0.** Confirm whether re-sending `razer-on` mid-stream blanks the frame, settling the assumption the native workaround is built on.
 6. **Any RGBIC device with a durable layout applied from the Mac app.** Run a web preview, stop it, power-cycle the device, and confirm the durable layout is intact — proving the web path wrote nothing permanent.
 7. **A Govee model the catalog does not recognize.** Confirm it either ignores razer packets harmlessly or is correctly excluded by the profile gate.
-

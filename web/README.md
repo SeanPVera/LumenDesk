@@ -35,9 +35,12 @@ colours to the bridge; nothing is uploaded anywhere. To run a show:
    changes from "Beat" to the tempo and bar count once it locks, which normally
    takes about four seconds of steady rhythm.
 
-**Stop** ends the show and leaves the lights on the last colour they were sent.
-The browser client has no restore step, so apply a scene from Library if you
-want them back where they started; the Mac and iPhone apps do restore.
+**Stop** ends the show and puts the lights back on the colours they were showing
+when it started, as the Mac and iPhone apps do. Leaving the Music tab or closing
+it counts as a stop. Colour is the only thing a browser show changes — power and
+brightness are left alone throughout — so replaying those colours is a complete
+restore. A light that was unreachable when the show began has no colour to go
+back to and is left where it is.
 
 Each light gets a job. **Auto** reads the light's name, giving the punch to one
 called "kick" or "downstage" and the second colour to one called "rear" or

@@ -322,7 +322,10 @@ export function createServer({
               ? lifx.setColor(device, { rgb })
               : govee.setColor(device, { rgb })
           if (ok) {
-            registry.patch(device.id, { color: rgb, power: true })
+            // Colour only: this path never sends a power command, so it must
+            // not record a power state it did not set. The device's own status
+            // reply is what says whether the light is lit.
+            registry.patch(device.id, { color: rgb })
             applied += 1
           }
         }

@@ -126,6 +126,11 @@ final class PersistenceStore: ApplicationPersistence {
         var sunsetMinute: Int
         var brightnessPresets: [Double]
         // Optional so configurations exported by earlier versions still import.
+        /// Which lights the user put in white (kelvin) mode rather than colour
+        /// mode. A per-device setting made in the UI, so it belongs in an
+        /// exported configuration; it used to persist locally and silently
+        /// drop out of every export.
+        var whiteModeDeviceIDs: [String]?
         var goveeSegmentStates: [String: GoveeSegmentState]?
         var goveeSegmentPresets: [GoveeSegmentPreset]?
         var musicModeConfiguration: MusicModeConfiguration?
@@ -145,6 +150,7 @@ final class PersistenceStore: ApplicationPersistence {
             sunsetHour: Int,
             sunsetMinute: Int,
             brightnessPresets: [Double],
+            whiteModeDeviceIDs: [String]?,
             goveeSegmentStates: [String: GoveeSegmentState]?,
             goveeSegmentPresets: [GoveeSegmentPreset]?,
             musicModeConfiguration: MusicModeConfiguration?,
@@ -163,6 +169,7 @@ final class PersistenceStore: ApplicationPersistence {
             self.sunsetHour = sunsetHour
             self.sunsetMinute = sunsetMinute
             self.brightnessPresets = brightnessPresets
+            self.whiteModeDeviceIDs = whiteModeDeviceIDs
             self.goveeSegmentStates = goveeSegmentStates
             self.goveeSegmentPresets = goveeSegmentPresets
             self.musicModeConfiguration = musicModeConfiguration
@@ -183,6 +190,7 @@ final class PersistenceStore: ApplicationPersistence {
             case sunsetHour
             case sunsetMinute
             case brightnessPresets
+            case whiteModeDeviceIDs
             case goveeSegmentStates
             case goveeSegmentPresets
             case musicModeConfiguration
@@ -204,6 +212,7 @@ final class PersistenceStore: ApplicationPersistence {
             sunsetHour = try container.decode(Int.self, forKey: .sunsetHour)
             sunsetMinute = try container.decode(Int.self, forKey: .sunsetMinute)
             brightnessPresets = try container.decode([Double].self, forKey: .brightnessPresets)
+            whiteModeDeviceIDs = try container.decodeIfPresent([String].self, forKey: .whiteModeDeviceIDs)
             goveeSegmentStates = try container.decodeIfPresent([String: GoveeSegmentState].self, forKey: .goveeSegmentStates)
             goveeSegmentPresets = try container.decodeIfPresent([GoveeSegmentPreset].self, forKey: .goveeSegmentPresets)
             musicModeConfiguration = try container.decodeIfPresent(MusicModeConfiguration.self, forKey: .musicModeConfiguration)
@@ -328,6 +337,7 @@ final class PersistenceStore: ApplicationPersistence {
             sunsetHour: solar.sunsetHour,
             sunsetMinute: solar.sunsetMinute,
             brightnessPresets: state.customBrightnessPresets,
+            whiteModeDeviceIDs: Array(state.whiteModeDeviceIDs),
             goveeSegmentStates: state.goveeSegmentStates,
             goveeSegmentPresets: state.goveeSegmentPresets,
             musicModeConfiguration: state.musicModeConfiguration,
@@ -359,6 +369,10 @@ final class PersistenceStore: ApplicationPersistence {
                 sunsetMinute: archive.sunsetMinute
             )
             next.customBrightnessPresets = archive.brightnessPresets
+            // Older exports carry no white-mode list; keep what this install knows.
+            if let whiteModeDeviceIDs = archive.whiteModeDeviceIDs {
+                next.whiteModeDeviceIDs = Set(whiteModeDeviceIDs)
+            }
             // Older exports have no segment data; keep what this install knows.
             if let segmentStates = archive.goveeSegmentStates {
                 next.goveeSegmentStates = segmentStates

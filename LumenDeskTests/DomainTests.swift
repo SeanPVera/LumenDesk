@@ -471,6 +471,80 @@ final class DomainTests: XCTestCase {
         XCTAssertEqual(device.isOn, !originalPower)
     }
 
+    @MainActor
+    func testRehearsingASceneAppliesTheSameSegmentLayoutApplyingItWould() throws {
+        let manager = LightManager(
+            defaults: isolatedDefaults(),
+            persistenceStore: temporaryPersistenceStore()
+        )
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+
+        // "Desk COB Strip" — a Govee H619A, so a real segmented profile.
+        let strip = try XCTUnwrap(manager.devices.first { $0.brand == .govee && $0.sku == "H619A" })
+        let layout = GoveeSegmentState(
+            colors: [
+                GoveeSegmentColor(red: 1, green: 0, blue: 0),
+                GoveeSegmentColor(red: 0, green: 1, blue: 0),
+                GoveeSegmentColor(red: 0, green: 0, blue: 1)
+            ],
+            gradient: true,
+            isActive: true
+        )
+        let hsb = strip.color.hsbComponents
+        let scene = LightingScene(name: "Painted Strip", snapshots: [
+            strip.id: DeviceSnapshot(
+                isOn: true,
+                brightness: 0.42,
+                hue: hsb.h,
+                saturation: hsb.s,
+                kelvin: strip.kelvin,
+                segments: layout
+            )
+        ])
+
+        // Rehearsal is a preview of applying, so it has to put the same thing
+        // on the light. It used to carry its own copy of the per-device logic,
+        // which had lost the segment branch entirely: rehearsing a scene that
+        // captured a layout previewed one blended wash and never sent Govee a
+        // brightness at all.
+        manager.startSceneRehearsal(scene, deviceIDs: [strip.id])
+
+        let rehearsed = try XCTUnwrap(manager.activeSegmentState(for: strip.id))
+        XCTAssertEqual(rehearsed.colors, layout.colors)
+        XCTAssertEqual(rehearsed.gradient, layout.gradient)
+        XCTAssertEqual(strip.brightness, 0.42, accuracy: 0.0001)
+        XCTAssertEqual(manager.rehearsalSceneID, scene.id)
+
+        // Ending the rehearsal puts the light back where it started.
+        manager.stopSceneRehearsal(restore: true)
+        XCTAssertNil(manager.rehearsalSceneID)
+    }
+
+    @MainActor
+    func testAFailedConfigurationExportIsReportedRatherThanSwallowed() throws {
+        let manager = LightManager(
+            defaults: isolatedDefaults(),
+            persistenceStore: temporaryPersistenceStore()
+        )
+
+        // A directory that does not exist stands in for the read-only volume or
+        // unwritable folder a user can pick in the save panel. The write used to
+        // go out through `try?`, so a configuration that never landed looked
+        // exactly like one that did.
+        let unwritable = URL(fileURLWithPath: "/nonexistent-\(UUID().uuidString)/LumenDesk.json")
+        XCTAssertFalse(manager.exportConfiguration(to: unwritable))
+        XCTAssertNotNil(manager.commandError)
+        XCTAssertTrue(try XCTUnwrap(manager.commandError).contains("Export failed"))
+
+        let writable = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LumenDeskTests-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: writable) }
+        XCTAssertTrue(manager.exportConfiguration(to: writable))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: writable.path))
+        XCTAssertEqual(manager.lastActionSummary?.hasPrefix("Configuration exported"), true)
+    }
+
     private func isolatedDefaults() -> UserDefaults {
         UserDefaults(suiteName: "LumenDeskTests.\(UUID().uuidString)")!
     }

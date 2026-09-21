@@ -113,6 +113,7 @@ export class LifxClient {
     // because a LIFX device always reports both.
     if (hsbk) {
       this.#send(lifx.Message.lightSetColor, target, device.ip, lifx.setColorPayload(hsbk))
+      this.#rememberHSBK(device.id, hsbk)
       return true
     }
 
@@ -131,7 +132,28 @@ export class LifxClient {
 
     const next = { hue, saturation, brightness, kelvin: kelvin || current.kelvin || 3500 }
     this.#send(lifx.Message.lightSetColor, target, device.ip, lifx.setColorPayload(next))
+    this.#rememberHSBK(device.id, next)
     return true
+  }
+
+  /**
+   * Carry the HSBK we just sent into our own mirror instead of waiting for the
+   * bulb's StateLight reply.
+   *
+   * Every channel this client does not change is read back out of `device.hsbk`,
+   * so leaving the mirror stale made a second command undo the first: set
+   * brightness to 20%, tap a colour before the reply lands, and the colour
+   * packet rebuilt brightness from the pre-change value and put the bulb back
+   * to where it started. The reply still arrives and still wins — this only
+   * closes the window before it does.
+   */
+  #rememberHSBK(deviceID, hsbk) {
+    this.registry.patch(deviceID, {
+      hsbk,
+      brightness: u16ToPercent(hsbk.brightness),
+      color: hsbkToRgb(hsbk),
+      kelvin: hsbk.kelvin,
+    })
   }
 
   #nextSequence() {

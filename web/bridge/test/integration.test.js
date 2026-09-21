@@ -7,6 +7,8 @@ import { LifxClient } from '../src/lifx-client.js'
 import { GoveeClient } from '../src/govee-client.js'
 import { createServer } from '../src/server.js'
 import { FakeLifxBulb, FakeGoveeDevice } from './fake-devices.js'
+import { percentToU16, rgbToHsv, u16ToPercent } from '../src/color.js'
+import { Message as lifxMessages } from '../src/lifx.js'
 
 const ORIGIN = 'https://seanpvera.github.io'
 let bulb, strip, registry, lifx, govee, server, base
@@ -140,6 +142,47 @@ test('LIFX colour and brightness map into HSBK', async () => {
   assert.equal(bulb.color.saturation, 65535, 'hue/saturation preserved across a brightness change')
 })
 
+test('a colour sent before the bulb answers keeps the brightness just set', async () => {
+  const id = 'lifx%3Ad073d5000a01'
+  const green = rgbToHsv({ r: 0, g: 255, b: 0 })
+  const greenHue = Math.round((green.h / 360) * 65535)
+  const dim = percentToU16(20)
+
+  // Hold the bulb's StateLight replies so the second command lands inside the
+  // window a real LAN always has. Every channel the client does not change is
+  // read back out of its own HSBK mirror, so a stale mirror made the colour
+  // packet rebuild brightness from the pre-change value and undo it.
+  const realSend = bulb.socket.send.bind(bulb.socket)
+  const held = []
+  bulb.socket.send = (...args) => held.push(args)
+  try {
+    await api(`/devices/${id}/brightness`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ value: 20 }),
+    })
+    await waitFor(() => bulb.color.brightness === dim)
+
+    await api(`/devices/${id}/color`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rgb: { r: 0, g: 255, b: 0 } }),
+    })
+    // Wait on the colour itself: the bulb was already saturated, so waiting on
+    // saturation alone would return before this command had landed at all.
+    await waitFor(() => bulb.color.hue === greenHue)
+
+    assert.equal(
+      bulb.color.brightness,
+      dim,
+      `colour command reverted brightness to ${u16ToPercent(bulb.color.brightness)}%`,
+    )
+  } finally {
+    bulb.socket.send = realSend
+    held.forEach(args => realSend(...args))
+  }
+})
+
 test('music frame paints one solid colour per fixture and never invents razer', async () => {
   const devices = await waitFor(() => {
     const list = registry.list()
@@ -147,6 +190,8 @@ test('music frame paints one solid colour per fixture and never invents razer', 
   })
   const lifxDevice = devices.find(d => d.brand === 'lifx')
   const goveeDevice = devices.find(d => d.brand === 'govee')
+  const brightnessBefore = bulb.color.brightness
+
   const res = await api('/music/frame', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Origin: ORIGIN },
@@ -154,6 +199,8 @@ test('music frame paints one solid colour per fixture and never invents razer', 
       states: [
         { fixtureID: lifxDevice.id, rgb: { r: 20, g: 40, b: 200 } },
         { fixtureID: goveeDevice.id, rgb: { r: 20, g: 40, b: 200 } },
+        // A second state for a fixture already painted this frame. One colour
+        // per fixture means this one is dropped, not sent after the first.
         { fixtureID: lifxDevice.id, rgb: { r: 255, g: 0, b: 0 } },
       ],
     }),
@@ -161,8 +208,28 @@ test('music frame paints one solid colour per fixture and never invents razer', 
   assert.equal(res.status, 200)
   assert.equal(res.body.ok, true)
   assert.equal(res.body.applied, 2)
-  const patched = registry.get(lifxDevice.id)
-  assert.deepEqual(patched.color, { r: 20, g: 40, b: 200 })
+
+  // Assert what the lights actually received over UDP. The registry's own
+  // colour is an optimistic echo that the device's next authoritative reply
+  // legitimately replaces, so it cannot stand in for the device's state.
+  const hsv = rgbToHsv({ r: 20, g: 40, b: 200 })
+  const expectedHue = Math.round((hsv.h / 360) * 65535)
+  await waitFor(() => bulb.color.hue === expectedHue)
+  assert.equal(bulb.color.hue, expectedHue, 'bulb holds the first colour, not the duplicate')
+  assert.equal(bulb.color.saturation, Math.round(hsv.s * 65535))
+  assert.equal(
+    bulb.color.brightness,
+    brightnessBefore,
+    'a music frame carries colour only and must not move the light off its brightness',
+  )
+  await waitFor(() => strip.color.b === 200)
+  assert.deepEqual(strip.color, { r: 20, g: 40, b: 200 })
+
+  // "never invents razer": the RGBIC streaming extensions are not spoken on
+  // this path, so an RGBIC strip follows as a single wash.
+  assert.ok(!strip.received.includes('razer'), 'no razer packet was sent')
+  assert.ok(!strip.received.includes('ptReal'), 'no ptReal packet was sent')
+  assert.ok(!bulb.received.includes(lifxMessages.set64), 'no LIFX matrix packet was sent')
 })
 
 test('Govee commands arrive as LAN JSON and update state', async () => {

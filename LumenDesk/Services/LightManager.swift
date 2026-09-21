@@ -517,7 +517,14 @@ final class LightManager: ObservableObject {
 
     private func expectColor(_ device: LightDevice, color: Color) {
         guard demoWorkspaceController.allowsLiveNetworking else { return }
-        let rgb = color.rgbComponents
+        // Record what the light will actually report, not what the user picked.
+        // A LIFX bulb carries brightness in its own HSBK field, so `sendColor`
+        // deliberately drops the picked color's brightness component and
+        // `lifxDidUpdate` rebuilds the reported color at full brightness.
+        // Comparing the raw picked color against that reconstruction missed by
+        // more than the tolerance for anything below full value, so the command
+        // never confirmed and timed out with a false "did not confirm" error.
+        let rgb = (device.brand == .lifx ? color.lifxReportedEquivalent : color).rgbComponents
         commandCoordinator.expectColor(deviceID: device.id, red: rgb.r, green: rgb.g, blue: rgb.b)
     }
 
@@ -1053,6 +1060,19 @@ final class LightManager: ObservableObject {
     /// True when the device belongs to a currently animating effect run.
     private func isEffectAnimating(_ deviceID: String) -> Bool {
         effectRuns.values.contains { $0.animatedDeviceIDs.contains(deviceID) }
+    }
+
+    /// The running effect that owns this light, if one does.
+    ///
+    /// While a run owns a fixture it repaints colour and brightness on every
+    /// frame, so a value set on that light's own instruments is overwritten
+    /// within one frame interval. The row uses this to disable those controls
+    /// and point at the running show, rather than accept a change and quietly
+    /// lose it.
+    func animatingEffect(for deviceID: String) -> (scope: LightScope, name: String)? {
+        guard let match = effectRuns.first(where: { $0.value.animatedDeviceIDs.contains(deviceID) })
+        else { return nil }
+        return (match.key, match.value.effect.name)
     }
 
     private func runEffectFrame(_ run: EffectRun) {
@@ -2143,6 +2163,28 @@ extension LightManager {
         try? persistenceStore.exportConfiguration(from: persistedApplicationState())
     }
 
+    /// Writes the exported configuration to `url` and reports what happened.
+    ///
+    /// Both halves of this used to be silent: encoding returned nil on failure
+    /// and the write went out through `try?`. A user whose export never landed
+    /// — a read-only volume, a folder they could not write — saw nothing at all
+    /// and was left believing their configuration was backed up.
+    @discardableResult
+    func exportConfiguration(to url: URL) -> Bool {
+        do {
+            let data = try persistenceStore.exportConfiguration(from: persistedApplicationState())
+            try data.write(to: url, options: .atomic)
+            lastActionSummary = "Configuration exported to \u{201C}\(url.lastPathComponent)\u{201D}"
+            logActivity(.system, title: "Configuration exported", detail: url.lastPathComponent)
+            return true
+        } catch {
+            publishError("Export failed \u{2014} could not write \u{201C}\(url.lastPathComponent)\u{201D}: \(error.localizedDescription)")
+            logActivity(.system, title: "Configuration export failed",
+                        detail: error.localizedDescription, isFailure: true)
+            return false
+        }
+    }
+
     @discardableResult
     func importRoomsData(_ data: Data) -> Bool {
         do {
@@ -2346,6 +2388,35 @@ extension LightManager {
         lastActionSummary = "Restored \(revision.label)"
     }
 
+    /// Puts one captured scene snapshot onto a light.
+    ///
+    /// Shared by Apply and Rehearse so a preview cannot drift from what
+    /// applying actually does. Rehearsal used to carry its own copy of this
+    /// logic, which had lost the Govee segment branch and never sent a Govee
+    /// brightness at all — so rehearsing a scene that captured a segment
+    /// layout previewed a solid wash, at the light's old brightness, while
+    /// Apply painted the real segments.
+    fileprivate func applySceneSnapshot(_ snap: DeviceSnapshot, to device: LightDevice) {
+        device.isOn = snap.isOn
+        device.brightness = snap.brightness
+        device.kelvin = snap.kelvin
+        if let matrix = snap.matrix, device.isLIFXLuna {
+            applyLIFXMatrix(device, state: matrix, recordUndo: false,
+                            turnOn: false, announce: false)
+        } else if let segments = snap.segments, device.brand == .govee {
+            applySegments(device, state: segments, recordUndo: false, turnOn: false, announce: false)
+            sendBrightness(device, value: snap.brightness)
+        } else {
+            let color = Color(hue: snap.hue, saturation: snap.saturation, brightness: 1)
+            device.color = color
+            sendColor(device, color: color)
+            // Govee needs an explicit brightness message; LIFX carries
+            // brightness inside the same SetColor packet.
+            if device.brand == .govee { sendBrightness(device, value: snap.brightness) }
+        }
+        sendPower(device, on: snap.isOn)
+    }
+
     func startSceneRehearsal(_ scene: LightingScene, deviceIDs: Set<String>) {
         stopSceneRehearsal(restore: true)
         let targets = devices.filter { deviceIDs.contains($0.id) && scene.snapshots[$0.id] != nil && !$0.isStale }
@@ -2357,15 +2428,7 @@ extension LightManager {
         rehearsalSceneID = scene.id
         for device in targets {
             guard let value = scene.snapshots[device.id] else { continue }
-            device.isOn = value.isOn; device.brightness = value.brightness; device.kelvin = value.kelvin
-            if let matrix = value.matrix, device.isLIFXLuna {
-                applyLIFXMatrix(device, state: matrix, recordUndo: false,
-                                turnOn: false, announce: false)
-            } else {
-                device.color = Color(hue: value.hue, saturation: value.saturation, brightness: 1)
-                sendColor(device, color: device.color)
-            }
-            sendPower(device, on: value.isOn)
+            applySceneSnapshot(value, to: device)
         }
         lastActionSummary = "Rehearsing \(scene.name) on \(targets.count) light\(targets.count == 1 ? "" : "s")"
     }
@@ -2597,6 +2660,17 @@ extension Color {
         guard UIColor(self).getHue(&h, saturation: &s, brightness: &b, alpha: &a) else { return (0, 0, 1) }
         #endif
         return (Double(h), Double(s), Double(b))
+    }
+
+    /// The color a LIFX bulb reports back after being sent this one.
+    ///
+    /// LIFX HSBK keeps brightness in its own channel, so `LightManager.sendColor`
+    /// sends only this color's hue and saturation and supplies the device's
+    /// brightness separately. `StateLight` therefore always describes a
+    /// full-value color, whatever value the user picked.
+    var lifxReportedEquivalent: Color {
+        let hsb = hsbComponents
+        return Color(hue: hsb.h, saturation: hsb.s, brightness: 1)
     }
 
     var rgbComponents: (r: Double, g: Double, b: Double) {
@@ -3154,20 +3228,7 @@ extension LightManager {
             guard let snap = scene.snapshots[device.id] else { continue }
             if !allowTurningOff && !snap.isOn { skipped.append(device.id); continue }
             if device.isStale { failed.append(device.id) } else { succeeded.append(device.id) }
-            device.brightness = snap.brightness; device.kelvin = snap.kelvin; device.isOn = snap.isOn
-            if let matrix = snap.matrix, device.isLIFXLuna {
-                applyLIFXMatrix(device, state: matrix, recordUndo: false,
-                                turnOn: false, announce: false)
-            } else if let segments = snap.segments, device.brand == .govee {
-                applySegments(device, state: segments, recordUndo: false, turnOn: false, announce: false)
-                sendBrightness(device, value: snap.brightness)
-            } else {
-                let color = Color(hue: snap.hue, saturation: snap.saturation, brightness: 1)
-                device.color = color
-                sendColor(device, color: color)
-                if device.brand == .govee { sendBrightness(device, value: snap.brightness) }
-            }
-            sendPower(device, on: snap.isOn)
+            applySceneSnapshot(snap, to: device)
         }
         lastSceneResult = SceneApplicationResult(sceneName: scene.name, succeededIDs: succeeded, failedIDs: failed, skippedOffIDs: skipped)
         logActivity(.scene, title: "Scene applied", detail: "\(scene.name): \(succeeded.count) succeeded, \(failed.count) need retry", isFailure: !failed.isEmpty)

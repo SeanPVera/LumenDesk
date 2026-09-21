@@ -221,6 +221,8 @@ Room features include:
 - Apply themes and animated effects to a room.
 - Pause and resume automation for a room.
 
+On the Plan (the app's Home screen), every room's block carries its own power switch, so shutting a whole room off never requires opening anything first. Tapping a room or one of its fixtures reaches that room's full controls — brightness, All On/All Off, schedules, and every light's own color, white balance, and segment editor — through the inspector column on Mac, or a room sheet on iPhone/iPad. Each light listed there also carries a direct "Full controls" link, so a single fixture's color and white-balance controls are one tap away rather than nested behind the room.
+
 Deleted rooms can be restored with the app's undo affordances when available.
 
 ### Favorites

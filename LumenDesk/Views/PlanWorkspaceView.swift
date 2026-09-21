@@ -21,6 +21,11 @@ struct PlanWorkspaceView: View {
     @State private var showingSetup = false
     @State private var showingNewRoom = false
     @State private var searchText = ""
+    // iOS has no room inspector column, so tapping a room or fixture on the
+    // plan opens this instead — the one place on that platform a whole room
+    // can be shut off or a single light's full controls reached. macOS never
+    // sets this; it has the inline inspector for the same job.
+    @State private var showingRoomDetail = false
 
     private var selectedRoom: Room? {
         guard let selectedRoomID else { return manager.rooms.first }
@@ -63,6 +68,12 @@ struct PlanWorkspaceView: View {
         .sheet(isPresented: $showingNewRoom) {
             NewRoomSheet().environmentObject(manager)
         }
+        .sheet(isPresented: $showingRoomDetail) {
+            if let room = selectedRoom {
+                RoomDetailSheet(room: room, focusedLightID: selectedLightID)
+                    .environmentObject(manager)
+            }
+        }
     }
 
     // MARK: Sheet
@@ -81,7 +92,12 @@ struct PlanWorkspaceView: View {
                 PlanBoardView(arranging: arranging,
                               selectedRoomID: $selectedRoomID,
                               selectedLightID: $selectedLightID,
-                              query: searchText)
+                              query: searchText,
+                              onRoomTapped: {
+                                  #if !os(macOS)
+                                  showingRoomDetail = true
+                                  #endif
+                              })
                     .padding(.horizontal, 18)
                     .padding(.top, 18)
                 PlanTitleBlock()
@@ -264,6 +280,10 @@ struct PlanBoardView: View {
     @Binding var selectedRoomID: UUID?
     @Binding var selectedLightID: String?
     var query: String = ""
+    /// Fired whenever a room or one of its fixtures is tapped (not dragged).
+    /// Only iOS uses it, to open `RoomDetailSheet` in place of the
+    /// macOS-only inspector column.
+    var onRoomTapped: (() -> Void)? = nil
 
     /// A move or resize in progress, held here so the ghost and the block can
     /// be drawn from the same source.
@@ -347,7 +367,8 @@ struct PlanBoardView: View {
                 onResize: { delta, committing in
                     move(room: room, by: delta, resize: true, committing: committing)
                 },
-                cell: cell
+                cell: cell,
+                onTapped: onRoomTapped
             )
             .frame(width: rect.width, height: rect.height)
             .offset(x: rect.minX, y: rect.minY)
@@ -723,6 +744,11 @@ private struct RoomBlockView: View {
     let onMove: (PlanCellDelta, Bool) -> Void
     let onResize: (PlanCellDelta, Bool) -> Void
     let cell: CGSize
+    /// Fired only by a genuine tap on the room or one of its fixtures —
+    /// never by `commitLevel`, which also calls `onSelect()` on every frame
+    /// of a brightness drag. Conflating the two meant dragging across a room
+    /// to set its level fired this on each frame too.
+    var onTapped: (() -> Void)? = nil
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
@@ -772,7 +798,11 @@ private struct RoomBlockView: View {
         .clipped()
         .opacity(dimmed ? 0.35 : 1)
         .contentShape(Rectangle())
-        .onTapGesture { if !arranging { onSelect() } }
+        .onTapGesture {
+            guard !arranging else { return }
+            onSelect()
+            onTapped?()
+        }
         .gesture(blockGesture)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(room.name)
@@ -814,11 +844,40 @@ private struct RoomBlockView: View {
             Text("\(litLights.count)/\(lights.count)")
                 .font(LumenType.readout(size: 11, weight: .regular))
                 .foregroundStyle(Lumen.meter)
+
+            if !lights.isEmpty {
+                Spacer(minLength: 6)
+                roomPowerButton
+            }
         }
         // A tight shadow for edge definition and a wide one to hold the
         // label together where it crosses a bright pool.
         .shadow(color: Lumen.stage.opacity(0.92), radius: 1.5)
         .shadow(color: Lumen.stage.opacity(0.85), radius: 8)
+    }
+
+    /// Every room's own blackout switch, on the drawing itself rather than
+    /// behind a selection-then-scroll trip into the inspector. This is the
+    /// fastest way to shut a whole room off, on either platform, so it needed
+    /// to be visible without opening anything first.
+    private var roomAnyOn: Bool { lights.contains(where: \.isOn) }
+
+    private var roomPowerButton: some View {
+        Button {
+            // Deliberately does not call `onSelect()`: on iOS that opens
+            // `RoomDetailSheet`, and the point of this button is a blackout
+            // that needs nothing to open first.
+            manager.setPower(in: room, on: !roomAnyOn)
+        } label: {
+            Image(systemName: "power")
+        }
+        .buttonStyle(LumenIconButtonStyle(size: 22, prominent: roomAnyOn))
+        // The drawn key stays compact so it doesn't crowd the room label,
+        // but the tappable area grows to the platform's touch target so a
+        // near miss on a dense plan doesn't land on the room block behind it.
+        .lumenInteractiveTarget()
+        .help(roomAnyOn ? "Turn off every light in \(room.name)" : "Turn on every light in \(room.name)")
+        .accessibilityLabel(roomAnyOn ? "Turn off all lights in \(room.name)" : "Turn on all lights in \(room.name)")
     }
 
     private var pools: [RoomPoolCanvas.Pool] {
@@ -846,6 +905,7 @@ private struct RoomBlockView: View {
         return Button {
             onSelect()
             selectedLightID = light.id
+            onTapped?()
         } label: {
             PlanFixtureSymbol(symbol: kind,
                               colour: light.color,
@@ -1074,7 +1134,8 @@ private struct PlanInspector: View {
         // Schedules, effects and automation overrides for the room. The plan
         // is the control surface; this is where the room's settings live.
         .sheet(isPresented: $showingRoomDetail) {
-            RoomDetailSheet(room: room).environmentObject(manager)
+            RoomDetailSheet(room: room, focusedLightID: selectedLightID)
+                .environmentObject(manager)
         }
     }
 
@@ -1095,15 +1156,32 @@ private struct PlanInspector: View {
             ForEach(lights) { light in
                 PlanFixtureRow(light: light,
                                selected: selectedLightID == light.id,
-                               onSelect: { selectedLightID = light.id })
+                               onSelect: { selectedLightID = light.id },
+                               onOpenDetail: {
+                                   selectedLightID = light.id
+                                   showingRoomDetail = true
+                               })
             }
         }
     }
 
+    /// What this opens is easy to lose track of once "settings" is on the
+    /// label, so the button says what is actually inside: colour, white
+    /// balance, segments, and schedules for every light here.
     private var settingsButton: some View {
-        Button("Room settings") { showingRoomDetail = true }
+        VStack(alignment: .leading, spacing: 4) {
+            Button {
+                showingRoomDetail = true
+            } label: {
+                Label("Open Full Light Controls", systemImage: "paintpalette")
+                    .frame(maxWidth: .infinity)
+            }
             .buttonStyle(LumenSecondaryButtonStyle(compact: true))
-            .frame(maxWidth: .infinity)
+
+            Text("Colour, white balance, segments, and schedules")
+                .font(.system(size: 10.5))
+                .foregroundStyle(Lumen.muted)
+        }
     }
 
     private var header: some View {
@@ -1239,6 +1317,9 @@ private struct PlanFixtureRow: View {
     @ObservedObject var light: LightDevice
     let selected: Bool
     let onSelect: () -> Void
+    /// Opens this light's colour, white balance, and segment controls — the
+    /// ones this compact row has no room to show.
+    var onOpenDetail: () -> Void = {}
 
     private var lit: Bool { light.isOn && !light.isStale }
     private var dotColour: Color { lit ? light.color : Lumen.faint }
@@ -1260,7 +1341,7 @@ private struct PlanFixtureRow: View {
         VStack(alignment: .leading, spacing: 7) {
             identityRow
             levelFader
-            identifyButton
+            footerRow
         }
         .padding(.vertical, 8)
         .padding(.horizontal, selected ? 8 : 0)
@@ -1312,12 +1393,39 @@ private struct PlanFixtureRow: View {
             .disabled(light.isStale)
     }
 
+    private var footerRow: some View {
+        HStack(spacing: 12) {
+            identifyButton
+            Spacer(minLength: 6)
+            fullControlsButton
+        }
+    }
+
     private var identifyButton: some View {
         Button("Identify") { manager.identify(light) }
             .buttonStyle(.plain)
             .font(.system(size: 10.5))
             .foregroundStyle(Lumen.link)
             .accessibilityLabel("Flash \(light.label)")
+    }
+
+    /// The compact row above only has a power switch and a level — colour,
+    /// white balance, and (for Govee RGBIC/Luna fixtures) the segment studio
+    /// live one tap away here instead of behind the room's own settings
+    /// button, so a single light's full controls are reachable directly from
+    /// that light's own row.
+    private var fullControlsButton: some View {
+        Button(action: onOpenDetail) {
+            HStack(spacing: 3) {
+                Text("Full controls")
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 8.5, weight: .semibold))
+            }
+        }
+        .buttonStyle(.plain)
+        .font(.system(size: 10.5, weight: .medium))
+        .foregroundStyle(Lumen.link)
+        .accessibilityLabel("Open full controls for \(light.label)")
     }
 
     private var rowBackground: some View {

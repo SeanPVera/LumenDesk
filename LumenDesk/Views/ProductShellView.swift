@@ -350,6 +350,10 @@ struct RoomDetailSheet: View {
     @EnvironmentObject private var manager: LightManager
     @Environment(\.dismiss) private var dismiss
     let room: Room
+    /// The fixture to scroll to on open, when this sheet was reached through
+    /// a specific light's own "Full controls" entry point rather than the
+    /// room-level one. `nil` opens at the top, as before.
+    var focusedLightID: String? = nil
     @State private var showingSchedules = false
 
     private var currentRoom: Room {
@@ -364,51 +368,62 @@ struct RoomDetailSheet: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    PageHeader(eyebrow: "Room", title: currentRoom.name,
-                               subtitle: "\(lights.filter(\.isOn).count) of \(lights.count) lights on") {
-                        Button { manager.toggleFavoriteRoom(currentRoom.id) } label: {
-                            Image(systemName: manager.isFavoriteRoom(currentRoom.id) ? "star.fill" : "star")
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        PageHeader(eyebrow: "Room", title: currentRoom.name,
+                                   subtitle: "\(lights.filter(\.isOn).count) of \(lights.count) lights on") {
+                            Button { manager.toggleFavoriteRoom(currentRoom.id) } label: {
+                                Image(systemName: manager.isFavoriteRoom(currentRoom.id) ? "star.fill" : "star")
+                            }
+                            .buttonStyle(LumenIconButtonStyle(tint: manager.isFavoriteRoom(currentRoom.id) ? Lumen.gold : Lumen.textSecondary))
+                            .accessibilityLabel(manager.isFavoriteRoom(currentRoom.id) ? "Remove favorite" : "Favorite room")
                         }
-                        .buttonStyle(LumenIconButtonStyle(tint: manager.isFavoriteRoom(currentRoom.id) ? Lumen.gold : Lumen.textSecondary))
-                        .accessibilityLabel(manager.isFavoriteRoom(currentRoom.id) ? "Remove favorite" : "Favorite room")
-                    }
 
-                    HStack {
-                        Button("All On") { manager.setPower(in: currentRoom, on: true) }
-                            .buttonStyle(LumenPrimaryButtonStyle())
-                        Button("All Off") { manager.setPower(in: currentRoom, on: false) }
+                        HStack {
+                            Button("All On") { manager.setPower(in: currentRoom, on: true) }
+                                .buttonStyle(LumenPrimaryButtonStyle())
+                            Button("All Off") { manager.setPower(in: currentRoom, on: false) }
+                                .buttonStyle(LumenSecondaryButtonStyle())
+                            Spacer()
+                            Button { showingSchedules = true } label: {
+                                Label("Schedules", systemImage: "clock")
+                            }
                             .buttonStyle(LumenSecondaryButtonStyle())
-                        Spacer()
-                        Button { showingSchedules = true } label: {
-                            Label("Schedules", systemImage: "clock")
                         }
-                        .buttonStyle(LumenSecondaryButtonStyle())
+                        .disabled(lights.isEmpty)
+
+                        LumenFader(
+                            label: "Brightness in \(currentRoom.name)",
+                            value: Binding(get: { averageBrightness },
+                                           set: { manager.setBrightness(in: currentRoom, value: $0) }),
+                            track: .beam
+                        )
+                        .padding(16)
+                        .lumenCard()
+                        .disabled(lights.isEmpty)
+
+                        if lights.isEmpty {
+                            EmptyInlineView(icon: "lightbulb.slash", title: "No lights in this room",
+                                            message: "Assign a discovered light before using room power or brightness controls.")
+                        }
+
+                        SectionHeader(title: "Lights", detail: "\(lights.count) devices")
+                        ForEach(lights) { device in
+                            LightRowView(device: device)
+                                .id(device.id)
+                        }
                     }
-                    .disabled(lights.isEmpty)
-
-                    LumenFader(
-                        label: "Brightness in \(currentRoom.name)",
-                        value: Binding(get: { averageBrightness },
-                                       set: { manager.setBrightness(in: currentRoom, value: $0) }),
-                        track: .beam
-                    )
-                    .padding(16)
-                    .lumenCard()
-                    .disabled(lights.isEmpty)
-
-                    if lights.isEmpty {
-                        EmptyInlineView(icon: "lightbulb.slash", title: "No lights in this room",
-                                        message: "Assign a discovered light before using room power or brightness controls.")
-                    }
-
-                    SectionHeader(title: "Lights", detail: "\(lights.count) devices")
-                    ForEach(lights) { device in
-                        LightRowView(device: device)
+                    .padding(20)
+                }
+                .onAppear {
+                    guard let focusedLightID else { return }
+                    // The row hasn't laid out yet on the same runloop turn
+                    // this sheet appears, so `scrollTo` needs to run after.
+                    DispatchQueue.main.async {
+                        proxy.scrollTo(focusedLightID, anchor: .top)
                     }
                 }
-                .padding(20)
             }
             .background(LumenBackground(glow: false))
             .navigationTitle(currentRoom.name)

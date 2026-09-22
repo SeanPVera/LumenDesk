@@ -1,3 +1,4 @@
+import SwiftUI
 import XCTest
 @testable import LumenDesk
 
@@ -240,6 +241,53 @@ final class CommandCoordinatorTests: XCTestCase {
             deviceID: "light-1",
             reported: .init(isOn: true, brightness: 0.5, red: 1, green: 1, blue: 1, kelvin: 3_100)
         ))
+    }
+
+    @MainActor
+    func testLIFXColourExpectationMatchesWhatTheBulbActuallyReports() {
+        // A LIFX bulb keeps brightness in its own HSBK channel, so
+        // `LightManager.sendColor` sends only hue and saturation and
+        // `lifxDidUpdate` rebuilds the reported colour at full brightness.
+        // Recording the raw picked colour instead missed by (1 - value), which
+        // is far outside the 0.06 tolerance for anything but a near-maximal
+        // colour: the command never confirmed, timed out after 3.5 s, and told
+        // the user the light "did not confirm the change" while the bulb had in
+        // fact applied it. Most catalog theme colours are in that range.
+        let picked = Color(red: 0.31, green: 0.12, blue: 0.66) // a dim violet
+        let hsb = picked.hsbComponents
+        XCTAssertLessThan(hsb.b, 0.94, "the fixture for this test must be below full value")
+
+        // What the bulb sends back once it has applied that hue and saturation.
+        let reportedColor = Color(hue: hsb.h, saturation: hsb.s, brightness: 1)
+        let reported = reportedColor.rgbComponents
+        let observation = ReportedDeviceState(
+            isOn: true,
+            brightness: 0.4,
+            red: reported.r,
+            green: reported.g,
+            blue: reported.b,
+            kelvin: 3_500
+        )
+
+        let coordinator = makeCoordinator()
+        let normalized = picked.lifxReportedEquivalent.rgbComponents
+        coordinator.expectColor(deviceID: "lifx-1", red: normalized.r, green: normalized.g, blue: normalized.b)
+        XCTAssertTrue(
+            coordinator.reportedStateMatchesExpectation(deviceID: "lifx-1", reported: observation),
+            "a LIFX colour command must confirm against the state the bulb reports"
+        )
+
+        // The unnormalized expectation is what used to be recorded, and it is
+        // exactly what this test exists to keep out.
+        let raw = picked.rgbComponents
+        coordinator.expectColor(deviceID: "lifx-2", red: raw.r, green: raw.g, blue: raw.b)
+        XCTAssertFalse(
+            coordinator.reportedStateMatchesExpectation(deviceID: "lifx-2", reported: observation),
+            "the raw picked colour cannot match, which is why it must not be the expectation"
+        )
+
+        // Govee reports the RGB it was given, so its expectation is unchanged.
+        XCTAssertEqual(Color.white.lifxReportedEquivalent.rgbComponents.r, 1, accuracy: 0.001)
     }
 
     @MainActor

@@ -1385,12 +1385,24 @@ private struct PlanFixtureRow: View {
         .accessibilityLabel("Power for \(light.label)")
     }
 
+    /// The effect or Music Mode run painting this fixture, if one is.
+    private var runningEffect: (scope: LightScope, name: String)? {
+        manager.animatingEffect(for: light.id)
+    }
+
     private var levelFader: some View {
+        // A running effect repaints this light every frame, so the fader cannot
+        // hold a level the user sets. Disabled with a reason, the same way the
+        // full light row handles it, rather than accepting the drag and losing
+        // it a frame later.
         LumenFader(label: light.label,
                    value: levelBinding,
                    track: .tint(light.color),
                    showsHeader: false)
-            .disabled(light.isStale)
+            .disabled(light.isStale || runningEffect != nil)
+            .help(runningEffect.map {
+                "\u{201C}\($0.name)\u{201D} is running on \(manager.scopeDisplayName($0.scope)) and is setting this light\u{2019}s level. Stop it to take manual control."
+            } ?? "")
     }
 
     private var footerRow: some View {

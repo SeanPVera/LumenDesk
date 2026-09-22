@@ -305,3 +305,32 @@ test('a saturated LIFX colour survives capture and restore', () => {
   assert.equal(sent[0].hsbk.saturation, captured.saturation, 'saturation not zeroed')
   assert.ok(Math.abs(sent[0].hsbk.brightness - captured.brightness) < 700, 'brightness restored')
 })
+
+test('a schedule can never be saved with a weekday list that makes it unrunnable', async () => {
+  const store = await tmpStore()
+  store.load()
+  const room = store.addRoom('Study')
+
+  // The native ScheduleEngine reads an empty weekday list as "every day". The
+  // bridge's `due()` asks `weekdays.includes(...)`, so storing one verbatim
+  // saved an entry the UI still showed as enabled and that could never fire.
+  const created = store.addSchedule(room.id, { hour: 7, minute: 0, action: 'turnOn', weekdays: [] })
+  assert.deepEqual(created.weekdays, [1, 2, 3, 4, 5, 6, 7])
+
+  const cleared = store.updateSchedule(room.id, created.id, { weekdays: [] })
+  assert.deepEqual(cleared.weekdays, [1, 2, 3, 4, 5, 6, 7], 'clearing every day means every day')
+
+  // Out-of-range and duplicate values are dropped rather than stored.
+  const messy = store.updateSchedule(room.id, created.id, { weekdays: [3, 3, 0, 9, '5'] })
+  assert.deepEqual(messy.weekdays, [3, 5])
+
+  // And the normalized entry really does fire: Monday 2026-01-05 at 07:00.
+  const weekly = store.updateSchedule(room.id, created.id, { weekdays: [] })
+  const rooms = [{ ...room, schedules: [weekly] }]
+  const decisions = due({
+    rooms,
+    previous: new Date(2026, 0, 5, 6, 59, 30),
+    now: new Date(2026, 0, 5, 7, 0, 30),
+  })
+  assert.equal(decisions.length, 1)
+})

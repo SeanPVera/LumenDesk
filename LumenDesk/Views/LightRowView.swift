@@ -48,7 +48,16 @@ struct LightRowView: View {
                 set: { manager.setPower(device, on: $0) })
     }
 
-    private var controlsDisabled: Bool { selectionMode || !device.isOn }
+    /// The effect or Music Mode run currently painting this fixture, if any.
+    private var runningEffect: (scope: LightScope, name: String)? {
+        manager.animatingEffect(for: device.id)
+    }
+
+    // A running effect repaints this light every frame, so its own colour,
+    // brightness and white-balance instruments cannot hold a value. They are
+    // disabled while the show owns the fixture instead of taking a change and
+    // silently losing it a frame later.
+    private var controlsDisabled: Bool { selectionMode || !device.isOn || runningEffect != nil }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -282,6 +291,7 @@ struct LightRowView: View {
 
     private var controlsSection: some View {
         VStack(spacing: 12) {
+            if let running = runningEffect { effectOwnershipRow(running) }
             modePicker
             if colorModeBinding.wrappedValue == .color {
                 colorRow
@@ -400,6 +410,37 @@ struct LightRowView: View {
         }
     }
 
+    /// Says who is driving the fixture and offers the one control that can
+    /// give it back, so a disabled slider is never unexplained.
+    private func effectOwnershipRow(_ running: (scope: LightScope, name: String)) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "wand.and.rays")
+                .font(.caption)
+                .foregroundStyle(Lumen.beamBright)
+                .accessibilityHidden(true)
+            Text("\u{201C}\(running.name)\u{201D} is running on \(manager.scopeDisplayName(running.scope)) and is setting this light\u{2019}s colour and brightness.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+            Button("Stop") { manager.stopEffect(scope: running.scope) }
+                .buttonStyle(LumenSecondaryButtonStyle(compact: true))
+                .disabled(selectionMode)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 3, style: .continuous)
+                .fill(Lumen.surface)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 3, style: .continuous)
+                .stroke(Lumen.hairline, lineWidth: 1)
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(running.name) is running on \(manager.scopeDisplayName(running.scope)) and controls this light. Stop it to regain manual control.")
+    }
+
     private var modePicker: some View {
         LumenSelector(
             label: "\(device.label) light mode",
@@ -409,7 +450,7 @@ struct LightRowView: View {
                             symbol: $0 == .color ? "paintpalette" : "thermometer.medium")
             }
         )
-        .disabled(selectionMode || !device.isOn)
+        .disabled(controlsDisabled)
     }
 
     private var colorRow: some View {

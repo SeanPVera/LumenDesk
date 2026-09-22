@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import type { Device } from './bridge'
+import type { Device, RGB } from './bridge'
 import { MUSIC_HELP, PRESET_COPY, ROLE_COPY, SOURCE_COPY, configurationFor } from './music/config'
 import { GROOVES } from './music/grooves'
 import { hsvToRgb } from './music/fixtures'
@@ -44,6 +44,36 @@ export function MusicModeView({
   const [file, setFile] = useState<File | null>(null)
   const reachable = devices.filter(d => d.reachable)
 
+  // What the fixtures were showing before the show began. Music frames are the
+  // only thing this view changes on a light, so replaying these colours is a
+  // complete restore — without it, Stop simply froze the last frame on the
+  // lights and left them there.
+  const baseline = useRef<{ fixtureID: string; rgb: RGB }[] | null>(null)
+
+  const start = (source: Parameters<WebMusicSession['start']>[0], audio?: File) => {
+    // Capture only when nothing is running: a Restart must not adopt a colour
+    // the show itself painted as the state to go back to.
+    if (!state.running) {
+      baseline.current = reachable
+        .filter((d): d is Device & { color: RGB } => Boolean(d.color))
+        .map(d => ({ fixtureID: d.id, rgb: d.color }))
+    }
+    return session.start(source, audio)
+  }
+
+  const stop = async () => {
+    await session.stop()
+    const previous = baseline.current
+    baseline.current = null
+    if (previous?.length) await postFrame(port, previous).catch(() => undefined)
+  }
+
+  // Leaving the tab or navigating away is a stop too, so the lights are not
+  // abandoned mid-show.
+  const stopRef = useRef(stop)
+  stopRef.current = stop
+  useEffect(() => () => { void stopRef.current() }, [])
+
   useEffect(() => {
     session.setDevices(reachable.map(d => ({ id: d.id, name: d.name, brand: d.brand, reachable: d.reachable })))
   }, [session, reachable.map(d => d.id).join('|')])
@@ -83,22 +113,22 @@ export function MusicModeView({
           <button
             className="primary"
             disabled={!reachable.length && state.source !== 'demo'}
-            onClick={() => session.start(state.source === 'file' && file ? 'file' : state.source === 'midi' ? 'midi' : state.source === 'microphone' ? 'microphone' : 'demo', file ?? undefined)}
+            onClick={() => void start(state.source === 'file' && file ? 'file' : state.source === 'midi' ? 'midi' : state.source === 'microphone' ? 'microphone' : 'demo', file ?? undefined)}
           >
             {state.running ? 'Restart' : 'Start'}
           </button>
-          <button onClick={() => session.stop()} disabled={!state.running}>
+          <button onClick={() => void stop()} disabled={!state.running}>
             Stop
           </button>
           <button
-            onClick={() => session.start('demo')}
+            onClick={() => void start('demo')}
             className={state.source === 'demo' ? 'nav active' : undefined}
             title={SOURCE_COPY.demo.plain}
           >
             Demo groove
           </button>
           <button
-            onClick={() => session.start('microphone')}
+            onClick={() => void start('microphone')}
             className={state.source === 'microphone' ? 'nav active' : undefined}
             title={SOURCE_COPY.microphone.plain}
           >
@@ -113,11 +143,11 @@ export function MusicModeView({
                 const next = event.target.files?.[0]
                 if (!next) return
                 setFile(next)
-                session.start('file', next)
+                void start('file', next)
               }}
             />
           </label>
-          <button onClick={() => session.start('midi')} title={SOURCE_COPY.midi.plain}>
+          <button onClick={() => void start('midi')} title={SOURCE_COPY.midi.plain}>
             MIDI clock
           </button>
         </div>

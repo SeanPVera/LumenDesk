@@ -868,8 +868,13 @@ final class LightManager: ObservableObject {
             return .matrix(productID: matrix.productID, width: matrix.width, height: matrix.height)
         }
         if device.brand == .govee, let profile = segmentProfile(for: device), profile.recognized {
-            let stored = goveeSegmentStates[device.id]?.segmentCount
-            return .segments(count: stored ?? profile.defaultSegmentCount,
+            // `segmentState(for:)` is the one place that knows how many
+            // segments a fixture really has: it repairs a saved count that a
+            // fixed-topology profile contradicts, which happens when the layout
+            // was stored before the SKU was recognized or came in from another
+            // setup's archive. Reading the raw stored count here would plan a
+            // 15-entry layout for a three-zone lamp and misreport its zones.
+            return .segments(count: segmentState(for: device).segmentCount,
                              gradient: profile.supportsGradient,
                              simultaneousZoneLimit: profile.simultaneousZoneLimit)
         }
@@ -1958,24 +1963,11 @@ extension LightManager {
         persistApplicationState()
     }
 
-    /// Translates a layout into the packet batch the firmware expects: one
-    /// gradient toggle, one color packet per distinct color, and per-segment
-    /// brightness packets only when the layout actually dims something.
+    /// Sends the durable packet batch for a layout.
     private func sendSegmentPackets(_ device: LightDevice, state: GoveeSegmentState) {
-        var packets: [[UInt8]] = []
-        if segmentStudioProfile(for: device)?.supportsGradient == true {
-            packets.append(GoveeProtocol.gradientPacket(on: state.gradient))
-        }
-        for group in state.colorGroups {
-            let rgb = group.color.renderedRGB255
-            packets.append(GoveeProtocol.segmentColorPacket(r: rgb.r, g: rgb.g, b: rgb.b, segments: group.segments))
-        }
-        let brightnessGroups = state.brightnessGroups
-        if brightnessGroups.contains(where: { $0.percent < 100 }) {
-            for group in brightnessGroups {
-                packets.append(GoveeProtocol.segmentBrightnessPacket(percent: group.percent, segments: group.segments))
-            }
-        }
+        let packets = state.durableSegmentPackets(
+            supportsGradient: segmentStudioProfile(for: device)?.supportsGradient == true
+        )
         govee?.applySegments(deviceID: device.backendID, packets: packets)
     }
 

@@ -471,6 +471,44 @@ final class DomainTests: XCTestCase {
         XCTAssertEqual(device.isOn, !originalPower)
     }
 
+    /// The durable write has to leave the fixture showing exactly the layout it
+    /// was given. Firmware keeps the per-segment brightness it was last sent,
+    /// so a fully lit layout applied over a dimmed one used to inherit the old
+    /// dimming with nothing able to clear it.
+    func testDurablePacketsAlwaysWritePerSegmentBrightness() {
+        let allLit = GoveeSegmentState(colors: [
+            .init(hex: 0xFF0000), .init(hex: 0x00FF00), .init(hex: 0x0000FF)
+        ], gradient: false)
+        XCTAssertTrue(allLit.colors.allSatisfy { $0.brightnessPercent == 100 })
+
+        let packets = allLit.durableSegmentPackets(supportsGradient: false)
+        // Three colour packets plus one brightness packet covering all three.
+        XCTAssertEqual(packets.count, 4)
+        let brightness = packets.filter { $0[1] == 0x05 && $0[3] == 0x02 }
+        XCTAssertEqual(brightness.count, 1, "an all-100% layout still has to state its brightness")
+        XCTAssertEqual(brightness.first?[4], 100)
+    }
+
+    func testDurablePacketsGroupMixedBrightnessAndLeadWithGradient() {
+        let mixed = GoveeSegmentState(colors: [
+            .init(hex: 0xFF0000, brightness: 1.0),
+            .init(hex: 0xFF0000, brightness: 0.5),
+            .init(hex: 0x0000FF, brightness: 0.5)
+        ], gradient: true)
+
+        let withGradient = mixed.durableSegmentPackets(supportsGradient: true)
+        let withoutGradient = mixed.durableSegmentPackets(supportsGradient: false)
+        XCTAssertEqual(withGradient.count, withoutGradient.count + 1)
+        XCTAssertEqual(withGradient.first?[1], 0xA3, "the gradient toggle leads the batch")
+
+        // Two colours and two distinct levels, so two of each.
+        let colours = withoutGradient.filter { $0[1] == 0x05 && $0[3] == 0x01 }
+        let levels = withoutGradient.filter { $0[1] == 0x05 && $0[3] == 0x02 }
+        XCTAssertEqual(colours.count, 2)
+        XCTAssertEqual(levels.count, 2)
+        XCTAssertEqual(Set(levels.map { $0[4] }), [100, 50])
+    }
+
     private func isolatedDefaults() -> UserDefaults {
         UserDefaults(suiteName: "LumenDeskTests.\(UUID().uuidString)")!
     }

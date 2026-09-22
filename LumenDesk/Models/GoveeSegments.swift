@@ -442,6 +442,37 @@ struct GoveeSegmentState: Codable, Equatable {
     }
 }
 
+extension GoveeSegmentState {
+    /// The packet batch that writes this layout durably: one gradient toggle,
+    /// one color packet per distinct color, and one brightness packet per
+    /// distinct level.
+    ///
+    /// The brightness packets are unconditional. They used to be skipped when
+    /// nothing in the layout was dimmed, which saved one packet and left a
+    /// bug: the firmware keeps whatever per-segment brightness it was last
+    /// given, so a fully lit layout applied over a dimmed one inherited the
+    /// old dimming and no later command could clear it — the fixture-level
+    /// brightness scales the whole strip and never touches per-segment values.
+    /// An apply has to leave the fixture showing exactly this layout, and an
+    /// all-100% batch is a single extra packet.
+    func durableSegmentPackets(supportsGradient: Bool) -> [[UInt8]] {
+        var packets: [[UInt8]] = []
+        if supportsGradient {
+            packets.append(GoveeProtocol.gradientPacket(on: gradient))
+        }
+        for group in colorGroups {
+            let rgb = group.color.renderedRGB255
+            packets.append(GoveeProtocol.segmentColorPacket(r: rgb.r, g: rgb.g, b: rgb.b,
+                                                            segments: group.segments))
+        }
+        for group in brightnessGroups {
+            packets.append(GoveeProtocol.segmentBrightnessPacket(percent: group.percent,
+                                                                 segments: group.segments))
+        }
+        return packets
+    }
+}
+
 extension GoveeSegmentProfile {
     /// Repairs saved drafts created before a fixture's hardware topology was
     /// known. Adjustable strips keep the user's chosen segment count, and any

@@ -528,6 +528,71 @@ final class LightingThemeTests: XCTestCase {
         }
     }
 
+    // MARK: - Capability read from the live workspace
+
+    /// A saved layout can carry a segment count the fixture contradicts: it was
+    /// stored before the SKU was recognized, or it came in from another setup's
+    /// archive. Planning from that raw count would send a fifteen-entry layout
+    /// to a three-zone lamp and misreport its zones.
+    @MainActor
+    func testFixedTopologyFixturesIgnoreAStaleSavedSegmentCount() async throws {
+        let defaults = UserDefaults(suiteName: "LumenDeskTests.\(UUID().uuidString)")!
+        let manager = LightManager(defaults: defaults,
+                                   persistenceStore: temporaryPersistenceStore(legacyDefaults: defaults))
+        // H60B0: three zones, only two lit at a time, count fixed by hardware.
+        manager.goveeDiscovered(deviceID: "AA:BB:CC:DD", address: "192.168.1.40", sku: "H60B0")
+        for _ in 0..<100 where manager.devices.isEmpty {
+            try? await Task.sleep(nanoseconds: 1_000_000)
+        }
+        let lamp = try XCTUnwrap(manager.devices.first)
+
+        // A fifteen-segment layout the lamp could never show.
+        manager.applySegments(lamp,
+                              state: GoveeSegmentState(colors: Array(repeating: .init(hex: 0xFF0000),
+                                                                     count: 15),
+                                                       isActive: true),
+                              announce: false)
+
+        guard case .segments(let count, _, let limit) = manager.themeCapability(for: lamp) else {
+            return XCTFail("a recognized RGBIC lamp should plan as a segmented fixture")
+        }
+        XCTAssertEqual(count, 3, "the fixture's own topology wins over a stale saved count")
+        XCTAssertEqual(limit, 2)
+
+        let plan = ThemePlanner.plan(try theme("brass-smoke"),
+                                     fixtures: [ThemeFixture(id: lamp.id,
+                                                             capability: manager.themeCapability(for: lamp))])
+        let segments = try XCTUnwrap(plan.fixtures.first?.segments)
+        XCTAssertEqual(segments.segmentCount, 3)
+        XCTAssertEqual(plan.fixtures.first?.adaptation, .zoneLimited(lit: 2, of: 3))
+    }
+
+    /// An adjustable strip keeps whatever count the user chose in the studio.
+    @MainActor
+    func testAdjustableStripsKeepTheSegmentCountTheUserChose() async throws {
+        let defaults = UserDefaults(suiteName: "LumenDeskTests.\(UUID().uuidString)")!
+        let manager = LightManager(defaults: defaults,
+                                   persistenceStore: temporaryPersistenceStore(legacyDefaults: defaults))
+        manager.goveeDiscovered(deviceID: "11:22:33:44", address: "192.168.1.41", sku: "H619A")
+        for _ in 0..<100 where manager.devices.isEmpty {
+            try? await Task.sleep(nanoseconds: 1_000_000)
+        }
+        let strip = try XCTUnwrap(manager.devices.first)
+
+        manager.applySegments(strip,
+                              state: GoveeSegmentState(colors: Array(repeating: .init(hex: 0x00FF00),
+                                                                     count: 22),
+                                                       isActive: true),
+                              announce: false)
+
+        guard case .segments(let count, let gradient, let limit) = manager.themeCapability(for: strip) else {
+            return XCTFail("a recognized COB strip should plan as a segmented fixture")
+        }
+        XCTAssertEqual(count, 22)
+        XCTAssertTrue(gradient)
+        XCTAssertNil(limit)
+    }
+
     // MARK: - Music Mode palettes
 
     func testEveryCatalogThemeIsSelectableAsAMusicPalette() {

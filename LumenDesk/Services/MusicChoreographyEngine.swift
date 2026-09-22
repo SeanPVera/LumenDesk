@@ -441,10 +441,11 @@ final class MusicChoreographyEngine {
         // colour through hues the palette never contained, which showed up as
         // soon as the near-white catalog themes became selectable palettes.
         // Hold the chromatic end's hue instead and let saturation do the work.
+        // Same threshold as `PaletteTone.blend` — one number, one meaning.
         let hue: Double
-        if palette[low].saturation <= 0.02 {
+        if palette[low].saturation <= PaletteTone.achromaticSaturation {
             hue = palette[high].hue
-        } else if palette[high].saturation <= 0.02 {
+        } else if palette[high].saturation <= PaletteTone.achromaticSaturation {
             hue = palette[low].hue
         } else {
             hue = (palette[low].hue + hueDelta * fraction).wrappedUnit

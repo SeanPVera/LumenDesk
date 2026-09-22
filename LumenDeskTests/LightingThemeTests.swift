@@ -154,12 +154,34 @@ final class LightingThemeTests: XCTestCase {
     }
 
     func testBlendHoldsHueWhenOneEndIsAchromatic() {
-        let white = PaletteTone(hex: 0xF7FAFD)   // saturation ~0.02
+        // Morning Desk's near-white against Chrome Bass's sodium orange. The
+        // white reports a 210 degree hue purely because its channels land one
+        // step apart; interpolated naively, the midpoint is a 297 degree
+        // magenta that neither end contained.
+        let white = PaletteTone(hex: 0xF7FAFD)
         let orange = PaletteTone(hex: 0xFF7A1F)
+        XCTAssertLessThan(white.saturation, PaletteTone.achromaticSaturation)
+        XCTAssertGreaterThan(orange.saturation, PaletteTone.achromaticSaturation)
+
         let middle = PaletteTone.blend(white, orange, fraction: 0.5)
         XCTAssertEqual(middle.hue, orange.hue, accuracy: 0.001,
                        "a ramp into near-white must not detour through hues the palette never had")
         XCTAssertEqual(middle.saturation, (white.saturation + orange.saturation) / 2, accuracy: 0.001)
+
+        // The guard is one-sided only in which end it reads: either order holds
+        // the chromatic hue.
+        let reversed = PaletteTone.blend(orange, white, fraction: 0.5)
+        XCTAssertEqual(reversed.hue, orange.hue, accuracy: 0.001)
+
+        // Two real pastels still interpolate, or the guard would flatten every
+        // soft theme into a single hue.
+        let mint = PaletteTone(hex: 0x9CDCC6)
+        let rose = PaletteTone(hex: 0xC496A6)
+        XCTAssertGreaterThan(mint.saturation, PaletteTone.achromaticSaturation)
+        XCTAssertGreaterThan(rose.saturation, PaletteTone.achromaticSaturation)
+        let pastel = PaletteTone.blend(mint, rose, fraction: 0.5)
+        XCTAssertNotEqual(pastel.hue, mint.hue)
+        XCTAssertNotEqual(pastel.hue, rose.hue)
     }
 
     // MARK: - Distribution rules

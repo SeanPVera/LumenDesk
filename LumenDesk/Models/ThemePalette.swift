@@ -21,6 +21,15 @@ struct PaletteTone: Equatable {
     /// 0…1. The entry's own value, before the theme's brightness is applied.
     var level: Double
 
+    /// Below this saturation a colour reads as white and its hue is an
+    /// artifact of 8-bit rounding rather than a colour anyone chose. `#F7FAFD`
+    /// sits at 0.024 and reports a 210 degree hue purely because its channels
+    /// land one step apart; interpolating toward that hue drags a ramp through
+    /// colours the palette never contained. 0.08 is high enough to catch every
+    /// authored near-white in the catalog and low enough to leave real pastels
+    /// — sea glass, cashmere, linen — interpolating normally.
+    static let achromaticSaturation = 0.08
+
     init(hue: Double, saturation: Double, level: Double) {
         self.hue = hue.wrappedHue
         self.saturation = max(0, min(1, saturation))
@@ -91,12 +100,13 @@ struct PaletteTone: Equatable {
         if delta > 0.5 { delta -= 1 }
         if delta < -0.5 { delta += 1 }
         // An achromatic endpoint has no hue worth travelling to; hold the
-        // other end's hue so a ramp into white doesn't swing through a
-        // hue it was never given.
+        // other end's hue so a ramp into white doesn't swing through a hue it
+        // was never given. Without this, blending `#F7FAFD` halfway into
+        // `#FF7A1F` lands on a 297 degree magenta.
         let hue: Double
-        if from.saturation <= 0.001 {
+        if from.saturation <= achromaticSaturation {
             hue = to.hue
-        } else if to.saturation <= 0.001 {
+        } else if to.saturation <= achromaticSaturation {
             hue = from.hue
         } else {
             hue = from.hue + delta * t

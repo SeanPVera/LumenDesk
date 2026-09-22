@@ -15,6 +15,9 @@ export class BeatTracker {
   private frameInterval: number;
   private capacity: number;
   private history: Float64Array;
+  /** Kick-band onsets over the same window, scored separately from the full
+   * spectrum so dense hi-hats cannot drag the search off the pulse. */
+  private kickHistory: Float64Array;
   private writeIndex = 0;
   private frameCount = 0;
   private latestFrameTime = 0;
@@ -28,8 +31,16 @@ export class BeatTracker {
   private pendingBarEnergy = 0;
   private nextBarEnergy = 0;
   private scratch: Float64Array = new Float64Array(0);
+  private kickScratch: Float64Array = new Float64Array(0);
   private autocorrelation: Float64Array = new Float64Array(0);
+  private kickAutocorrelation: Float64Array = new Float64Array(0);
+  private smoothedCorrelation: Float64Array = new Float64Array(0);
+  private smoothedKickCorrelation: Float64Array = new Float64Array(0);
   private combScores: Float64Array = new Float64Array(0);
+  /** A period that disagrees with the current one has to win the same argument
+   * several estimates running before the grid moves. */
+  private challengerInterval = 0;
+  private challengerStreak = 0;
   private readonly metreTracker = new MetreTracker();
   private feelPreference: TimeFeel = "auto";
   private metreOverride: Metre | "auto" = "auto";
@@ -38,6 +49,7 @@ export class BeatTracker {
     this.frameInterval = Math.max(0.001, frameInterval);
     this.capacity = Math.max(64, Math.round(BeatTracker.historyDuration / this.frameInterval));
     this.history = new Float64Array(this.capacity);
+    this.kickHistory = new Float64Array(this.capacity);
     this.barEnergies = new Array(BeatTracker.beatsPerBar).fill(0);
   }
 
@@ -52,6 +64,7 @@ export class BeatTracker {
     this.frameInterval = interval;
     this.capacity = Math.max(64, Math.round(BeatTracker.historyDuration / interval));
     this.history = new Float64Array(this.capacity);
+    this.kickHistory = new Float64Array(this.capacity);
     this.reset();
   }
 
@@ -70,12 +83,16 @@ export class BeatTracker {
     this.pendingBarEnergy = 0;
     this.nextBarEnergy = 0;
     this.history.fill(0);
+    this.kickHistory.fill(0);
+    this.challengerInterval = 0;
+    this.challengerStreak = 0;
     this.metreTracker.reset();
   }
 
   process(onset: number, lowFrequencyOnset: number, time: number): number {
     const clampedOnset = Math.max(0, Math.min(1, onset));
     this.history[this.writeIndex] = clampedOnset;
+    this.kickHistory[this.writeIndex] = Math.max(0, Math.min(1, lowFrequencyOnset));
     this.writeIndex = (this.writeIndex + 1) % this.capacity;
     this.frameCount += 1;
     this.latestFrameTime = time;
@@ -251,9 +268,24 @@ export class BeatTracker {
       const ratio = estimate.interval / this.grid.interval;
       if (Math.abs(ratio - 1) < 0.06) {
         this.grid.interval = this.grid.interval * 0.85 + estimate.interval * 0.15;
-      } else if (estimate.confidence > 0.45) {
-        this.grid.interval = estimate.interval;
-        this.resyncPhase(now);
+        this.challengerStreak = 0;
+      } else {
+        // Adopting a disagreeing period immediately let a tie between the beat
+        // and a dotted or halved relative teleport the grid several times a
+        // second, and every jump re-anchored the phase.
+        const near =
+          this.challengerInterval > 0 &&
+          Math.abs(estimate.interval / this.challengerInterval - 1) < 0.06;
+        this.challengerInterval = near
+          ? this.challengerInterval * 0.6 + estimate.interval * 0.4
+          : estimate.interval;
+        this.challengerStreak = near ? this.challengerStreak + 1 : 1;
+        const required = isSimpleRelative(estimate.interval, this.grid.interval) ? 4 : 2;
+        if (this.challengerStreak >= required && estimate.confidence > 0.45) {
+          this.grid.interval = this.challengerInterval;
+          this.resyncPhase(now);
+          this.challengerStreak = 0;
+        }
       }
     }
     this.grid.tempo = 60 / this.grid.interval;
@@ -277,21 +309,26 @@ export class BeatTracker {
     const available = Math.min(this.frameCount, this.capacity);
     if (available * this.frameInterval < BeatTracker.minimumHistoryDuration) return null;
 
-    if (this.scratch.length !== available) this.scratch = new Float64Array(available);
-    let total = 0;
-    for (let i = 0; i < available; i += 1) {
-      const value = this.historyValue(available - 1 - i);
-      this.scratch[i] = value;
-      total += value;
+    if (this.scratch.length !== available) {
+      this.scratch = new Float64Array(available);
+      this.kickScratch = new Float64Array(available);
     }
-    const mean = total / available;
-    let variance = 0;
-    for (let i = 0; i < available; i += 1) {
-      this.scratch[i] -= mean;
-      variance += this.scratch[i] * this.scratch[i];
-    }
-    variance /= available;
+    const variance = centre(this.scratch, available, (n) => this.historyValue(n));
     if (variance <= 1e-9) return null;
+    const kickVariance = centre(this.kickScratch, available, (n) => this.kickHistoryValue(n));
+
+    // How peaky the onset function is over the window. Drums give a tall crest
+    // against a low floor; a held chord's analysis ripple does not. Only the
+    // first means there is a pulse to find.
+    let peak = 0;
+    let levelTotal = 0;
+    for (let i = 0; i < available; i += 1) {
+      const value = this.historyValue(i);
+      if (value > peak) peak = value;
+      levelTotal += value;
+    }
+    const meanLevel = levelTotal / available;
+    const peakiness = meanLevel > 1e-6 ? peak / meanLevel : 0;
 
     const minimumLag = Math.max(2, Math.floor(60 / BeatTracker.maximumTempo / this.frameInterval));
     const maximumLag = Math.min(
@@ -304,13 +341,16 @@ export class BeatTracker {
 
     if (this.autocorrelation.length !== combLimit + 1) {
       this.autocorrelation = new Float64Array(combLimit + 1);
+      this.kickAutocorrelation = new Float64Array(combLimit + 1);
+      this.smoothedCorrelation = new Float64Array(combLimit + 1);
+      this.smoothedKickCorrelation = new Float64Array(combLimit + 1);
     }
-    for (let lag = 1; lag <= combLimit; lag += 1) {
-      let sum = 0;
-      for (let index = lag; index < available; index += 1) {
-        sum += this.scratch[index] * this.scratch[index - lag];
-      }
-      this.autocorrelation[lag] = sum / ((available - lag) * variance);
+    correlate(this.autocorrelation, this.scratch, available, variance, combLimit);
+    smooth(this.smoothedCorrelation, this.autocorrelation, combLimit);
+    const hasKick = kickVariance > 1e-9;
+    if (hasKick) {
+      correlate(this.kickAutocorrelation, this.kickScratch, available, kickVariance, combLimit);
+      smooth(this.smoothedKickCorrelation, this.kickAutocorrelation, combLimit);
     }
 
     if (this.combScores.length !== maximumLag + 1) {
@@ -318,17 +358,14 @@ export class BeatTracker {
     }
     let bestLag = minimumLag;
     let bestScore = Number.NEGATIVE_INFINITY;
-    let scoreTotal = 0;
     for (let lag = minimumLag; lag <= maximumLag; lag += 1) {
-      const comb =
-        (this.autocorrelation[lag] +
-          0.5 * this.autocorrelation[lag * 2] +
-          0.25 * this.autocorrelation[lag * 3]) /
-        1.75;
+      const broad = comb(this.smoothedCorrelation, lag);
+      // The kick band votes separately; material with no kick at all falls
+      // back to the broadband term.
+      const kick = hasKick ? comb(this.smoothedKickCorrelation, lag) : broad;
       const bpm = 60 / (lag * this.frameInterval);
-      const score = Math.max(0, comb) * tempoPrior(bpm);
+      const score = Math.max(0, 0.55 * broad + 0.45 * kick) * tempoPrior(bpm);
       this.combScores[lag] = score;
-      scoreTotal += score;
       if (score > bestScore) {
         bestScore = score;
         bestLag = lag;
@@ -348,12 +385,35 @@ export class BeatTracker {
       Math.max(60 / BeatTracker.maximumTempo, refinedLag * this.frameInterval),
     );
 
-    const meanScore = scoreTotal / (maximumLag - minimumLag + 1);
-    const prominence = (bestScore - meanScore) / bestScore;
-    const coefficient = Math.max(0, this.autocorrelation[bestLag]);
+    // The best score among genuinely different periods, skipping the winner's
+    // own peak. Measured against the mean of every lag instead, confidence
+    // reports near 1 even when a rival period is neck and neck.
+    let rivalScore = 0;
+    for (let lag = minimumLag; lag <= maximumLag; lag += 1) {
+      if (Math.abs(Math.log2(lag / bestLag)) < 0.14) continue;
+      if (this.combScores[lag] > rivalScore) rivalScore = this.combScores[lag];
+    }
+    const separation = Math.max(0, (bestScore - rivalScore) / bestScore);
+
+    const coefficient = Math.max(0, this.smoothedCorrelation[bestLag]);
     const activity = Math.min(1, Math.sqrt(variance) * 6);
-    const confidence = Math.min(1, coefficient * 1.8) * Math.min(1, prominence * 2.2) * activity;
+    const rhythmic = Math.min(1, Math.max(0, (peakiness - 2.2) / 3.5));
+    // A pulse has to be strong, clearly ahead of its rivals, loud enough to
+    // measure, and actually percussive.
+    const confidence =
+      Math.min(1, coefficient * 1.8) *
+      Math.min(1, separation * 2.4) *
+      activity *
+      (0.25 + 0.75 * rhythmic);
     return { interval, confidence: Math.max(0, Math.min(1, confidence)) };
+  }
+
+  private kickHistoryValue(framesAgo: number): number {
+    const available = Math.min(this.frameCount, this.capacity);
+    if (framesAgo < 0 || framesAgo >= available) return 0;
+    let index = this.writeIndex - 1 - framesAgo;
+    while (index < 0) index += this.capacity;
+    return this.kickHistory[index % this.capacity];
   }
 
   private historyValue(framesAgo: number): number {
@@ -392,4 +452,64 @@ function parabolicOffset(previous: number, peak: number, next: number): number {
   if (Math.abs(denominator) <= 1e-12) return 0;
   const offset = (0.5 * (previous - next)) / denominator;
   return Math.max(-0.5, Math.min(0.5, offset));
+}
+
+/** Mean-removes the newest `available` frames into `buffer`; returns variance. */
+function centre(buffer: Float64Array, available: number, read: (framesAgo: number) => number): number {
+  let total = 0;
+  for (let i = 0; i < available; i += 1) {
+    const value = read(available - 1 - i);
+    buffer[i] = value;
+    total += value;
+  }
+  const mean = total / available;
+  let variance = 0;
+  for (let i = 0; i < available; i += 1) {
+    buffer[i] -= mean;
+    variance += buffer[i] * buffer[i];
+  }
+  return variance / available;
+}
+
+function correlate(
+  into: Float64Array,
+  source: Float64Array,
+  available: number,
+  variance: number,
+  limit: number,
+): void {
+  for (let lag = 1; lag <= limit; lag += 1) {
+    let sum = 0;
+    for (let index = lag; index < available; index += 1) sum += source[index] * source[index - lag];
+    into[lag] = sum / ((available - lag) * variance);
+  }
+}
+
+/**
+ * Three-tap smoothing. A beat period rarely lands on a whole number of analysis
+ * hops, so its correlation peak is split across two lags; a rival period that
+ * happens to land on one would otherwise win on bin alignment rather than on
+ * the music.
+ */
+function smooth(into: Float64Array, source: Float64Array, limit: number): void {
+  for (let lag = 1; lag <= limit; lag += 1) {
+    const previous = lag > 1 ? source[lag - 1] : source[lag];
+    const next = lag < limit ? source[lag + 1] : source[lag];
+    into[lag] = 0.25 * previous + 0.5 * source[lag] + 0.25 * next;
+  }
+}
+
+function comb(table: Float64Array, lag: number): number {
+  return (table[lag] + 0.5 * table[lag * 2] + 0.25 * table[lag * 3]) / 1.75;
+}
+
+/**
+ * True when `candidate` is within a few percent of a simple musical relative of
+ * `current` — half, double, three halves, and so on. Those are the likeliest
+ * ways to be wrong, so they have to argue longer before the grid moves.
+ */
+function isSimpleRelative(candidate: number, current: number): boolean {
+  if (!(current > 0) || !(candidate > 0)) return false;
+  const ratio = candidate / current;
+  return [0.5, 2, 1.5, 2 / 3, 3, 1 / 3, 4 / 3, 0.75].some((r) => Math.abs(ratio / r - 1) < 0.05);
 }

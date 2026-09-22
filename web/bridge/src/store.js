@@ -21,6 +21,22 @@ const EMPTY = {
 
 export const id = () => crypto.randomUUID()
 
+const EVERY_DAY = [1, 2, 3, 4, 5, 6, 7]
+
+/**
+ * 1 = Sunday … 7 = Saturday, matching the native ScheduleEntry model.
+ *
+ * An empty or unusable list means every day, because that is what the native
+ * ScheduleEngine means by it. The bridge's own evaluator asks
+ * `weekdays.includes(...)`, so storing an empty list here saved a schedule the
+ * UI still showed as enabled and that could never fire again.
+ */
+export function normalizeWeekdays(value) {
+  if (!Array.isArray(value)) return [...EVERY_DAY]
+  const days = [...new Set(value.map(Number).filter(d => Number.isInteger(d) && d >= 1 && d <= 7))]
+  return days.length ? days.sort((a, b) => a - b) : [...EVERY_DAY]
+}
+
 export class Store {
   constructor({ file = DEFAULT_FILE, log = () => {} } = {}) {
     this.file = file
@@ -194,7 +210,7 @@ export class Store {
       hour: Math.max(0, Math.min(23, Number(entry.hour) || 0)),
       minute: Math.max(0, Math.min(59, Number(entry.minute) || 0)),
       action: entry.action,
-      weekdays: Array.isArray(entry.weekdays) && entry.weekdays.length ? entry.weekdays : [1, 2, 3, 4, 5, 6, 7],
+      weekdays: normalizeWeekdays(entry.weekdays),
       sceneID: entry.sceneID ?? null,
     }
     room.schedules.push(schedule)
@@ -210,7 +226,7 @@ export class Store {
     if (patch.hour !== undefined) schedule.hour = Math.max(0, Math.min(23, Number(patch.hour) || 0))
     if (patch.minute !== undefined) schedule.minute = Math.max(0, Math.min(59, Number(patch.minute) || 0))
     if (patch.action) schedule.action = patch.action
-    if (Array.isArray(patch.weekdays)) schedule.weekdays = patch.weekdays
+    if (Array.isArray(patch.weekdays)) schedule.weekdays = normalizeWeekdays(patch.weekdays)
     if ('sceneID' in patch) schedule.sceneID = patch.sceneID
     this.save()
     return schedule

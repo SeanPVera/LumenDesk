@@ -37,10 +37,30 @@ interface MusicalClock {
   strength: number;
   barRate: number;
   metre: number;
+  /** Absolute position in bars on the detected grid. */
+  barPosition: number;
 }
 
+/** One-pole follower toward `target` over `timeConstant` seconds. */
+function follow(current: number, target: number, dt: number, timeConstant: number): number {
+  if (!(timeConstant > 0)) return target;
+  return current + (target - current) * (1 - Math.exp(-dt / timeConstant));
+}
+
+/**
+ * Brightness is a **bed plus a swell**: the bed tracks loudness over about half
+ * a second and carries dynamics, the swell is an accent inside the headroom
+ * above it and carries rhythm. A fixture falls back to the bed rather than to
+ * the floor, so a beat reads as an accent on a lit room instead of the room
+ * going dark and coming back.
+ *
+ * Kept in lockstep with `LumenDesk/Services/MusicChoreographyEngine.swift`.
+ */
 export class MusicChoreographyEngine {
   private static outputLatency = 0.045;
+  private static attackTime = 0.026;
+  private static bedTimeConstant = 0.55;
+  private static offGridRelease = 0.28;
   private lastBeatCount = 0;
   private paletteProgress = 0;
   private movementPhase = 0;
@@ -50,6 +70,18 @@ export class MusicChoreographyEngine {
   private lastTimestamp: number | null = null;
   private brightnessEnvelopes = new Map<string, number>();
   private flashLimiter = new FlashSafetyLimiter();
+  private dynamics = 0;
+  private fastEnergy = 0;
+  private slowEnergy = 0;
+  private moodSmoothed = 0.5;
+  private chromaHueSmoothed = 0;
+  private chromaCandidate = -1;
+  private chromaCandidateFrames = 0;
+  private chromaIndex = -1;
+  private onsetEnvelope = 0;
+  private accentEnvelope = 0;
+  private colourIndex = 0;
+  private lastColourIndex = 0;
 
   reset(): void {
     this.lastBeatCount = 0;
@@ -61,6 +93,18 @@ export class MusicChoreographyEngine {
     this.lastTimestamp = null;
     this.brightnessEnvelopes.clear();
     this.flashLimiter.reset();
+    this.dynamics = 0;
+    this.fastEnergy = 0;
+    this.slowEnergy = 0;
+    this.moodSmoothed = 0.5;
+    this.chromaHueSmoothed = 0;
+    this.chromaCandidate = -1;
+    this.chromaCandidateFrames = 0;
+    this.chromaIndex = -1;
+    this.onsetEnvelope = 0;
+    this.accentEnvelope = 0;
+    this.colourIndex = 0;
+    this.lastColourIndex = 0;
   }
 
   makeFrame(
@@ -84,10 +128,23 @@ export class MusicChoreographyEngine {
 
     const newBeats = snapshot.beatCount > this.lastBeatCount ? snapshot.beatCount - this.lastBeatCount : 0;
     this.lastBeatCount = snapshot.beatCount;
+
+    const silence = snapshot.confidence < 0.025 && snapshot.level < 0.025 && snapshot.energy < 0.035;
+
+    // One loudness line, smoothed over about half a second, so a single noisy
+    // analysis hop cannot move the room.
+    const loudness = Math.max(snapshot.level, snapshot.energy);
+    this.dynamics = follow(this.dynamics, loudness, dt, silence ? 0.9 : MusicChoreographyEngine.bedTimeConstant);
+    // A long/short energy pair. Their difference is a phrase building, where
+    // the single-hop energy difference this replaces was measurement noise.
+    this.fastEnergy = follow(this.fastEnergy, snapshot.energy, dt, 0.7);
+    this.slowEnergy = follow(this.slowEnergy, snapshot.energy, dt, 5);
+    const energyRise = Math.max(0, this.fastEnergy - this.slowEnergy);
+
     this.advancePalette(newBeats, clock, config, dt);
     this.advanceMovement(clock, config, dt);
 
-    const beganSustained = this.updateSustainedEnergy(snapshot.energy, timestamp);
+    const beganSustained = this.updateSustainedEnergy(this.fastEnergy, timestamp);
     const percussionRequest = Math.max(
       snapshot.snare * config.percussionSensitivity,
       snapshot.percussion * config.percussionSensitivity * 0.9,
@@ -95,72 +152,124 @@ export class MusicChoreographyEngine {
     const requestedFlash = Math.max(percussionRequest > 0.62 ? percussionRequest : 0, beganSustained ? 0.8 : 0);
     const flashIntensity = this.flashLimiter.admit(timestamp, requestedFlash, config);
 
-    const silence = snapshot.confidence < 0.025 && snapshot.level < 0.025 && snapshot.energy < 0.035;
+    // On the grid a pulse is a contour across the felt beat. Off it, a
+    // smoothed onset envelope with a bounded fall, so a wall of hi-hats raises
+    // a level rather than retriggering a pulse several times a second.
+    this.onsetEnvelope = Math.max(
+      this.onsetEnvelope * Math.exp(-dt / MusicChoreographyEngine.offGridRelease),
+      Math.max(snapshot.beat, snapshot.pulse),
+    );
+    const musicalPulse = beatShape(clock.phase) * barAccent(clock.beatInBar, clock.metre);
+    const pulseDrive = this.onsetEnvelope + (musicalPulse - this.onsetEnvelope) * clock.strength;
+
+    const accentTarget = clamp01(snapshot.snare * config.percussionSensitivity);
+    this.accentEnvelope = Math.max(this.accentEnvelope * Math.exp(-dt / 0.35), accentTarget);
+
+    // How deep a beat may dig, as a fraction of the headroom above the bed. It
+    // shrinks at fast tempos so the rate of *visible* musical events stays
+    // musical however fast analysis and frame delivery run.
+    const feltInterval = clock.interval > 0 ? clock.interval : 0.5;
+    const tempoRestraint = clamp01((feltInterval - 0.22) / 0.26);
+    const dynamicsGate = Math.pow(clamp01(this.dynamics), 0.8);
+    const baseDepth =
+      (0.3 + config.beatSensitivity * 1.15) *
+      (0.6 + config.effectIntensity * 0.4) *
+      (0.4 + 0.6 * tempoRestraint) *
+      (0.12 + 0.88 * dynamicsGate);
+
     const upperBrightness = Math.max(config.minimumBrightness, config.maximumBrightness * config.masterBrightness);
     const palette = config.palette.map(toHsb);
-    const reactivePulse = Math.max(snapshot.beat, snapshot.pulse);
-    const musicalPulse = beatShape(clock.phase) * barAccent(clock.beatInBar, clock.metre) * Math.min(1, 0.4 + snapshot.energy * 0.8);
-    const pulseDrive = reactivePulse + (musicalPulse - reactivePulse) * clock.strength;
-    const phraseLift = config.phraseAware ? Math.max(0, snapshot.energySlope) * 0.22 : 0;
-    const chromaHue = chromaToHue(snapshot.chroma);
+    const chromaHue = this.smoothedChromaHue(snapshot.chroma, dt);
+    this.moodSmoothed = follow(this.moodSmoothed, snapshot.mood, dt, 2.5);
+    const phraseLift = config.phraseAware ? Math.min(0.18, energyRise * 0.9) : 0;
+
+    // A room of two or three bulbs cannot show travel, so a sweep there is one
+    // more brightness wobble. Spend movement on colour position instead; a
+    // segmented fixture gets the full spatial treatment.
+    const resolution = targets.length;
+    const spatialFidelity = resolution >= 8 ? 1 : resolution >= 4 ? 0.6 : 0.3;
+    const motionDepth = config.movementAmount * spatialFidelity;
 
     const states: MusicLightingState[] = [];
     for (const target of targets) {
       const phase = spatialPhase(target.position, config.movementDirection, this.movementPhase);
       const wave = 0.5 + 0.5 * Math.sin(phase * 2 * Math.PI);
       const stereoBias = 1 + (snapshot.stereo - 0.5) * 2 * config.stereoImage * (target.position - 0.5) * 2;
-      const spatialWeight = (1 - config.movementAmount + config.movementAmount * (0.3 + wave * 0.7)) * Math.max(0.55, stereoBias);
+      // Centred on 1 so movement tilts the room rather than dimming it.
+      const spatialWeight = (1 - motionDepth * 0.5 + motionDepth * wave) * Math.max(0.6, Math.min(1.4, stereoBias));
 
       const isHit = target.role === "hit";
       const isAccent = target.role === "accent";
       const isMotion = target.role === "motion";
       const isWash = target.role === "wash" || target.role === "auto";
 
-      const bassDrive = snapshot.bass * config.bassSensitivity;
-      const sustain = 0.1 + Math.pow(Math.max(snapshot.level, snapshot.energy), 0.65) * 0.2 + bassDrive * 0.14;
-      let swing = pulseDrive * (0.35 + config.beatSensitivity * 0.8);
-      if (isHit) swing *= 1.35;
-      if (isWash) swing *= 0.72;
-      if (isMotion) swing *= 0.9;
-      if (isAccent) swing *= 0.55;
+      // The bed: where this fixture rests between accents.
+      const bassBed = snapshot.bass * config.bassSensitivity * 0.1;
+      const sustainedLift = this.sustainedEnergyEvent ? 0.06 + this.fastEnergy * 0.08 : 0;
+      let bedLevel = 0.1 + Math.pow(clamp01(this.dynamics), 0.7) * 0.4 + bassBed + phraseLift + sustainedLift;
+      // A hit fixture rests darker so it has headroom to punch.
+      if (isHit) bedLevel *= 0.76;
+      else if (isAccent) bedLevel *= 0.85;
+      bedLevel = clamp01(bedLevel * (0.6 + config.effectIntensity * 0.5) * spatialWeight);
 
-      let drive = sustain + swing + phraseLift;
-      if (isAccent) drive += snapshot.snare * config.percussionSensitivity * 0.28;
-      if (isHit) drive += snapshot.kick * config.bassSensitivity * 0.2;
-      drive = Math.min(1, drive * (0.55 + config.effectIntensity * 0.65) * spatialWeight);
+      // The swell: an accent inside the headroom above the bed.
+      let depth = baseDepth;
+      if (isHit) depth *= 1.7;
+      else if (isWash) depth *= 1.15;
+      else if (isMotion) depth *= 0.92;
+      else if (isAccent) depth *= 0.6;
+      if (isAccent) depth += this.accentEnvelope * 0.18 * config.percussionSensitivity;
+      if (isHit) depth += snapshot.kick * config.bassSensitivity * 0.1;
+      // Deliberately not clamped to 1: past that the swell holds at the ceiling
+      // for part of the beat, which is what a punchy preset should look like.
+      depth = Math.max(0, depth);
+
+      const bed = config.minimumBrightness + (upperBrightness - config.minimumBrightness) * bedLevel;
+      let rawBrightness = bed + (upperBrightness - bed) * depth * clamp01(pulseDrive);
 
       if (silence) {
-        if (config.silenceBehavior === "settle") drive = 0;
-        else if (config.silenceBehavior === "holdPalette") drive = 0.08 + config.effectIntensity * 0.08;
-        else drive = -0.1;
+        if (config.silenceBehavior === "settle") rawBrightness = config.minimumBrightness;
+        else if (config.silenceBehavior === "holdPalette") {
+          rawBrightness =
+            config.minimumBrightness +
+            (upperBrightness - config.minimumBrightness) * (0.08 + config.effectIntensity * 0.08);
+        } else rawBrightness = 0;
       }
-
-      const rawBrightness = Math.max(
-        config.silenceBehavior === "fadeOut" && silence ? 0 : config.minimumBrightness,
-        config.minimumBrightness + (upperBrightness - config.minimumBrightness) * Math.max(0, drive),
+      rawBrightness = Math.max(
+        silence && config.silenceBehavior === "fadeOut" ? 0 : config.minimumBrightness,
+        Math.min(upperBrightness, rawBrightness),
       );
+
       const envelopeKey = `${target.fixtureID}#${target.segmentID ?? -1}`;
       const previous = this.brightnessEnvelopes.get(envelopeKey) ?? rawBrightness;
-      const attack = 1 - Math.exp(-dt / 0.045);
-      const musicalRelease = Math.min(0.3, Math.max(0.06, clock.interval * 0.12));
-      const releaseTime = silence ? 0.65 : 0.22 + (musicalRelease - 0.22) * clock.strength;
+      const attack = 1 - Math.exp(-dt / MusicChoreographyEngine.attackTime);
+      // Release is a fraction of the felt beat with a floor. The constant this
+      // replaces clamped to 60 ms for anything at or above 120 BPM, turning
+      // every beat into a full-depth sawtooth.
+      const musicalRelease = Math.min(0.45, Math.max(0.13, feltInterval * 0.26));
+      const quietStretch = 1 + Math.max(0, 0.6 - clamp01(this.dynamics)) * 1.2;
+      const releaseTime = silence ? 0.8 : musicalRelease * quietStretch;
       const release = 1 - Math.exp(-dt / releaseTime);
       const coefficient = rawBrightness > previous ? attack : release;
       let brightness = previous + (rawBrightness - previous) * coefficient;
       brightness = Math.min(1, brightness + flashIntensity * (1 - brightness));
       this.brightnessEnvelopes.set(envelopeKey, brightness);
 
-      const entries = Math.max(1, palette.length);
+      // A palette entry held for a whole number of bars and cross-faded over
+      // one beat at the bar line, plus a spatial offset so the room reads as
+      // one gradient.
+      const spread = config.colorChangeIntensity * (0.35 + spatialFidelity * 0.65);
       const paletteMotion =
-        target.position * config.colorChangeIntensity * Math.max(1, palette.length - 1) +
-        this.quantizedPaletteProgress(clock.strength);
-      const color = paletteColor(palette, paletteMotion / entries);
-      color.hue = wrapUnit(color.hue + (snapshot.mood - 0.5) * 0.08 + chromaHue * 0.04);
-      if (isAccent && snapshot.snare * config.percussionSensitivity > 0.42) {
+        target.position * spread * Math.max(1, palette.length - 1) + this.paletteProgress;
+      const color = paletteColor(palette, paletteMotion / Math.max(1, palette.length));
+      color.hue = wrapUnit(color.hue + (this.moodSmoothed - 0.5) * 0.05 + chromaHue * 0.03);
+      if (isAccent) {
+        // The accent role sits on the complementary colour for the whole show
+        // rather than teleporting there whenever a snare crosses a threshold.
         color.hue = wrapUnit(color.hue + 0.5);
-        color.saturation *= 0.72;
-      } else if (isHit && snapshot.kick > 0.5) {
-        color.saturation = Math.min(1, color.saturation + 0.08);
+        color.saturation *= 0.78;
+      } else if (isHit) {
+        color.saturation = Math.min(1, color.saturation + snapshot.kick * 0.06);
       }
       if (flashIntensity > 0) color.saturation *= 1 - flashIntensity * 0.8;
 
@@ -170,7 +279,9 @@ export class MusicChoreographyEngine {
         hue: color.hue,
         saturation: clamp01(color.saturation),
         brightness: clamp01(brightness),
-        transitionDuration: silence ? 0.55 : flashIntensity > 0 ? 0.04 : 0.1,
+        // The transition covers the gap to the next frame, so a fixture
+        // interpolates between commands instead of stepping.
+        transitionDuration: silence ? 0.55 : flashIntensity > 0 ? 0.04 : 0.09,
         priority: flashIntensity > 0 ? 3 : isHit ? 2 : 1,
       });
     }
@@ -186,25 +297,75 @@ export class MusicChoreographyEngine {
 
   private musicalClock(snapshot: AudioReactiveSnapshot, timestamp: number): MusicalClock {
     const interval = snapshot.feltInterval > 0 ? snapshot.feltInterval : snapshot.beatInterval;
-    if (!snapshot.isTempoLocked || interval <= 0 || snapshot.beatReferenceTime <= 0) {
-      return { phase: 0, beatInBar: 0, interval: 0, strength: 0, barRate: 0, metre: snapshot.metre };
-    }
-    if (timestamp - snapshot.beatReferenceTime >= interval * 6) {
-      return { phase: 0, beatInBar: 0, interval: 0, strength: 0, barRate: 0, metre: snapshot.metre };
-    }
-    const predicted = timestamp + MusicChoreographyEngine.outputLatency;
-    const beats = (predicted - snapshot.beatReferenceTime) / interval;
-    const whole = Math.floor(beats);
     const metre = snapshot.metre || 4;
-    const beatInBar = ((snapshot.beatInBar + whole) % metre + metre) % metre;
+    const blank: MusicalClock = {
+      phase: 0, beatInBar: 0, interval: 0, strength: 0, barRate: 0, metre, barPosition: 0,
+    };
+    if (!snapshot.isTempoLocked || interval <= 0 || snapshot.beatReferenceTime <= 0) return blank;
+    if (timestamp - snapshot.beatReferenceTime >= interval * 6) return blank;
+
+    // Compensate for transport, firmware delay, and the envelope's own rise
+    // time, or the swell lands consistently late.
+    const predicted =
+      timestamp + MusicChoreographyEngine.outputLatency + MusicChoreographyEngine.attackTime * 0.8;
+    const gridInterval = snapshot.beatInterval > 0 ? snapshot.beatInterval : interval;
+    const gridBeats = (predicted - snapshot.beatReferenceTime) / gridInterval;
+    // The reference advances on every detected beat. Include its position on
+    // the grid before dividing into felt beats, or half-time restarts its
+    // pulse halfway through every cycle.
+    const absoluteBeat = snapshot.beatCount + gridBeats;
+    const beats = (absoluteBeat * gridInterval) / interval;
+    const whole = Math.floor(beats);
+    const beatInBar = (((snapshot.beatInBar + Math.floor(gridBeats)) % metre) + metre) % metre;
     return {
       phase: beats - whole,
       beatInBar,
       interval,
-      strength: Math.max(0, Math.min(1, snapshot.beatConfidence * 1.6)),
-      barRate: 1 / (interval * metre),
+      // Confidence now reflects how far the tempo estimate is ahead of its
+      // nearest rival period, so this cross-fade does real work: an ambiguous
+      // grid renders the smooth energy-driven show instead of a confident
+      // wrong one.
+      strength: clamp01((snapshot.beatConfidence - 0.25) / 0.45),
+      barRate: 1 / (gridInterval * metre),
       metre,
+      barPosition: absoluteBeat / metre,
     };
+  }
+
+  /**
+   * The argmax of the chroma vector flickers between near-equal bins every
+   * analysis frame. Require a new bin to lead clearly and hold that lead, then
+   * glide the short way round the wheel rather than jumping.
+   */
+  private smoothedChromaHue(chroma: number[], dt: number): number {
+    if (chroma && chroma.length >= 12) {
+      let best = 0;
+      let runnerUp = 0;
+      let index = 0;
+      for (let i = 0; i < chroma.length; i += 1) {
+        if (chroma[i] > best) {
+          runnerUp = best;
+          best = chroma[i];
+          index = i;
+        } else if (chroma[i] > runnerUp) {
+          runnerUp = chroma[i];
+        }
+      }
+      if (best > 0.15 && best > runnerUp * 1.15) {
+        if (index === this.chromaCandidate) this.chromaCandidateFrames += 1;
+        else {
+          this.chromaCandidate = index;
+          this.chromaCandidateFrames = 1;
+        }
+        if (this.chromaCandidateFrames >= 4) this.chromaIndex = index;
+      }
+    }
+    const target = this.chromaIndex >= 0 ? this.chromaIndex / 12 : this.chromaHueSmoothed;
+    let delta = target - this.chromaHueSmoothed;
+    if (delta > 0.5) delta -= 1;
+    if (delta < -0.5) delta += 1;
+    this.chromaHueSmoothed = wrapUnit(this.chromaHueSmoothed + delta * (1 - Math.exp(-dt / 2.5)));
+    return this.chromaHueSmoothed;
   }
 
   private updateSustainedEnergy(energy: number, timestamp: number): boolean {
@@ -226,29 +387,43 @@ export class MusicChoreographyEngine {
     return began;
   }
 
-  private advancePalette(newBeats: number, clock: MusicalClock, configuration: MusicModeConfiguration, dt: number): void {
+  /**
+   * Palette progression measured in whole bars: an entry is held for an integer
+   * number of bars and cross-faded across one beat at the bar line, so the
+   * change lands on a downbeat by construction. The free-running accumulator
+   * this replaces quantized to its own boundaries, which drifted relative to
+   * the bar and changed colour about twice a second at the default setting.
+   */
+  private advancePalette(_newBeats: number, clock: MusicalClock, configuration: MusicModeConfiguration, dt: number): void {
     if (clock.strength > 0 && clock.barRate > 0) {
-      const entriesPerBar = 0.25 + configuration.colorChangeIntensity * 1.75;
-      this.paletteProgress += entriesPerBar * clock.barRate * dt;
-    } else if (newBeats > 0) {
-      this.paletteProgress += newBeats * Math.max(0.15, configuration.colorChangeIntensity);
+      const barsPerColour = Math.max(1, Math.round(5 - configuration.colorChangeIntensity * 4));
+      const raw = clock.barPosition / barsPerColour;
+      const index = Math.floor(raw);
+      // Beats elapsed inside the current hold, so the cross-fade lasts exactly
+      // one beat however long the hold is.
+      const within = (raw - Math.floor(raw)) * barsPerColour * clock.metre;
+      const blend = clamp01(within);
+      if (index !== this.colourIndex) {
+        this.lastColourIndex = this.colourIndex;
+        this.colourIndex = index;
+      }
+      this.paletteProgress = this.lastColourIndex + (this.colourIndex - this.lastColourIndex) * blend;
+    } else {
+      // Off the grid there are no bars for a change to land on, so the palette
+      // drifts slowly and continuously instead of snapping.
+      this.paletteProgress += dt * (0.02 + configuration.colorChangeIntensity * 0.06);
+      this.colourIndex = Math.floor(this.paletteProgress);
+      this.lastColourIndex = this.colourIndex;
     }
   }
 
-  private quantizedPaletteProgress(strength: number): number {
-    if (strength <= 0) return this.paletteProgress;
-    const step = Math.floor(this.paletteProgress);
-    const fraction = this.paletteProgress - step;
-    const crossfade = Math.min(1, fraction / 0.15);
-    const quantized = step + crossfade;
-    return this.paletteProgress + (quantized - this.paletteProgress) * strength;
-  }
-
   private advanceMovement(clock: MusicalClock, configuration: MusicModeConfiguration, dt: number): void {
-    const wallClockRate = 0.18 + configuration.movementSpeed * 1.7;
+    const wallClockRate = 0.06 + configuration.movementSpeed * 0.55;
     let rate = wallClockRate;
     if (clock.strength > 0 && clock.barRate > 0) {
-      const traversesPerBar = 0.25 + configuration.movementSpeed * 1.75;
+      // One traverse every few bars at the default speed: motion that reads as
+      // travel rather than as another oscillator stacked on brightness.
+      const traversesPerBar = 0.12 + configuration.movementSpeed * 0.55;
       const musicalRate = traversesPerBar * clock.barRate;
       rate = wallClockRate + (musicalRate - wallClockRate) * clock.strength;
     }
@@ -314,20 +489,30 @@ export function resolveRole(fixture: MusicFixtureDescriptor): FixtureRole {
   return "wash";
 }
 
+/**
+ * Brightness contour across one felt beat. Unlike the curve it replaces this
+ * returns to a floor rather than to zero, so a beat is an accent on a lit room
+ * instead of the room going dark and coming back.
+ */
 function beatShape(phase: number): number {
-  const decay = Math.pow(Math.max(0, 1 - phase), 2.6);
-  const anticipation = phase > 0.82 ? Math.pow((phase - 0.82) / 0.18, 2) * 0.55 : 0;
-  return Math.max(decay, anticipation);
+  const decay = Math.pow(Math.max(0, 1 - phase), 2);
+  const anticipation = phase > 0.86 ? Math.pow((phase - 0.86) / 0.14, 2) * 0.62 : 0;
+  return 0.07 + 0.93 * Math.max(decay, anticipation);
 }
 
+/**
+ * Relative weight of each beat in the bar. The downbeat leads by a clear
+ * margin, so only the strong beats produce a large swing and the bar reads as
+ * a groove rather than a metronome at full depth.
+ */
 function barAccent(beatInBar: number, metre: number): number {
   if (beatInBar === 0) return 1;
-  if (metre === 3) return beatInBar === 1 ? 0.7 : 0.82;
-  if (metre === 5) return beatInBar === 3 ? 0.9 : 0.7;
-  if (metre === 6) return beatInBar === 3 ? 0.9 : 0.72;
-  if (metre === 7) return beatInBar === 3 || beatInBar === 5 ? 0.88 : 0.7;
-  if (beatInBar === 2) return 0.88;
-  return 0.74;
+  if (metre === 3) return beatInBar === 1 ? 0.46 : 0.6;
+  if (metre === 5) return beatInBar === 3 ? 0.72 : 0.46;
+  if (metre === 6) return beatInBar === 3 ? 0.72 : 0.48;
+  if (metre === 7) return beatInBar === 3 || beatInBar === 5 ? 0.7 : 0.46;
+  if (beatInBar === 2) return 0.72;
+  return 0.5;
 }
 
 function spatialPhase(position: number, direction: MusicMovementDirection, time: number): number {
@@ -371,11 +556,13 @@ function toHsb(color: MusicPaletteColor): HSB {
 function paletteColor(palette: HSB[], position: number): HSB {
   if (palette.length === 0) return { hue: 0, saturation: 0, brightness: 1 };
   if (palette.length === 1) return { ...palette[0] };
-  const wrapped = wrapUnit(position) * (palette.length - 1);
-  const index = Math.floor(wrapped);
-  const t = wrapped - index;
+  // Cyclic, matching the Swift engine. A clamped ramp reaches the last entry
+  // and snaps back to the first, which the native app never did.
+  const wrapped = wrapUnit(position) * palette.length;
+  const index = Math.floor(wrapped) % palette.length;
+  const t = wrapped - Math.floor(wrapped);
   const a = palette[index];
-  const b = palette[Math.min(palette.length - 1, index + 1)];
+  const b = palette[(index + 1) % palette.length];
   return {
     hue: lerpHue(a.hue, b.hue, t),
     saturation: a.saturation + (b.saturation - a.saturation) * t,
@@ -386,17 +573,4 @@ function paletteColor(palette: HSB[], position: number): HSB {
 function lerpHue(a: number, b: number, t: number): number {
   let delta = wrapUnit(b - a + 0.5) - 0.5;
   return wrapUnit(a + delta * t);
-}
-
-function chromaToHue(chroma: number[]): number {
-  if (chroma.length < 12) return 0;
-  let best = 0;
-  let idx = 0;
-  for (let i = 0; i < 12; i += 1) {
-    if (chroma[i] > best) {
-      best = chroma[i];
-      idx = i;
-    }
-  }
-  return best > 0.15 ? idx / 12 : 0;
 }

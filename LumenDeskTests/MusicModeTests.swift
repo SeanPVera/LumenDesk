@@ -112,57 +112,197 @@ final class MusicModeTests: XCTestCase {
         XCTAssertEqual(Double(snapshot.beatCount - lock.beatCount), expectedBeats, accuracy: 2.5)
     }
 
-    func testChoreographyPulsesOnTheBeatWhenTempoIsLocked() {
+    /// The beat has to be visible, and it has to stop short of a strobe. Both
+    /// bounds matter: the engine this replaced hit the upper one, and simply
+    /// damping it would have traded one wrong answer for another. Measured at
+    /// the render clock the app actually uses (20 Hz), not a finer one.
+    func testBeatIsVisibleWithoutBecomingAStrobe() throws {
         let engine = MusicChoreographyEngine()
         let fixture = MusicFixtureDescriptor(id: "f", label: "Fixture", transport: .lifxLAN)
         var config = MusicModeConfiguration.configuration(for: .balanced)
-        // Isolate the beat: no spatial movement, no flashes.
         config.movementAmount = 0
         config.allowsFlashes = false
 
         let interval = 0.5
         let reference = 100.0
-        var onBeat: [Double] = []
-        var offBeat: [Double] = []
-        for frame in 0..<160 {
-            let timestamp = reference + Double(frame) * 0.025
-            let state = engine.makeFrame(
+        var byBeat: [Int: [Double]] = [:]
+        for frame in 0...240 {
+            let timestamp = reference + Double(frame) * MusicModeTests.renderStep
+            let brightness = engine.makeFrame(
                 snapshot: lockedSnapshot(at: timestamp, reference: reference, interval: interval),
                 configuration: config,
                 topology: FixtureTopology(),
                 fixtures: [fixture],
                 timestamp: timestamp,
                 sequenceNumber: UInt64(frame)
-            ).states.first
-            // The engine renders slightly ahead to pay for transport latency,
-            // so phase is measured the same way it chooses to render.
-            let beats = (timestamp + 0.045 - reference) / interval
-            let phase = beats - floor(beats)
-            guard let brightness = state?.brightness, frame > 20 else { continue }
-            if phase < 0.15 { onBeat.append(brightness) }
-            if (0.4...0.6).contains(phase) { offBeat.append(brightness) }
+            ).states.first?.brightness
+            guard let brightness, timestamp - reference > 3 else { continue }
+            byBeat[Int((timestamp - reference) / interval), default: []].append(brightness)
         }
 
-        XCTAssertGreaterThan(onBeat.count, 5)
-        XCTAssertGreaterThan(offBeat.count, 5)
-        let onBeatMean = onBeat.reduce(0, +) / Double(onBeat.count)
-        let offBeatMean = offBeat.reduce(0, +) / Double(offBeat.count)
-        XCTAssertGreaterThan(
-            onBeatMean, offBeatMean * 1.25,
-            "brightness should swell on the beat (\(onBeatMean)) versus between beats (\(offBeatMean))"
+        let ratios = byBeat.values
+            .filter { $0.count >= 4 }
+            .compactMap { values -> Double? in
+                guard let high = values.max(), let low = values.min(), low > 0 else { return nil }
+                return high / low
+            }
+            .sorted()
+        XCTAssertGreaterThan(ratios.count, 10)
+        let median = ratios[ratios.count / 2]
+        XCTAssertGreaterThan(median, 1.15, "the beat should be clearly visible, not a trickle (\(median))")
+        XCTAssertLessThan(median, 2.0, "a beat that swings this far at beat rate reads as flashing (\(median))")
+    }
+
+    /// A light that peaks a different amount on every beat regardless of how
+    /// loud the music is has thrown its dynamics away. Quiet material must not
+    /// be modulated harder than loud material.
+    func testQuietMaterialIsNoMoreModulatedThanLoud() throws {
+        func perBeatRatio(level: Double, energy: Double, bass: Double) throws -> Double {
+            let engine = MusicChoreographyEngine()
+            let fixture = MusicFixtureDescriptor(id: "f", label: "Fixture", transport: .lifxLAN)
+            var config = MusicModeConfiguration.configuration(for: .balanced)
+            config.movementAmount = 0
+            config.allowsFlashes = false
+            let interval = 0.5
+            let reference = 100.0
+            var byBeat: [Int: [Double]] = [:]
+            for frame in 0...240 {
+                let timestamp = reference + Double(frame) * MusicModeTests.renderStep
+                var snapshot = lockedSnapshot(at: timestamp, reference: reference, interval: interval)
+                snapshot.level = level
+                snapshot.energy = energy
+                snapshot.bass = bass
+                let brightness = engine.makeFrame(
+                    snapshot: snapshot, configuration: config, topology: FixtureTopology(),
+                    fixtures: [fixture], timestamp: timestamp, sequenceNumber: UInt64(frame)
+                ).states.first?.brightness
+                guard let brightness, timestamp - reference > 3 else { continue }
+                byBeat[Int((timestamp - reference) / interval), default: []].append(brightness)
+            }
+            let ratios = byBeat.values
+                .filter { $0.count >= 4 }
+                .compactMap { values -> Double? in
+                    guard let high = values.max(), let low = values.min(), low > 0 else { return nil }
+                    return high / low
+                }
+                .sorted()
+            return try XCTUnwrap(ratios.isEmpty ? nil : ratios[ratios.count / 2])
+        }
+
+        let loud = try perBeatRatio(level: 0.7, energy: 0.6, bass: 0.5)
+        let quiet = try perBeatRatio(level: 0.12, energy: 0.1, bass: 0.08)
+        XCTAssertLessThanOrEqual(
+            quiet, loud + 0.02,
+            "a quiet passage (\(quiet)) should be no more modulated than a loud one (\(loud))"
         )
     }
 
-    func testPaletteHoldsThroughABarInsteadOfChasingTransients() {
+    /// Below the confidence threshold the show must not invent a confident
+    /// beat. It falls back to the smoothed energy behaviour, which on a
+    /// snapshot carrying no transients means almost no modulation at all.
+    func testLowBeatConfidenceDoesNotInventAPulse() throws {
         let engine = MusicChoreographyEngine()
         let fixture = MusicFixtureDescriptor(id: "f", label: "Fixture", transport: .lifxLAN)
-        let config = MusicModeConfiguration.configuration(for: .balanced)
+        var config = MusicModeConfiguration.configuration(for: .balanced)
+        config.movementAmount = 0
+        config.allowsFlashes = false
+        let interval = 0.5
+        let reference = 100.0
+        var byBeat: [Int: [Double]] = [:]
+        for frame in 0...240 {
+            let timestamp = reference + Double(frame) * MusicModeTests.renderStep
+            var snapshot = lockedSnapshot(at: timestamp, reference: reference, interval: interval)
+            snapshot.beatConfidence = 0.2
+            let brightness = engine.makeFrame(
+                snapshot: snapshot, configuration: config, topology: FixtureTopology(),
+                fixtures: [fixture], timestamp: timestamp, sequenceNumber: UInt64(frame)
+            ).states.first?.brightness
+            guard let brightness, timestamp - reference > 3 else { continue }
+            byBeat[Int((timestamp - reference) / interval), default: []].append(brightness)
+        }
+        let ratios = byBeat.values
+            .filter { $0.count >= 4 }
+            .compactMap { values -> Double? in
+                guard let high = values.max(), let low = values.min(), low > 0 else { return nil }
+                return high / low
+            }
+            .sorted()
+        let median = try XCTUnwrap(ratios.isEmpty ? nil : ratios[ratios.count / 2])
+        XCTAssertLessThan(median, 1.08, "an unsure grid should not drive a beat-shaped pulse (\(median))")
+    }
+
+    /// The count that matches the complaint: how often a fixture makes a large,
+    /// visible jump. A hit fixture used to do it about four times a second at
+    /// club tempo — twice per beat, up and down — which is the rate the eye
+    /// reads as strobing rather than as a groove.
+    func testLargeBrightnessSwingsStayBelowTheFlickerRate() throws {
+        let engine = MusicChoreographyEngine()
+        let hit = MusicFixtureDescriptor(id: "hit", label: "Downstage", transport: .lifxLAN, role: .hit)
+        let wash = MusicFixtureDescriptor(id: "wash", label: "Wash", transport: .lifxLAN, role: .wash)
+        var config = MusicModeConfiguration.configuration(for: .club)
+        config.movementAmount = 0
+        config.allowsFlashes = false
+        let interval = 60.0 / 124
+        let reference = 100.0
+        var series: [String: [Double]] = ["hit": [], "wash": []]
+        var samples = 0
+        for frame in 0...400 {
+            let timestamp = reference + Double(frame) * MusicModeTests.renderStep
+            let states = engine.makeFrame(
+                snapshot: lockedSnapshot(at: timestamp, reference: reference, interval: interval),
+                configuration: config,
+                topology: FixtureTopology(layout: .custom, fixtureOrder: ["hit", "wash"]),
+                fixtures: [hit, wash],
+                timestamp: timestamp,
+                sequenceNumber: UInt64(frame)
+            ).states
+            guard timestamp - reference > 3 else { continue }
+            samples += 1
+            for state in states { series[state.fixtureID]?.append(state.brightness) }
+        }
+        let duration = Double(samples) * MusicModeTests.renderStep
+        XCTAssertGreaterThan(duration, 10)
+        // A hit fixture may accent the strong beats; it may not swing hard on
+        // every one. Club tempo is about two beats a second.
+        XCTAssertLessThan(Self.largeSwings(series["hit"] ?? []) / duration, 2.5)
+        XCTAssertLessThan(Self.largeSwings(series["wash"] ?? []) / duration, 1.0)
+    }
+
+    /// Counts monotonic runs that cover at least `minimum` of the brightness
+    /// range: one visible jump up or drop down each.
+    private static func largeSwings(_ values: [Double], minimum: Double = 0.25) -> Double {
+        guard values.count > 2 else { return 0 }
+        var runs = 0.0
+        var start = 0
+        var direction = (values[1] - values[0]).sign
+        for index in 1..<values.count {
+            let step = values[index] - values[index - 1]
+            if step == 0 { continue }
+            if step.sign != direction {
+                if abs(values[index - 1] - values[start]) >= minimum { runs += 1 }
+                start = index - 1
+                direction = step.sign
+            }
+        }
+        return runs
+    }
+
+    /// Colour is held for a whole number of bars and crossed over at a bar
+    /// line, so the window has to be long enough to contain one. The engine
+    /// this replaced advanced a free-running accumulator and quantized to its
+    /// own boundaries, which drifted against the bar and changed colour about
+    /// twice a second at the default setting.
+    func testPaletteHoldsAcrossBarsInsteadOfChasingTransients() {
+        let engine = MusicChoreographyEngine()
+        let fixture = MusicFixtureDescriptor(id: "f", label: "Fixture", transport: .lifxLAN)
+        var config = MusicModeConfiguration.configuration(for: .balanced)
+        config.movementAmount = 0
         let interval = 0.5
         let reference = 50.0
 
         var hues: [Int] = []
-        for frame in 0..<200 {
-            let timestamp = reference + Double(frame) * 0.025
+        for frame in 0...400 {
+            let timestamp = reference + Double(frame) * MusicModeTests.renderStep
             let state = engine.makeFrame(
                 snapshot: lockedSnapshot(at: timestamp, reference: reference, interval: interval),
                 configuration: config,
@@ -171,15 +311,203 @@ final class MusicModeTests: XCTestCase {
                 timestamp: timestamp,
                 sequenceNumber: UInt64(frame)
             ).states.first
-            if let hue = state?.hue { hues.append(Int((hue * 1_000).rounded())) }
+            guard let hue = state?.hue, timestamp - reference > 3 else { continue }
+            hues.append(Int((hue * 1_000).rounded()))
         }
 
-        let distinct = Set(hues)
-        XCTAssertGreaterThan(distinct.count, 1, "the palette should still move across bars")
-        // Five seconds is two and a half bars. Colour is held for each musical
-        // division and only crosses over at its boundary, so the overwhelming
-        // majority of frames repeat the colour of the frame before them.
-        XCTAssertLessThan(distinct.count, hues.count / 3)
+        XCTAssertGreaterThan(hues.count, 300)
+        let changing = zip(hues, hues.dropFirst()).filter { $0 != $1 }.count
+        XCTAssertGreaterThan(changing, 0, "the palette should still move across bars")
+        XCTAssertLessThan(
+            Double(changing) / Double(hues.count), 0.2,
+            "colour should be held between bar lines, not redrawn every frame"
+        )
+    }
+
+    /// Chroma is the argmax of a noisy vector and mood is a per-frame band
+    /// ratio. Fed straight into the hue they put a visible wobble on every
+    /// fixture; smoothed and gated they must not.
+    func testHueHoldsThroughChromaAndMoodNoise() {
+        let engine = MusicChoreographyEngine()
+        let fixture = MusicFixtureDescriptor(id: "f", label: "Fixture", transport: .lifxLAN)
+        var config = MusicModeConfiguration.configuration(for: .balanced)
+        config.movementAmount = 0
+        let interval = 0.5
+        let reference = 10.0
+        var noise = DeterministicNoise(seed: 7)
+        var hues: [Double] = []
+        for frame in 0...400 {
+            let timestamp = reference + Double(frame) * MusicModeTests.renderStep
+            var snapshot = lockedSnapshot(at: timestamp, reference: reference, interval: interval)
+            // One clear root with two near-tied neighbours, which is what makes
+            // the argmax flip between frames on real music.
+            snapshot.chroma = (0..<12).map { index in
+                let base = index == 0 ? 0.9 : (index == 4 ? 0.62 : (index == 7 ? 0.61 : 0.1))
+                return max(0, min(1, base + (noise.next() - 0.5) * 0.2))
+            }
+            snapshot.mood = 0.5 + (noise.next() - 0.5) * 0.5
+            if let hue = engine.makeFrame(
+                snapshot: snapshot, configuration: config, topology: FixtureTopology(),
+                fixtures: [fixture], timestamp: timestamp, sequenceNumber: UInt64(frame)
+            ).states.first?.hue, timestamp - reference > 3 {
+                hues.append(hue)
+            }
+        }
+
+        XCTAssertGreaterThan(hues.count, 300)
+        var travel = 0.0
+        var jumps = 0
+        for (previous, current) in zip(hues, hues.dropFirst()) {
+            var delta = current - previous
+            if delta > 0.5 { delta -= 1 }
+            if delta < -0.5 { delta += 1 }
+            travel += abs(delta)
+            if abs(delta) > 1.0 / 12 { jumps += 1 }
+        }
+        let duration = Double(hues.count) * MusicModeTests.renderStep
+        XCTAssertLessThan(travel / duration, 0.1, "hue should not chase chroma noise round the wheel")
+        XCTAssertEqual(jumps, 0, "no single frame should move the hue more than thirty degrees")
+    }
+
+    /// The render clock Music Mode actually runs at.
+    private static let renderStep: TimeInterval = 1.0 / 20
+
+    private struct DeterministicNoise {
+        private var state: UInt64
+        init(seed: UInt64) { state = seed &* 6_364_136_223_846_793_005 &+ 1 }
+        mutating func next() -> Double {
+            state = state &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+            return Double((state >> 33) % 1_000) / 1_000
+        }
+    }
+
+    /// The case the bare-ODF tests miss. Fed an idealised onset function the
+    /// old search handled dense subdivisions fine; fed the flux of a real
+    /// groove — a swept kick, a noise snare, noise hats and a moving bassline —
+    /// it settled on the dotted quarter about as often as on the beat and
+    /// switched between the two dozens of times a run, at full confidence.
+    /// Every switch re-anchored the phase, which is what the lights showed.
+    func testTempoHoldsThePulseThroughDenseRealisticMaterial() throws {
+        let analyzer = MusicFeatureAnalyzer(sourceDescription: "Test")
+        let bpm = 124.0
+        let samples = grooveSamples(bpm: bpm, seconds: 26)
+        var tempos: [Double] = []
+        var index = 0
+        while index < samples.count {
+            let count = min(1_024, samples.count - index)
+            let time = Double(index + count) / 48_000
+            if let snapshot = analyzer.analyze(pcmBuffer(samples, from: index, count: count), hostTime: time),
+               time > 6, snapshot.isTempoLocked {
+                tempos.append(snapshot.tempo)
+            }
+            index += count
+        }
+
+        XCTAssertGreaterThan(tempos.count, 200, "the analyzer never locked onto the groove")
+        let onPulse = tempos.filter { abs($0 / bpm - 1) < 0.04 }.count
+        XCTAssertGreaterThan(
+            Double(onPulse) / Double(tempos.count), 0.9,
+            "the reported tempo should be the pulse, not a dotted or halved relative of it"
+        )
+        var switches = 0
+        for (previous, current) in zip(tempos, tempos.dropFirst()) where abs(log2(current / previous)) > 0.1 {
+            switches += 1
+        }
+        XCTAssertLessThan(switches, 4, "the grid should not jump between periods while it is locked")
+    }
+
+    /// A held chord has no pulse. The onset function still ripples, and the
+    /// auto-gain amplifies that ripple, so a confidence measure that only asks
+    /// "is this lag better than average" locked a tempo onto it and pulsed the
+    /// room. Requiring the onset function to be peaky is what stops it.
+    func testSustainedChordNeverLocksATempo() throws {
+        let analyzer = MusicFeatureAnalyzer(sourceDescription: "Test")
+        let sampleRate = 48_000.0
+        var samples = [Float](repeating: 0, count: Int(20 * sampleRate))
+        for index in samples.indices {
+            let time = Double(index) / sampleRate
+            samples[index] = Float(
+                0.25 * sin(2 * .pi * 220 * time)
+                + 0.18 * sin(2 * .pi * 277.2 * time)
+                + 0.14 * sin(2 * .pi * 329.6 * time)
+            )
+        }
+        var lockedFrames = 0
+        var highestConfidence = 0.0
+        var index = 0
+        while index < samples.count {
+            let count = min(1_024, samples.count - index)
+            if let snapshot = analyzer.analyze(pcmBuffer(samples, from: index, count: count),
+                                               hostTime: Double(index + count) / sampleRate) {
+                if snapshot.isTempoLocked { lockedFrames += 1 }
+                highestConfidence = max(highestConfidence, snapshot.beatConfidence)
+            }
+            index += count
+        }
+        XCTAssertEqual(lockedFrames, 0, "a pad with no pulse must not produce a locked tempo")
+        XCTAssertLessThan(highestConfidence, 0.38, "confidence should stay under the lock threshold")
+    }
+
+    /// Kick, backbeat snare, sixteenth hats and an eighth-note bassline. The
+    /// hats and the bassline are what make this harder than a bare click track:
+    /// they give every subdivision of the beat something to correlate with.
+    private func grooveSamples(bpm: Double, seconds: Double) -> [Float] {
+        let sampleRate = 48_000.0
+        var buffer = [Float](repeating: 0, count: Int(seconds * sampleRate))
+        let beat = 60 / bpm
+        var noise = DeterministicNoise(seed: 11)
+        func add(_ value: Double, at position: Int) {
+            guard position >= 0, position < buffer.count else { return }
+            buffer[position] += Float(value)
+        }
+        var index = 0
+        var at = 0.5
+        while at < seconds - 0.3 {
+            let origin = Int(at * sampleRate)
+            // Kick: 110 Hz swept down to 45 Hz.
+            for offset in 0..<Int(0.18 * sampleRate) {
+                let time = Double(offset) / sampleRate
+                let frequency = 45 + 65 * exp(-time / 0.02)
+                add(0.9 * exp(-time / 0.055) * sin(2 * .pi * frequency * time), at: origin + offset)
+            }
+            if index % 4 == 1 || index % 4 == 3 {
+                for offset in 0..<Int(0.14 * sampleRate) {
+                    let time = Double(offset) / sampleRate
+                    let body = (noise.next() * 2 - 1) * 0.55 + sin(2 * .pi * 190 * time) * 0.35
+                    add(0.7 * exp(-time / 0.045) * body, at: origin + offset)
+                }
+            }
+            for step in 0..<4 {
+                let start = Int((at + Double(step) * beat / 4) * sampleRate)
+                for offset in 0..<Int(0.045 * sampleRate) {
+                    let decay = exp(-(Double(offset) / sampleRate) / 0.012)
+                    let sign: Double = offset.isMultiple(of: 2) ? 0.45 : -0.45
+                    add((step == 0 ? 0.35 : 0.55) * decay * (noise.next() * 2 - 1) * sign, at: start + offset)
+                }
+            }
+            let notes = [55.0, 55.0, 82.4, 65.4]
+            for half in 0..<2 {
+                let start = Int((at + Double(half) * beat * 0.5) * sampleRate)
+                let frequency = notes[(index * 2 + half) % notes.count]
+                for offset in 0..<Int(beat * 0.45 * sampleRate) {
+                    let time = Double(offset) / sampleRate
+                    let envelope = min(1, time / 0.008) * exp(-time / (beat * 0.35))
+                    add(0.32 * envelope * sin(2 * .pi * frequency * time), at: start + offset)
+                }
+            }
+            at += beat
+            index += 1
+        }
+        return buffer
+    }
+
+    private func pcmBuffer(_ samples: [Float], from offset: Int, count: Int) -> AVAudioPCMBuffer {
+        let format = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1)!
+        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(count))!
+        buffer.frameLength = AVAudioFrameCount(count)
+        let channel = buffer.floatChannelData![0]
+        for index in 0..<count { channel[index] = samples[offset + index] }
+        return buffer
     }
 
     func testTopologyUsesDeterministicFallbackAndExplicitOrder() throws {

@@ -169,6 +169,7 @@ final class PersistenceStoreTests: XCTestCase {
         source.favoriteSceneIDs = [scene.id]
         source.customNames = ["lifx:a": "Desk"]
         source.customBrightnessPresets = [0.35]
+        source.whiteModeDeviceIDs = ["lifx:a", "govee:strip"]
 
         let exported = try store.exportConfiguration(from: source)
         let imported = try store.importingConfiguration(
@@ -182,6 +183,26 @@ final class PersistenceStoreTests: XCTestCase {
         XCTAssertEqual(imported.favoriteSceneIDs, source.favoriteSceneIDs)
         XCTAssertEqual(imported.customNames, source.customNames)
         XCTAssertEqual(imported.customBrightnessPresets, source.customBrightnessPresets)
+        // Which lights the user put in white mode is a per-device setting made
+        // in the UI, so it has to travel with the configuration. It used to
+        // persist locally and drop silently out of every export, leaving every
+        // light in colour mode on the machine that imported it.
+        XCTAssertEqual(imported.whiteModeDeviceIDs, source.whiteModeDeviceIDs)
+
+        // A configuration exported before that field existed still imports, and
+        // leaves this install's own white-mode choices alone.
+        var legacyArchive = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: exported) as? [String: Any]
+        )
+        legacyArchive.removeValue(forKey: "whiteModeDeviceIDs")
+        var keepsOwn = PersistedApplicationState()
+        keepsOwn.whiteModeDeviceIDs = ["lifx:local"]
+        let fromLegacy = try store.importingConfiguration(
+            from: try JSONSerialization.data(withJSONObject: legacyArchive),
+            into: keepsOwn
+        )
+        XCTAssertEqual(fromLegacy.whiteModeDeviceIDs, ["lifx:local"])
+        XCTAssertEqual(fromLegacy.rooms, source.rooms)
 
         var existing = source
         existing.scenes = [LightingScene(name: "Keep Me", snapshots: [:])]

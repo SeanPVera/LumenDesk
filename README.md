@@ -287,16 +287,56 @@ Open the Lighting Library with **⇧⌘S**.
 
 ### Lighting themes
 
-The Lighting Library includes 18 curated static themes across four categories:
+The Lighting Library includes 48 curated static themes across nine moods. Every
+theme's name, palette, output level, and intended spread is listed in
+[THEME_CATALOG.md](THEME_CATALOG.md).
 
-- Nature.
-- Atmosphere.
-- Celebration.
-- Focus.
+| Mood | Themes | What it is for |
+| --- | --- | --- |
+| Warmth | 5 | Low and close. Mulled Wine, Lantern Street, Cocoa Rose, Brass & Smoke, Paper Lantern. |
+| Nature | 9 | Landscape light, mostly desaturated. Aurora Veil, Tidepool, Forest Bath, Wildflowers, Petrichor, Salt Flat, Kelp Forest, Glacier Melt, Thunder Plain. |
+| Atmosphere | 6 | Afterglow, Moon Garden, Ember & Ash, Candy Cloud, Desert Modern, Pocket Galaxy. |
+| Jewel | 5 | One saturated stone, one metal, somewhere dark to sit. Emerald Study, Sapphire Hour, Ruby Velvet, Amethyst Court, Malachite & Ink. |
+| Nightlife | 5 | Sign colours at high output. Tokyo Rain, Acid House, Last Call, Blacklight, Chrome Bass. |
+| Celebration | 4 | Synthwave, Arcade Tokens, Festival Lanterns, Ice Cream Social. |
+| Dreamy | 5 | Soft, low chroma, nothing competing. Linen Dusk, Peony Fade, Sea Glass, Cashmere, Nightlight. |
+| Focus | 4 | Deep Work, Reading Nook, Creative Spark, Quiet Mind. |
+| Everyday | 5 | Light you can live under. Morning Desk, Kitchen Noon, Supper Table, Hallway Low, Wind Down. |
 
-Themes include palettes such as Aurora Veil, Afterglow, Tidepool, Forest Bath, Wildflowers, Moon Garden, Ember & Ash, Candy Cloud, Synthwave, Arcade Tokens, Festival Lanterns, Ice Cream Social, Deep Work, Reading Nook, Creative Spark, Quiet Mind, Desert Modern, and Pocket Galaxy.
+Themes can be applied to all lights or to a specific room, and every one of them
+is also selectable as a Music Mode palette.
 
-Themes can be applied to all lights or to a specific room.
+#### How a theme lands on your lights
+
+A theme is a palette plus a **spread**: where those colours are meant to go.
+LumenDesk reads what each light in the scope can actually address and plans the
+whole room in one pass.
+
+- **One colour-capable bulb** takes the theme's key colour at the theme's own
+  brightness, so a one-bulb room reads as the theme rather than as one arbitrary
+  slice of it.
+- **Several ordinary bulbs** split the palette by the theme's spread: an even
+  wash puts one colour everywhere, an anchored theme keeps its key on most
+  fixtures and places accents on the rest, a gradient ramps from the first light
+  to the last, alternating changes light by light, and scattered guarantees no
+  two neighbours match.
+- **Govee RGBIC segments and LIFX matrices** run the same spread along their own
+  segments or zones, so a strip carries the whole palette instead of one colour.
+  Gradient and wash themes switch on segment blending; crisp themes leave it off.
+  Long strips quantise a ramp to at most 16 stops so a 200-bead string stays one
+  sensible packet batch.
+- **Mixed groups** are planned together and reported plainly. Applying a theme to
+  a room holding two bulbs, a strip, and an uplighter says so in the toast —
+  "2 single-colour lights hold one palette colour each; one fixture lights 2 of
+  its 3 zones" — rather than dropping the detail silently. A fixture that can
+  only run some of its zones at once keeps the zones you already had lit.
+
+Palettes are authored as chroma plus level. The colour goes to the light at full
+value and the level rides the brightness channel, so a LIFX bulb and a Govee bulb
+given the same palette entry emit the same thing, and a near-white theme carries
+a white point so it arrives at the temperature it was designed for.
+
+Applying a theme never starts an animation and never introduces flashing.
 
 ### Music Mode
 
@@ -376,6 +416,13 @@ You need none of these to run a show. Turn on **Explain the controls** at the to
 | Minimum brightness | Keeps the lights from dropping as dark between beats. |
 | Maximum brightness | Lets a beat push the lights brighter. |
 | Stereo image | Tilts the room with the balance of the recording. At zero every light gets the same level; turn it up and a mix leaning one way brightens the lights at that end of your list. |
+
+**Color palette** picks the set of colours the show draws from. Alongside
+Soundcheck, Sunset, Ocean, and Club, every theme in the Lighting Library is
+listed there by mood, so a show can run on Emerald Study or Tokyo Rain. Choosing
+a palette swaps the colours and nothing else: the music still owns timing,
+intensity, and where movement travels, and a palette can never turn flashing on.
+Your flash settings, safe mode, and every slider stay exactly where you left them.
 
 Three switches are worth knowing:
 

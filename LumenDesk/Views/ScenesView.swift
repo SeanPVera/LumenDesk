@@ -148,7 +148,8 @@ struct ScenesView: View {
                         Button("All moods") { themeCategory = nil }
                         Divider()
                         ForEach(LightingTheme.Category.allCases, id: \.self) { category in
-                            Button(category.rawValue) { themeCategory = category }
+                            let count = LightingCatalog.themes.filter { $0.category == category }.count
+                            Button("\(category.rawValue) (\(count))") { themeCategory = category }
                         }
                     } label: {
                         Label(themeCategory?.rawValue ?? "All moods", systemImage: "line.3.horizontal.decrease.circle")
@@ -183,8 +184,8 @@ struct ScenesView: View {
     private var searchPlaceholder: String {
         switch section {
         case .scenes: return "Search saved scenes"
-        case .themes: return "Search 18 color themes"
-        case .effects: return "Search 10 animated effects"
+        case .themes: return "Search \(LightingCatalog.themes.count) color themes"
+        case .effects: return "Search \(LightingCatalog.effects.count) animated effects"
         }
     }
 
@@ -224,16 +225,13 @@ struct ScenesView: View {
             Text(theme.summary)
                 .font(.caption).foregroundStyle(.secondary)
                 .lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
-            HStack(spacing: 0) {
-                ForEach(Array(theme.colors.enumerated()), id: \.offset) { _, swatch in
-                    Rectangle().fill(swatch.color).frame(height: 24)
-                }
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 6))
-            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.white.opacity(0.12), lineWidth: 1))
+            ThemeSwatchStrip(theme: theme, height: 24, cornerRadius: 6)
+                .help(theme.distribution.summary)
             HStack {
                 Label("\(Int(theme.brightness * 100))%", systemImage: "sun.max.fill")
                     .font(.caption2).foregroundStyle(.secondary)
+                Text(theme.distribution.displayName)
+                    .font(.caption2).foregroundStyle(.tertiary)
                 Spacer()
                 Button("Apply") { manager.applyTheme(theme, scope: scope) }
                     .buttonStyle(LumenPrimaryButtonStyle(compact: true))

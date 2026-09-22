@@ -39,6 +39,13 @@ jobs:
             git diff --check HEAD^..HEAD
           fi
 
+      - name: Audit the lighting theme catalog
+        shell: bash
+        run: |
+          python3 scripts/audit_lighting_themes.py
+          python3 scripts/audit_lighting_themes.py --write
+          git diff --exit-code -- THEME_CATALOG.md
+
       - name: Validate project and asset catalogs
         shell: bash
         run: |

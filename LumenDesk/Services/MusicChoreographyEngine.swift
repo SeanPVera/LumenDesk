@@ -436,8 +436,21 @@ final class MusicChoreographyEngine {
         var hueDelta = palette[high].hue - palette[low].hue
         if hueDelta > 0.5 { hueDelta -= 1 }
         if hueDelta < -0.5 { hueDelta += 1 }
+        // A near-white entry has no hue worth travelling to: its hue is
+        // whatever rounding left behind. Interpolating toward it drags the
+        // colour through hues the palette never contained, which showed up as
+        // soon as the near-white catalog themes became selectable palettes.
+        // Hold the chromatic end's hue instead and let saturation do the work.
+        let hue: Double
+        if palette[low].saturation <= 0.02 {
+            hue = palette[high].hue
+        } else if palette[high].saturation <= 0.02 {
+            hue = palette[low].hue
+        } else {
+            hue = (palette[low].hue + hueDelta * fraction).wrappedUnit
+        }
         return HSB(
-            hue: (palette[low].hue + hueDelta * fraction).wrappedUnit,
+            hue: hue,
             saturation: palette[low].saturation + (palette[high].saturation - palette[low].saturation) * fraction,
             brightness: palette[low].brightness + (palette[high].brightness - palette[low].brightness) * fraction
         )

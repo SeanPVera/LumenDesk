@@ -615,3 +615,42 @@ struct WashLinkFact: View {
         .accessibilityElement(children: .combine)
     }
 }
+
+// MARK: - Theme swatch
+
+/// A theme's palette drawn the way it will land in a room.
+///
+/// Two things separate this from a row of equal blocks. Each entry is as wide
+/// as its share of the fixtures under the theme's distribution, so an anchored
+/// theme reads as one colour with accents rather than as four equals. And each
+/// entry is drawn at the value the light will emit, scaled by the theme's own
+/// brightness, so a low theme looks low here too — with a floor, because a
+/// swatch that renders as black on a near-black card tells the eye nothing.
+struct ThemeSwatchStrip: View {
+    let theme: LightingTheme
+    var height: CGFloat = 24
+    var cornerRadius: CGFloat = 2
+
+    private var shares: [(tone: PaletteTone, share: Double)] { theme.distributionShares() }
+
+    var body: some View {
+        GeometryReader { proxy in
+            HStack(spacing: 0) {
+                ForEach(Array(shares.enumerated()), id: \.offset) { _, entry in
+                    Rectangle()
+                        .fill(entry.tone.emittedColor(scaledBy: max(0.45, theme.brightness)))
+                        .frame(width: max(2, proxy.size.width * entry.share))
+                }
+            }
+        }
+        .frame(height: height)
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .stroke(Lumen.hairlineStrong, lineWidth: 1)
+        )
+        .accessibilityElement()
+        .accessibilityLabel("\(theme.name) palette")
+        .accessibilityValue(theme.distribution.summary)
+    }
+}

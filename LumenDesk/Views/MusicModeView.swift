@@ -435,14 +435,36 @@ struct MusicModeView: View {
 
                 Divider().overlay(Lumen.hairline)
                 Picker("Color palette", selection: paletteBinding) {
-                    Text("Soundcheck").tag("soundcheck")
-                    Text("Aurora").tag("aurora")
-                    Text("Sunset").tag("sunset")
-                    Text("Ocean").tag("ocean")
-                    Text("Club").tag("club")
+                    ForEach(MusicModeConfiguration.builtInPalettes) { entry in
+                        Text(entry.name).tag(entry.id)
+                    }
+                    if configuration.paletteIdentity == "custom" {
+                        Text("Custom").tag("custom")
+                    }
+                    // Every catalog theme is selectable here, grouped by mood.
+                    // Only the colours cross over; timing, intensity and
+                    // movement stay with the preset and the sliders.
+                    ForEach(LightingTheme.Category.allCases, id: \.self) { category in
+                        let themes = LightingCatalog.themes.filter { $0.category == category }
+                        if !themes.isEmpty {
+                            Section(category.rawValue) {
+                                ForEach(themes) { theme in
+                                    Text(theme.name).tag(theme.id)
+                                }
+                            }
+                        }
+                    }
                 }
                 .help(MusicModeHelp.palette)
                 helpCaption(MusicModeHelp.palette)
+                if let theme = LightingCatalog.theme(withID: configuration.paletteIdentity) {
+                    HStack(spacing: 8) {
+                        ThemeSwatchStrip(theme: theme, height: 14)
+                            .frame(width: 96)
+                        Text(theme.summary)
+                            .font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+                    }
+                }
                 Picker("Silence behavior", selection: binding(\.silenceBehavior)) {
                     ForEach(MusicSilenceBehavior.allCases) { Text($0.displayName).tag($0) }
                 }
@@ -569,22 +591,12 @@ struct MusicModeView: View {
 
     private var paletteBinding: Binding<String> {
         Binding(
-            get: {
-                if configuration.palette == MusicModeConfiguration.auroraPalette { return "aurora" }
-                if configuration.palette == MusicModeConfiguration.sunsetPalette { return "sunset" }
-                if configuration.palette == MusicModeConfiguration.oceanPalette { return "ocean" }
-                if configuration.palette == MusicModeConfiguration.clubPalette { return "club" }
-                return "soundcheck"
-            },
-            set: { name in
-                switch name {
-                case "aurora": configuration.palette = MusicModeConfiguration.auroraPalette
-                case "sunset": configuration.palette = MusicModeConfiguration.sunsetPalette
-                case "ocean": configuration.palette = MusicModeConfiguration.oceanPalette
-                case "club": configuration.palette = MusicModeConfiguration.clubPalette
-                default: configuration.palette = MusicModeConfiguration.soundcheckPalette
-                }
-                configuration.preset = .custom
+            get: { configuration.paletteIdentity },
+            set: { identity in
+                // A hand-edited palette has no tag to go back to, so selecting
+                // "Custom" is a no-op rather than a way to lose it.
+                guard identity != "custom" else { return }
+                configuration.selectPalette(identity)
                 commitConfiguration()
             }
         )

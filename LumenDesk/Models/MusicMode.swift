@@ -241,6 +241,52 @@ struct MusicModeConfiguration: Codable, Equatable {
         MusicPaletteColor(0xF6FAFF)
     ]
 
+    /// One selectable palette that ships with Music Mode itself, before the
+    /// theme catalog is offered.
+    struct PaletteOption: Identifiable, Equatable {
+        let id: String
+        let name: String
+        let colors: [MusicPaletteColor]
+    }
+
+    /// Soundcheck stays first and stays the default, because saved state points
+    /// at it by value rather than by name.
+    static let builtInPalettes: [PaletteOption] = [
+        PaletteOption(id: "soundcheck", name: "Soundcheck", colors: soundcheckPalette),
+        PaletteOption(id: "music-sunset", name: "Sunset", colors: sunsetPalette),
+        PaletteOption(id: "music-ocean", name: "Ocean", colors: oceanPalette),
+        PaletteOption(id: "music-club", name: "Club", colors: clubPalette)
+    ]
+
+    /// Which palette a configuration is currently carrying, as a selector tag.
+    /// Palettes are stored as plain colour lists, so identity is recovered by
+    /// comparing them rather than by storing a name — which keeps the archive
+    /// schema untouched and lets a hand-edited palette report as custom.
+    var paletteIdentity: String {
+        for entry in Self.builtInPalettes where entry.colors == palette {
+            return entry.id
+        }
+        for theme in LightingCatalog.themes where theme.musicPalette == palette {
+            return theme.id
+        }
+        return "custom"
+    }
+
+    /// Swaps in a palette by selector tag. Deliberately touches nothing but the
+    /// colours: picking a palette must never be a route to enabling flashes,
+    /// so `allowsFlashes`, `flashIntensity`, `maximumFlashFrequency`, and
+    /// `photosensitivitySafeMode` are left exactly as the user set them.
+    mutating func selectPalette(_ identity: String) {
+        if let entry = Self.builtInPalettes.first(where: { $0.id == identity }) {
+            palette = entry.colors
+        } else if let theme = LightingCatalog.theme(withID: identity) {
+            palette = theme.musicPalette
+        } else {
+            return
+        }
+        preset = .custom
+    }
+
     static func configuration(for preset: MusicModePreset) -> MusicModeConfiguration {
         var value = MusicModeConfiguration()
         value.preset = preset
@@ -837,7 +883,7 @@ enum MusicModeHelp {
     static let flashIntensity = "How strong those flashes are."
     static let maximumFlashFrequency = "The most flashes allowed per second. LumenDesk never goes above three per second no matter what this says."
     static let photosensitivitySafeMode = "On by default. Blocks flashing outright, because flashing light can trigger seizures and migraines in some people. Leave it on unless you know everyone in the room is fine with it."
-    static let palette = "The set of colors the show picks from. It changes the mood more than any other single control."
+    static let palette = "The set of colors the show picks from. It changes the mood more than any other single control. Every theme in the lighting library is here too, and choosing one only swaps the colors — it never turns flashing on."
     static let stereoImage = "How much the balance of the recording tilts the room. At zero every light gets the same level. Turn it up and a mix leaning one way brightens the lights at that end of your list."
     static let phraseAware = "Lets the show notice when a section is building and lift with it, instead of treating every bar the same."
     static let restorePreviousState = "When you press Stop, put every light back exactly how it was before the show started."

@@ -338,6 +338,8 @@ Press **Stop** when you are done. Unless you turn it off, every light goes back 
 
 You can change presets while the music is playing. Moving any slider switches the preset to **Custom**, and picking a named preset afterwards writes over those values, so a customised setup does not survive a trip through the other presets.
 
+Every preset accents the beat without strobing to it. **Concert** and **Club** hit hardest, **Ambient** barely moves, and none of them flash unless you turn photosensitivity-safe mode off yourself after the warning. If a preset feels too calm in a bright room, **Beat response** and **Effect intensity** are the two sliders that deepen the accent.
+
 #### Giving each light a job
 
 Under **Which light does what**, every light in the room gets a job. **Auto** picks one for you and is fine for most rooms — only change a light if you want that specific light doing something else.
@@ -402,7 +404,8 @@ If **Reduced Motion** is on in your system accessibility settings, LumenDesk kee
 
 Music Mode is a first-class section of the Lighting Library. It turns the existing `music-pulse` effect into a configurable choreography session while preserving that identifier for saved-state compatibility.
 
-- Real beat tracking. LumenDesk estimates the tempo of what is playing and choreographs to the beat grid it predicts, rather than reacting to every transient: brightness swells into each beat and accents the downbeat, sweeps travel the room once per bar, and colours change on bar lines. The tracker also listens for 3/4, 5/4, 6/8 and 7/8, and for half- or double-time feel, so a waltz and a head-nod groove do not get forced onto four-four. The detected tempo and metre are shown next to the beat indicator once it locks; music with no clear pulse falls back to the onset-driven show automatically.
+- Real beat tracking. LumenDesk estimates the tempo of what is playing and choreographs to the beat grid it predicts, rather than reacting to every transient. The kick band is scored separately from the full spectrum, so a wall of hi-hats cannot drag the estimate onto a subdivision or a dotted relative of the beat, and the tracker refuses to lock onto material with no real pulse — a held chord will not produce a phantom tempo. The tracker also listens for 3/4, 5/4, 6/8 and 7/8, and for half- or double-time feel, so a waltz and a head-nod groove do not get forced onto four-four. The detected tempo and metre are shown next to the beat indicator once it locks; music with no clear pulse falls back to a smooth energy-driven show automatically.
+- Brightness is a resting level plus an accent. The resting level follows how loud the music is over about half a second, so quiet passages, breakdowns and sustained notes genuinely pull the room back, and a beat lifts the light above that level rather than dropping it to the floor and back. Colour is held for whole bars and crossed over on a bar line. The result is a room that breathes with the music instead of blinking at it; turn **Beat response** up if you want the accents harder.
 - Built-in presets: Ambient, Balanced, Concert, Cinematic, Soundcheck, Club, Half-time, and Waltz, plus a persisted Custom configuration.
 - Fixture roles. Each light can be wash, hit, accent, motion, or off. Auto assigns RGBIC strips to motion, downstage to hit, rear to accent, and everything else to wash, so a mixed room layers without tagging every fixture.
 - Beat, bass, percussion, color-change, brightness, movement, silence, palette, metre, feel, stereo, and restoration controls.

@@ -43,10 +43,23 @@ struct BeatGrid: Equatable {
 /// 1. **Periodicity.** Autocorrelate several seconds of ODF, comb-sum each
 ///    candidate lag with its second and third multiples so a half- or
 ///    double-time peak cannot outvote the true beat period, and weight the
-///    result by a log-normal prior around 120 BPM.
+///    result by a log-normal prior around 120 BPM. The kick band is
+///    autocorrelated *separately* and votes alongside the broadband function:
+///    mixed into one signal before the transform, dense hi-hats correlate as
+///    strongly at a subdivision or a dotted relative as the kick does at the
+///    beat, and the search follows the hats.
 /// 2. **Phase.** Find the offset within one beat period that best explains
 ///    where recent onsets actually landed, then run a phase-locked loop that
 ///    predicts the next beat and nudges itself toward observed onsets.
+///
+/// Confidence measures how far the winning period is ahead of its nearest
+/// *rival* period, not how far it is above the average of every lag. The
+/// latter stays near 1 while two candidates are neck and neck, which let the
+/// estimate flip between a beat and its dotted relative several times a second
+/// while still reporting full confidence — and every flip re-anchored the
+/// phase, restarting the light show's contour at an arbitrary point. Locking
+/// also requires the onset function to be peaky, because variance alone lets a
+/// sustained chord's analysis ripple lock a tempo onto music with no pulse.
 ///
 /// Consumers render from the predicted grid, so beats keep arriving through a
 /// sustained note and stop arriving between them. Nothing here touches
@@ -72,6 +85,9 @@ final class BeatTracker {
     private var frameInterval: TimeInterval
     private var capacity: Int
     private var history: [Double]
+    /// Kick-band onsets over the same window, so periodicity can be scored on
+    /// the pulse separately from the full spectrum.
+    private var kickHistory: [Double]
     private var writeIndex = 0
     private var frameCount = 0
 
@@ -86,8 +102,16 @@ final class BeatTracker {
     private var pendingBarEnergy: Double = 0
     private var nextBarEnergy: Double = 0
     private var scratch: [Double] = []
+    private var kickScratch: [Double] = []
     private var autocorrelation: [Double] = []
+    private var kickAutocorrelation: [Double] = []
+    private var smoothedCorrelation: [Double] = []
+    private var smoothedKickCorrelation: [Double] = []
     private var combScores: [Double] = []
+    /// A period that disagrees with the current one has to win the same
+    /// argument several estimates running before the grid moves.
+    private var challengerInterval: TimeInterval = 0
+    private var challengerStreak = 0
     private let metreTracker = MetreTracker()
 
     init(frameInterval: TimeInterval = 512.0 / 48_000.0) {
@@ -95,6 +119,7 @@ final class BeatTracker {
         self.frameInterval = interval
         capacity = max(64, Int((BeatTracker.historyDuration / interval).rounded()))
         history = [Double](repeating: 0, count: capacity)
+        kickHistory = [Double](repeating: 0, count: capacity)
     }
 
     /// Re-anchors the tracker when the capture format changes. A different hop
@@ -106,6 +131,7 @@ final class BeatTracker {
         frameInterval = interval
         capacity = max(64, Int((Self.historyDuration / interval).rounded()))
         history = [Double](repeating: 0, count: capacity)
+        kickHistory = [Double](repeating: 0, count: capacity)
         reset()
     }
 
@@ -124,6 +150,9 @@ final class BeatTracker {
         pendingBarEnergy = 0
         nextBarEnergy = 0
         for index in history.indices { history[index] = 0 }
+        for index in kickHistory.indices { kickHistory[index] = 0 }
+        challengerInterval = 0
+        challengerStreak = 0
         metreTracker.reset()
     }
 
@@ -139,6 +168,7 @@ final class BeatTracker {
     func process(onset: Double, lowFrequencyOnset: Double, at time: TimeInterval) -> Int {
         let clampedOnset = max(0, min(1, onset))
         history[writeIndex] = clampedOnset
+        kickHistory[writeIndex] = max(0, min(1, lowFrequencyOnset))
         writeIndex = (writeIndex + 1) % capacity
         frameCount += 1
         latestFrameTime = time
@@ -331,11 +361,29 @@ final class BeatTracker {
             let ratio = estimate.interval / grid.interval
             if abs(ratio - 1) < 0.06 {
                 grid.interval = grid.interval * 0.85 + estimate.interval * 0.15
-            } else if estimate.confidence > 0.45 {
-                // A different period this confident means a new track or a
-                // real tempo change: adopt it and re-derive the phase.
-                grid.interval = estimate.interval
-                resyncPhase(now: now)
+                challengerStreak = 0
+            } else {
+                // A different period has to win the same argument several
+                // estimates running before the grid moves. Adopting each one
+                // immediately let a tie between the beat and a dotted or
+                // halved relative teleport the grid several times a second,
+                // and every jump re-anchored the phase, restarting the
+                // brightness contour at an arbitrary point — which is what
+                // reads as flashing that has nothing to do with the music.
+                let near = challengerInterval > 0
+                    && abs(estimate.interval / challengerInterval - 1) < 0.06
+                challengerInterval = near
+                    ? challengerInterval * 0.6 + estimate.interval * 0.4
+                    : estimate.interval
+                challengerStreak = near ? challengerStreak + 1 : 1
+                let required = Self.isSimpleRelative(estimate.interval, of: grid.interval) ? 4 : 2
+                if challengerStreak >= required, estimate.confidence > 0.45 {
+                    // A new track or a real tempo change: adopt it and
+                    // re-derive the phase.
+                    grid.interval = challengerInterval
+                    resyncPhase(now: now)
+                    challengerStreak = 0
+                }
             }
         }
         grid.tempo = 60 / grid.interval
@@ -367,14 +415,17 @@ final class BeatTracker {
         let available = min(frameCount, capacity)
         guard Double(available) * frameInterval >= Self.minimumHistoryDuration else { return nil }
 
-        if scratch.count != available { scratch = [Double](repeating: 0, count: available) }
+        if scratch.count != available {
+            scratch = [Double](repeating: 0, count: available)
+            kickScratch = [Double](repeating: 0, count: available)
+        }
         var total = 0.0
         for index in 0..<available {
             let value = historyValue(framesAgo: available - 1 - index)
             scratch[index] = value
             total += value
         }
-        let mean = total / Double(available)
+        var mean = total / Double(available)
         var variance = 0.0
         for index in 0..<available {
             scratch[index] -= mean
@@ -382,6 +433,33 @@ final class BeatTracker {
         }
         variance /= Double(available)
         guard variance > 1e-9 else { return nil }
+
+        total = 0
+        for index in 0..<available {
+            let value = kickHistoryValue(framesAgo: available - 1 - index)
+            kickScratch[index] = value
+            total += value
+        }
+        mean = total / Double(available)
+        var kickVariance = 0.0
+        for index in 0..<available {
+            kickScratch[index] -= mean
+            kickVariance += kickScratch[index] * kickScratch[index]
+        }
+        kickVariance /= Double(available)
+
+        // How peaky the onset function is over the window. Drums give a tall
+        // crest against a low floor; a held chord's analysis ripple does not.
+        // Only the first means there is a pulse to find.
+        var peak = 0.0
+        var levelTotal = 0.0
+        for index in 0..<available {
+            let value = historyValue(framesAgo: index)
+            if value > peak { peak = value }
+            levelTotal += value
+        }
+        let meanLevel = levelTotal / Double(available)
+        let peakiness = meanLevel > 1e-6 ? peak / meanLevel : 0
 
         let minimumLag = max(2, Int((60 / Self.maximumTempo) / frameInterval))
         // The comb sum reads the second and third multiple of every candidate,
@@ -396,15 +474,16 @@ final class BeatTracker {
 
         if autocorrelation.count != combLimit + 1 {
             autocorrelation = [Double](repeating: 0, count: combLimit + 1)
+            kickAutocorrelation = [Double](repeating: 0, count: combLimit + 1)
+            smoothedCorrelation = [Double](repeating: 0, count: combLimit + 1)
+            smoothedKickCorrelation = [Double](repeating: 0, count: combLimit + 1)
         }
-        for lag in 1...combLimit {
-            var sum = 0.0
-            var index = lag
-            while index < available {
-                sum += scratch[index] * scratch[index - lag]
-                index += 1
-            }
-            autocorrelation[lag] = sum / (Double(available - lag) * variance)
+        correlate(into: &autocorrelation, from: scratch, available: available, variance: variance, limit: combLimit)
+        smooth(into: &smoothedCorrelation, from: autocorrelation, limit: combLimit)
+        let hasKick = kickVariance > 1e-9
+        if hasKick {
+            correlate(into: &kickAutocorrelation, from: kickScratch, available: available, variance: kickVariance, limit: combLimit)
+            smooth(into: &smoothedKickCorrelation, from: kickAutocorrelation, limit: combLimit)
         }
 
         if combScores.count != maximumLag + 1 {
@@ -412,24 +491,33 @@ final class BeatTracker {
         }
         var bestLag = minimumLag
         var bestScore = -Double.greatestFiniteMagnitude
-        var scoreTotal = 0.0
         for lag in minimumLag...maximumLag {
             // Comb-summing the multiples is what keeps a strong offbeat from
             // being read as the beat: the true period correlates with itself
             // at every multiple, half the period does not.
-            let comb = (autocorrelation[lag]
-                + 0.5 * autocorrelation[lag * 2]
-                + 0.25 * autocorrelation[lag * 3]) / 1.75
+            let broad = comb(smoothedCorrelation, lag: lag)
+            // The kick band votes separately. Material with no kick at all
+            // falls back to the broadband term.
+            let kick = hasKick ? comb(smoothedKickCorrelation, lag: lag) : broad
             let bpm = 60 / (Double(lag) * frameInterval)
-            let score = max(0, comb) * Self.tempoPrior(bpm: bpm)
+            let score = max(0, 0.55 * broad + 0.45 * kick) * Self.tempoPrior(bpm: bpm)
             combScores[lag] = score
-            scoreTotal += score
             if score > bestScore {
                 bestScore = score
                 bestLag = lag
             }
         }
         guard bestScore > 0 else { return nil }
+
+        // The best score among genuinely different periods, skipping the
+        // winner's own peak. Measuring prominence against the mean of every
+        // lag instead stays high even when a rival is neck and neck.
+        var rivalScore = 0.0
+        for lag in minimumLag...maximumLag {
+            guard abs(log2(Double(lag) / Double(bestLag))) >= 0.14 else { continue }
+            if combScores[lag] > rivalScore { rivalScore = combScores[lag] }
+        }
+        let separation = max(0, (bestScore - rivalScore) / bestScore)
 
         let refinedLag = Double(bestLag) + Self.parabolicOffset(
             previous: bestLag > minimumLag ? combScores[bestLag - 1] : 0,
@@ -438,14 +526,64 @@ final class BeatTracker {
         )
         let interval = min(60 / Self.minimumTempo, max(60 / Self.maximumTempo, refinedLag * frameInterval))
 
-        let meanScore = scoreTotal / Double(maximumLag - minimumLag + 1)
-        let prominence = (bestScore - meanScore) / bestScore
-        let coefficient = max(0, autocorrelation[bestLag])
+        let coefficient = max(0, smoothedCorrelation[bestLag])
         // Silence and unstructured noise autocorrelate weakly; requiring ODF
         // activity as well keeps a quiet room from "locking" onto anything.
         let activity = min(1, sqrt(variance) * 6)
-        let confidence = min(1, coefficient * 1.8) * min(1, prominence * 2.2) * activity
+        let rhythmic = min(1, max(0, (peakiness - 2.2) / 3.5))
+        // A pulse has to be strong, clearly ahead of its rivals, loud enough
+        // to measure, and actually percussive.
+        let confidence = min(1, coefficient * 1.8)
+            * min(1, separation * 2.4)
+            * activity
+            * (0.25 + 0.75 * rhythmic)
         return TempoEstimate(interval: interval, confidence: max(0, min(1, confidence)))
+    }
+
+    private func comb(_ table: [Double], lag: Int) -> Double {
+        (table[lag] + 0.5 * table[lag * 2] + 0.25 * table[lag * 3]) / 1.75
+    }
+
+    private func correlate(
+        into table: inout [Double],
+        from source: [Double],
+        available: Int,
+        variance: Double,
+        limit: Int
+    ) {
+        for lag in 1...limit {
+            var sum = 0.0
+            var index = lag
+            while index < available {
+                sum += source[index] * source[index - lag]
+                index += 1
+            }
+            table[lag] = sum / (Double(available - lag) * variance)
+        }
+    }
+
+    /// Three-tap smoothing. A beat period rarely lands on a whole number of
+    /// analysis hops, so its correlation peak is split across two lags; a rival
+    /// period that happens to land on one would otherwise win on bin alignment
+    /// alone rather than on the music.
+    private func smooth(into table: inout [Double], from source: [Double], limit: Int) {
+        for lag in 1...limit {
+            let previous = lag > 1 ? source[lag - 1] : source[lag]
+            let next = lag < limit ? source[lag + 1] : source[lag]
+            table[lag] = 0.25 * previous + 0.5 * source[lag] + 0.25 * next
+        }
+    }
+
+    /// True when `candidate` is within a few percent of a simple musical
+    /// relative of `current` — half, double, three halves, and so on. Those are
+    /// the likeliest ways to be wrong, so they have to argue longer.
+    private static func isSimpleRelative(_ candidate: TimeInterval, of current: TimeInterval) -> Bool {
+        guard current > 0, candidate > 0 else { return false }
+        let ratio = candidate / current
+        for relative in [0.5, 2, 1.5, 2.0 / 3, 3, 1.0 / 3, 4.0 / 3, 0.75] where abs(ratio / relative - 1) < 0.05 {
+            return true
+        }
+        return false
     }
 
     private static func tempoPrior(bpm: Double) -> Double {
@@ -468,6 +606,14 @@ final class BeatTracker {
         var index = writeIndex - 1 - framesAgo
         while index < 0 { index += capacity }
         return history[index % capacity]
+    }
+
+    private func kickHistoryValue(framesAgo: Int) -> Double {
+        let available = min(frameCount, capacity)
+        guard framesAgo >= 0, framesAgo < available else { return 0 }
+        var index = writeIndex - 1 - framesAgo
+        while index < 0 { index += capacity }
+        return kickHistory[index % capacity]
     }
 }
 

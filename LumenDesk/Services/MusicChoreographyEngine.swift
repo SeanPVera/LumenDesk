@@ -37,23 +37,38 @@ struct FlashSafetyLimiter {
 /// Pure, vendor-neutral music-to-light mapping. State is limited to musical
 /// envelopes, hysteresis, palette progression, and the flash safety gate.
 ///
+/// Brightness is a **bed plus a swell**. The bed is where a fixture rests, and
+/// it tracks the music's loudness over about half a second, so it carries
+/// dynamics. The swell is an accent that occupies part of the headroom between
+/// the bed and the ceiling, and it carries rhythm. Because a fixture falls back
+/// to the bed rather than to the floor, a beat reads as an accent on a lit room
+/// instead of the room going dark and coming back — which is the difference
+/// between a groove and a strobe at the same rate.
+///
 /// The engine choreographs against musical time, not wall-clock time. When
-/// `AudioReactiveSnapshot` carries a locked tempo, brightness swells are shaped
-/// by the position inside the beat, sweeps traverse the room once per bar, and
-/// the palette advances on bar lines. Every one of those was previously driven
-/// by raw onsets or by `timestamp` alone, which is what made dense material
-/// read as fast flashing that happened to coincide with music rather than
-/// choreography that followed it.
+/// `AudioReactiveSnapshot` carries a locked tempo, swells are shaped by the
+/// position inside the felt beat, sweeps traverse the room over bars, and the
+/// palette is held for a whole number of bars and cross-faded on the bar line.
 ///
 /// Material with no detectable pulse — ambient, spoken word, sparse acoustic —
-/// keeps the energy-driven behavior. `MusicalClock.strength` cross-fades
-/// between the two so a track that drifts in and out of a clear beat does not
-/// snap between two different shows.
+/// keeps a smoothed, energy-driven behavior. `MusicalClock.strength` cross-fades
+/// between the two, and because it now reads a confidence that reflects how far
+/// ahead of its rivals the tempo estimate actually is, an ambiguous grid renders
+/// the smooth show rather than a confident wrong one.
 final class MusicChoreographyEngine {
     /// Roughly how long a frame takes to leave the renderer, cross the LAN, and
-    /// light a fixture. On a predicted beat grid the show can be evaluated that
-    /// far ahead so the swell lands *on* the beat instead of just after it.
+    /// light a fixture. On a predicted beat grid the show is evaluated that far
+    /// ahead so the swell lands *on* the beat instead of just after it.
     private static let outputLatencyCompensation: TimeInterval = 0.045
+    /// Rise time of the brightness envelope. A swell that begins on the beat
+    /// peaks after it, so the clock compensates for this as well as for
+    /// transport.
+    private static let attackTime: TimeInterval = 0.026
+    /// The bed is the dynamics line. It should move over phrases, not frames.
+    private static let bedTimeConstant: TimeInterval = 0.55
+    /// Fall time of the off-grid onset envelope. Bounded so that dense
+    /// transients raise a level instead of firing a burst of pulses.
+    private static let offGridRelease: TimeInterval = 0.28
 
     private var lastBeatCount = 0
     private var paletteProgress: Double = 0
@@ -65,6 +80,20 @@ final class MusicChoreographyEngine {
     private var brightnessEnvelopes: [String: Double] = [:]
     private var flashLimiter = FlashSafetyLimiter()
 
+    // Musical state carried between frames.
+    private var dynamics: Double = 0
+    private var fastEnergy: Double = 0
+    private var slowEnergy: Double = 0
+    private var moodSmoothed: Double = 0.5
+    private var chromaHueSmoothed: Double = 0
+    private var chromaCandidate = -1
+    private var chromaCandidateFrames = 0
+    private var chromaIndex = -1
+    private var onsetEnvelope: Double = 0
+    private var accentEnvelope: Double = 0
+    private var colourIndex = 0
+    private var lastColourIndex = 0
+
     func reset() {
         lastBeatCount = 0
         paletteProgress = 0
@@ -75,6 +104,18 @@ final class MusicChoreographyEngine {
         lastTimestamp = nil
         brightnessEnvelopes.removeAll(keepingCapacity: true)
         flashLimiter.reset()
+        dynamics = 0
+        fastEnergy = 0
+        slowEnergy = 0
+        moodSmoothed = 0.5
+        chromaHueSmoothed = 0
+        chromaCandidate = -1
+        chromaCandidateFrames = 0
+        chromaIndex = -1
+        onsetEnvelope = 0
+        accentEnvelope = 0
+        colourIndex = 0
+        lastColourIndex = 0
     }
 
     func makeFrame(
@@ -101,10 +142,26 @@ final class MusicChoreographyEngine {
 
         let newBeats = snapshot.beatCount > lastBeatCount ? snapshot.beatCount - lastBeatCount : 0
         lastBeatCount = snapshot.beatCount
+
+        let silence = snapshot.confidence < 0.025 && snapshot.level < 0.025 && snapshot.energy < 0.035
+
+        // One loudness line, smoothed over about half a second. Everything that
+        // used to read a raw per-frame level or energy reads this instead, so a
+        // single noisy analysis hop cannot move the room.
+        let loudness = max(snapshot.level, snapshot.energy)
+        dynamics = Self.follow(dynamics, toward: loudness, dt: dt,
+                               timeConstant: silence ? 0.9 : Self.bedTimeConstant)
+        // A long/short energy pair. Their difference is a phrase building,
+        // where the single-hop energy difference this replaces was measurement
+        // noise worth up to a fifth of a fixture's drive.
+        fastEnergy = Self.follow(fastEnergy, toward: snapshot.energy, dt: dt, timeConstant: 0.7)
+        slowEnergy = Self.follow(slowEnergy, toward: snapshot.energy, dt: dt, timeConstant: 5)
+        let energyRise = max(0, fastEnergy - slowEnergy)
+
         advancePalette(newBeats: newBeats, clock: clock, configuration: config, dt: dt)
         advanceMovement(clock: clock, configuration: config, dt: dt)
 
-        let beganSustainedEvent = updateSustainedEnergy(snapshot.energy, at: timestamp)
+        let beganSustainedEvent = updateSustainedEnergy(fastEnergy, at: timestamp)
         let percussionRequest = max(
             snapshot.snare * config.percussionSensitivity,
             snapshot.percussion * config.percussionSensitivity * 0.9
@@ -117,23 +174,51 @@ final class MusicChoreographyEngine {
             configuration: config
         )
 
-        let silence = snapshot.confidence < 0.025 && snapshot.level < 0.025 && snapshot.energy < 0.035
+        // On the grid a pulse is a contour across the felt beat, weighted by
+        // where the beat sits in the bar. Off the grid it is a smoothed onset
+        // envelope with a bounded fall, so a wall of hi-hats raises a level
+        // rather than retriggering a pulse several times a second.
+        onsetEnvelope = max(onsetEnvelope * exp(-dt / Self.offGridRelease),
+                            max(snapshot.beat, snapshot.pulse))
+        let musicalPulse = Self.beatShape(phase: clock.phase)
+            * Self.barAccent(clock.beatInBar, metre: clock.metre)
+        let pulseDrive = onsetEnvelope + (musicalPulse - onsetEnvelope) * clock.strength
+
+        // Percussion accent as a decaying envelope rather than a threshold
+        // toggle, so an accent fixture fades instead of switching.
+        let accentTarget = (snapshot.snare * config.percussionSensitivity).clamped01
+        accentEnvelope = max(accentEnvelope * exp(-dt / 0.35), accentTarget)
+
+        // How deep a beat is allowed to dig, as a fraction of the headroom
+        // above the bed. It rises with sensitivity and with the music's own
+        // loudness, and it shrinks at fast tempos so the rate of *visible*
+        // musical events stays musical however fast analysis and frame
+        // delivery run.
+        let feltInterval = clock.interval > 0 ? clock.interval : 0.5
+        let tempoRestraint = ((feltInterval - 0.22) / 0.26).clamped01
+        let dynamicsGate = pow(dynamics.clamped01, 0.8)
+        let baseDepth = (0.3 + config.beatSensitivity * 1.15)
+            * (0.6 + config.effectIntensity * 0.4)
+            * (0.4 + 0.6 * tempoRestraint)
+            * (0.12 + 0.88 * dynamicsGate)
+
         let upperBrightness = max(
             config.minimumBrightness,
             config.maximumBrightness * config.masterBrightness
         )
         let palette = config.palette.map(Self.hsb)
-        // On the grid, a pulse is shaped by where the frame sits inside the
-        // beat: it swells into the beat, peaks on it, and decays across it, and
-        // the downbeat is accented. Off the grid it is the onset envelope, as
-        // before.
-        let reactivePulse = max(snapshot.beat, snapshot.pulse)
-        let musicalPulse = beatShape(phase: clock.phase)
-            * Self.barAccent(clock.beatInBar, metre: clock.metre)
-            * min(1, 0.4 + snapshot.energy * 0.8)
-        let pulseDrive = reactivePulse + (musicalPulse - reactivePulse) * clock.strength
-        let phraseLift = configuration.phraseAware ? max(0, snapshot.energySlope) * 0.22 : 0
-        let chromaHue = Self.chromaToHue(snapshot.chroma)
+        let chromaHue = smoothedChromaHue(snapshot.chroma, dt: dt)
+        moodSmoothed = Self.follow(moodSmoothed, toward: snapshot.mood, dt: dt, timeConstant: 2.5)
+        let phraseLift = config.phraseAware ? min(0.18, energyRise * 0.9) : 0
+
+        // A room of two or three bulbs cannot show travel, so a sweep there is
+        // only one more brightness wobble stacked on the beat. Spend movement
+        // on colour position instead and keep the brightness tilt shallow; a
+        // segmented fixture gets the full spatial treatment because it can
+        // actually render it.
+        let resolution = targets.count
+        let spatialFidelity: Double = resolution >= 8 ? 1 : (resolution >= 4 ? 0.6 : 0.3)
+        let motionDepth = config.movementAmount * spatialFidelity
 
         var states: [MusicLightingState] = []
         states.reserveCapacity(targets.count)
@@ -146,69 +231,89 @@ final class MusicChoreographyEngine {
             let phase = spatialPhase(position: target.position, direction: config.movementDirection)
             let wave = 0.5 + 0.5 * sin(phase * 2 * .pi)
             let stereoBias = 1 + (snapshot.stereo - 0.5) * 2 * config.stereoImage * (target.position - 0.5) * 2
-            let spatialWeight = (1 - config.movementAmount + config.movementAmount * (0.3 + wave * 0.7)) * max(0.55, stereoBias)
-            let bassDrive = snapshot.bass * config.bassSensitivity
-            let sustainedLift = sustainedEnergyEvent ? 0.14 + snapshot.energy * 0.16 : 0
-            let sustain = 0.1
-                + pow(max(snapshot.level, snapshot.energy), 0.65) * 0.2
-                + bassDrive * 0.14
-            var swing = pulseDrive * (0.35 + config.beatSensitivity * 0.8)
-            if isHit { swing *= 1.35 }
-            if isWash { swing *= 0.72 }
-            if isMotion { swing *= 0.9 }
-            if isAccent { swing *= 0.55 }
-            var drive = sustain + swing + phraseLift + sustainedLift
-            if isAccent { drive += snapshot.snare * config.percussionSensitivity * 0.28 }
-            if isHit { drive += snapshot.kick * config.bassSensitivity * 0.2 }
-            drive = min(1, drive * (0.55 + config.effectIntensity * 0.65) * spatialWeight)
+            // Centred on 1 so movement tilts the room rather than dimming it.
+            let spatialWeight = (1 - motionDepth * 0.5 + motionDepth * wave)
+                * max(0.6, min(1.4, stereoBias))
+
+            // The bed: where this fixture rests between accents.
+            let bassBed = snapshot.bass * config.bassSensitivity * 0.1
+            let sustainedLift = sustainedEnergyEvent ? 0.06 + fastEnergy * 0.08 : 0
+            var bedLevel = 0.1 + pow(dynamics.clamped01, 0.7) * 0.4 + bassBed + phraseLift + sustainedLift
+            // A hit fixture rests darker so it has headroom to punch; a wash
+            // sits in the room and only lifts.
+            if isHit { bedLevel *= 0.76 } else if isAccent { bedLevel *= 0.85 }
+            bedLevel = (bedLevel * (0.6 + config.effectIntensity * 0.5) * spatialWeight).clamped01
+
+            // The swell: an accent inside the headroom above the bed.
+            var depth = baseDepth
+            if isHit { depth *= 1.7 }
+            else if isWash { depth *= 1.15 }
+            else if isMotion { depth *= 0.92 }
+            else if isAccent { depth *= 0.6 }
+            if isAccent { depth += accentEnvelope * 0.18 * config.percussionSensitivity }
+            if isHit { depth += snapshot.kick * config.bassSensitivity * 0.1 }
+            // Deliberately not clamped to 1: past that the swell holds at the
+            // ceiling for part of the beat, which is what a punchy preset
+            // should look like. Brightness itself is still clamped to `upper`,
+            // so nothing clips into a discontinuity.
+            depth = max(0, depth)
+
+            let bed = config.minimumBrightness + (upperBrightness - config.minimumBrightness) * bedLevel
+            var rawBrightness = bed + (upperBrightness - bed) * depth * pulseDrive.clamped01
 
             if silence {
                 switch config.silenceBehavior {
-                case .settle: drive = 0
-                case .holdPalette: drive = 0.08 + config.effectIntensity * 0.08
-                case .fadeOut: drive = -0.1
+                case .settle:
+                    rawBrightness = config.minimumBrightness
+                case .holdPalette:
+                    rawBrightness = config.minimumBrightness
+                        + (upperBrightness - config.minimumBrightness) * (0.08 + config.effectIntensity * 0.08)
+                case .fadeOut:
+                    rawBrightness = 0
                 }
             }
-
-            let rawBrightness = max(
-                config.silenceBehavior == .fadeOut && silence ? 0 : config.minimumBrightness,
-                config.minimumBrightness + (upperBrightness - config.minimumBrightness) * max(0, drive)
+            rawBrightness = max(
+                silence && config.silenceBehavior == .fadeOut ? 0 : config.minimumBrightness,
+                min(upperBrightness, rawBrightness)
             )
+
             let envelopeKey = "\(target.fixtureID)#\(target.segmentID ?? -1)"
             let previous = brightnessEnvelopes[envelopeKey] ?? rawBrightness
-            let attack = 1 - exp(-dt / 0.045)
-            // On the grid the decay is a fraction of the beat, so one pulse
-            // finishes well before the next arrives at any tempo rather than
-            // smearing into it at fast tempos or leaving a gap at slow ones.
-            // The musical envelope is already a smooth shape, so it wants far
-            // less smoothing than the onset-driven drive does: at the old
-            // constant the light barely came down between beats and the pulse
-            // flattened into a glow.
-            let musicalRelease = min(0.3, max(0.06, clock.interval * 0.12))
-            let releaseTime = silence ? 0.65 : (0.22 + (musicalRelease - 0.22) * clock.strength)
+            let attack = 1 - exp(-dt / Self.attackTime)
+            // Release is a fraction of the felt beat with a floor, so one
+            // accent finishes before the next arrives at any tempo without ever
+            // becoming a snap. The previous constant clamped to 60 ms for
+            // anything at or above 120 BPM, which turned every beat into a
+            // full-depth sawtooth. Quiet passages relax further still.
+            let musicalRelease = min(0.45, max(0.13, feltInterval * 0.26))
+            let quietStretch = 1 + max(0, 0.6 - dynamics.clamped01) * 1.2
+            let releaseTime = silence ? 0.8 : musicalRelease * quietStretch
             let release = 1 - exp(-dt / releaseTime)
             let coefficient = rawBrightness > previous ? attack : release
             var brightness = previous + (rawBrightness - previous) * coefficient
             brightness = min(1, brightness + flashIntensity * (1 - brightness))
             brightnessEnvelopes[envelopeKey] = brightness
 
-            // Palette progression is measured in palette entries and quantized:
-            // the colour is held for the whole musical division and cross-fades
-            // quickly at its boundary, so a change reads as landing on the
-            // music rather than as a continuous drift or a per-transient
-            // flicker. `paletteColor` takes a 0…1 position across the whole
-            // palette, so entries are converted at the last moment.
-            let entries = Double(max(1, palette.count))
-            let paletteMotion = target.position * config.colorChangeIntensity * Double(max(1, palette.count - 1))
-                + quantizedPaletteProgress(strength: clock.strength)
-            var color = Self.paletteColor(palette, position: paletteMotion / entries)
-            color.hue = (color.hue + (snapshot.mood - 0.5) * 0.08 + chromaHue * 0.04).wrappedUnit
+            // Colour: a palette entry held for a whole number of bars and
+            // cross-faded over one beat at the bar line, plus a spatial offset
+            // so the room reads as one gradient. `paletteColor` takes a 0…1
+            // position across the whole palette, so entries are converted at
+            // the last moment.
+            let spread = config.colorChangeIntensity * (0.35 + spatialFidelity * 0.65)
+            let paletteMotion = target.position * spread * Double(max(1, palette.count - 1))
+                + paletteProgress
+            var color = Self.paletteColor(palette, position: paletteMotion / Double(max(1, palette.count)))
+            color.hue = (color.hue + (moodSmoothed - 0.5) * 0.05 + chromaHue * 0.03).wrappedUnit
 
-            if isAccent && snapshot.snare * config.percussionSensitivity > 0.42 {
+            if isAccent {
+                // The accent role sits on the complementary colour for the
+                // whole show rather than teleporting there whenever a snare
+                // crosses a threshold, which used to read as a colour toggling
+                // on and off with the backbeat.
                 color.hue = (color.hue + 0.5).wrappedUnit
-                color.saturation *= 0.72
-            } else if isHit && snapshot.kick > 0.5 {
-                color.saturation = min(1, color.saturation + 0.08)
+                color.saturation *= 0.78
+            } else if isHit {
+                color.saturation = min(1, color.saturation + snapshot.kick * 0.06)
             }
             if flashIntensity > 0 {
                 color.saturation *= 1 - flashIntensity * 0.8
@@ -218,9 +323,11 @@ final class MusicChoreographyEngine {
                 fixtureID: target.fixtureID,
                 segmentID: target.segmentID,
                 hue: color.hue,
-                saturation: color.saturation,
-                brightness: brightness,
-                transitionDuration: silence ? 0.55 : (flashIntensity > 0 ? 0.04 : 0.1),
+                saturation: color.saturation.clamped01,
+                brightness: brightness.clamped01,
+                // The transition covers the gap to the next frame, so a fixture
+                // interpolates between commands instead of stepping.
+                transitionDuration: silence ? 0.55 : (flashIntensity > 0 ? 0.04 : 0.09),
                 priority: flashIntensity > 0 ? 3 : (isHit ? 2 : 1)
             ))
         }
@@ -232,6 +339,53 @@ final class MusicChoreographyEngine {
             sustainedEnergyEvent: sustainedEnergyEvent,
             flashApplied: flashIntensity > 0
         )
+    }
+
+    /// One-pole follower toward `target` over `timeConstant` seconds.
+    private static func follow(
+        _ current: Double,
+        toward target: Double,
+        dt: Double,
+        timeConstant: Double
+    ) -> Double {
+        guard timeConstant > 0 else { return target }
+        return current + (target - current) * (1 - exp(-dt / timeConstant))
+    }
+
+    /// The argmax of the chroma vector flickers between near-equal bins every
+    /// analysis frame, and feeding it straight into the hue put a visible
+    /// wobble on every fixture. Require a new bin to lead clearly and hold that
+    /// lead, then glide the short way round the wheel rather than jumping.
+    private func smoothedChromaHue(_ chroma: [Double], dt: Double) -> Double {
+        if chroma.count >= 12 {
+            var best = 0.0
+            var runnerUp = 0.0
+            var index = 0
+            for (offset, value) in chroma.enumerated() {
+                if value > best {
+                    runnerUp = best
+                    best = value
+                    index = offset
+                } else if value > runnerUp {
+                    runnerUp = value
+                }
+            }
+            if best > 0.15, best > runnerUp * 1.15 {
+                if index == chromaCandidate {
+                    chromaCandidateFrames += 1
+                } else {
+                    chromaCandidate = index
+                    chromaCandidateFrames = 1
+                }
+                if chromaCandidateFrames >= 4 { chromaIndex = index }
+            }
+        }
+        let target = chromaIndex >= 0 ? Double(chromaIndex) / 12 : chromaHueSmoothed
+        var delta = target - chromaHueSmoothed
+        if delta > 0.5 { delta -= 1 }
+        if delta < -0.5 { delta += 1 }
+        chromaHueSmoothed = (chromaHueSmoothed + delta * (1 - exp(-dt / 2.5))).wrappedUnit
+        return chromaHueSmoothed
     }
 
     private func updateSustainedEnergy(_ energy: Double, at timestamp: TimeInterval) -> Bool {
@@ -267,7 +421,7 @@ final class MusicChoreographyEngine {
 
     /// Where the frame being rendered sits in the music.
     private struct MusicalClock {
-        /// 0…1 position inside the current beat, 0 exactly on the beat.
+        /// 0…1 position inside the current felt beat, 0 exactly on the beat.
         var phase: Double = 0
         /// Which beat of the current bar this is.
         var beatInBar: Int = 0
@@ -279,6 +433,8 @@ final class MusicChoreographyEngine {
         /// Bars per second, 0 when there is no usable grid.
         var barRate: Double = 0
         var metre: Int = 4
+        /// Absolute position in bars on the detected grid.
+        var barPosition: Double = 0
     }
 
     private func musicalClock(snapshot: AudioReactiveSnapshot, timestamp: TimeInterval) -> MusicalClock {
@@ -293,15 +449,16 @@ final class MusicChoreographyEngine {
         guard timestamp - snapshot.beatReferenceTime < interval * 6 else { return MusicalClock(metre: metre) }
 
         // Evaluating slightly ahead is only meaningful on a predicted grid: it
-        // pays for the transport and firmware delay so the swell lands on the
-        // beat rather than a frame or two behind it.
-        let predicted = timestamp + Self.outputLatencyCompensation
+        // pays for transport, firmware delay, and the envelope's own rise time,
+        // so the swell lands on the beat rather than a frame or two behind it.
+        let predicted = timestamp + Self.outputLatencyCompensation + Self.attackTime * 0.8
         let gridInterval = snapshot.beatInterval > 0 ? snapshot.beatInterval : interval
         let gridBeats = (predicted - snapshot.beatReferenceTime) / gridInterval
         // The reference advances on every detected beat. Include its position
         // on the grid before dividing into felt beats, or half-time restarts
         // its pulse halfway through every cycle.
-        let beats = (Double(snapshot.beatCount) + gridBeats) * gridInterval / interval
+        let absoluteBeat = Double(snapshot.beatCount) + gridBeats
+        let beats = absoluteBeat * gridInterval / interval
         let wholeBeats = floor(beats)
         let beatInBar = Int(((Double(snapshot.beatInBar) + floor(gridBeats))
             .truncatingRemainder(dividingBy: Double(metre))
@@ -311,43 +468,51 @@ final class MusicChoreographyEngine {
             phase: beats - wholeBeats,
             beatInBar: beatInBar,
             interval: interval,
-            strength: max(0, min(1, snapshot.beatConfidence * 1.6)),
+            // Confidence now reflects how far the tempo estimate is ahead of
+            // its nearest rival period rather than how far it is above the
+            // average of every lag, so this cross-fade does real work: an
+            // ambiguous grid renders the smooth energy-driven show instead of
+            // a confident wrong one.
+            strength: ((snapshot.beatConfidence - 0.25) / 0.45).clamped01,
             barRate: 1 / (gridInterval * Double(metre)),
-            metre: metre
+            metre: metre,
+            barPosition: absoluteBeat / Double(metre)
         )
     }
 
-    /// Brightness contour across one beat: a short swell into the beat, a peak
-    /// on it, then a decay across the rest.
-    private func beatShape(phase: Double) -> Double {
-        let decay = pow(max(0, 1 - phase), 2.6)
-        let anticipation = phase > 0.82 ? pow((phase - 0.82) / 0.18, 2) * 0.55 : 0
-        return max(decay, anticipation)
+    /// Brightness contour across one felt beat: a short swell into the beat, a
+    /// peak on it, then a decay across the rest. Unlike the curve this replaces
+    /// it returns to a floor rather than to zero, so a beat is an accent on a
+    /// lit room instead of the room going dark and coming back.
+    private static func beatShape(phase: Double) -> Double {
+        let decay = pow(max(0, 1 - phase), 2)
+        let anticipation = phase > 0.86 ? pow((phase - 0.86) / 0.14, 2) * 0.62 : 0
+        return 0.07 + 0.93 * max(decay, anticipation)
     }
 
-    /// Relative weight of each beat in the current bar. Odd metres keep a
-    /// strong downbeat and a secondary accent so a run of pulses still reads
-    /// as a groove rather than a metronome.
+    /// Relative weight of each beat in the current bar. The downbeat leads by a
+    /// clear margin, so only the strong beats produce a large swing and the bar
+    /// reads as a groove rather than as a metronome at full depth.
     private static func barAccent(_ beatInBar: Int, metre: Int) -> Double {
         if beatInBar == 0 { return 1 }
         switch metre {
-        case 3: return beatInBar == 1 ? 0.7 : 0.82
-        case 5: return beatInBar == 3 ? 0.9 : 0.7
-        case 6: return beatInBar == 3 ? 0.9 : 0.72
-        case 7: return beatInBar == 3 || beatInBar == 5 ? 0.88 : 0.7
+        case 3: return beatInBar == 1 ? 0.46 : 0.6
+        case 5: return beatInBar == 3 ? 0.72 : 0.46
+        case 6: return beatInBar == 3 ? 0.72 : 0.48
+        case 7: return beatInBar == 3 || beatInBar == 5 ? 0.7 : 0.46
         default:
-            return beatInBar == 2 ? 0.88 : 0.74
+            return beatInBar == 2 ? 0.72 : 0.5
         }
     }
 
-    /// Advances palette progression, measured in palette entries: on a grid it
-    /// moves by musical time so a change lands on a bar line, and off one it
-    /// still steps per detected beat.
+    /// Palette progression measured in whole bars. On the grid an entry is held
+    /// for an integer number of bars and cross-faded across one beat at the bar
+    /// line, so the change lands on a downbeat by construction.
     ///
-    /// Progression used to be fed straight into a position that wraps across
-    /// the *whole* palette, so a single beat could advance the room by two or
-    /// three colours and the palette cycled about every other beat. Counting
-    /// entries makes "one colour per bar" mean exactly that.
+    /// Progression used to be a free-running accumulator quantized to *its own*
+    /// integer boundaries. Entries-per-bar was not an integer, so a colour
+    /// change landed at a different point in every bar and arrived about twice
+    /// a second at the default setting.
     private func advancePalette(
         newBeats: Int,
         clock: MusicalClock,
@@ -355,43 +520,47 @@ final class MusicChoreographyEngine {
         dt: Double
     ) {
         if clock.strength > 0, clock.barRate > 0 {
-            let entriesPerBar = 0.25 + configuration.colorChangeIntensity * 1.75
-            paletteProgress += entriesPerBar * clock.barRate * dt
-        } else if newBeats > 0 {
-            paletteProgress += Double(newBeats) * max(0.15, configuration.colorChangeIntensity)
+            let barsPerColour = Double(max(1, Int((5 - configuration.colorChangeIntensity * 4).rounded())))
+            let raw = clock.barPosition / barsPerColour
+            let index = Int(floor(raw))
+            // Beats elapsed inside the current hold, so the cross-fade lasts
+            // exactly one beat however long the hold is.
+            let within = (raw - floor(raw)) * barsPerColour * Double(clock.metre)
+            let blend = within.clamped01
+            if index != colourIndex {
+                lastColourIndex = colourIndex
+                colourIndex = index
+            }
+            paletteProgress = Double(lastColourIndex)
+                + Double(colourIndex - lastColourIndex) * blend
+        } else {
+            // Off the grid there are no bars for a change to land on, so the
+            // palette drifts slowly and continuously instead of snapping:
+            // roughly one entry every twelve seconds at full intensity.
+            paletteProgress += dt * (0.02 + configuration.colorChangeIntensity * 0.06)
+            colourIndex = Int(floor(paletteProgress))
+            lastColourIndex = colourIndex
         }
-    }
-
-    /// Holds the palette for the whole division and cross-fades over the last
-    /// sliver of it, so the change lands on a bar line. Off the grid the
-    /// progression stays continuous, matching the previous behavior.
-    private func quantizedPaletteProgress(strength: Double) -> Double {
-        guard strength > 0 else { return paletteProgress }
-        let step = floor(paletteProgress)
-        let fraction = paletteProgress - step
-        let crossfade = min(1, fraction / 0.15)
-        let quantized = step + crossfade
-        return paletteProgress + (quantized - paletteProgress) * strength
     }
 
     /// Integrates the sweep rate rather than deriving an absolute phase from
     /// the clock, so gaining or losing tempo lock changes the speed of the
     /// motion without ever jumping its position.
     private func advanceMovement(clock: MusicalClock, configuration: MusicModeConfiguration, dt: Double) {
-        let wallClockRate = 0.18 + configuration.movementSpeed * 1.7
+        let wallClockRate = 0.06 + configuration.movementSpeed * 0.55
         var rate = wallClockRate
         if clock.strength > 0, clock.barRate > 0 {
-            // Traverses per bar, so a sweep arrives on the downbeat instead of
-            // drifting across it.
-            let traversesPerBar = 0.25 + configuration.movementSpeed * 1.75
+            // One traverse every few bars at the default speed: motion that
+            // reads as travel rather than as another oscillator stacked on
+            // brightness.
+            let traversesPerBar = 0.12 + configuration.movementSpeed * 0.55
             let musicalRate = traversesPerBar * clock.barRate
             rate = wallClockRate + (musicalRate - wallClockRate) * clock.strength
         }
         barsElapsed += (clock.barRate > 0 ? clock.barRate : 0.5) * dt
         if configuration.movementDirection == .alternating {
             // Reverse on the bar line while locked. Without a grid there are no
-            // bars, so fall back to flipping every four detected beats, which is
-            // the cadence the show used before.
+            // bars, so fall back to flipping every four detected beats.
             let bar = clock.strength > 0 ? Int(floor(barsElapsed)) : lastBeatCount / max(1, clock.metre)
             if !bar.isMultiple(of: 2) { rate = -rate }
         }
@@ -442,17 +611,6 @@ final class MusicChoreographyEngine {
             brightness: palette[low].brightness + (palette[high].brightness - palette[low].brightness) * fraction
         )
     }
-
-    private static func chromaToHue(_ chroma: [Double]) -> Double {
-        guard chroma.count >= 12 else { return 0 }
-        var best = 0.0
-        var index = 0
-        for (offset, value) in chroma.enumerated() where value > best {
-            best = value
-            index = offset
-        }
-        return best > 0.15 ? Double(index) / 12 : 0
-    }
 }
 
 private extension Double {
@@ -460,4 +618,7 @@ private extension Double {
         let value = truncatingRemainder(dividingBy: 1)
         return value < 0 ? value + 1 : value
     }
+
+    /// `MusicMode.swift` has the same helper, but fileprivate to that file.
+    var clamped01: Double { max(0, min(1, self)) }
 }

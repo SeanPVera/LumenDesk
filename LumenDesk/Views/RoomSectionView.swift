@@ -215,11 +215,13 @@ struct RoomSectionView: View {
                 Button("Rename\u{2026}") { beginRename() }
                 Button("Edit Schedules\u{2026}") { showingSchedules = true }
                 if !allLights.isEmpty {
+                    // One submenu per mood. A flat list of every theme was
+                    // workable at eighteen and is a wall at forty-eight.
                     Menu("Apply Theme") {
                         ForEach(LightingTheme.Category.allCases, id: \.self) { category in
                             let themes = LightingCatalog.themes.filter { $0.category == category }
                             if !themes.isEmpty {
-                                Section(category.rawValue) {
+                                Menu(category.rawValue) {
                                     ForEach(themes) { theme in
                                         Button(theme.name) { manager.applyTheme(theme, scope: .room(room.id)) }
                                     }

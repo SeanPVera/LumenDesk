@@ -54,6 +54,8 @@
 		B10000000000000000002B /* MusicModeVisualizerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000002B /* MusicModeVisualizerView.swift */; };
 		B10000000000000000002C /* LIFXMatrix.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000002C /* LIFXMatrix.swift */; };
 		B10000000000000000002D /* LIFXLunaEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000002D /* LIFXLunaEditorView.swift */; };
+		B100000000000000000033 /* ThemePalette.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000033 /* ThemePalette.swift */; };
+		B100000000000000000034 /* ThemePlanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000034 /* ThemePlanner.swift */; };
 		B200000000000000000001 /* ProtocolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000001 /* ProtocolTests.swift */; };
 		B200000000000000000002 /* DomainTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000002 /* DomainTests.swift */; };
 		B200000000000000000003 /* NetworkUtilityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000003 /* NetworkUtilityTests.swift */; };
@@ -65,6 +67,7 @@
 		B200000000000000000009 /* MusicModeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000009 /* MusicModeTests.swift */; };
 		B20000000000000000000A /* BeatTrackerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000A /* BeatTrackerTests.swift */; };
 		B20000000000000000000B /* RoomPlanningTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000B /* RoomPlanningTests.swift */; };
+		B20000000000000000000C /* LightingThemeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000C /* LightingThemeTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -127,6 +130,8 @@
 		A10000000000000000002B /* MusicModeVisualizerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicModeVisualizerView.swift; sourceTree = "<group>"; };
 		A10000000000000000002C /* LIFXMatrix.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LIFXMatrix.swift; sourceTree = "<group>"; };
 		A10000000000000000002D /* LIFXLunaEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LIFXLunaEditorView.swift; sourceTree = "<group>"; };
+		A100000000000000000033 /* ThemePalette.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemePalette.swift; sourceTree = "<group>"; };
+		A100000000000000000034 /* ThemePlanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemePlanner.swift; sourceTree = "<group>"; };
 		A100000000000000000099 /* LumenDesk.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LumenDesk.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A200000000000000000001 /* ProtocolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolTests.swift; sourceTree = "<group>"; };
 		A200000000000000000002 /* DomainTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DomainTests.swift; sourceTree = "<group>"; };
@@ -139,6 +144,7 @@
 		A200000000000000000009 /* MusicModeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicModeTests.swift; sourceTree = "<group>"; };
 		A20000000000000000000A /* BeatTrackerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BeatTrackerTests.swift; sourceTree = "<group>"; };
 		A20000000000000000000B /* RoomPlanningTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomPlanningTests.swift; sourceTree = "<group>"; };
+		A20000000000000000000C /* LightingThemeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LightingThemeTests.swift; sourceTree = "<group>"; };
 		A200000000000000000099 /* LumenDeskTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LumenDeskTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -199,6 +205,7 @@
 				A10000000000000000001E /* GoveeSegments.swift */,
 				A10000000000000000002C /* LIFXMatrix.swift */,
 				A100000000000000000026 /* MusicMode.swift */,
+				A100000000000000000033 /* ThemePalette.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -213,6 +220,7 @@
 				A100000000000000000030 /* RoomPlanning.swift */,
 				A100000000000000000024 /* PersistenceStore.swift */,
 				A100000000000000000025 /* CommandCoordinator.swift */,
+				A100000000000000000034 /* ThemePlanner.swift */,
 				A100000000000000000027 /* MusicChoreographyEngine.swift */,
 				A100000000000000000028 /* MusicLightingRenderer.swift */,
 				A100000000000000000029 /* AudioReactiveSessionController.swift */,
@@ -296,6 +304,7 @@
 				A200000000000000000009 /* MusicModeTests.swift */,
 				A20000000000000000000A /* BeatTrackerTests.swift */,
 				A20000000000000000000B /* RoomPlanningTests.swift */,
+				A20000000000000000000C /* LightingThemeTests.swift */,
 			);
 			path = LumenDeskTests;
 			sourceTree = "<group>";
@@ -437,6 +446,8 @@
 				B10000000000000000002B /* MusicModeVisualizerView.swift in Sources */,
 				B10000000000000000002C /* LIFXMatrix.swift in Sources */,
 				B10000000000000000002D /* LIFXLunaEditorView.swift in Sources */,
+				B100000000000000000033 /* ThemePalette.swift in Sources */,
+				B100000000000000000034 /* ThemePlanner.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -455,6 +466,7 @@
 				B200000000000000000009 /* MusicModeTests.swift in Sources */,
 				B20000000000000000000A /* BeatTrackerTests.swift in Sources */,
 				B20000000000000000000B /* RoomPlanningTests.swift in Sources */,
+				B20000000000000000000C /* LightingThemeTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

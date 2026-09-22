@@ -497,6 +497,7 @@ struct LibraryWorkspaceView: View {
     @State private var previewScene: LightingScene?
     @State private var editingScene: LightingScene?
     @State private var pendingAudioEffect: LightingEffect?
+    @State private var themeCategory: LightingTheme.Category?
     @State private var hasRestoredRunningShow = false
 
     private let columns = [GridItem(.adaptive(minimum: 220), spacing: 12)]
@@ -524,6 +525,18 @@ struct LibraryWorkspaceView: View {
                             Text("All Lights").tag(LightScope.all)
                             ForEach(manager.rooms) { room in
                                 Text(room.name).tag(LightScope.room(room.id))
+                            }
+                        }
+                        .labelsHidden()
+                        .fixedSize()
+                    }
+                    if section == .themes {
+                        LumenEyebrow(text: "Mood")
+                        Picker("Mood", selection: $themeCategory) {
+                            Text("All (\(LightingCatalog.themes.count))").tag(LightingTheme.Category?.none)
+                            ForEach(LightingTheme.Category.allCases, id: \.self) { category in
+                                let count = LightingCatalog.themes.filter { $0.category == category }.count
+                                Text("\(category.rawValue) (\(count))").tag(LightingTheme.Category?.some(category))
                             }
                         }
                         .labelsHidden()
@@ -634,10 +647,13 @@ struct LibraryWorkspaceView: View {
                     }
                     Text(theme.name).font(LumenType.display(size: 15, weight: .semibold))
                     Text(theme.summary).font(.caption).foregroundStyle(Lumen.textSecondary).lineLimit(3)
-                    PaletteStrip(colors: theme.colors.map(\.color))
+                    ThemeSwatchStrip(theme: theme, height: 26)
+                        .help(theme.distribution.summary)
                     HStack {
                         Label("\(Int(theme.brightness * 100))%", systemImage: "sun.max")
                             .font(.caption).foregroundStyle(Lumen.textSecondary)
+                        Text(theme.distribution.displayName)
+                            .font(.caption).foregroundStyle(Lumen.textTertiary)
                         Spacer()
                         Button("Apply") { manager.applyTheme(theme, scope: scope) }
                             .buttonStyle(LumenPrimaryButtonStyle(compact: true))
@@ -763,8 +779,12 @@ struct LibraryWorkspaceView: View {
     }
 
     private var filteredThemes: [LightingTheme] {
-        searchText.isEmpty ? LightingCatalog.themes : LightingCatalog.themes.filter {
-            $0.name.localizedCaseInsensitiveContains(searchText) || $0.summary.localizedCaseInsensitiveContains(searchText)
+        LightingCatalog.themes.filter { theme in
+            guard themeCategory == nil || theme.category == themeCategory else { return false }
+            guard !searchText.isEmpty else { return true }
+            return theme.name.localizedCaseInsensitiveContains(searchText)
+                || theme.summary.localizedCaseInsensitiveContains(searchText)
+                || theme.category.rawValue.localizedCaseInsensitiveContains(searchText)
         }
     }
 

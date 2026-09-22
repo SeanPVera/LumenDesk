@@ -840,17 +840,87 @@ final class LightManager: ObservableObject {
         }
         stopEffects(touching: Set(targets.map(\.id)))
         recordChange(targets)
-        for (index, device) in targets.enumerated() {
-            let color = theme.colors[index % theme.colors.count].color
-            device.isOn = true
-            device.brightness = theme.brightness
-            device.color = color
-            sendPower(device, on: true)
-            sendColor(device, color: color)
-            if device.brand == .govee { sendBrightness(device, value: theme.brightness) }
+
+        let plan = ThemePlanner.plan(theme, fixtures: targets.map(themeFixture))
+        let plansByID = Dictionary(plan.fixtures.map { ($0.fixtureID, $0) },
+                                   uniquingKeysWith: { first, _ in first })
+        for device in targets {
+            guard let fixturePlan = plansByID[device.id] else { continue }
+            applyThemePlan(fixturePlan, to: device)
         }
+
         let suffix = scope == .all ? "" : " in “\(scopeDisplayName(scope))”"
-        publishError("Applied “\(theme.name)” to \(targets.count) light\(targets.count == 1 ? "" : "s")\(suffix).")
+        var message = "Applied “\(theme.name)” to \(targets.count) light\(targets.count == 1 ? "" : "s")\(suffix)."
+        if let adaptation = plan.adaptationSummary { message += " \(adaptation)" }
+        publishError(message)
+        logActivity(.command, title: "Theme applied",
+                    detail: "\(theme.name): \(targets.count) lights, \(theme.distribution.displayName.lowercased())")
+    }
+
+    /// What the planner needs to know about a light: what it can address, the
+    /// white point to fall back on, and — for a fixture that can only run some
+    /// of its zones — which zones the user already has lit.
+    private func themeFixture(_ device: LightDevice) -> ThemeFixture {
+        ThemeFixture(id: device.id,
+                     capability: themeCapability(for: device),
+                     kelvin: device.kelvin,
+                     preferredZones: activeSegmentState(for: device.id)?.poweredSegments ?? [])
+    }
+
+    /// Capability comes from what discovery reported, never from a guess. A
+    /// Govee model the segment catalog doesn't recognize is planned as a plain
+    /// emitter rather than being sent segment packets its firmware would drop.
+    func themeCapability(for device: LightDevice) -> ThemeFixtureCapability {
+        if device.isLIFXLuna, let matrix = lifxMatrixStates[device.id] {
+            return .matrix(productID: matrix.productID, width: matrix.width, height: matrix.height)
+        }
+        if device.brand == .govee, let profile = segmentProfile(for: device), profile.recognized {
+            // `segmentState(for:)` is the one place that knows how many
+            // segments a fixture really has: it repairs a saved count that a
+            // fixed-topology profile contradicts, which happens when the layout
+            // was stored before the SKU was recognized or came in from another
+            // setup's archive. Reading the raw stored count here would plan a
+            // 15-entry layout for a three-zone lamp and misreport its zones.
+            return .segments(count: segmentState(for: device).segmentCount,
+                             gradient: profile.supportsGradient,
+                             simultaneousZoneLimit: profile.simultaneousZoneLimit)
+        }
+        return .solid
+    }
+
+    /// Sends one fixture's share of a theme down whichever path its hardware
+    /// understands. Undo was recorded once for the whole batch and the toast is
+    /// published once at the end, so every call here stays quiet.
+    private func applyThemePlan(_ plan: ThemeFixturePlan, to device: LightDevice) {
+        device.isOn = true
+        device.kelvin = plan.kelvin
+        sendPower(device, on: true)
+
+        if let matrix = plan.matrix, device.isLIFXLuna {
+            // Matrix zones carry their own brightness, so the fixture-level
+            // value is bookkeeping for the UI rather than a second command.
+            device.brightness = plan.brightness
+            device.color = plan.tone.displayColor
+            applyLIFXMatrix(device, state: matrix, recordUndo: false, turnOn: false, announce: false)
+            return
+        }
+
+        if let segments = plan.segments, device.brand == .govee {
+            applySegments(device, state: segments, recordUndo: false, turnOn: false, announce: false)
+            device.brightness = plan.brightness
+            sendBrightness(device, value: plan.brightness)
+            return
+        }
+
+        // Chroma at full value plus an explicit brightness, the same shape
+        // scene restore uses. Sending the authored hex instead lands
+        // differently on each brand: LIFX ignores how dark it was, and Govee
+        // dims by it once in the RGB and again in the brightness command.
+        let color = plan.tone.displayColor
+        device.brightness = plan.brightness
+        device.color = color
+        sendColor(device, color: color)
+        if device.brand == .govee { sendBrightness(device, value: plan.brightness) }
     }
 
     func startEffect(_ effect: LightingEffect, scope: LightScope = .all) {
@@ -1913,24 +1983,11 @@ extension LightManager {
         persistApplicationState()
     }
 
-    /// Translates a layout into the packet batch the firmware expects: one
-    /// gradient toggle, one color packet per distinct color, and per-segment
-    /// brightness packets only when the layout actually dims something.
+    /// Sends the durable packet batch for a layout.
     private func sendSegmentPackets(_ device: LightDevice, state: GoveeSegmentState) {
-        var packets: [[UInt8]] = []
-        if segmentStudioProfile(for: device)?.supportsGradient == true {
-            packets.append(GoveeProtocol.gradientPacket(on: state.gradient))
-        }
-        for group in state.colorGroups {
-            let rgb = group.color.renderedRGB255
-            packets.append(GoveeProtocol.segmentColorPacket(r: rgb.r, g: rgb.g, b: rgb.b, segments: group.segments))
-        }
-        let brightnessGroups = state.brightnessGroups
-        if brightnessGroups.contains(where: { $0.percent < 100 }) {
-            for group in brightnessGroups {
-                packets.append(GoveeProtocol.segmentBrightnessPacket(percent: group.percent, segments: group.segments))
-            }
-        }
+        let packets = state.durableSegmentPackets(
+            supportsGradient: segmentStudioProfile(for: device)?.supportsGradient == true
+        )
         govee?.applySegments(deviceID: device.backendID, packets: packets)
     }
 

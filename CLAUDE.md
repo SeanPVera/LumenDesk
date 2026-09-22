@@ -27,6 +27,7 @@ xcodebuild -project LumenDesk.xcodeproj -scheme LumenDesk -configuration Debug \
 CI additionally runs, before the build steps:
 
 - `git diff --check` on the pushed range — trailing whitespace or whitespace errors fail the build.
+- `python3 scripts/audit_lighting_themes.py`, which parses `LightingCatalog.swift` and fails on duplicate/near-duplicate palettes, a dropped original identifier, an unbalanced mood family, a wash theme that doesn't lead with its brightest colour, or a README mood count that has drifted. It then regenerates `THEME_CATALOG.md` and fails if the committed copy is stale.
 - `plutil -lint LumenDesk/Info.plist LumenDesk/LumenDesk.entitlements`.
 - `xcrun actool` validation of both asset catalogs.
 
@@ -76,6 +77,22 @@ Discovery never relies on a single broadcast. `LocalSubnet` (in `UDPSocket.swift
 Address a Govee device by the source address of its reply (`GoveeClient.commandAddress`), never the `ip` field in the scan payload: that field is baked at join time and goes stale across a DHCP renewal, which sent every command to a dead address. `LIFXClient` has always used the source address.
 
 Both clients must notify their delegate on **every** discovery response, not only when the address changed. LightManager folds a repeat into the existing device; suppressing repeats meant a rescan never counted the light or re-marked it seen, and a single dropped callback (Demo Mode swallows live callbacks) hid the light until its address changed or the app restarted.
+
+### Themes
+
+`Models/LightingCatalog.swift` holds 48 static themes. Each is a palette plus a `ThemeDistribution` (`wash`, `anchored`, `gradient`, `alternating`, `scattered`) saying where those colours are meant to land. Identifiers are load-bearing — favourites, intent cards, and saved Music Mode palettes resolve by them — so never rename or repurpose one. The list is built with one `add(...)` call per row rather than as an array literal, for the same type-checker reason `GoveeSegmentProfile` is.
+
+A palette entry is chroma plus level, not a colour. `Models/ThemePalette.swift` (`PaletteTone`) decomposes each hex with its own HSV maths, deliberately not through `NSColor`/`UIColor`, so it is identical on both platforms and in tests. `LightingTheme.normalizedTones` measures every level against the palette's brightest entry and floors it at 0.2. **The colour is sent at full value and the level rides the brightness channel** — LIFX takes hue/saturation/brightness as independent channels and ignores how dark the authored hex was, while Govee takes raw RGB and would dim by it twice. Sending the authored hex makes the same theme land differently on each brand; this is also the shape `applyScene` already restores in, so themes captured into scenes round-trip.
+
+`Services/ThemePlanner.swift` is pure and Foundation-only: a theme plus ordered `ThemeFixture`s (`.solid`, `.segments`, `.matrix`) becomes one `ThemeFixturePlan` per light, carrying tone, brightness, kelvin, an optional `GoveeSegmentState`, an optional `LIFXMatrixState`, and a `ThemeAdaptation` recording what the fixture could not show. `LightManager.applyTheme` plans once, then routes each plan through the existing `applySegments` / `applyLIFXMatrix` / `sendColor` paths with `recordUndo: false, announce: false`, so undo is recorded once for the batch and one toast names any adaptation. Rules that are easy to break:
+
+- A lone `.solid` fixture takes the key colour at the theme's **full** brightness; otherwise a dark-keyed theme would light a one-bulb room at a fraction of what the slider says.
+- A `.wash` theme's first colour must be its brightest (within 15%), because that colour fills the whole room. Both the audit script and `LightingThemeTests` enforce it.
+- Gradient ramps are quantised to `ThemePlanner.maximumGradientStops` (16), so a 200-bead string doesn't become 200 `ptReal` packets.
+- Low-saturation entries carry a white point, since LIFX renders them from kelvin rather than hue. Saturated entries leave the device's kelvin alone.
+- A fixture with a `simultaneousZoneLimit` keeps the zones the user already had lit (`preferredZones`), so a theme never moves the light around an H60B0.
+
+Every catalog theme is also a Music Mode palette (`LightingTheme.musicPalette`, `MusicModeConfiguration.selectPalette(_:)`). Identity is recovered by comparing colour lists, not by storing a name, so the persisted schema is untouched and a hand-edited palette reports as custom. **Selecting a palette changes the colours and nothing else** — never `allowsFlashes`, `flashIntensity`, `maximumFlashFrequency`, or `photosensitivitySafeMode`.
 
 ### Persistence
 

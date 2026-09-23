@@ -381,6 +381,7 @@ struct ContentView: View {
                 Button("All Vendors") { vendorFilter = nil }
                 Button("LIFX") { vendorFilter = .lifx }
                 Button("Govee") { vendorFilter = .govee }
+                Button("Nanoleaf") { vendorFilter = .nanoleaf }
             } label: { Label(vendorFilter?.displayName ?? "Vendor", systemImage: "line.3.horizontal.decrease.circle").font(.caption) }
             .menuStyle(.borderlessButton)
             if showOnlyOn || showOfflineOnly || vendorFilter != nil {

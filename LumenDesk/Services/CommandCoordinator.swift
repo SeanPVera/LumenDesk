@@ -85,6 +85,7 @@ struct ExpectedDeviceState: Equatable {
     var brightness: Double?
     var color: Color?
     var kelvin: Int?
+    var nanoleafAppearance: NanoleafAppearance?
 }
 
 struct ReportedDeviceState {
@@ -94,6 +95,7 @@ struct ReportedDeviceState {
     var green: Double
     var blue: Double
     var kelvin: Int
+    var nanoleafAppearance: NanoleafAppearance? = nil
 }
 
 /// Owns the vendor-neutral lifecycle of lighting commands. Vendor clients
@@ -199,8 +201,19 @@ final class CommandCoordinator {
         }
     }
 
+    func expectNanoleafAppearance(deviceID: String, appearance: NanoleafAppearance) {
+        updateState {
+            state.expectedStates[deviceID, default: ExpectedDeviceState()].nanoleafAppearance = appearance
+            if appearance.colorMode == "effect" {
+                state.expectedStates[deviceID]?.color = nil
+                state.expectedStates[deviceID]?.kelvin = nil
+            }
+        }
+    }
+
     func reportedStateMatchesExpectation(deviceID: String, reported: ReportedDeviceState) -> Bool {
         guard let expected = state.expectedStates[deviceID] else { return false }
+        if let appearance = expected.nanoleafAppearance, appearance != reported.nanoleafAppearance { return false }
         if let value = expected.isOn, value != reported.isOn { return false }
         if let value = expected.brightness, abs(value - reported.brightness) > 0.03 { return false }
         if let value = expected.kelvin, abs(value - reported.kelvin) > 100 { return false }

@@ -8,6 +8,7 @@ import SwiftUI
 ///
 /// Every step is skippable so no one is ever trapped.
 struct OnboardingView: View {
+    @State private var showingNanoleafPairing = false
     @EnvironmentObject var manager: LightManager
 
     /// Called when the user finishes or skips. The caller flips the persisted
@@ -98,7 +99,7 @@ struct OnboardingView: View {
 
             VStack(spacing: 14) {
                 valueRow("network", Lumen.cyan,
-                         "Stays on this network", "LIFX and Govee commands travel directly from this device to your lights.")
+                         "Stays on this network", "LIFX, Govee, and Nanoleaf commands travel directly from this device to your lights.")
                 valueRow("rectangle.3.group.fill", Lumen.signal,
                          "Mixed lights, one desk", "Build rooms and scenes across brands without adding a bridge or an account.")
                 valueRow("clock.badge.checkmark.fill", Lumen.success,
@@ -195,6 +196,9 @@ struct OnboardingView: View {
                       manager.isScanning ? manager.scanPhase : discoverSubtitle)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
+            Button("Pair Nanoleaf Shapes") { showingNanoleafPairing = true }
+                .buttonStyle(LumenSecondaryButtonStyle())
+
             if manager.isScanning && manager.devices.isEmpty {
                 ScanPulse()
                     .padding(.vertical, 24)
@@ -231,6 +235,7 @@ struct OnboardingView: View {
                 .padding(.vertical, 12)
             }
         }
+        .sheet(isPresented: $showingNanoleafPairing) { NanoleafPairingView().environmentObject(manager) }
         .onAppear { manager.scan() }
     }
 

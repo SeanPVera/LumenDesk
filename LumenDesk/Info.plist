@@ -31,11 +31,17 @@
     <key>NSScreenCaptureUsageDescription</key>
     <string>LumenDesk can capture system audio from music apps locally to drive music-reactive lightshows.</string>
     <key>NSLocalNetworkUsageDescription</key>
-    <string>LumenDesk discovers and controls LIFX and Govee smart bulbs on your local network.</string>
+    <string>LumenDesk discovers and controls LIFX, Govee, and Nanoleaf Shapes lights on your local network.</string>
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsLocalNetworking</key>
+        <true/>
+    </dict>
     <key>NSBonjourServices</key>
     <array>
         <string>_lifx._udp</string>
         <string>_hap._tcp</string>
+        <string>_nanoleafapi._tcp</string>
     </array>
     <key>UILaunchScreen</key>
     <dict/>

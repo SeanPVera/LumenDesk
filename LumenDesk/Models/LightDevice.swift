@@ -2,7 +2,7 @@ import Foundation
 import SwiftUI
 
 final class LightDevice: ObservableObject, Identifiable {
-    enum Brand: String { case lifx, govee }
+    enum Brand: String { case lifx, govee, nanoleaf }
 
     let id: String
     let brand: Brand
@@ -24,6 +24,12 @@ final class LightDevice: ObservableObject, Identifiable {
     // Reachability UI only needs a refresh when the stale flag changes. Publishing
     // every heartbeat forced every visible row to redraw even though nothing the
     // user could see had changed.
+    @Published var nanoleafAppearance: NanoleafAppearance?
+    @Published var nanoleafEffects: [String] = []
+    @Published var needsNanoleafPairing = false
+
+    var kelvinRange: ClosedRange<Double> { brand == .nanoleaf ? 1200...6500 : 2500...9000 }
+
     var lastSeen: Date
     @Published var isStale: Bool = false
 
@@ -59,6 +65,7 @@ extension LightDevice.Brand {
         switch self {
         case .lifx: return "LIFX"
         case .govee: return "Govee"
+        case .nanoleaf: return "Nanoleaf"
         }
     }
 
@@ -66,6 +73,7 @@ extension LightDevice.Brand {
         switch self {
         case .lifx: return Lumen.violetBright
         case .govee: return Lumen.coral
+        case .nanoleaf: return Lumen.cyan
         }
     }
 }

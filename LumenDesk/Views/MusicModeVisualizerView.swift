@@ -99,6 +99,7 @@ struct MusicModeVisualizerView: View {
         switch transport {
         case .lifxLAN: return "LIFX LAN"
         case .goveeLAN: return "Govee LAN"
+        case .nanoleafLAN: return "Nanoleaf Shapes"
         case .goveeRealtimeSegments: return "Govee real-time segments"
         }
     }

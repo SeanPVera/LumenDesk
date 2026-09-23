@@ -75,6 +75,7 @@ final class MusicLightingRenderer {
         switch transport {
         case .goveeRealtimeSegments: return 0.05  // 20 fps volatile stream
         case .lifxLAN: return 0.06                 // combined HSBK packet
+        case .nanoleafLAN: return 0.2             // whole-controller HTTP updates
         case .goveeLAN: return 0.1                 // ordinary LAN JSON ceiling
         }
     }

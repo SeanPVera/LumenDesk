@@ -71,6 +71,9 @@ final class LightManager: ObservableObject {
     private var errorClearTask: Task<Void, Never>?
     private var lifx: LIFXClient?
     private var govee: GoveeClient?
+    private let nanoleaf: NanoleafClient
+    @Published private(set) var nanoleafCandidates: [NanoleafCandidate] = []
+    @Published private(set) var nanoleafDiscoveryError: String?
     private var refreshTimer: Timer?
     private var scheduleTimer: Timer?
     private var napTimer: Timer?
@@ -99,6 +102,7 @@ final class LightManager: ObservableObject {
         let brightness: Double
         let segments: GoveeSegmentState?
         let matrix: LIFXMatrixState?
+        let nanoleafAppearance: NanoleafAppearance?
         var task: Task<Void, Never>?
     }
 
@@ -173,8 +177,10 @@ final class LightManager: ObservableObject {
         scheduleEngine: ScheduleEngine? = nil,
         persistenceStore: ApplicationPersistence? = nil,
         commandCoordinator: CommandCoordinator? = nil,
-        musicModeController: AudioReactiveSessionController? = nil
+        musicModeController: AudioReactiveSessionController? = nil,
+        nanoleafClient: NanoleafClient? = nil
     ) {
+        self.nanoleaf = nanoleafClient ?? NanoleafClient()
         self.demoWorkspaceController = demoWorkspaceController ?? DemoWorkspaceController()
         self.confirmationCoordinator = confirmationCoordinator ?? ConfirmationCoordinator(defaults: defaults)
         self.scheduleEngine = scheduleEngine ?? ScheduleEngine()
@@ -212,6 +218,7 @@ final class LightManager: ObservableObject {
         goveeSegmentPresets = persistedState.goveeSegmentPresets
         musicModeConfiguration = persistedState.musicModeConfiguration
         fixtureTopologies = persistedState.fixtureTopologies
+        configureNanoleaf()
         self.commandCoordinator.onChange = { [weak self] in
             self?.objectWillChange.send()
         }
@@ -274,7 +281,7 @@ final class LightManager: ObservableObject {
             }
             return
         }
-        logActivity(.scan, title: "Discovery scan started", detail: "Broadcasting and probing every host on the local subnet for LIFX and Govee devices.")
+        logActivity(.scan, title: "Discovery scan started", detail: "Broadcasting and probing every host on the local subnet for LIFX, Govee, and Nanoleaf Shapes devices.")
         isScanning = true
         discoveryChanges = []
         scanStartingIDs = Set(devices.map(\.id))
@@ -287,6 +294,8 @@ final class LightManager: ObservableObject {
         scanInterfaces = LocalSubnet.interfaces().map(\.description)
         lifx?.discover()
         govee?.discover()
+        nanoleafDiscoveryError = nil
+        nanoleaf.discover()
         scanGeneration += 1
         let gen = scanGeneration
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
@@ -447,6 +456,7 @@ final class LightManager: ObservableObject {
                 stalenessGeneration += 1  // triggers manager @Published, re-renders rooms
             }
             switch d.brand {
+            case .nanoleaf: nanoleaf.refresh(d.backendID)
             case .lifx:  lifx?.refresh(macHex: d.backendID)
             case .govee:
                 govee?.refresh(deviceID: d.backendID)
@@ -524,7 +534,7 @@ final class LightManager: ObservableObject {
         // Comparing the raw picked color against that reconstruction missed by
         // more than the tolerance for anything below full value, so the command
         // never confirmed and timed out with a false "did not confirm" error.
-        let rgb = (device.brand == .lifx ? color.lifxReportedEquivalent : color).rgbComponents
+        let rgb = (device.brand != .govee ? color.lifxReportedEquivalent : color).rgbComponents
         commandCoordinator.expectColor(deviceID: device.id, red: rgb.r, green: rgb.g, blue: rgb.b)
     }
 
@@ -536,6 +546,7 @@ final class LightManager: ObservableObject {
     private func refresh(_ device: LightDevice) {
         guard demoWorkspaceController.allowsLiveNetworking else { return }
         switch device.brand {
+        case .nanoleaf: nanoleaf.refresh(device.backendID)
         case .lifx: lifx?.refresh(macHex: device.backendID)
         case .govee: govee?.refresh(deviceID: device.backendID)
         }
@@ -1216,6 +1227,12 @@ final class LightManager: ObservableObject {
                                  duration: TimeInterval) {
         guard demoWorkspaceController.allowsLiveNetworking else { return }
         switch device.brand {
+        case .nanoleaf:
+            let hsb = color.hsbComponents
+            device.nanoleafAppearance = .init(colorMode: "hs")
+            nanoleaf.setState(device.backendID,
+                              NanoleafProtocol.color(hue: hsb.h, saturation: hsb.s, brightness: brightness),
+                              transient: true)
         case .lifx:
             markLIFXMatrixInactive(device)
             let hsb = color.hsbComponents
@@ -1247,7 +1264,9 @@ final class LightManager: ObservableObject {
             device.brightness = state.brightness
             device.color = state.color
             device.kelvin = state.kelvin
-            if let matrix = state.matrix, device.isLIFXLuna {
+            if restoreNanoleafAppearance(state.nanoleafAppearance, to: device) {
+                // Native saved effects and white mode survive a stopped show.
+            } else if let matrix = state.matrix, device.isLIFXLuna {
                 applyLIFXMatrix(device, state: matrix, recordUndo: false,
                                 turnOn: false, announce: false)
             } else if let segments = state.segments, device.brand == .govee {
@@ -1273,6 +1292,7 @@ final class LightManager: ObservableObject {
         enqueueCommand(for: device, coalescingKey: "power", summary: on ? "Turning on" : "Turning off") { [weak self, weak device] in
             guard let self, let device else { return }
             switch device.brand {
+            case .nanoleaf: self.nanoleaf.setState(device.backendID, ["on": ["value": on]])
             case .lifx: self.lifx?.setPower(macHex: device.backendID, on: on)
             case .govee:
                 self.govee?.setPower(deviceID: device.backendID, on: on)
@@ -1311,6 +1331,8 @@ final class LightManager: ObservableObject {
                     let lifxColor = LIFXHSBK(hue: UInt16(hsb.h * 65535), saturation: UInt16(hsb.s * 65535), brightness: UInt16(max(0, min(1, value)) * 65535), kelvin: UInt16(device.kelvin))
                     self.lifx?.setColor(macHex: device.backendID, color: lifxColor)
                 }
+            case .nanoleaf:
+                self.nanoleaf.setState(device.backendID, ["brightness": ["value": NanoleafProtocol.percent(value)]])
             case .govee:
                 self.govee?.setBrightness(deviceID: device.backendID, percent: Int(value * 100))
             }
@@ -1320,6 +1342,7 @@ final class LightManager: ObservableObject {
     private func sendColor(_ device: LightDevice, color: Color, debounce: TimeInterval = 0.08) {
         if device.brand == .lifx { markLIFXMatrixInactive(device) }
         expectColor(device, color: color)
+        expectNanoleafAppearance(device, appearance: .init(colorMode: "hs"))
         enqueueCommand(for: device, coalescingKey: "color", summary: "Changing color", debounce: debounce) { [weak self, weak device] in
             guard let self, let device else { return }
             switch device.brand {
@@ -1327,6 +1350,9 @@ final class LightManager: ObservableObject {
                 let hsb = color.hsbComponents
                 let lifxColor = LIFXHSBK(hue: UInt16(hsb.h * 65535), saturation: UInt16(hsb.s * 65535), brightness: UInt16(device.brightness * 65535), kelvin: UInt16(device.kelvin))
                 self.lifx?.setColor(macHex: device.backendID, color: lifxColor)
+            case .nanoleaf:
+                let hsb = color.hsbComponents
+                self.nanoleaf.setState(device.backendID, NanoleafProtocol.color(hue: hsb.h, saturation: hsb.s, brightness: device.brightness))
             case .govee:
                 self.markSegmentsInactive(device)
                 let rgb = color.rgbComponents
@@ -1336,14 +1362,19 @@ final class LightManager: ObservableObject {
     }
 
     private func sendColorTemperature(_ device: LightDevice, kelvin: Int) {
+        let kelvin = device.brand == .nanoleaf ? NanoleafProtocol.kelvin(kelvin) : kelvin
+        device.kelvin = kelvin
+        expectNanoleafAppearance(device, appearance: .init(colorMode: "ct"))
         if device.brand == .lifx { markLIFXMatrixInactive(device) }
         expectKelvin(device, kelvin: kelvin)
-        enqueueCommand(for: device, coalescingKey: "kelvin", summary: "Color temperature \(kelvin) kelvin") { [weak self, weak device] in
+        enqueueCommand(for: device, coalescingKey: device.brand == .nanoleaf ? "color" : "kelvin", summary: "Color temperature \(kelvin) kelvin") { [weak self, weak device] in
             guard let self, let device else { return }
             switch device.brand {
             case .lifx:
                 let hsb = device.color.hsbComponents
                 self.lifx?.setColor(macHex: device.backendID, color: LIFXHSBK(hue: UInt16(hsb.h * 65535), saturation: 0, brightness: UInt16(device.brightness * 65535), kelvin: UInt16(kelvin)))
+            case .nanoleaf:
+                self.nanoleaf.setState(device.backendID, ["ct": ["value": kelvin], "brightness": ["value": NanoleafProtocol.percent(device.brightness)]])
             case .govee:
                 self.markSegmentsInactive(device)
                 self.govee?.setColor(deviceID: device.backendID, r: 255, g: 255, b: 255, kelvin: kelvin)
@@ -1357,7 +1388,8 @@ final class LightManager: ObservableObject {
         LightRuntimeSnapshot(deviceID: device.id, isOn: device.isOn,
                     brightness: device.brightness, color: device.color, kelvin: device.kelvin,
                     segments: activeSegmentState(for: device.id),
-                    matrix: activeLIFXMatrixState(for: device.id))
+                    matrix: activeLIFXMatrixState(for: device.id),
+                    nanoleafAppearance: device.nanoleafAppearance)
     }
 
     private func recordChange(_ devices: [LightDevice]) {
@@ -1409,7 +1441,9 @@ final class LightManager: ObservableObject {
             d.brightness = snap.brightness
             d.color = snap.color
             d.kelvin = snap.kelvin
-            if let matrix = snap.matrix, d.isLIFXLuna {
+            if restoreNanoleafAppearance(snap.nanoleafAppearance, to: d) {
+                // Restored the controller mode.
+            } else if let matrix = snap.matrix, d.isLIFXLuna {
                 applyLIFXMatrix(d, state: matrix, recordUndo: false,
                                 turnOn: false, announce: false)
             } else if let segments = snap.segments, d.brand == .govee {
@@ -1462,6 +1496,119 @@ final class LightManager: ObservableObject {
 
     fileprivate func device(withID id: String) -> LightDevice? {
         devicesByID[id]
+    }
+}
+
+// MARK: - Nanoleaf Shapes
+
+extension LightManager {
+    private func configureNanoleaf() {
+        nanoleaf.onCandidates = { [weak self] candidates in
+            guard let self, self.demoWorkspaceController.acceptsLiveNetworkCallbacks else { return }
+            self.nanoleafCandidates = candidates
+        }
+        nanoleaf.onDiscoveryError = { [weak self] message in
+            guard let self, self.demoWorkspaceController.acceptsLiveNetworkCallbacks else { return }
+            self.nanoleafDiscoveryError = message
+        }
+        nanoleaf.onUpdate = { [weak self] pairing, info in
+            self?.nanoleafDidUpdate(pairing: pairing, info: info)
+        }
+        nanoleaf.onFailure = { [weak self] serial, error in
+            guard let self, self.demoWorkspaceController.acceptsLiveNetworkCallbacks else { return }
+            let id = "nanoleaf:\(serial)"
+            if let device = self.device(withID: id), error == .pairingRequired {
+                device.needsNanoleafPairing = true
+                device.isStale = true
+            }
+            if self.commandPendingIDs.contains(id) {
+                self.commandCoordinator.fail(deviceIDs: [id], summary: error.localizedDescription)
+                self.publishError(error.localizedDescription)
+            }
+        }
+    }
+
+    func pairNanoleaf(host: String, port: Int = 16021, serviceID: String? = nil) async throws {
+        guard demoWorkspaceController.allowsLiveNetworking else { throw NanoleafError.unavailable }
+        try await nanoleaf.pair(endpoint: NanoleafEndpoint(host: host, port: port), serviceID: serviceID)
+        logActivity(.system, title: "Nanoleaf Shapes paired", detail: "Local control is ready.")
+    }
+
+    func nanoleafDidUpdate(pairing: NanoleafPairing, info: NanoleafInfo) {
+        guard demoWorkspaceController.acceptsLiveNetworkCallbacks, info.isShapes else { return }
+        let id = "nanoleaf:\(pairing.serial)"
+        if device(withID: id) == nil {
+            upsert(LightDevice(id: id, brand: .nanoleaf, backendID: pairing.serial,
+                               name: info.name, address: pairing.endpoint.host, sku: info.model))
+        }
+        guard let device = device(withID: id) else { return }
+        device.address = pairing.endpoint.host
+        device.name = info.name
+        device.needsNanoleafPairing = false
+        device.nanoleafEffects = info.effects.effectsList
+        let color = Color(hue: Double(info.state.hue.value) / 360,
+                          saturation: Double(info.state.sat.value) / 100, brightness: 1)
+        let rgb = color.rgbComponents
+        let brightness = Double(info.state.brightness.value) / 100
+        let matches = commandCoordinator.reportedStateMatchesExpectation(
+            deviceID: id,
+            reported: ReportedDeviceState(isOn: info.state.on.value, brightness: brightness,
+                                           red: rgb.r, green: rgb.g, blue: rgb.b,
+                                           kelvin: info.state.ct.value, nanoleafAppearance: info.appearance)
+        )
+        if !isEffectAnimating(id) && (!commandPendingIDs.contains(id) || matches) {
+            device.isOn = info.state.on.value
+            device.brightness = brightness
+            device.kelvin = info.state.ct.value
+            device.color = color
+            device.nanoleafAppearance = info.appearance
+            if info.state.colorMode == "ct" { whiteModeDeviceIDs.insert(id) }
+            else { whiteModeDeviceIDs.remove(id) }
+        }
+        if isScanning { scanResponseCount += 1 }
+        markSeen(device, confirmsPendingCommand: matches)
+    }
+
+    private func expectNanoleafAppearance(_ device: LightDevice, appearance: NanoleafAppearance) {
+        guard device.brand == .nanoleaf else { return }
+        device.nanoleafAppearance = appearance
+        if appearance.colorMode == "ct" { whiteModeDeviceIDs.insert(device.id) }
+        else { whiteModeDeviceIDs.remove(device.id) }
+        guard demoWorkspaceController.allowsLiveNetworking else { return }
+        commandCoordinator.expectNanoleafAppearance(deviceID: device.id, appearance: appearance)
+    }
+
+    func selectNanoleafEffect(_ device: LightDevice, name: String) {
+        guard device.brand == .nanoleaf, device.nanoleafEffects.contains(name),
+              !isEffectAnimating(device.id) else { return }
+        recordChange([device])
+        device.isOn = true
+        sendPower(device, on: true)
+        sendNanoleafEffect(device, name: name)
+    }
+
+    private func sendNanoleafEffect(_ device: LightDevice, name: String) {
+        expectNanoleafAppearance(device, appearance: .init(colorMode: "effect", effect: name))
+        // Share the color coalescing key so a queued color cannot overwrite an
+        // effect the user selected afterwards (or vice versa).
+        enqueueCommand(for: device, coalescingKey: "color", summary: "Selecting Nanoleaf effect") { [weak self, weak device] in
+            guard let self, let device else { return }
+            self.nanoleaf.selectEffect(device.backendID, name: name)
+        }
+    }
+
+    private func restoreNanoleafAppearance(_ appearance: NanoleafAppearance?, to device: LightDevice) -> Bool {
+        guard device.brand == .nanoleaf, let appearance else { return false }
+        if appearance.colorMode == "effect", let effect = appearance.effect {
+            sendNanoleafEffect(device, name: effect)
+            sendBrightness(device, value: device.brightness)
+            return true
+        }
+        if appearance.colorMode == "ct" {
+            sendColorTemperature(device, kelvin: device.kelvin)
+            return true
+        }
+        return false
     }
 }
 
@@ -2362,7 +2509,8 @@ extension LightManager {
                 saturation: hsb.s,
                 kelvin: d.kelvin,
                 segments: activeSegmentState(for: d.id),
-                matrix: activeLIFXMatrixState(for: d.id)
+                matrix: activeLIFXMatrixState(for: d.id),
+                nanoleafAppearance: d.nanoleafAppearance
             )
         }
         scenes.append(LightingScene(name: trimmed, snapshots: snapshots))
@@ -2457,7 +2605,9 @@ extension LightManager {
         device.isOn = snap.isOn
         device.brightness = snap.brightness
         device.kelvin = snap.kelvin
-        if let matrix = snap.matrix, device.isLIFXLuna {
+        if restoreNanoleafAppearance(snap.nanoleafAppearance, to: device) {
+            // Restored the captured controller mode.
+        } else if let matrix = snap.matrix, device.isLIFXLuna {
             applyLIFXMatrix(device, state: matrix, recordUndo: false,
                             turnOn: false, announce: false)
         } else if let segments = snap.segments, device.brand == .govee {
@@ -2826,7 +2976,7 @@ extension LightManager {
             return MusicFixtureDescriptor(
                 id: device.id,
                 label: device.label,
-                transport: device.brand == .lifx ? .lifxLAN : .goveeLAN,
+                transport: device.brand == .nanoleaf ? .nanoleafLAN : (device.brand == .lifx ? .lifxLAN : .goveeLAN),
                 role: role
             )
         }
@@ -2853,7 +3003,7 @@ extension LightManager {
             }
 
             switch command.transport {
-            case .lifxLAN, .goveeLAN:
+            case .lifxLAN, .goveeLAN, .nanoleafLAN:
                 sendEffectFrame(
                     device,
                     color: color,
@@ -3028,6 +3178,7 @@ extension LightManager {
         let originalBrightness = device.brightness
         let originalSegments = activeSegmentState(for: device.id)
         let originalMatrix = activeLIFXMatrixState(for: device.id)
+        let originalNanoleaf = device.nanoleafAppearance
         device.isOn = true
         device.color = .cyan
         device.brightness = 1
@@ -3037,7 +3188,9 @@ extension LightManager {
             try? await Task.sleep(for: .seconds(2))
             guard let self, let device else { return }
             device.color = originalColor; device.brightness = originalBrightness; device.isOn = originalPower
-            if let originalMatrix {
+            if self.restoreNanoleafAppearance(originalNanoleaf, to: device) {
+                // Restore the effect selected before identification.
+            } else if let originalMatrix {
                 self.applyLIFXMatrix(device, state: originalMatrix, recordUndo: false,
                                      turnOn: false, announce: false)
             } else if let originalSegments {
@@ -3069,6 +3222,7 @@ extension LightManager {
                                 brightness: device.brightness,
                                 segments: activeSegmentState(for: device.id),
                                 matrix: activeLIFXMatrixState(for: device.id),
+                                nanoleafAppearance: device.nanoleafAppearance,
                                 task: nil)
         logActivity(.recovery, title: "Identifying light", detail: device.label)
         hold.task = Task { @MainActor [weak self, weak device] in
@@ -3099,7 +3253,9 @@ extension LightManager {
         device.color = hold.color
         device.brightness = hold.brightness
         device.isOn = hold.power
-        if let matrix = hold.matrix {
+        if restoreNanoleafAppearance(hold.nanoleafAppearance, to: device) {
+            // Restore the effect selected before identification.
+        } else if let matrix = hold.matrix {
             applyLIFXMatrix(device, state: matrix, recordUndo: false, turnOn: false, announce: false)
         } else if let segments = hold.segments {
             applySegments(device, state: segments, recordUndo: false, turnOn: false, announce: false)
@@ -3128,7 +3284,7 @@ extension LightManager {
             ScanDiagnostic(title: "Address", value: device.address, status: .neutral),
             ScanDiagnostic(title: "Last seen", value: device.lastSeen.formatted(date: .abbreviated, time: .standard), status: device.isStale ? .warning : .good),
             ScanDiagnostic(title: "Reachability", value: device.isStale ? "Not seen recently" : "Responding", status: device.isStale ? .warning : .good),
-            ScanDiagnostic(title: "Color temperature", value: "2,500–9,000 K", status: .neutral),
+            ScanDiagnostic(title: "Color temperature", value: device.brand == .nanoleaf ? "1,200–6,500 K" : "2,500–9,000 K", status: .neutral),
             ScanDiagnostic(title: "LAN identifier", value: device.backendID, status: .neutral)
         ]
     }
@@ -3146,6 +3302,9 @@ extension LightManager {
     var discoveryFailureHint: String? {
         guard !isDemoMode, !isScanning, lastScanDate != nil, devices.isEmpty else { return nil }
 
+        if !nanoleafCandidates.isEmpty {
+            return "Nanoleaf Shapes found. Open Pair Nanoleaf in Rig to connect the controller."
+        }
         if govee == nil && lifx == nil {
             return "Neither protocol could open a socket. Another app may hold UDP 4002, or the app was denied network access."
         }
@@ -3183,6 +3342,7 @@ extension LightManager {
             ScanDiagnostic(title: "LIFX protocol", value: lifx == nil ? "Unavailable" : "Ready on UDP 56700", status: lifx == nil ? .warning : .good),
             ScanDiagnostic(title: "Govee protocol", value: govee == nil ? "Unavailable" : "Ready on UDP 4001–4003", status: govee == nil ? .warning : .good)
         ]
+        rows.append(ScanDiagnostic(title: "Nanoleaf Shapes", value: nanoleafDiscoveryError ?? "Bonjour discovery · local pairing", status: nanoleafDiscoveryError == nil ? .good : .warning))
         // The probe rows are the difference between "your network has no
         // lights" and "nothing we sent ever left the machine". Without them a
         // wrong interface, a refused route, and a denied Local Network grant
@@ -3387,6 +3547,7 @@ extension LightManager {
 
 extension LightManager {
     func enterDemoMode() {
+        nanoleaf.pause()
         guard !isDemoMode else { return }
         if rehearsalSceneID != nil { stopSceneRehearsal(restore: true) }
         let liveEffects = activeEffects
@@ -3428,6 +3589,7 @@ extension LightManager {
                 }
             }
         }
+        nanoleaf.discover()
         // Restarting a previously active effect must not manufacture a new
         // user-visible undo step merely because Demo Mode was exited.
         undoStack = restoredWorkspace.undoStack

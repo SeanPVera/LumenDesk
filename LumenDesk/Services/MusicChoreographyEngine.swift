@@ -188,7 +188,7 @@ final class MusicChoreographyEngine {
         // delivery run.
         let feltInterval = clock.interval > 0 ? clock.interval : 0.5
         let tempoRestraint = ((feltInterval - 0.22) / 0.26).clamped01
-        let dynamicsGate = pow(dynamics.clamped01, 0.8)
+        let dynamicsGate = pow(dynamics.clamped01, 1.5)
         let baseDepth = config.beatSensitivity * 1.57
             * (0.6 + config.effectIntensity * 0.4) * min(1, config.effectIntensity / 0.2)
             * (0.4 + 0.6 * tempoRestraint)
@@ -248,7 +248,9 @@ final class MusicChoreographyEngine {
             depth = 1 - exp(-max(0, depth) * 1.6)
 
             let bed = lowerBrightness + (upperBrightness - lowerBrightness) * bedLevel
-            var rawBrightness = bed + (upperBrightness - bed) * depth * pulseDrive.clamped01
+            // A hit carries the accent longer while retaining its darker bed.
+            let rolePulse = isHit ? sqrt(pulseDrive.clamped01) : pulseDrive.clamped01
+            var rawBrightness = bed + (upperBrightness - bed) * depth * rolePulse
 
             if silence {
                 switch config.silenceBehavior {

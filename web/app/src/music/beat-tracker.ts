@@ -111,12 +111,6 @@ export class BeatTracker {
     const emitted = this.emitBeats(time);
     this.accumulateBarEnergy(lowFrequencyOnset, time);
     if (emitted > 0) {
-      this.metreTracker.observe(
-        this.grid.beatCount,
-        Math.max(0, lowFrequencyOnset),
-        this.grid.tempo,
-        this.grid.isLocked,
-      );
       this.applyMusicalTime();
     }
     return emitted;
@@ -166,6 +160,9 @@ export class BeatTracker {
   }
 
   private rotateBarEnergy(): void {
+    // Observe the completed nearest-beat window, not the FFT hop on which a
+    // predicted grid event happened to be emitted.
+    this.metreTracker.observe(this.grid.beatCount - 1, this.pendingBarEnergy, this.grid.tempo, this.grid.isLocked);
     const n = this.barEnergies.length;
     for (let i = 0; i < n; i += 1) this.barEnergies[i] *= 0.94;
     this.barEnergies[this.pendingBarSlot] += this.pendingBarEnergy;

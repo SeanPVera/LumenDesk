@@ -186,12 +186,6 @@ final class BeatTracker {
         let emitted = emitBeats(upTo: time)
         accumulateBarEnergy(lowFrequencyOnset, at: time)
         if emitted > 0 {
-            metreTracker.observe(
-                beatCount: grid.beatCount,
-                kick: max(0, lowFrequencyOnset),
-                tempo: grid.tempo,
-                locked: grid.isLocked
-            )
             applyDetectedMusicalTime()
         }
         return emitted
@@ -256,6 +250,10 @@ final class BeatTracker {
     /// four-beat bar. It is a heuristic, not metre detection: the strongest
     /// position wins, and sustained disagreement moves it.
     private func rotateBarEnergy() {
+        // The predicted beat callback can precede the actual onset. Observe
+        // the completed nearest-beat window, not that one arbitrary FFT hop.
+        metreTracker.observe(beatCount: grid.beatCount - 1, kick: pendingBarEnergy,
+                             tempo: grid.tempo, locked: grid.isLocked)
         // A new beat means the previous beat's window is complete, so fold it
         // in and start the new beat's window with whatever already arrived in
         // its leading half.

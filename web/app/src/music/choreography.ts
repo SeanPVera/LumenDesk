@@ -163,7 +163,7 @@ export class MusicChoreographyEngine {
     // musical however fast analysis and frame delivery run.
     const feltInterval = clock.interval > 0 ? clock.interval : 0.5;
     const tempoRestraint = clamp01((feltInterval - 0.22) / 0.26);
-    const dynamicsGate = Math.pow(clamp01(this.dynamics), 0.8);
+    const dynamicsGate = Math.pow(clamp01(this.dynamics), 1.5);
     const baseDepth =
       (config.beatSensitivity * 1.57) *
       (0.6 + config.effectIntensity * 0.4) * Math.min(1, config.effectIntensity / 0.2) *
@@ -216,7 +216,8 @@ export class MusicChoreographyEngine {
       depth = 1 - Math.exp(-Math.max(0, depth) * 1.6);
 
       const bed = lowerBrightness + (upperBrightness - lowerBrightness) * bedLevel;
-      let rawBrightness = bed + (upperBrightness - bed) * depth * clamp01(pulseDrive);
+      const rolePulse = isHit ? Math.sqrt(clamp01(pulseDrive)) : clamp01(pulseDrive);
+      let rawBrightness = bed + (upperBrightness - bed) * depth * rolePulse;
 
       if (silence) {
         if (config.silenceBehavior === "settle") rawBrightness = lowerBrightness;

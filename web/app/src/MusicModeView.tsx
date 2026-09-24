@@ -247,7 +247,7 @@ export function MusicModeView({
             ['movementSpeed', 'Movement speed'], ['colorChangeIntensity', 'Color variation'],
           ] as const).map(([key, label]) => <label key={key} className="field">
             {label} <output>{Math.round(state.configuration[key] * 100)}%</output>
-            <input type="range" min="0" max={key === 'movementAmount' && reduceMotion ? '.2' : '1'} step=".01"
+            <input aria-label={label} type="range" min="0" max={key === 'movementAmount' && reduceMotion ? '.2' : '1'} step=".01"
               value={state.configuration[key]} onChange={e => adjust(key, Number(e.target.value))}/>
           </label>)}
         </div>

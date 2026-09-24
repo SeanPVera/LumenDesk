@@ -72,7 +72,7 @@ struct LightRowView: View {
         .accessibilityAddTraits(selectionMode ? .isButton : [])
         .accessibilityHint(selectionMode ? "Double-tap to toggle selection" : "")
         .accessibilityAction(.default) { if selectionMode { onToggleSelection?() } }
-        .accessibilityAction(named: "Toggle Power") { if !selectionMode { manager.setPower(device, on: !device.isOn) } }
+        .accessibilityAction(named: "Toggle Power") { if !selectionMode && !device.isStale && runningEffect == nil { manager.setPower(device, on: !device.isOn) } }
         .accessibilityAction(named: "Open Inspector") { if !selectionMode { showingInspector = true } }
         .focusableCompat()
         .padding(16)
@@ -152,7 +152,7 @@ struct LightRowView: View {
             if let recent = manager.recentActivitySummary(for: device) {
                 Label(recent, systemImage: "clock.arrow.circlepath")
                     .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Lumen.meter)
                     .lineLimit(1)
             }
             if device.isStale {
@@ -266,7 +266,7 @@ struct LightRowView: View {
                 size: 38,
                 spokenLabel: device.isOn ? "Turn off \(device.label)" : "Turn on \(device.label)"
             ))
-            .disabled(selectionMode)
+            .disabled(selectionMode || device.isStale || runningEffect != nil)
     }
 
     // MARK: - Controls
@@ -436,18 +436,23 @@ struct LightRowView: View {
     }
 
     private var colorRow: some View {
-        HStack(spacing: 6) {
-            ForEach(Self.colorSwatches, id: \.label) { swatch in
-                swatchButton(swatch)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                ColorPicker("Color", selection: colorBinding, supportsOpacity: false)
+                    .disabled(controlsDisabled)
+                    .accessibilityLabel("\(device.label) color")
+                Spacer()
+                Button("Precise values…") { showingPreciseColor = true }
+                    .buttonStyle(.plain).disabled(controlsDisabled)
             }
-            Spacer(minLength: 0)
-            Text(colorDescription)
-                .font(LumenType.instrumentLabel(size: 9))
-                .foregroundStyle(Lumen.textTertiary)
-            ColorPicker("", selection: colorBinding, supportsOpacity: false)
-                .labelsHidden()
-                .disabled(controlsDisabled)
-                .accessibilityLabel("\(device.label) color")
+            Text(colorDescription).font(.caption).foregroundStyle(Lumen.meter)
+            DisclosureGroup("Quick colors") {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 44), spacing: 6)], spacing: 6) {
+                    ForEach(Self.colorSwatches, id: \.label) { swatch in
+                        swatchButton(swatch).frame(minWidth: 44, minHeight: 44)
+                    }
+                }
+            }
         }
     }
 

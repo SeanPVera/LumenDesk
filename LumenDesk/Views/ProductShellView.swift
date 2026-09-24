@@ -282,8 +282,7 @@ private struct DeviceCompactRow: View {
         }
         .padding(13)
         .lumenCard(radius: 8, fill: selected ? Lumen.stripLoud : Lumen.strip, highlighted: selected)
-        .washed(color: device.color, level: device.brightness,
-                isOn: device.isOn && !device.isStale, radius: 8)
+        .background(Lumen.deck)
         .opacity(device.isStale ? 0.8 : 1)
     }
 }
@@ -596,7 +595,7 @@ struct LibraryWorkspaceView: View {
                     Label("Save room lighting", systemImage: "plus")
                 }
                 .buttonStyle(LumenPrimaryButtonStyle())
-                .disabled(newSceneName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || manager.devices.isEmpty)
+                .disabled(newSceneName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || manager.devices(in: scope).isEmpty)
             }
 
             Text("Saving captures \(manager.scopeDisplayName(scope)). Existing scenes always recall their saved fixtures.")
@@ -666,11 +665,16 @@ struct LibraryWorkspaceView: View {
                 Menu {
                     Button("Preview & review…") { previewScene = scene }
                     Button("Edit scene…") { editingScene = scene }
+                    Button("Version history…") { editingScene = scene }
+                        .disabled(manager.revisions(for: scene.id).isEmpty)
+                    Button("Certify scene") { _ = manager.certify(scene) }
                     Button(manager.isFavoriteScene(scene.id) ? "Remove favorite" : "Favorite") {
                         manager.toggleFavoriteScene(scene.id)
                     }
                     Button("Delete", role: .destructive) { manager.deleteScene(scene.id) }
                 } label: { Image(systemName: "ellipsis.circle") }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
                 .accessibilityLabel("Actions for \(scene.name)")
             }
             // Sort IDs: dictionary iteration must not shuffle a composition.

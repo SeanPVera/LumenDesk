@@ -1,6 +1,8 @@
 import XCTest
 import SwiftUI
+#if os(macOS)
 import AppKit
+#endif
 @testable import LumenDesk
 
 // MARK: - Name parsing
@@ -304,6 +306,7 @@ final class RoomWorkspaceTests: XCTestCase {
 /// Opt-in rendered review, separate from behavioral tests. NSHostingView renders
 /// production SwiftUI in a real AppKit window; these are not mockup screenshots.
 /// No LightManager.start(), UDP clients, microphone or screen capture is used.
+#if os(macOS)
 final class RoomWorkspaceRenderTests: XCTestCase {
     @MainActor
     func testRenderReviewStates() async throws {
@@ -317,16 +320,19 @@ final class RoomWorkspaceRenderTests: XCTestCase {
         defer { manager.exitDemoMode() }
         let room = try XCTUnwrap(manager.rooms.first)
         let scope = LightScope.room(room.id)
+        try await capture("shell-demo", LumenDeskShellView(), manager, width: 1100, height: 1000)
+        try await capture("room-all-offline", PlanWorkspaceView(scope: .constant(.all)), manager, width: 1440, height: 1100)
         try await capture("room-620", PlanWorkspaceView(scope: .constant(scope)), manager, width: 620, height: 850)
         try await capture("room-1100", PlanWorkspaceView(scope: .constant(scope)), manager, width: 1100, height: 900)
         try await capture("room-1440", PlanWorkspaceView(scope: .constant(scope)), manager, width: 1440, height: 1000)
         let selected = Set(manager.devices(in: room).prefix(2).map(\.id))
-        try await capture("selection", VStack(spacing: 20) {
-            RoomLightField(lights: manager.devices(in: room), room: room, selectedIDs: .constant(selected))
-            RoomOutputControls(lights: manager.devices(in: room).filter { selected.contains($0.id) }, title: "2 selected fixtures")
-        }.padding(24), manager, width: 820, height: 800)
+        try await capture("selection", PlanWorkspaceView(scope: .constant(scope), initialSelection: selected),
+                          manager, width: 1100, height: 1000)
         let light = try XCTUnwrap(manager.devices(in: room).first)
-        try await capture("fixture-inspector", LightRowView(device: light).padding(24), manager, width: 460, height: 700)
+        try await capture("fixture-inspector", PlanWorkspaceView(scope: .constant(scope), initialSelection: [light.id]),
+                          manager, width: 1100, height: 1100)
+        try await capture("luna-studio", LIFXLunaEditorView(device: light), manager, width: 1000, height: 800)
+        try await capture("room-configuration", RoomConfigurationView(room: room), manager, width: 660, height: 850)
         try await capture("scenes", LibraryWorkspaceView(scope: .constant(scope)), manager, width: 900, height: 800)
         try await capture("music-stopped", ScrollView { MusicModeView(scope: .constant(scope)).padding(24) },
                           manager, width: 1000, height: 1100)
@@ -379,3 +385,5 @@ final class RoomWorkspaceRenderTests: XCTestCase {
         XCTAssertGreaterThan(data.count, 1000, "Rendering produced no useful image")
     }
 }
+
+#endif

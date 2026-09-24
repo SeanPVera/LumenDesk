@@ -116,7 +116,7 @@ struct LumenFader: View {
             let width = max(1, proxy.size.width)
             ZStack(alignment: .leading) {
                 Capsule()
-                    .fill(Lumen.stage)
+                    .fill(Lumen.rule)
                     .frame(height: 5)
                 Capsule()
                     .fill(track.gradient)

@@ -11,7 +11,7 @@ const browser = await chromium.launch()
 const context = await browser.newContext({ viewport: { width: 1100, height: 900 }, colorScheme: 'dark' })
 const page = await context.newPage()
 const errors = []
-page.on('pageerror', error => errors.push(error.message))
+page.on('pageerror', error => { errors.push(error.message); console.error('BROWSER_ERROR:',error.message) })
 const devices = [
   {id:'lifx:one',name:'Reading lamp',brand:'lifx',ip:'192.0.2.1',reachable:true,power:true,brightness:65,color:{r:255,g:190,b:100},kelvin:3000,roomID:'lounge'},
   {id:'govee:two',name:'Bookshelf light with a deliberately long fixture name',brand:'govee',ip:'192.0.2.2',reachable:true,power:true,brightness:35,color:{r:83,g:152,b:182},kelvin:4000,roomID:'lounge'},
@@ -88,7 +88,8 @@ try {
   assert.deepEqual(commands.find(x=>x.path==='/scenes').data.deviceIDs.sort(),['govee:two','lifx:one','lifx:three'])
   await capture('web-scenes')
   await page.getByRole('button',{name:'Music',exact:true}).click()
-  await page.getByRole('slider',{name:/^Intensity/}).press('Home')
+  await capture('web-music-initial')
+  await page.getByRole('slider',{name:'Intensity',exact:true}).press('Home')
   await page.getByText('Custom balance. Choosing a preset replaces these adjustments.').waitFor()
   await page.getByRole('button',{name:'Move Reading lamp later',exact:true}).click()
   assert.match(await page.locator('.fixture-list li').first().innerText(),/Bookshelf/)

@@ -151,7 +151,7 @@ struct GoveeSegmentEditorView: View {
             stripView
             Text(selectionCaption)
                 .font(.caption2)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(Lumen.meter)
         }
     }
 
@@ -338,7 +338,7 @@ struct GoveeSegmentEditorView: View {
                 .foregroundStyle(.secondary)
             Text(zoneLimitExplanation)
                 .font(.caption2)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(Lumen.meter)
                 .fixedSize(horizontal: false, vertical: true)
             if !profile.zoneCombinations.isEmpty {
                 HStack(spacing: 6) {
@@ -500,7 +500,7 @@ struct GoveeSegmentEditorView: View {
                 // painting selection rather than as more on/off controls.
                 Text("Select")
                     .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Lumen.meter)
             }
             Button("All") { selection = Set(0..<draft.segmentCount) }
             Button("None") { selection = [] }
@@ -534,7 +534,7 @@ struct GoveeSegmentEditorView: View {
     private var paintSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Paint").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-            HStack(spacing: 6) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 44), spacing: 6)], spacing: 6) {
                 ForEach(LightRowView.colorSwatches, id: \.label) { swatch in
                     Button {
                         paintColor = swatch.color
@@ -542,7 +542,8 @@ struct GoveeSegmentEditorView: View {
                     } label: {
                         Circle()
                             .fill(swatch.color)
-                            .frame(width: 20, height: 20)
+                            .frame(width: 36, height: 36)
+                            .frame(width: 44, height: 44)
                             .overlay(Circle().stroke(Color.primary.opacity(0.25), lineWidth: 0.5))
                     }
                     .buttonStyle(.plain)
@@ -556,20 +557,20 @@ struct GoveeSegmentEditorView: View {
                     } label: {
                         Circle()
                             .fill(recent.color)
-                            .frame(width: 20, height: 20)
+                            .frame(width: 36, height: 36)
+                            .frame(width: 44, height: 44)
                             .overlay(Circle().stroke(Lumen.hairlineStrong, lineWidth: 0.5))
                     }
                     .buttonStyle(.plain)
                     .help("\(recent.name) · \(recent.hex)")
                     .accessibilityLabel("Paint recent color \(recent.name)")
                 }
-                Spacer(minLength: 0)
                 ColorPicker("", selection: $paintColor, supportsOpacity: false)
                     .labelsHidden()
                     .onChange(of: paintColor) { newValue in paintTargets(with: newValue) }
                     .accessibilityLabel("Paint color")
             }
-            HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 10) {
                 Button("Blend Across Selection", action: blendAcrossSelection)
                     .buttonStyle(LumenSecondaryButtonStyle(compact: true))
                     .disabled(targetIndexes.count < 2)
@@ -577,7 +578,7 @@ struct GoveeSegmentEditorView: View {
                 ColorPicker("", selection: $blendEndColor, supportsOpacity: false)
                     .labelsHidden()
                     .accessibilityLabel("Blend end color")
-                Text("→ end color").font(.caption2).foregroundStyle(.tertiary)
+                Text("→ end color").font(.caption2).foregroundStyle(Lumen.meter)
                 Spacer()
             }
             if paintingOnlyDarkZones {
@@ -617,7 +618,7 @@ struct GoveeSegmentEditorView: View {
                 Text("Blend colors between segments")
                 Text("Melts neighboring segment colors into each other, like the Govee app's gradient switch.")
                     .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Lumen.meter)
             }
         }
         .toggleStyle(LumenRockerStyle())
@@ -670,7 +671,7 @@ struct GoveeSegmentEditorView: View {
                     if custom {
                         Image(systemName: "person.fill")
                             .font(.system(size: 7))
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(Lumen.meter)
                             .accessibilityHidden(true)
                     }
                     Text(preset.name).font(.caption2).lineLimit(1)
@@ -699,7 +700,7 @@ struct GoveeSegmentEditorView: View {
                     .font(.callout.weight(.medium))
                 Text(fixedTopologyDetail)
                     .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Lumen.meter)
             } else {
                 HStack {
                     Stepper("\(unitName.capitalized)s: \(draft.segmentCount)",
@@ -717,7 +718,7 @@ struct GoveeSegmentEditorView: View {
                 }
                 Text("Match the \(unitName) count the Govee Home app shows for this light.")
                     .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Lumen.meter)
             }
             Toggle("Live preview on the light while editing", isOn: $livePreview)
                 .toggleStyle(LumenRockerStyle())
@@ -768,7 +769,7 @@ struct GoveeSegmentEditorView: View {
                      ? "This light family can't store the edited layout in its own firmware, so Apply holds it from LumenDesk and restores it automatically while LumenDesk is running."
                      : "Live preview is temporary. Apply pauses the preview and writes the layout to the light so it survives power cycles; editing again resumes the preview.")
                     .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Lumen.meter)
                     .fixedSize(horizontal: false, vertical: true)
                 HStack {
                 Spacer()

@@ -706,7 +706,7 @@ private struct MusicModeInputStatusView: View {
                     .font(.caption).foregroundStyle(Lumen.warning)
             }
             if showsPlainHelp {
-                Text(MusicModeHelp.readout)
+                Text("Input shows received audio level. Energy describes the music, not measured light output. A tempo appears only when the analyzer has a reliable pulse; generated lighting is shown separately below.")
                     .font(.caption)
                     .foregroundStyle(Lumen.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)

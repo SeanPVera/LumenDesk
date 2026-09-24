@@ -10,11 +10,17 @@ struct PlanWorkspaceView: View {
     @State private var showingSetup = false
     @State private var showingNewRoom = false
     @State private var showingPlan = false
+    @State private var configurationRoom: Room?
     @State private var searchText = ""
     @AppStorage("LumenDesk.workspaceLayout.v1") private var layout = WorkspaceLayout.automatic.rawValue
     @AppStorage("LumenDesk.interfaceDensity.v1") private var density = InterfaceDensity.comfortable.rawValue
 
-    init(scope: Binding<LightScope> = .constant(.all)) { _scope = scope }
+    init(scope: Binding<LightScope> = .constant(.all),
+         initialSelection: Set<String> = [], initialSection: RoomWorkspaceSection = .control) {
+        _scope = scope
+        _selectedIDs = State(initialValue: initialSelection)
+        _section = State(initialValue: initialSection)
+    }
 
     private var lights: [LightDevice] { manager.devices(in: scope) }
     private var room: Room? {
@@ -72,6 +78,7 @@ struct PlanWorkspaceView: View {
         .sheet(isPresented: $showingSetup) { RoomSetupView().environmentObject(manager) }
         .sheet(isPresented: $showingNewRoom) { NewRoomSheet().environmentObject(manager) }
         .sheet(isPresented: $showingPlan) { RoomArrangementSheet().environmentObject(manager) }
+        .sheet(item: $configurationRoom) { RoomConfigurationView(room: $0).environmentObject(manager) }
     }
 
     private var scopeHeader: some View {
@@ -106,6 +113,10 @@ struct PlanWorkspaceView: View {
                 Text(manager.scanPhase).font(.caption).foregroundStyle(Lumen.meter)
             }
             Menu {
+                if let room {
+                    Button("Configure this room…") { configurationRoom = room }
+                    Button(manager.isFavoriteRoom(room.id) ? "Unpin room" : "Pin room") { manager.toggleFavoriteRoom(room.id) }
+                }
                 Button("New room…") { showingNewRoom = true }
                 Button("Assign fixtures…") { showingSetup = true }
                 Button("Arrange rooms…") { showingPlan = true }
@@ -188,17 +199,25 @@ struct PlanWorkspaceView: View {
 
     private var outputControls: some View {
         VStack(alignment: .leading, spacing: 16) {
-            RoomOutputControls(lights: targets, title: selectedIDs.isEmpty
-                               ? manager.scopeDisplayName(scope)
-                               : "\(selectedIDs.count) selected fixtures")
+            if selectedIDs.count == 1, let light = targets.first {
+                Text("One selected fixture").font(.headline)
+                LightRowView(device: light)
+            } else {
+                RoomOutputControls(lights: targets, title: selectedIDs.isEmpty
+                                   ? manager.scopeDisplayName(scope)
+                                   : "\(selectedIDs.count) selected fixtures")
+            }
             if !selectedIDs.isEmpty {
+                Menu("Move selected fixtures") {
+                    ForEach(manager.rooms) { destination in
+                        Button(destination.name) { manager.assign(lightIDs: selectedIDs, toRoom: destination.id) }
+                    }
+                    Button("Remove room assignment") { manager.assign(lightIDs: selectedIDs, toRoom: nil) }
+                }
                 Button("Clear selection — control the room") { selectedIDs.removeAll() }
                     .buttonStyle(LumenSecondaryButtonStyle(compact: true))
             }
-            if selectedIDs.count == 1, let light = targets.first {
-                Divider()
-                LightRowView(device: light)
-            } else {
+            if selectedIDs.count != 1 {
                 Text("Select one fixture for precise color, white temperature, and its spatial editor. Select several to edit them together.")
                     .font(.callout).foregroundStyle(Lumen.meter)
                     .fixedSize(horizontal: false, vertical: true)
@@ -322,7 +341,7 @@ struct RoomLightField: View {
                             .accessibilityAction(named: "Move toward bottom") { move(light, in: room, dx: 0, dy: 0.1) }
                     }
                 }
-                .frame(height: 240)
+                .frame(height: 210)
             } else {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 116), spacing: 8)], spacing: 12) {
                     ForEach(lights) { light in
@@ -367,6 +386,12 @@ struct RoomEmitter: View {
                         }
                         .frame(height: 12).padding(.horizontal, 10)
                         .opacity(light.isOn && !light.isStale ? 1 : 0.2)
+                    } else if let profile = manager.segmentProfile(for: light) {
+                        HStack(spacing: 2) {
+                            ForEach(0..<min(16, profile.defaultSegmentCount), id: \.self) { _ in
+                                Rectangle().fill(light.isOn && !light.isStale ? light.color : Lumen.meter)
+                            }
+                        }.frame(height: 12).padding(.horizontal, 10)
                     } else {
                         Image(systemName: light.isLIFXLuna ? "circle.grid.3x3" : "lightbulb")
                             .font(.system(size: 24, weight: .light))
@@ -485,6 +510,60 @@ struct RoomOutputControls: View {
     }
 }
 
+/// Room membership and naming use the existing canonical manager mutations.
+struct RoomConfigurationView: View {
+    @EnvironmentObject private var manager: LightManager
+    @Environment(\.dismiss) private var dismiss
+    let room: Room
+    @State private var name = ""
+    private var current: Room { manager.rooms.first { $0.id == room.id } ?? room }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    HStack {
+                        TextField("Room name", text: $name).textFieldStyle(.roundedBorder)
+                        Button("Rename") { manager.renameRoom(room.id, to: name) }
+                            .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                    Text("Fixtures in this room").font(.headline)
+                    Text("Assignment changes organization only. Removing a fixture here keeps it available in All lights.")
+                        .font(.callout).foregroundStyle(Lumen.meter)
+                    ForEach(manager.devices) { light in
+                        Toggle(light.label, isOn: Binding(
+                            get: { current.lightIDs.contains(light.id) },
+                            set: { manager.assign(lightID: light.id, toRoom: $0 ? room.id : nil) }))
+                            .toggleStyle(LumenRockerStyle())
+                    }
+                    Divider()
+                    Text("Fixture order").font(.headline)
+                    ForEach(manager.devices(in: current)) { light in
+                        HStack {
+                            Text(light.label).lineLimit(2)
+                            Spacer()
+                            Button("Earlier") { manager.moveLight(light.id, in: room.id, by: -1) }
+                                .accessibilityLabel("Move \(light.label) earlier")
+                            Button("Later") { manager.moveLight(light.id, in: room.id, by: 1) }
+                                .accessibilityLabel("Move \(light.label) later")
+                        }
+                    }
+                    Button("Delete room", role: .destructive) {
+                        manager.deleteRoom(room.id)
+                        dismiss()
+                    }
+                    Text("Deleting removes the room and its schedules. Fixtures remain available. The existing deletion confirmation and Undo policy apply.")
+                        .font(.caption).foregroundStyle(Lumen.meter)
+                }.padding(20)
+            }
+            .navigationTitle("Configure \(current.name)")
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } } }
+        }
+        .onAppear { name = current.name }
+        .sheetFrame(minWidth: 540, idealWidth: 660, minHeight: 540, idealHeight: 700)
+    }
+}
+
 /// Existing saved room frames remain editable as advanced organization.
 struct RoomArrangementSheet: View {
     @EnvironmentObject private var manager: LightManager
@@ -505,7 +584,7 @@ struct RoomArrangementSheet: View {
                     .foregroundStyle(Lumen.meter)
                 ScrollView(.horizontal) {
                     PlanBoardView(arranging: true, selectedRoomID: $roomID, selectedLightID: $lightID)
-                        .frame(width: 600, height: max(420, CGFloat(manager.rooms.count) * 90))
+                        .frame(width: 600, height: CGFloat(max(2, manager.rooms.compactMap { $0.planFrame?.maxRow }.max() ?? 2)) * 120)
                 }
                 if let placementError {
                     Label(placementError, systemImage: "exclamationmark.triangle")
@@ -611,7 +690,7 @@ struct PlanBoardView: View {
         for room in manager.rooms {
             if let frame = room.planFrame { frames[room.id] = frame }
         }
-        return PlanLayout.rowCount(for: frames)
+        return max(2, frames.values.map(\.maxRow).max() ?? 2)
     }
 
     private var placedFrames: [RoomPlanFrame] {
@@ -625,14 +704,6 @@ struct PlanBoardView: View {
                 ForEach(manager.rooms) { room in
                     block(for: room, cell: cell)
                 }
-                // Walls last so they sit over every floor, and inert so a
-                // partition never swallows a click meant for a fixture.
-                PlanWallLayer(frames: placedFrames,
-                              cell: cell,
-                              inset: boardInset,
-                              bounds: proxy.size,
-                              selected: selectedFrame)
-                    .allowsHitTesting(false)
                 refusal(cell: cell)
             }
         }
@@ -660,23 +731,48 @@ struct PlanBoardView: View {
     private func block(for room: Room, cell: CGSize) -> some View {
         if let frame = displayFrame(for: room) {
             let rect = frame.rect(cell: cell, origin: boardInset)
-            RoomBlockView(
-                room: room,
-                arranging: arranging,
-                dimmed: !matchesQuery(room),
-                selected: selectedRoomID == room.id,
-                selectedLightID: $selectedLightID,
-                onSelect: { selectedRoomID = room.id },
-                onLevel: { manager.setBrightness(in: room, value: $0) },
-                onMove: { delta, committing in
-                    move(room: room, by: delta, resize: false, committing: committing)
-                },
-                onResize: { delta, committing in
-                    move(room: room, by: delta, resize: true, committing: committing)
-                },
-                cell: cell,
-                onTapped: onRoomTapped
-            )
+            VStack(alignment: .leading, spacing: 8) {
+                Text(room.name).font(.headline).lineLimit(2)
+                Text("\(manager.devices(in: room).count) fixtures")
+                    .font(.caption).foregroundStyle(Lumen.meter)
+                Spacer(minLength: 0)
+                HStack {
+                    Text("\(frame.width) × \(frame.height) cells").font(.caption)
+                    Spacer()
+                    Image(systemName: "arrow.down.right")
+                        .frame(width: 32, height: 32)
+                        .contentShape(Rectangle())
+                        .gesture(DragGesture().onChanged { value in
+                            move(room: room, by: PlanCellDelta(
+                                columns: Int((value.translation.width / cell.width).rounded()),
+                                rows: Int((value.translation.height / cell.height).rounded())),
+                                 resize: true, committing: false)
+                        }.onEnded { value in
+                            move(room: room, by: PlanCellDelta(
+                                columns: Int((value.translation.width / cell.width).rounded()),
+                                rows: Int((value.translation.height / cell.height).rounded())),
+                                 resize: true, committing: true)
+                        })
+                        .accessibilityHidden(true)
+                }
+            }
+            .padding(12)
+            .background(Lumen.deck)
+            .overlay(Rectangle().stroke(selectedRoomID == room.id ? Lumen.lit : Lumen.rule, lineWidth: 1))
+            .padding(3)
+            .contentShape(Rectangle())
+            .onTapGesture { selectedRoomID = room.id }
+            .gesture(DragGesture().onChanged { value in
+                move(room: room, by: PlanCellDelta(
+                    columns: Int((value.translation.width / cell.width).rounded()),
+                    rows: Int((value.translation.height / cell.height).rounded())),
+                     resize: false, committing: false)
+            }.onEnded { value in
+                move(room: room, by: PlanCellDelta(
+                    columns: Int((value.translation.width / cell.width).rounded()),
+                    rows: Int((value.translation.height / cell.height).rounded())),
+                     resize: false, committing: true)
+            })
             .frame(width: rect.width, height: rect.height)
             .offset(x: rect.minX, y: rect.minY)
             .zIndex(draft?.roomID == room.id ? 10 : 0)
@@ -1399,356 +1495,3 @@ struct RoomPoolCanvas: View {
     }
 }
 
-// MARK: - Inspector
-
-/// The selected room, and every fixture in it with its own control.
-///
-/// Per-fixture work is the cost of putting the room first: it is one click on
-/// a dot plus one drag here, where a channel strip would be a single drag.
-/// The trade is deliberate, and this column is what keeps the cost at two.
-private struct PlanInspector: View {
-    @EnvironmentObject private var manager: LightManager
-    let room: Room
-    @Binding var selectedLightID: String?
-    let arranging: Bool
-
-    @State private var renaming = false
-    @State private var draftName = ""
-    @State private var showingRoomDetail = false
-
-    private var lights: [LightDevice] { manager.devices(in: room) }
-
-    private var roomPower: Binding<Bool> {
-        Binding(get: { lights.contains(where: \.isOn) },
-                set: { manager.setPower(in: room, on: $0) })
-    }
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                header
-                masterToggle
-                fixtureList
-                settingsButton
-                Spacer(minLength: 12)
-                deviceFacts
-                planFacts
-            }
-            .padding(16)
-            .frame(maxHeight: .infinity, alignment: .top)
-        }
-        .background(Lumen.deck)
-        // Schedules, effects and automation overrides for the room. The plan
-        // is the control surface; this is where the room's settings live.
-        .sheet(isPresented: $showingRoomDetail) {
-            RoomDetailSheet(room: room, focusedLightID: selectedLightID)
-                .environmentObject(manager)
-        }
-    }
-
-    private var masterToggle: some View {
-        Toggle("All in this room", isOn: roomPower)
-            .toggleStyle(LumenRockerStyle())
-            .disabled(lights.isEmpty)
-    }
-
-    @ViewBuilder
-    private var fixtureList: some View {
-        if lights.isEmpty {
-            Text("No fixtures in this room yet. Sort one in from the plan's tray, or move it here from another room.")
-                .font(.system(size: 12))
-                .foregroundStyle(Lumen.muted)
-                .fixedSize(horizontal: false, vertical: true)
-        } else {
-            ForEach(lights) { light in
-                PlanFixtureRow(light: light,
-                               selected: selectedLightID == light.id,
-                               onSelect: { selectedLightID = light.id },
-                               onOpenDetail: {
-                                   selectedLightID = light.id
-                                   showingRoomDetail = true
-                               })
-            }
-        }
-    }
-
-    /// What this opens is easy to lose track of once "settings" is on the
-    /// label, so the button says what is actually inside: colour, white
-    /// balance, segments, and schedules for every light here.
-    private var settingsButton: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Button {
-                showingRoomDetail = true
-            } label: {
-                Label("Open Full Light Controls", systemImage: "paintpalette")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(LumenSecondaryButtonStyle(compact: true))
-
-            Text("Colour, white balance, segments, and schedules")
-                .font(.system(size: 10.5))
-                .foregroundStyle(Lumen.muted)
-        }
-    }
-
-    private var header: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            if renaming {
-                TextField("Room name", text: $draftName)
-                    .textFieldStyle(.plain)
-                    // Matches the Text it stands in for, so the room name
-                    // does not change weight the moment you click rename.
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(Lumen.lit)
-                    .onSubmit(commitRename)
-                Button("Save", action: commitRename)
-                    .buttonStyle(LumenSecondaryButtonStyle(compact: true))
-            } else {
-                Text(room.name)
-                    .font(.system(size: 15, weight: .semibold))
-                    .kerning(0.7)
-                    .textCase(.uppercase)
-                    .foregroundStyle(Lumen.lit)
-                Spacer(minLength: 6)
-                Button {
-                    draftName = room.name
-                    renaming = true
-                } label: {
-                    Image(systemName: "pencil")
-                }
-                .buttonStyle(LumenIconButtonStyle(size: 24))
-                .accessibilityLabel("Rename \(room.name)")
-            }
-        }
-    }
-
-    private func commitRename() {
-        manager.renameRoom(room.id, to: draftName)
-        renaming = false
-    }
-
-    /// What the drawing cannot say.
-    ///
-    /// The plan already states how many fixtures a room has and how many are
-    /// lit, so repeating that here fills the column with an echo. These are
-    /// the facts only the inspector has: what the selected fixture actually
-    /// is, where it lives on the network, and when it last answered. The
-    /// network facts take the one authored hue; the catalogue facts do not.
-    @ViewBuilder
-    private var deviceFacts: some View {
-        if let light = selectedLight {
-            VStack(spacing: 5) {
-                Divider().overlay(Lumen.ruleSoft).padding(.bottom, 6)
-                PlanCatalogueFact(key: "MAKE", value: makeLine(for: light))
-                PlanCatalogueFact(key: "MODE", value: modeLine(for: light))
-                WashLinkFact(key: "LINK", value: light.address, dead: light.isStale)
-                WashLinkFact(key: "SEEN",
-                             value: light.isStale ? "no reply" : lastSeenLine(for: light),
-                             dead: light.isStale)
-            }
-        }
-    }
-
-    private var selectedLight: LightDevice? {
-        guard let id = selectedLightID else { return lights.first }
-        return lights.first { $0.id == id } ?? lights.first
-    }
-
-    private func makeLine(for light: LightDevice) -> String {
-        let brand = light.brand == .lifx ? "LIFX" : "Govee"
-        guard let sku = light.sku, !sku.isEmpty else { return brand }
-        return "\(brand) \(sku)"
-    }
-
-    private func modeLine(for light: LightDevice) -> String {
-        if light.isLIFXLuna { return "Matrix" }
-        if let profile = manager.segmentStudioProfile(for: light) {
-            let held = profile.appliesViaStream ? " · held" : ""
-            return "\(profile.defaultSegmentCount) segments\(held)"
-        }
-        return "\(light.kelvin) K"
-    }
-
-    private func lastSeenLine(for light: LightDevice) -> String {
-        let seconds = Int(Date().timeIntervalSince(light.lastSeen))
-        if seconds < 60 { return "\(max(0, seconds)) s ago" }
-        if seconds < 3_600 { return "\(seconds / 60) min ago" }
-        return "\(seconds / 3_600) h ago"
-    }
-
-    /// The two room facts the drawing does not already state. Its count of
-    /// lit fixtures is on the room label and its hatched patches mark the
-    /// unreachable ones, so FIXTURES and LIT used to sit here saying twice
-    /// what you can read once. The unreachable tally stays because the hatch
-    /// is deliberately quiet, and the block figure is arranging information
-    /// the drawing has no room for.
-    private var planFacts: some View {
-        VStack(spacing: 5) {
-            Divider().overlay(Lumen.ruleSoft).padding(.bottom, 6)
-            WashLinkFact(key: "UNREACHABLE",
-                         value: "\(lights.filter(\.isStale).count)",
-                         dead: lights.contains(where: \.isStale))
-            if let frame = room.planFrame {
-                WashLinkFact(key: "BLOCK",
-                             value: "\(frame.width)×\(frame.height) @ \(frame.column),\(frame.row)")
-            }
-        }
-    }
-}
-
-/// A catalogue fact: the same ruled row as `WashLinkFact`, in chalk rather
-/// than the authored hue, because what a fixture *is* is not network truth.
-private struct PlanCatalogueFact: View {
-    let key: String
-    let value: String
-
-    var body: some View {
-        HStack {
-            Text(key)
-                .font(LumenType.readout(size: 11, weight: .regular))
-                .foregroundStyle(Lumen.muted)
-            Spacer(minLength: 8)
-            Text(value)
-                .font(LumenType.readout(size: 11))
-                .foregroundStyle(Lumen.meter)
-                .lineLimit(1)
-                .truncationMode(.middle)
-        }
-        .accessibilityElement(children: .combine)
-    }
-}
-
-/// One fixture inside the inspector: identity, power, and its own level.
-private struct PlanFixtureRow: View {
-    @EnvironmentObject private var manager: LightManager
-    @ObservedObject var light: LightDevice
-    let selected: Bool
-    let onSelect: () -> Void
-    /// Opens this light's colour, white balance, and segment controls — the
-    /// ones this compact row has no room to show.
-    var onOpenDetail: () -> Void = {}
-
-    private var lit: Bool { light.isOn && !light.isStale }
-    private var dotColour: Color { lit ? light.color : Lumen.faint }
-    private var nameColour: Color { light.isStale ? Lumen.muted : Lumen.lit }
-    private var nameWeight: Font.Weight { selected ? .semibold : .regular }
-
-    private var statusText: String {
-        if light.isStale { return "N/R" }
-        guard light.isOn else { return "OFF" }
-        return "\(Int((light.brightness * 100).rounded()))%"
-    }
-
-    private var levelBinding: Binding<Double> {
-        Binding(get: { light.brightness },
-                set: { manager.setBrightness(light, value: $0) })
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            identityRow
-            levelFader
-            footerRow
-        }
-        .padding(.vertical, 8)
-        .padding(.horizontal, selected ? 8 : 0)
-        .background(rowBackground)
-        .contentShape(Rectangle())
-        .onTapGesture(perform: onSelect)
-    }
-
-    private var identityRow: some View {
-        HStack(spacing: 8) {
-            Circle()
-                .fill(dotColour)
-                .frame(width: 8, height: 8)
-                .shadow(color: lit ? light.color.opacity(0.7) : .clear, radius: 4)
-
-            Text(light.label)
-                .font(.system(size: 13.5, weight: nameWeight))
-                .foregroundStyle(nameColour)
-                .lineLimit(1)
-
-            Spacer(minLength: 6)
-
-            Text(statusText)
-                .font(LumenType.readout(size: 12))
-                .monospacedDigit()
-                .foregroundStyle(Lumen.meter)
-
-            powerButton
-        }
-    }
-
-    private var powerButton: some View {
-        Button {
-            manager.setPower(light, on: !light.isOn)
-        } label: {
-            Image(systemName: "power")
-                .font(.system(size: 9, weight: .semibold))
-        }
-        .buttonStyle(LumenIconButtonStyle(size: 20, prominent: lit))
-        .disabled(light.isStale)
-        .accessibilityLabel("Power for \(light.label)")
-    }
-
-    /// The effect or Music Mode run painting this fixture, if one is.
-    private var runningEffect: (scope: LightScope, name: String)? {
-        manager.animatingEffect(for: light.id)
-    }
-
-    private var levelFader: some View {
-        // A running effect repaints this light every frame, so the fader cannot
-        // hold a level the user sets. Disabled with a reason, the same way the
-        // full light row handles it, rather than accepting the drag and losing
-        // it a frame later.
-        LumenFader(label: light.label,
-                   value: levelBinding,
-                   track: .tint(light.color),
-                   showsHeader: false)
-            .disabled(light.isStale || runningEffect != nil)
-            .help(runningEffect.map {
-                "\u{201C}\($0.name)\u{201D} is running on \(manager.scopeDisplayName($0.scope)) and is setting this light\u{2019}s level. Stop it to take manual control."
-            } ?? "")
-    }
-
-    private var footerRow: some View {
-        HStack(spacing: 12) {
-            identifyButton
-            Spacer(minLength: 6)
-            fullControlsButton
-        }
-    }
-
-    private var identifyButton: some View {
-        Button("Identify") { manager.identify(light) }
-            .buttonStyle(.plain)
-            .font(.system(size: 10.5))
-            .foregroundStyle(Lumen.link)
-            .accessibilityLabel("Flash \(light.label)")
-    }
-
-    /// The compact row above only has a power switch and a level — colour,
-    /// white balance, and (for Govee RGBIC/Luna fixtures) the segment studio
-    /// live one tap away here instead of behind the room's own settings
-    /// button, so a single light's full controls are reachable directly from
-    /// that light's own row.
-    private var fullControlsButton: some View {
-        Button(action: onOpenDetail) {
-            HStack(spacing: 3) {
-                Text("Full controls")
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 8.5, weight: .semibold))
-            }
-        }
-        .buttonStyle(.plain)
-        .font(.system(size: 10.5, weight: .medium))
-        .foregroundStyle(Lumen.link)
-        .accessibilityLabel("Open full controls for \(light.label)")
-    }
-
-    private var rowBackground: some View {
-        RoundedRectangle(cornerRadius: 6, style: .continuous)
-            .fill(selected ? Lumen.stripRaised : Color.clear)
-    }
-}

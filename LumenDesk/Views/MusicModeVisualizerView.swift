@@ -35,6 +35,8 @@ struct MusicModeVisualizerView: View {
                 Text("Source: \(controller.sourceStatus.displayName) · snapshot age: \(age.map { String(format: "%.3f s", $0) } ?? "synthetic / unavailable")")
                 Text("Capture to analysis: \(analysisDelay.map { String(format: "%.3f s", $0) } ?? "unavailable") · dropped buffers: \(snapshot.droppedBuffers)")
                 Text(String(format: "RMS %.4f · onset %.2f · beat count %d · BPM %.1f · confidence %.2f", snapshot.rawRMS, snapshot.onset, snapshot.beatCount, snapshot.tempo, snapshot.beatConfidence))
+                let phase = snapshot.beatInterval > 0 ? ((ProcessInfo.processInfo.systemUptime - snapshot.beatReferenceTime) / snapshot.beatInterval).truncatingRemainder(dividingBy: 1) : 0
+                Text("Grid phase now: \(phase, specifier: "%.2f") · last render interval: \(controller.lastRenderInterval, specifier: "%.3f") s (target 0.050 s)")
                 if let config = controller.effectiveConfiguration(for: scope) {
                     Text("Preset: \(config.preset.displayName) · beat: \(config.beatSensitivity, specifier: "%.2f") · intensity: \(config.effectIntensity, specifier: "%.2f") · brightness: \(config.masterBrightness, specifier: "%.2f")")
                 }

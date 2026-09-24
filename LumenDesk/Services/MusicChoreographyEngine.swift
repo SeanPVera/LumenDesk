@@ -248,8 +248,10 @@ final class MusicChoreographyEngine {
             depth = 1 - exp(-max(0, depth) * 1.6)
 
             let bed = lowerBrightness + (upperBrightness - lowerBrightness) * bedLevel
-            // A hit carries the accent longer while retaining its darker bed.
-            let rolePulse = isHit ? sqrt(pulseDrive.clamped01) : pulseDrive.clamped01
+            // Broaden only the crest on Hit fixtures; lifting the whole contour
+            // would fill in the intervening beat in half-time material.
+            let p = pulseDrive.clamped01
+            let rolePulse = isHit ? min(1, p + 2 * max(0, p - 0.35) * (1 - p)) : p
             var rawBrightness = bed + (upperBrightness - bed) * depth * rolePulse
 
             if silence {

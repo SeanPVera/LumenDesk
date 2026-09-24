@@ -105,6 +105,8 @@ final class AudioReactiveSessionController: ObservableObject {
     private var subscriptionToken: AudioCaptureService.SubscriptionToken?
     private var sessions: [LightScope: Session] = [:]
     private var renderTimer: Timer?
+    private var lastRenderAt: TimeInterval?
+    private(set) var lastRenderInterval: TimeInterval = 0
     private var sequenceNumber: UInt64 = 0
     private var liveCaptureBeganAt: TimeInterval = 0
     private var analysisSnapshot = AudioReactiveSnapshot()
@@ -291,6 +293,7 @@ final class AudioReactiveSessionController: ObservableObject {
 
     private func startRenderTimerIfNeeded() {
         guard renderTimer == nil else { return }
+        lastRenderAt = nil
         renderTick()
         // Lighting and preview output do not benefit from display-refresh
         // cadence. Twenty frames per second remains fluid and cuts a third of
@@ -304,6 +307,8 @@ final class AudioReactiveSessionController: ObservableObject {
     private func renderTick() {
         guard !sessions.isEmpty else { return }
         let timestamp = now()
+        lastRenderInterval = lastRenderAt.map { max(0, timestamp - $0) } ?? 0
+        lastRenderAt = timestamp
         if sessions.values.contains(where: { !$0.synthetic }) {
             let fresh = analysisSnapshot.fresh(at: timestamp)
             isAudioPlaying = fresh.level >= 0.025 || fresh.energy >= 0.035

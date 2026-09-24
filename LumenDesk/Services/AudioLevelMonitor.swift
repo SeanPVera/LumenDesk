@@ -66,6 +66,7 @@ struct AudioReactiveSnapshot: Equatable {
     var gridBeatPosition: Int? = nil
     var analyzedSamples: Int64 = 0
     var droppedBuffers: Int = 0
+    var inputChannels: Int? = nil
 
     /// Stop extrapolating stale capture. Preserve beat count and theme; decay
     /// musical evidence over one second, then let the existing silence policy settle.
@@ -836,6 +837,7 @@ final class MusicFeatureAnalyzer {
             }
         }
         guard var snapshot = latest else { return nil }
+        snapshot.inputChannels = channels
         // A beat can land on any hop in the buffer, not only the last one.
         // Reporting the strongest keeps the beat indicator and the publication
         // gate honest; `beatCount` is monotonic, so choreography never misses

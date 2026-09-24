@@ -214,3 +214,29 @@ test('PCM tracker follows gradual drift and reacquires a changed tempo',()=>{
     assert.ok(correct/locked>.9,`${mode}: ${correct}/${locked}`)
   }
 })
+
+// The same role/half-time acceptance conditions as the native tests. This runs
+// shipped TypeScript; it is not evidence of Swift execution.
+test('Hit crests lead Wash without filling the intervening half-time beat',()=>{
+  function input(t,reference=100){const count=Math.floor((t-reference)/.5);return {...snapshot(t),level:.7,energy:.6,bass:.5,beatCount:count,beatInBar:count%4,beatReferenceTime:reference+count*.5,beatInterval:.5}}
+  const engine=new MusicChoreographyEngine(), config={...configurationFor('club'),movementAmount:0,allowsFlashes:false}
+  const pair=[{...fixtures[0],role:'hit'},{...fixtures[0],id:'b',role:'wash'}]
+  let hit=0,wash=0,count=0
+  for(let i=0;i<80;i++){
+    const t=100+i*.025,s={...input(t),kick:.9,energy:.7,metre:4,feltInterval:.5}
+    const out=engine.makeFrame(s,config,{...topology,fixtureOrder:['a','b']},pair,t,i)
+    if(i>16&&((t+.045-100)/.5)%1<.12){hit+=out.states[0].brightness;wash+=out.states[1].brightness;count++}
+  }
+  assert.ok(count>4);assert.ok(hit>wash,`${hit/count} must exceed ${wash/count}`)
+  const half=new MusicChoreographyEngine(),halfConfig={...configurationFor('halftime'),movementAmount:0,allowsFlashes:false}
+  const peaks=[],between=[]
+  for(let i=0;i<400;i++){
+    const t=100+i*.025,s={...input(t),timeFeel:'half',feltInterval:1}
+    const b=half.makeFrame(s,halfConfig,topology,[pair[0]],t,i).states[0].brightness
+    const phase=(t+.045-100)%1
+    if(i>40&&phase<.15)peaks.push(b)
+    if(i>40&&phase>=.5&&phase<.65)between.push(b)
+  }
+  const mean=a=>a.reduce((a,b)=>a+b)/a.length
+  assert.ok(mean(peaks)>mean(between)*1.25,`${mean(peaks)} must exceed ${mean(between)} by 25%`)
+})

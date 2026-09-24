@@ -75,6 +75,7 @@ export class WebMusicSession {
   private choreography = new MusicChoreographyEngine()
   private timer: number | null = null
   private startedAt = 0
+  private lastRenderAt: number | null = null
   private sequence = 0
   private audio: AudioContext | null = null
   private mediaStream: MediaStream | null = null
@@ -89,7 +90,7 @@ export class WebMusicSession {
   private midiLastTick: number | null = null
   private midiStopped = false
   private inputSnapshot = emptySnapshot()
-  readonly diagnostics = { analyzedSamples: 0, droppedBuffers: 0, framesGenerated: 0, snapshotAge: 0 }
+  readonly diagnostics = { analyzedSamples: 0, droppedBuffers: 0, framesGenerated: 0, snapshotAge: 0, renderInterval: 0 }
   version = 0
   private onFrame: ((frame: MusicLightingFrame) => void) | null = null
 
@@ -148,6 +149,7 @@ export class WebMusicSession {
     this.state.running = true
     this.startedAt = performance.now() / 1000
     this.sequence = 0
+    this.lastRenderAt = null
     this.choreography.reset()
     this.analyzer.reset(sourceLabel(source, file))
     this.analyzer.setPolicy(this.state.configuration.metreOverride, this.state.configuration.timeFeel)
@@ -201,6 +203,8 @@ export class WebMusicSession {
   private tick(): void {
     if (!this.state.running) return
     const timestamp = performance.now() / 1000
+    this.diagnostics.renderInterval = this.lastRenderAt == null ? 0 : timestamp-this.lastRenderAt
+    this.lastRenderAt = timestamp
     this.sequence += 1
     if (this.state.source === 'demo') {
       const groove = GROOVES.find(g => g.id === this.state.grooveId) ?? GROOVES[0]

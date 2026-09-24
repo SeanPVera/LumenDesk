@@ -10,6 +10,8 @@ struct MusicModeView: View {
     @State private var advancedExpanded = false
     @State private var showUnsafeWarning = false
     @State private var showFileImporter = false
+    @State private var audioStatus: MusicAudioSourceStatus = .idle
+    @State private var inputChannels: Int?
     /// Lightweight view preferences, stored the way the rest of the app stores
     /// them. Both start on so a first-time user gets the walkthrough and the
     /// plain-English captions without going looking for them.
@@ -19,6 +21,13 @@ struct MusicModeView: View {
     private var fixtures: [MusicFixtureDescriptor] { manager.musicFixtureDescriptors(in: scope) }
     private var includedFixtures: [MusicFixtureDescriptor] { topology.includedFixtures(fixtures) }
     private var isRunning: Bool { manager.activeEffects[scope] == "music-pulse" }
+
+    private var stereoUnavailableReason: String? {
+        if topology.expandedTargets(for: fixtures).count < 2 { return "Stereo image needs at least two fixture or segment positions." }
+        if audioStatus == .midiClock { return "MIDI clock has timing only, with no stereo audio." }
+        if isRunning && inputChannels == 1 { return "This source is mono; stereo image needs a stereo source." }
+        return nil
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -36,6 +45,8 @@ struct MusicModeView: View {
             advancedControls
         }
         .onAppear { reloadForScope() }
+        .onReceive(manager.musicModeController.$sourceStatus) { audioStatus = $0 }
+        .onReceive(manager.musicModeController.$latestSnapshot.map(\.inputChannels).removeDuplicates()) { inputChannels = $0 }
         .onChange(of: scope) { _ in reloadForScope() }
         .onChange(of: reduceMotion) { manager.setMusicReducedMotion($0) }
         .alert("Allow optional flashes?", isPresented: $showUnsafeWarning) {
@@ -399,18 +410,19 @@ struct MusicModeView: View {
                 Divider().overlay(Lumen.hairline)
                 Toggle("Allow controlled flashes", isOn: binding(\.allowsFlashes))
                     .toggleStyle(LumenRockerStyle())
+                    .disabled(configuration.photosensitivitySafeMode || reduceMotion)
                     .help(MusicModeHelp.allowsFlashes)
                 helpCaption(MusicModeHelp.allowsFlashes)
                 musicSlider("Flash intensity", value: binding(\.flashIntensity), icon: "bolt.fill",
                             help: MusicModeHelp.flashIntensity)
-                    .disabled(configuration.photosensitivitySafeMode || !configuration.allowsFlashes)
+                    .disabled(configuration.photosensitivitySafeMode || !configuration.allowsFlashes || reduceMotion)
                 LumenFader(label: "Maximum flash frequency",
                            value: frequencyBinding,
                            range: 0...FlashSafetyLimiter.hardMaximumFrequency,
                            step: 0.25,
                            track: .tint(Lumen.warning),
                            format: { String(format: "%.2f/s", $0) })
-                .disabled(configuration.photosensitivitySafeMode || !configuration.allowsFlashes)
+                .disabled(configuration.photosensitivitySafeMode || !configuration.allowsFlashes || reduceMotion)
                 .help(MusicModeHelp.maximumFlashFrequency)
                 .accessibilityHint(MusicModeHelp.maximumFlashFrequency)
                 helpCaption(MusicModeHelp.maximumFlashFrequency)
@@ -486,6 +498,10 @@ struct MusicModeView: View {
                 helpCaption(configuration.timeFeel.plainSummary)
                 musicSlider("Stereo image", value: binding(\.stereoImage), icon: "headphones",
                             help: MusicModeHelp.stereoImage)
+                    .disabled(stereoUnavailableReason != nil)
+                if let reason = stereoUnavailableReason {
+                    Text(reason).font(.caption).foregroundStyle(Lumen.textSecondary)
+                }
                 Toggle("Sustained-energy lifts", isOn: binding(\.phraseAware))
                     .toggleStyle(LumenRockerStyle())
                     .help(MusicModeHelp.phraseAware)

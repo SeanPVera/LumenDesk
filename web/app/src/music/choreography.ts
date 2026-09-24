@@ -216,7 +216,8 @@ export class MusicChoreographyEngine {
       depth = 1 - Math.exp(-Math.max(0, depth) * 1.6);
 
       const bed = lowerBrightness + (upperBrightness - lowerBrightness) * bedLevel;
-      const rolePulse = isHit ? Math.sqrt(clamp01(pulseDrive)) : clamp01(pulseDrive);
+      const p = clamp01(pulseDrive);
+      const rolePulse = isHit ? Math.min(1, p + 2 * Math.max(0, p - 0.35) * (1 - p)) : p;
       let rawBrightness = bed + (upperBrightness - bed) * depth * rolePulse;
 
       if (silence) {

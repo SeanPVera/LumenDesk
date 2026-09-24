@@ -146,7 +146,7 @@ reflects repeated color samples, not 963 independent defects.
 
 `npm --prefix web/app test` compiles `src/music` using
 `tsconfig.music-tests.json`, then imports those emitted modules. There is no
-copied analyzer/engine in the harness. **20 tests pass** at the final local check.
+copied analyzer/engine in the harness. **21 tests pass** at the final local check.
 The first six assertions were also run against unchanged baseline modules before
 repairs: **all six failed** (zero master, live ceiling, role palette, zero color,
 independent brightness/transition, no render-clock PCM re-analysis).
@@ -157,7 +157,9 @@ versus loud .8 kick signal produces mean generated brightness **.1851 vs .2951**
 over seconds 5–10, same Soundcheck fixture/settings. The >.08 separation checks
 retained dynamics, not merely lower variance. Chord, drift/step, duplicate/stale
 input, stereo/rate switch, sample consumption, zero control, role/half-time,
-MIDI and one-in-flight cancellation tests also execute.
+MIDI and one-in-flight cancellation tests also execute. A deferred audio-close
+regression failed on the intermediate patch, then passed after guarding Stop
+completion by generation; an old close cannot stop a replacement session.
 
 `npm --prefix web/bridge test`: **60/60 pass**, versus 58 baseline. New loopback
 integration cases verify independent LIFX HSBK brightness/transition and Govee
@@ -220,7 +222,9 @@ xcodebuild -project LumenDesk.xcodeproj -scheme LumenDesk -configuration Debug \
 - `53e4f24` run [36008143805](https://github.com/SeanPVera/LumenDesk/actions/runs/36008143805): 234 native tests passed, baseline regression failures proved, iOS build passed.
 - `4665a7d` run [36009456152](https://github.com/SeanPVera/LumenDesk/actions/runs/36009456152): 236 native tests, **2 failed** (Hit contrast, quiet restraint); later iOS step not run.
 - `56acc2b` run [36010100374](https://github.com/SeanPVera/LumenDesk/actions/runs/36010100374): 236 native tests, **1 failed** (half-time contrast); later iOS step not run. Assertions retained; Hit crest corrected.
-- Final revision: native CI verification pending while this record is assembled; replace this line with the exact completed run before delivery.
+- `083b122` run [36011406391](https://github.com/SeanPVera/LumenDesk/actions/runs/36011406391): **236 native tests passed**, baseline failures proved, generic iOS build passed.
+- Final native code `f96986a` run [36011775226](https://github.com/SeanPVera/LumenDesk/actions/runs/36011775226): **236 native tests passed**, synthetic CSV uploaded, baseline failures proved, generic iOS build passed. [Download native production trace](https://github.com/SeanPVera/LumenDesk/actions/runs/36011775226/artifacts/10812707802). The subsequent web-only Stop-completion fix passes 21 local production tests and the web build; native code is unchanged.
+- Final local bridge suite: **60/60 passed**. Web production build, `git diff --check`, and the 48-theme catalog audit passed.
 - Web PR workflow builds/tests only; its deployment job is restricted to main. No site was published by this patch.
 - Not run: installed app/UI automation, signing/notarization, physical capture permission flows, browser permission dialogs/tab teardown, device acknowledgements/visible output, congested real LAN, offline/reconnect on actual firmware, medical safety evaluation.
 

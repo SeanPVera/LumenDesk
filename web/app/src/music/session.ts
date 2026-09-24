@@ -170,7 +170,7 @@ export class WebMusicSession {
   }
 
   async stop(): Promise<void> {
-    this.generation++
+    const generation = ++this.generation
     this.state.running = false
     this.inputSnapshot = emptySnapshot()
     this.state.snapshot = emptySnapshot()
@@ -190,6 +190,7 @@ export class WebMusicSession {
     this.midiAccess = null
     this.midiTicks = 0; this.midiBeats = 0; this.midiLastBeat = null; this.midiLastTick = null
     if (audio) await audio.close().catch(() => undefined)
+    if (generation !== this.generation) return
     this.state.running = false
     this.state.midiClock = false
     this.emit()

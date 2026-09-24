@@ -240,3 +240,16 @@ test('Hit crests lead Wash without filling the intervening half-time beat',()=>{
   const mean=a=>a.reduce((a,b)=>a+b)/a.length
   assert.ok(mean(peaks)>mean(between)*1.25,`${mean(peaks)} must exceed ${mean(between)} by 25%`)
 })
+
+test('completion of an old audio close cannot stop a replacement session',async()=>{
+  globalThis.window=globalThis
+  const session=new WebMusicSession()
+  let finishClose
+  session.audio={close:()=>new Promise(resolve=>{finishClose=resolve})}
+  const oldStop=session.stop()
+  await session.start('demo')
+  assert.equal(session.state.running,true)
+  finishClose();await oldStop
+  try { assert.equal(session.state.running,true) }
+  finally { await session.stop() }
+})

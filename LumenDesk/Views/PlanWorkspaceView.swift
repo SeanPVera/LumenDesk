@@ -1,252 +1,517 @@
 import SwiftUI
 
-// MARK: - The Plan
-//
-// The room is the primary object. The screen is a drawing of the home, and
-// every lit fixture pools its own colour onto it, so a dark room is visible
-// from across the desk without reading a word.
-//
-// The plan is deliberately not a floor plan. It is a seating chart: it does
-// not have to be architecturally correct, it has to be consistent. A kitchen
-// that stays top-right is learned in about a day and never unlearned, which
-// is why `setPlanFrame` refuses an overlapping drop rather than tidying the
-// board, and why every default position in `PlanLayout` is deterministic.
-
+/// A room is the working context, not a destination hidden behind a drawing.
+/// Domain state remains in LightManager; this view owns only navigation and selection.
 struct PlanWorkspaceView: View {
     @EnvironmentObject private var manager: LightManager
-
-    @State private var selectedRoomID: UUID?
-    @State private var selectedLightID: String?
-    @State private var arranging = false
+    @Binding var scope: LightScope
+    @State private var selectedIDs: Set<String> = []
+    @State private var section: RoomWorkspaceSection = .control
     @State private var showingSetup = false
     @State private var showingNewRoom = false
+    @State private var showingPlan = false
     @State private var searchText = ""
-    // iOS has no room inspector column, so tapping a room or fixture on the
-    // plan opens this instead — the one place on that platform a whole room
-    // can be shut off or a single light's full controls reached. macOS never
-    // sets this; it has the inline inspector for the same job.
-    @State private var showingRoomDetail = false
+    @AppStorage("LumenDesk.workspaceLayout.v1") private var layout = WorkspaceLayout.automatic.rawValue
+    @AppStorage("LumenDesk.interfaceDensity.v1") private var density = InterfaceDensity.comfortable.rawValue
 
-    private var selectedRoom: Room? {
-        guard let selectedRoomID else { return manager.rooms.first }
-        return manager.rooms.first { $0.id == selectedRoomID } ?? manager.rooms.first
+    init(scope: Binding<LightScope> = .constant(.all)) { _scope = scope }
+
+    private var lights: [LightDevice] { manager.devices(in: scope) }
+    private var room: Room? {
+        guard case .room(let id) = scope else { return nil }
+        return manager.rooms.first { $0.id == id }
+    }
+    private var visibleLights: [LightDevice] {
+        lights.filter { searchText.isEmpty || manager.device($0, matchesQuery: searchText) }
+    }
+    private var targets: [LightDevice] {
+        let ids = RoomWorkspaceSelection.targets(selected: selectedIDs, available: lights.map(\.id))
+        return lights.filter { ids.contains($0.id) }
+    }
+    private var activeScopes: [LightScope] {
+        Array(Set(lights.compactMap { manager.animatingEffect(for: $0.id)?.scope }))
+            .sorted { manager.scopeDisplayName($0) < manager.scopeDisplayName($1) }
     }
 
     var body: some View {
-        HStack(spacing: 0) {
-            drawingSheet
-
-            #if os(macOS)
-            if let room = selectedRoom {
-                Divider().overlay(Lumen.ruleSoft)
-                // Not a fixed width. The inspector gives ground before the
-                // drawing does, and between its minimum and the board's the
-                // window inherits a floor it cannot be dragged under —
-                // better than a panel that vanishes and strands the only
-                // per-fixture control there is.
-                PlanInspector(room: room,
-                              selectedLightID: $selectedLightID,
-                              arranging: arranging)
-                    .frame(minWidth: 228, idealWidth: 268, maxWidth: 292)
+        GeometryReader { geometry in
+            ScrollView {
+                VStack(alignment: .leading, spacing: LumenToken.Spacing.s6) {
+                    scopeHeader
+                    runningOutput
+                    if lights.isEmpty {
+                        emptyState
+                    } else {
+                        RoomLightField(lights: lights, room: room, selectedIDs: $selectedIDs)
+                        sectionPicker
+                        switch section {
+                        case .control:
+                            controls(wide: geometry.size.width >= 900)
+                        case .compositions:
+                            LibraryWorkspaceView(scope: $scope, embedded: true)
+                        case .music:
+                            MusicModeView(scope: $scope, showsScopePicker: false)
+                        }
+                    }
+                }
+                .padding(geometry.size.width < 600 ? 16 : 24)
+                .frame(maxWidth: 1440)
+                .frame(maxWidth: .infinity, alignment: .top)
             }
-            #endif
         }
         .background(Lumen.stage)
-        .navigationTitle("Plan")
-        .searchable(text: $searchText, prompt: "Search rooms and fixtures")
-        .onAppear {
-            manager.ensurePlanLayout()
-            if selectedRoomID == nil { selectedRoomID = manager.rooms.first?.id }
+        .navigationTitle("Room")
+        .onChange(of: scope) { _ in selectedIDs.removeAll(); searchText = "" }
+        .onChange(of: lights.map(\.id)) { ids in
+            selectedIDs = RoomWorkspaceSelection.reconciled(selected: selectedIDs, available: ids)
         }
-        .onChange(of: manager.rooms.count) { _ in
-            manager.ensurePlanLayout()
-            if selectedRoomID == nil { selectedRoomID = manager.rooms.first?.id }
+        .onChange(of: manager.rooms.map(\.id)) { ids in
+            if case .room(let id) = scope, !ids.contains(id) { scope = .all }
         }
-        .sheet(isPresented: $showingSetup) {
-            RoomSetupView().environmentObject(manager)
-        }
-        .sheet(isPresented: $showingNewRoom) {
-            NewRoomSheet().environmentObject(manager)
-        }
-        .sheet(isPresented: $showingRoomDetail) {
-            if let room = selectedRoom {
-                RoomDetailSheet(room: room, focusedLightID: selectedLightID)
-                    .environmentObject(manager)
+        .sheet(isPresented: $showingSetup) { RoomSetupView().environmentObject(manager) }
+        .sheet(isPresented: $showingNewRoom) { NewRoomSheet().environmentObject(manager) }
+        .sheet(isPresented: $showingPlan) { RoomArrangementSheet().environmentObject(manager) }
+    }
+
+    private var scopeHeader: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .center, spacing: 20) {
+                scopeTitle
+                Spacer(minLength: 12)
+                roomActions
             }
+            VStack(alignment: .leading, spacing: 12) { scopeTitle; roomActions }
         }
     }
 
-    // MARK: Sheet
-
-    private var drawingSheet: some View {
-        VStack(spacing: 0) {
-            titleBar
-            Divider().overlay(Lumen.ruleSoft)
-
-            if manager.devices.isEmpty {
-                emptyRig
-            } else if manager.rooms.isEmpty {
-                unsortedRig
-            } else {
-                if !manager.unplacedDevices.isEmpty { unsortedTray }
-                PlanBoardView(arranging: arranging,
-                              selectedRoomID: $selectedRoomID,
-                              selectedLightID: $selectedLightID,
-                              query: searchText,
-                              onRoomTapped: {
-                                  #if !os(macOS)
-                                  showingRoomDetail = true
-                                  #endif
-                              })
-                    .padding(.horizontal, 18)
-                    .padding(.top, 18)
-                PlanTitleBlock()
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 14)
+    private var scopeTitle: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Picker("Control room", selection: $scope) {
+                Text("All lights").tag(LightScope.all)
+                ForEach(manager.rooms) { Text($0.name).tag(LightScope.room($0.id)) }
             }
+            .font(.title3.weight(.semibold))
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityIdentifier("workspace.scope")
+            Text("\(lights.filter { $0.isOn && !$0.isStale }.count) lit · \(lights.count) fixtures · \(lights.filter(\.isStale).count) not responding")
+                .font(.callout).foregroundStyle(Lumen.meter)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private var titleBar: some View {
+    private var roomActions: some View {
         HStack(spacing: 12) {
-            // Drafting convention: thin, tracked, uppercase. This is the one
-            // surface in the product where that is correct, because it is a
-            // drawing and drawings label that way.
-            Text("Ground floor")
-                .font(.system(size: 15, weight: .semibold))
-                .kerning(0.7)
-                .textCase(.uppercase)
-                .foregroundStyle(Lumen.lit)
-
-            Text("1:50")
-                .font(LumenType.readout(size: 11, weight: .regular))
-                .kerning(0.4)
-                .foregroundStyle(Lumen.meter)
-
-            Spacer(minLength: 12)
-            arrangeControls
-            actionsMenu
+            if manager.isScanning {
+                ProgressView().controlSize(.small)
+                Text(manager.scanPhase).font(.caption).foregroundStyle(Lumen.meter)
+            }
+            Menu {
+                Button("New room…") { showingNewRoom = true }
+                Button("Assign fixtures…") { showingSetup = true }
+                Button("Arrange rooms…") { showingPlan = true }
+                Button("Scan for lights") { manager.scan() }.disabled(manager.isScanning)
+            } label: { Label("Room actions", systemImage: "ellipsis.circle") }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 13)
     }
 
-    @ViewBuilder
-    private var arrangeControls: some View {
-        Toggle("Arrange", isOn: $arranging)
-            .toggleStyle(LumenChipStyle())
-            .help("Move and resize room blocks")
+    @ViewBuilder private var runningOutput: some View {
+        if !activeScopes.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(activeScopes, id: \.self) { runScope in
+                    let id = manager.activeEffects[runScope] ?? ""
+                    let name = LightingCatalog.effects.first { $0.id == id }?.name ?? "Effect"
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 16) {
+                            Label("\(name) · \(manager.scopeDisplayName(runScope))", systemImage: id == "music-pulse" ? "music.note" : "waveform")
+                            Spacer(minLength: 12)
+                            stopActions(runScope)
+                        }
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("\(name) · \(manager.scopeDisplayName(runScope))")
+                            stopActions(runScope)
+                        }
+                    }
+                }
+                Text("The running show owns these fixtures. Stop it before editing their output.")
+                    .font(.caption).foregroundStyle(Lumen.meter)
+            }
+            .padding(16)
+            .background(Lumen.deck)
+            .overlay(alignment: .leading) { Rectangle().fill(Lumen.chalk).frame(width: 2) }
+        }
+    }
 
-        if arranging {
-            Button("Reset layout") { manager.resetPlanLayout() }
+    private func stopActions(_ runScope: LightScope) -> some View {
+        HStack(spacing: 10) {
+            Button("Stop & restore") { manager.stopEffect(scope: runScope, restore: true) }
+                .buttonStyle(LumenSecondaryButtonStyle(compact: true))
+            Button("Keep current light") { manager.stopEffect(scope: runScope, restore: false) }
                 .buttonStyle(LumenSecondaryButtonStyle(compact: true))
         }
     }
 
-    private var actionsMenu: some View {
-        Menu {
-            Button { showingSetup = true } label: {
-                Label("Sort Fixtures Into Rooms", systemImage: "square.grid.3x3.topleft.filled")
+    private var sectionPicker: some View {
+        HStack(spacing: 20) {
+            ForEach(RoomWorkspaceSection.allCases) { item in
+                Button { section = item } label: {
+                    Text(item.rawValue)
+                        .font(.body.weight(section == item ? .semibold : .regular))
+                        .foregroundStyle(section == item ? Lumen.lit : Lumen.meter)
+                        .padding(.vertical, 12)
+                        .overlay(alignment: .bottom) {
+                            if section == item { Rectangle().fill(Lumen.lit).frame(height: 2) }
+                        }
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(section == item ? .isSelected : [])
             }
-            Button { showingNewRoom = true } label: {
-                Label("New Room", systemImage: "rectangle.stack.badge.plus")
-            }
-            Divider()
-            Button { manager.resetPlanLayout() } label: {
-                Label("Reset Plan Layout", systemImage: "arrow.counterclockwise")
-            }
-        } label: {
-            Image(systemName: "ellipsis")
+            Spacer(minLength: 0)
         }
-        .menuStyle(.borderlessButton)
-        .fixedSize()
-        .accessibilityLabel("Plan actions")
+        .overlay(alignment: .bottom) { Rectangle().fill(Lumen.ruleSoft).frame(height: 1) }
     }
 
-    // MARK: Trays and empty states
+    @ViewBuilder private func controls(wide: Bool) -> some View {
+        if wide {
+            HStack(alignment: .top, spacing: 28) {
+                fixtureList.frame(maxWidth: .infinity)
+                outputControls.frame(width: 330)
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 24) {
+                outputControls
+                fixtureList
+            }
+        }
+    }
 
-    /// Unsorted fixtures surface on the plan itself, forever. Every setup
-    /// wizard works once; people buy lamps for years, so the sorting flow
-    /// cannot live only in onboarding.
-    private var unsortedTray: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "lightbulb.max")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(Lumen.warn)
-                .frame(width: 26, height: 26)
-                .background(Circle().fill(Lumen.warn.opacity(0.14)))
+    private var outputControls: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            RoomOutputControls(lights: targets, title: selectedIDs.isEmpty
+                               ? manager.scopeDisplayName(scope)
+                               : "\(selectedIDs.count) selected fixtures")
+            if !selectedIDs.isEmpty {
+                Button("Clear selection — control the room") { selectedIDs.removeAll() }
+                    .buttonStyle(LumenSecondaryButtonStyle(compact: true))
+            }
+            if selectedIDs.count == 1, let light = targets.first {
+                Divider()
+                LightRowView(device: light)
+            } else {
+                Text("Select one fixture for precise color, white temperature, and its spatial editor. Select several to edit them together.")
+                    .font(.callout).foregroundStyle(Lumen.meter)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(unsortedTitle)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Lumen.chalk)
-                Text(manager.unplacedDevices.map(\.label).joined(separator: ", "))
-                    .font(LumenType.readout(size: 10))
+    private var fixtureList: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Fixtures").font(.headline)
+                Spacer()
+                Text("\(selectedIDs.count) selected").font(.caption).foregroundStyle(Lumen.meter)
+                Button("Select all") { selectedIDs = Set(visibleLights.map(\.id)) }
+                    .buttonStyle(LumenSecondaryButtonStyle(compact: true))
+            }
+            TextField("Find a fixture", text: $searchText)
+                .textFieldStyle(.roundedBorder)
+                .accessibilityLabel("Find a fixture in the current room")
+            if !selectedIDs.isSubset(of: Set(visibleLights.map(\.id))) {
+                Label("Selection includes fixtures hidden by this search.", systemImage: "eye.slash")
+                    .font(.caption).foregroundStyle(Lumen.warn)
+            }
+            if visibleLights.isEmpty {
+                Text("No fixtures match. Clear the search to see this room.")
                     .foregroundStyle(Lumen.meter)
-                    .lineLimit(1)
             }
-
-            Spacer(minLength: 8)
-
-            Button("Flash and sort") { showingSetup = true }
-                .buttonStyle(LumenPrimaryButtonStyle(compact: true))
-        }
-        .padding(.horizontal, 15)
-        .padding(.vertical, 11)
-        .background(trayBackground)
-        .padding(.horizontal, 18)
-        .padding(.top, 16)
-    }
-
-    private var trayBackground: some View {
-        RoundedRectangle(cornerRadius: 8, style: .continuous)
-            .fill(Lumen.strip)
-            .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(Lumen.warn.opacity(0.45), lineWidth: 1)
-            )
-    }
-
-    private var unsortedTitle: String {
-        let count = manager.unplacedDevices.count
-        return count == 1 ? "1 fixture is not on the plan" : "\(count) fixtures are not on the plan"
-    }
-
-    private var emptyRig: some View {
-        ScrollView {
-            EmptyWorkspaceView(
-                icon: "lightbulb.slash",
-                title: "No fixtures found",
-                message: "Scan this network for LIFX and Govee, or take the plan for a run on an isolated demo rig.",
-                primaryTitle: "Scan This Network",
-                primaryAction: manager.scan,
-                secondaryTitle: "Try the Demo Rig",
-                secondaryAction: manager.enterDemoMode
-            )
-            .padding(24)
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: layout == WorkspaceLayout.list.rawValue ? 280 : 250), spacing: 16)], spacing: 0) {
+                ForEach(visibleLights) { light in
+                    RoomFixtureLine(light: light, selected: selectedIDs.contains(light.id),
+                                    compact: density == InterfaceDensity.compact.rawValue) {
+                        if selectedIDs.contains(light.id) { selectedIDs.remove(light.id) }
+                        else { selectedIDs.insert(light.id) }
+                    }
+                }
+            }
         }
     }
 
-    private var unsortedRig: some View {
-        ScrollView {
-            VStack(spacing: 14) {
-                LumenIconTile(systemName: "square.grid.3x3.topleft.filled",
-                              tint: Lumen.muted, size: 52)
-                Text("Nothing is on the plan yet")
-                    .font(.system(size: 19, weight: .semibold))
-                    .foregroundStyle(Lumen.chalk)
-                Text("\(manager.devices.count) fixtures are on the network. Sorting them takes about a minute: most land in a room from their own name, and the rest get flashed one at a time so you can point at them.")
-                    .font(.system(size: 13))
-                    .foregroundStyle(Lumen.meter)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 420)
-                Button("Sort My Fixtures") { showingSetup = true }
-                    .buttonStyle(LumenPrimaryButtonStyle())
+    private var emptyState: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(manager.devices.isEmpty ? "Bring your lights into view" : "No fixtures in this room")
+                .font(.title3.weight(.semibold))
+            Text(manager.devices.isEmpty
+                 ? "Keep LIFX and Govee lights on the same network. Enable LAN Control in Govee Home."
+                 : "Assign a discovered fixture to start controlling this space.")
+                .font(.body).foregroundStyle(Lumen.meter)
+            HStack {
+                Button(manager.isScanning ? "Searching…" : "Scan for lights") { manager.scan() }
+                    .buttonStyle(LumenPrimaryButtonStyle()).disabled(manager.isScanning)
+                if manager.devices.isEmpty {
+                    Button("Try Demo Mode") { manager.enterDemoMode() }
+                        .buttonStyle(LumenSecondaryButtonStyle())
+                } else {
+                    Button("Assign fixtures") { showingSetup = true }
+                        .buttonStyle(LumenSecondaryButtonStyle())
+                }
             }
+            if manager.isScanning { Text(manager.scanPhase).font(.callout) }
+            if !manager.statusMessage.isEmpty {
+                Text(manager.statusMessage).font(.callout).foregroundStyle(Lumen.warn)
+            }
+        }
+        .padding(.vertical, 32)
+    }
+}
+
+enum RoomWorkspaceSection: String, CaseIterable, Identifiable {
+    case control = "Light", compositions = "Compositions", music = "Music"
+    var id: String { rawValue }
+}
+
+/// Relative fixture placement uses the existing Room anchors. All-lights and
+/// dense rooms use an ordered field instead of implying unknown geometry.
+struct RoomLightField: View {
+    @EnvironmentObject private var manager: LightManager
+    let lights: [LightDevice]
+    let room: Room?
+    @Binding var selectedIDs: Set<String>
+    @State private var arranging = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(room == nil ? "Fixture order" : "Relative placement")
+                    .font(.caption).foregroundStyle(Lumen.meter)
+                Spacer()
+                if room != nil && lights.count <= 8 {
+                    Toggle("Arrange", isOn: $arranging).toggleStyle(LumenChipStyle())
+                }
+                Text("Select to control").font(.caption).foregroundStyle(Lumen.meter)
+            }
+            if let room, lights.count <= 8 {
+                GeometryReader { geometry in
+                    ForEach(lights) { light in
+                        let anchor = manager.planAnchor(for: light.id, in: room)
+                        RoomEmitter(light: light, selected: selectedIDs.contains(light.id)) { toggle(light.id) }
+                            .frame(width: 116, height: 106)
+                            .position(x: 58 + (geometry.size.width - 116) * anchor.x,
+                                      y: 53 + (geometry.size.height - 106) * anchor.y)
+                            .gesture(DragGesture(minimumDistance: 6).onEnded { value in
+                                guard arranging else { return }
+                                manager.setPlanAnchor(PlanAnchor(
+                                    x: anchor.x + Double(value.translation.width / max(1, geometry.size.width - 116)),
+                                    y: anchor.y + Double(value.translation.height / max(1, geometry.size.height - 106))),
+                                    for: light.id, in: room.id)
+                            }, including: arranging ? .all : .none)
+                            .contextMenu {
+                                Button("Move left") { move(light, in: room, dx: -0.1, dy: 0) }
+                                Button("Move right") { move(light, in: room, dx: 0.1, dy: 0) }
+                                Button("Move toward top") { move(light, in: room, dx: 0, dy: -0.1) }
+                                Button("Move toward bottom") { move(light, in: room, dx: 0, dy: 0.1) }
+                            }
+                            .accessibilityAction(named: "Move left") { move(light, in: room, dx: -0.1, dy: 0) }
+                            .accessibilityAction(named: "Move right") { move(light, in: room, dx: 0.1, dy: 0) }
+                            .accessibilityAction(named: "Move toward top") { move(light, in: room, dx: 0, dy: -0.1) }
+                            .accessibilityAction(named: "Move toward bottom") { move(light, in: room, dx: 0, dy: 0.1) }
+                    }
+                }
+                .frame(height: 240)
+            } else {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 116), spacing: 8)], spacing: 12) {
+                    ForEach(lights) { light in
+                        RoomEmitter(light: light, selected: selectedIDs.contains(light.id)) { toggle(light.id) }
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .background(Lumen.deck)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Room light field")
+    }
+
+    private func toggle(_ id: String) {
+        if selectedIDs.contains(id) { selectedIDs.remove(id) } else { selectedIDs.insert(id) }
+    }
+
+    private func move(_ light: LightDevice, in room: Room, dx: Double, dy: Double) {
+        let anchor = manager.planAnchor(for: light.id, in: room)
+        manager.setPlanAnchor(PlanAnchor(x: anchor.x + dx, y: anchor.y + dy), for: light.id, in: room.id)
+    }
+}
+
+struct RoomEmitter: View {
+    @EnvironmentObject private var manager: LightManager
+    @ObservedObject var light: LightDevice
+    let selected: Bool
+    let select: () -> Void
+
+    var body: some View {
+        Button(action: select) {
+            VStack(spacing: 7) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(light.color.opacity(light.isOn && !light.isStale ? 0.12 + light.brightness * 0.3 : 0))
+                    if let state = manager.activeSegmentState(for: light.id) {
+                        HStack(spacing: 2) {
+                            ForEach(Array(state.colors.prefix(16).enumerated()), id: \.offset) { _, color in
+                                Rectangle().fill(color.litColor)
+                            }
+                        }
+                        .frame(height: 12).padding(.horizontal, 10)
+                        .opacity(light.isOn && !light.isStale ? 1 : 0.2)
+                    } else {
+                        Image(systemName: light.isLIFXLuna ? "circle.grid.3x3" : "lightbulb")
+                            .font(.system(size: 24, weight: .light))
+                            .foregroundStyle(light.isOn && !light.isStale ? light.color : Lumen.meter)
+                    }
+                }
+                .frame(height: 46)
+                .overlay(alignment: .topTrailing) {
+                    if selected { Image(systemName: "checkmark.circle.fill").foregroundStyle(Lumen.lit).padding(3) }
+                }
+                Text(light.label).font(.callout.weight(selected ? .semibold : .regular)).lineLimit(2)
+                Text(light.isStale ? "Not responding" : light.isOn ? "\(Int(light.brightness * 100))% · On" : "Off")
+                    .font(.caption).foregroundStyle(Lumen.meter)
+            }
+            .padding(6)
             .frame(maxWidth: .infinity)
-            .padding(44)
+            .contentShape(Rectangle())
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(selected ? Lumen.lit : .clear, lineWidth: 2))
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel(light.label)
+        .accessibilityValue("\(selected ? "Selected. " : "")\(light.isStale ? "Not responding" : light.isOn ? "On, \(Int(light.brightness * 100)) percent" : "Off")")
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .help(light.label)
+    }
+}
+
+struct RoomFixtureLine: View {
+    @EnvironmentObject private var manager: LightManager
+    @ObservedObject var light: LightDevice
+    let selected: Bool
+    var compact = false
+    let select: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Button(action: select) {
+                HStack(spacing: 12) {
+                    Image(systemName: selected ? "checkmark.square.fill" : "square")
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(light.label).font(.body.weight(.medium)).lineLimit(2)
+                        Text(detail).font(.caption).foregroundStyle(Lumen.meter)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(selected ? "Deselect" : "Select") \(light.label)")
+            .accessibilityAddTraits(selected ? .isSelected : [])
+            Text(light.isStale ? "Offline" : light.isOn ? "\(Int(light.brightness * 100))%" : "Off")
+                .font(.callout.monospacedDigit()).foregroundStyle(Lumen.meter)
+        }
+        .padding(.vertical, compact ? 8 : 14)
+        .overlay(alignment: .bottom) { Rectangle().fill(Lumen.ruleSoft).frame(height: 1) }
+    }
+
+    private var detail: String {
+        if let run = manager.animatingEffect(for: light.id) { return run.name }
+        if light.isLIFXLuna { return "Matrix · 26 zones" }
+        if manager.segmentStudioProfile(for: light) != nil {
+            return "\(manager.segmentState(for: light).segmentCount) segments"
+        }
+        return manager.isWhiteMode(light.id) ? "\(light.kelvin) K white" : "Single color"
+    }
+}
+
+struct RoomOutputControls: View {
+    @EnvironmentObject private var manager: LightManager
+    let lights: [LightDevice]
+    let title: String
+
+    private var ids: Set<String> { Set(lights.filter { !$0.isStale }.map(\.id)) }
+    private var owned: Bool { lights.contains { manager.animatingEffect(for: $0.id) != nil } }
+    private var level: Double {
+        let online = lights.filter { !$0.isStale }
+        return online.isEmpty ? 0 : online.reduce(0) { $0 + $1.brightness } / Double(online.count)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(title).font(.headline)
+            Text("\(ids.count) available · \(lights.count - ids.count) not responding")
+                .font(.caption).foregroundStyle(Lumen.meter)
+            HStack(spacing: 12) {
+                Button("On") { manager.setPower(deviceIDs: ids, on: true) }
+                    .buttonStyle(LumenPrimaryButtonStyle())
+                Button("Off") { manager.setPower(deviceIDs: ids, on: false) }
+                    .buttonStyle(LumenSecondaryButtonStyle())
+            }
+            .disabled(ids.isEmpty || owned)
+            LumenFader(label: "Brightness", value: Binding(
+                get: { level }, set: { manager.setBrightness(deviceIDs: ids, value: $0) }))
+                .disabled(ids.isEmpty || owned)
+            ColorPicker("Color", selection: Binding(
+                get: { lights.first?.color ?? .white },
+                set: { manager.setColor(deviceIDs: ids, color: $0) }), supportsOpacity: false)
+                .disabled(ids.isEmpty || owned)
+            if Set(lights.map { $0.color.hsbComponents.h }).count > 1 {
+                Text("Mixed colors. Picking a color replaces the selected output.")
+                    .font(.caption).foregroundStyle(Lumen.meter)
+            }
+            LumenFader(label: "White temperature", value: Binding(
+                get: { Double(lights.first?.kelvin ?? 3500) },
+                set: { manager.setKelvin(deviceIDs: ids, kelvin: Int($0)) }),
+                       range: 2500...9000, step: 100, track: .kelvin,
+                       format: { "\(Int($0)) K" })
+                .disabled(ids.isEmpty || owned)
+            Text("Output depends on each fixture. Segment and matrix layouts are replaced by a single color or white setting.")
+                .font(.caption).foregroundStyle(Lumen.meter)
+            if owned {
+                Label("Controlled by the running show", systemImage: "waveform")
+                    .font(.callout).foregroundStyle(Lumen.meter)
+            }
+        }
+    }
+}
+
+/// Existing saved room frames remain editable as advanced organization.
+struct RoomArrangementSheet: View {
+    @EnvironmentObject private var manager: LightManager
+    @Environment(\.dismiss) private var dismiss
+    @State private var roomID: UUID?
+    @State private var lightID: String?
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text("Arrange rooms").font(.headline)
+                Spacer()
+                Button("Done") { dismiss() }
+            }
+            Text("Relative organization, not a measured floor plan. Move a room or use the controls below.")
+                .foregroundStyle(Lumen.meter)
+            ScrollView([.horizontal, .vertical]) {
+                PlanBoardView(arranging: true, selectedRoomID: $roomID, selectedLightID: $lightID)
+                    .frame(width: 600, height: max(420, CGFloat(manager.rooms.count) * 90))
+            }
+            ForEach(manager.rooms) { room in
+                HStack {
+                    Text(room.name)
+                    Spacer()
+                    Button("Earlier") { manager.moveRoom(room.id, by: -1) }
+                    Button("Later") { manager.moveRoom(room.id, by: 1) }
+                }
+            }
+            Button("Reset arrangement") { manager.resetPlanLayout() }
+        }
+        .padding(20)
+        .onAppear { manager.ensurePlanLayout() }
+        .sheetFrame(minWidth: 620, idealWidth: 820, minHeight: 560, idealHeight: 700)
     }
 }
 

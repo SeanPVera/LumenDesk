@@ -26,7 +26,7 @@ struct LumenDeskApp: App {
         WindowGroup {
             RootView()
                 .environmentObject(manager)
-                .frame(minWidth: 520, minHeight: 380)
+                .frame(minWidth: 620, minHeight: 540)
                 .preferredColorScheme(.dark)
                 .onAppear { manager.start() }
         }
@@ -135,6 +135,7 @@ struct LumenDeskApp: App {
 struct RootView: View {
     @EnvironmentObject var manager: LightManager
     @AppStorage("LumenDesk.hasOnboarded.v1") private var hasOnboarded = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ZStack {
@@ -146,7 +147,7 @@ struct RootView: View {
                     .transition(.opacity)
             }
         }
-        .animation(.easeInOut(duration: 0.4), value: hasOnboarded)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: hasOnboarded)
         .managedActionConfirmations(manager)
     }
 }

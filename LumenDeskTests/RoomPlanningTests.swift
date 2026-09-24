@@ -1,4 +1,6 @@
 import XCTest
+import SwiftUI
+import AppKit
 @testable import LumenDesk
 
 // MARK: - Name parsing
@@ -241,5 +243,136 @@ final class PlanLayoutTests: XCTestCase {
         let anchor = PlanAnchor(x: -3, y: 9)
         XCTAssertEqual(anchor.x, 0.06, accuracy: 0.0001)
         XCTAssertEqual(anchor.y, 0.94, accuracy: 0.0001)
+    }
+}
+
+
+final class RoomWorkspaceTests: XCTestCase {
+    func testSelectionNeverExpandsAStaleSelectionToTheWholeRoom() {
+        XCTAssertEqual(RoomWorkspaceSelection.targets(selected: ["gone"], available: ["a", "b"]), [])
+        XCTAssertEqual(RoomWorkspaceSelection.targets(selected: [], available: ["a", "b"]), ["a", "b"])
+        XCTAssertEqual(RoomWorkspaceSelection.targets(selected: ["a", "gone"], available: ["a", "b"]), ["a"])
+    }
+
+    func testSelectionDropsRemovedFixturesWithoutInventingMembers() {
+        XCTAssertEqual(RoomWorkspaceSelection.reconciled(selected: ["a", "b"], available: ["b", "c"]), ["b"])
+    }
+
+    @MainActor
+    func testScopedCaptureKeepsSavedTopologyAndDoesNotIncludeOtherRooms() throws {
+        let manager = LightManager(defaults: UserDefaults(suiteName: UUID().uuidString)!,
+                                   persistenceStore: temporaryPersistenceStore())
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+        let room = try XCTUnwrap(manager.rooms.first)
+        manager.captureScene(name: "Only this room", scope: .room(room.id))
+        let scene = try XCTUnwrap(manager.scenes.last)
+        XCTAssertEqual(Set(scene.snapshots.keys), Set(manager.devices(in: room).map(\.id)))
+        XCTAssertLessThan(scene.snapshots.count, manager.devices.count)
+        for light in manager.devices(in: room) {
+            XCTAssertEqual(scene.snapshots[light.id]?.segments, manager.activeSegmentState(for: light.id))
+            XCTAssertEqual(scene.snapshots[light.id]?.matrix, manager.activeLIFXMatrixState(for: light.id))
+        }
+        manager.captureScene(name: "Legacy all-lights capture")
+        XCTAssertEqual(manager.scenes.last?.snapshots.count, manager.devices.count)
+    }
+
+    @MainActor
+    func testBulkColorAndWhiteTouchOnlyTheirSelectionAndCanUndo() throws {
+        let manager = LightManager(defaults: UserDefaults(suiteName: UUID().uuidString)!,
+                                   persistenceStore: temporaryPersistenceStore())
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+        let lights = manager.devices.filter { !$0.isStale }
+        let a = try XCTUnwrap(lights.first)
+        let b = try XCTUnwrap(lights.last)
+        let before = b.color.rgbComponents
+        manager.setColor(deviceIDs: [a.id], color: .red)
+        XCTAssertEqual(a.color.rgbComponents.r, 1, accuracy: 0.001)
+        XCTAssertEqual(b.color.rgbComponents.r, before.r, accuracy: 0.001)
+        XCTAssertTrue(manager.canUndo)
+        let otherKelvin = b.kelvin
+        manager.setKelvin(deviceIDs: [a.id], kelvin: 4200)
+        XCTAssertEqual(a.kelvin, 4200)
+        XCTAssertEqual(b.kelvin, otherKelvin)
+        XCTAssertTrue(manager.isWhiteMode(a.id))
+        manager.setColor(deviceIDs: [a.id], color: .blue)
+        XCTAssertFalse(manager.isWhiteMode(a.id))
+    }
+}
+
+/// Opt-in rendered review, separate from behavioral tests. NSHostingView renders
+/// production SwiftUI in a real AppKit window; these are not mockup screenshots.
+/// No LightManager.start(), UDP clients, microphone or screen capture is used.
+final class RoomWorkspaceRenderTests: XCTestCase {
+    @MainActor
+    func testRenderReviewStates() async throws {
+        guard ProcessInfo.processInfo.environment["LUMENDESK_RENDER_QA"] == "1" else {
+            throw XCTSkip("Set LUMENDESK_RENDER_QA=1 to capture production SwiftUI views.")
+        }
+        let manager = LightManager(defaults: UserDefaults(suiteName: UUID().uuidString)!,
+                                   persistenceStore: temporaryPersistenceStore())
+        try await capture("empty-620", PlanWorkspaceView(scope: .constant(.all)), manager, width: 620, height: 700)
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+        let room = try XCTUnwrap(manager.rooms.first)
+        let scope = LightScope.room(room.id)
+        try await capture("room-620", PlanWorkspaceView(scope: .constant(scope)), manager, width: 620, height: 850)
+        try await capture("room-1100", PlanWorkspaceView(scope: .constant(scope)), manager, width: 1100, height: 900)
+        try await capture("room-1440", PlanWorkspaceView(scope: .constant(scope)), manager, width: 1440, height: 1000)
+        let selected = Set(manager.devices(in: room).prefix(2).map(\.id))
+        try await capture("selection", VStack(spacing: 20) {
+            RoomLightField(lights: manager.devices(in: room), room: room, selectedIDs: .constant(selected))
+            RoomOutputControls(lights: manager.devices(in: room).filter { selected.contains($0.id) }, title: "2 selected fixtures")
+        }.padding(24), manager, width: 820, height: 800)
+        let light = try XCTUnwrap(manager.devices(in: room).first)
+        try await capture("fixture-inspector", LightRowView(device: light).padding(24), manager, width: 460, height: 700)
+        try await capture("scenes", LibraryWorkspaceView(scope: .constant(scope)), manager, width: 900, height: 800)
+        try await capture("music-stopped", ScrollView { MusicModeView(scope: .constant(scope)).padding(24) },
+                          manager, width: 1000, height: 1100)
+        var config = MusicModeConfiguration.configuration(for: .ambient)
+        config.usesSyntheticDemoPattern = true
+        manager.startMusicMode(configuration: config, scope: scope, reducedMotion: true)
+        try await capture("music-running-demo", ScrollView { MusicModeView(scope: .constant(scope)).padding(24) },
+                          manager, width: 1000, height: 1100)
+        try await capture("effect-owner", PlanWorkspaceView(scope: .constant(scope)), manager, width: 1100, height: 950)
+        manager.stopAllEffects()
+        let strip = try XCTUnwrap(manager.devices.first { manager.segmentProfile(for: $0)?.layout == .cobStrip })
+        try await capture("segment-studio", GoveeSegmentEditorView(device: strip), manager, width: 1000, height: 780)
+        try await capture("discovery-partial", DevicesWorkspaceView(), manager, width: 850, height: 900)
+        try await capture("onboarding", OnboardingView(onFinish: {}), manager, width: 760, height: 720)
+        try await capture("reduced-motion", PlanWorkspaceView(scope: .constant(scope))
+            .environment(\.accessibilityReduceMotion, true)
+            .environment(\.accessibilityReduceTransparency, true), manager, width: 1100, height: 900)
+    }
+
+    @MainActor
+    private func capture<Content: View>(_ name: String, _ content: Content, _ manager: LightManager,
+                                       width: CGFloat, height: CGFloat) async throws {
+        let root = content.environmentObject(manager).preferredColorScheme(.dark)
+            .frame(width: width, height: height).background(Lumen.stage)
+        let host = NSHostingView(rootView: root)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: height),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = host
+        window.orderFront(nil)
+        defer { window.orderOut(nil) }
+        try await Task.sleep(nanoseconds: 180_000_000)
+        host.layoutSubtreeIfNeeded()
+        host.displayIfNeeded()
+        let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: bitmap)
+        let data = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+        let directory = URL(fileURLWithPath: ProcessInfo.processInfo.environment["LUMENDESK_RENDER_DIRECTORY"]
+                            ?? NSTemporaryDirectory()).appendingPathComponent("LumenDesk-Visual-QA")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try data.write(to: directory.appendingPathComponent("\(name).png"))
+        // The connector can read job logs even without an execution workspace.
+        // JPEG is a review transport; the lossless originals are CI artifacts.
+        let jpeg = try XCTUnwrap(bitmap.representation(using: .jpeg, properties: [.compressionFactor: 0.75]))
+        print("LUMEN_VISUAL_BEGIN|\(name)|\(Int(width))x\(Int(height))")
+        print(jpeg.base64EncodedString())
+        print("LUMEN_VISUAL_END|\(name)")
+        XCTAssertGreaterThan(data.count, 1000, "Rendering produced no useful image")
     }
 }

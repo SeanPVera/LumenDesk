@@ -315,3 +315,16 @@ enum RoomNameParser {
         }
     }
 }
+
+
+/// View selection policy, separate from Room membership and fixture topology.
+enum RoomWorkspaceSelection {
+    static func reconciled(selected: Set<String>, available: [String]) -> Set<String> {
+        selected.intersection(available)
+    }
+
+    static func targets(selected: Set<String>, available: [String]) -> Set<String> {
+        // A nonempty stale selection must never expand into a room-wide action.
+        selected.isEmpty ? Set(available) : reconciled(selected: selected, available: available)
+    }
+}

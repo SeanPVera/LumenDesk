@@ -71,6 +71,9 @@ jobs:
             --platform macosx
 
       - name: Test macOS Debug
+        env:
+          LUMENDESK_RENDER_QA: "1"
+          LUMENDESK_RENDER_DIRECTORY: ${{ runner.temp }}
         run: |
           xcodebuild \
             -project "$PROJECT" \
@@ -93,3 +96,11 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             build
+
+      - name: Preserve rendered review states
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-visual-review
+          path: ${{ runner.temp }}/LumenDesk-Visual-QA
+          if-no-files-found: warn

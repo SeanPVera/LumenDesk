@@ -1,7 +1,6 @@
 import SwiftUI
 
-/// A vendor-neutral preview of the same fixture and segment frame sent to the
-/// renderer. It remains useful in Demo Mode and when no hardware is reachable.
+/// Generated output only; this is not a device confirmation or light measurement.
 struct MusicModeVisualizerView: View {
     @ObservedObject var controller: AudioReactiveSessionController
     let scope: LightScope
@@ -16,7 +15,7 @@ struct MusicModeVisualizerView: View {
                     Image(systemName: "waveform.path.ecg.rectangle")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(Lumen.beamDim)
-                    LumenEyebrow(text: "Choreography preview", tint: Lumen.beamDim, size: 10)
+                    LumenEyebrow(text: "Generated lighting", tint: Lumen.beamDim, size: 10)
                 }
                 Spacer()
                 if frame?.sustainedEnergyEvent == true {
@@ -51,30 +50,23 @@ struct MusicModeVisualizerView: View {
                     .font(.caption2)
                     .foregroundStyle(Lumen.textTertiary)
             }
-            .frame(width: 138, alignment: .leading)
+            .frame(minWidth: 90, idealWidth: 138, maxWidth: 180, alignment: .leading)
 
-            if fixture.segmentCount > 0 {
-                GeometryReader { proxy in
-                    let gap: CGFloat = 2
-                    let width = max(3, (proxy.size.width - gap * CGFloat(max(0, fixture.segmentCount - 1))) / CGFloat(max(1, fixture.segmentCount)))
-                    HStack(spacing: gap) {
-                        ForEach(0..<fixture.segmentCount, id: \.self) { index in
-                            let state = states.first { $0.segmentID == index }
-                            RoundedRectangle(cornerRadius: 2)
-                                .fill(previewColor(state))
-                                .frame(width: width)
-                                .shadow(color: previewColor(state).opacity(0.45), radius: 3)
-                        }
-                    }
+            Canvas { context, size in
+                let count = max(1, fixture.segmentCount)
+                let unit = size.width / CGFloat(count)
+                for index in 0..<count {
+                    let state = fixture.segmentCount > 0
+                        ? states.first { $0.segmentID == index } : states.first
+                    let rect = CGRect(x: CGFloat(index) * unit, y: 0,
+                                      width: max(0, unit - (count > 40 ? 0 : 1)), height: size.height)
+                    context.fill(Path(rect), with: .color(previewColor(state)))
                 }
-                .frame(height: 24)
-            } else {
-                let state = states.first
-                Capsule()
-                    .fill(previewColor(state))
-                    .frame(maxWidth: .infinity, minHeight: 24, maxHeight: 24)
-                    .shadow(color: previewColor(state).opacity(0.4), radius: 5)
             }
+            .frame(height: 18)
+            .accessibilityLabel("Generated output for \(fixture.label)")
+            .accessibilityValue(states.isEmpty ? "No generated frame" : "\(states.count) output values")
+
         }
     }
 

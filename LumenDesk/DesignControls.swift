@@ -69,6 +69,7 @@ struct LumenFader: View {
 
     @Environment(\.isEnabled) private var isEnabled
     @State private var editing = false
+    @FocusState private var hasKeyboardFocus: Bool
 
     private var span: Double { max(0.000001, range.upperBound - range.lowerBound) }
     private var fraction: Double { min(1, max(0, (value - range.lowerBound) / span)) }
@@ -105,6 +106,8 @@ struct LumenFader: View {
             }
         }
         .focusableCompat()
+        .focused($hasKeyboardFocus)
+        .overlay(RoundedRectangle(cornerRadius: 4).stroke(hasKeyboardFocus ? Lumen.focus : .clear, lineWidth: 2).padding(-3))
         .onHorizontalMoveCompat { nudge($0) }
     }
 
@@ -124,7 +127,7 @@ struct LumenFader: View {
                 RoundedRectangle(cornerRadius: 2.5, style: .continuous)
                     .fill(Lumen.lit)
                     .frame(width: 5, height: 18)
-                    .shadow(color: Lumen.chalk.opacity(editing ? 0.5 : 0.22), radius: 6)
+
                     .offset(x: min(max(0, width * fraction - 2.5), width - 5))
             }
             .contentShape(Rectangle())
@@ -144,15 +147,17 @@ struct LumenFader: View {
                     }
             )
         }
-        .frame(height: 22)
+        .frame(height: 44)
     }
 
     private func commit(x: CGFloat, width: CGFloat) {
+        guard isEnabled else { return }
         let ratio = min(1, max(0, Double(x / width)))
         value = quantized(range.lowerBound + ratio * span)
     }
 
     private func nudge(_ direction: Int) {
+        guard isEnabled else { return }
         let increment = step ?? (span / 20)
         value = min(range.upperBound,
                     max(range.lowerBound,
@@ -210,7 +215,7 @@ private struct LumenPowerKeyFace: View {
                     .foregroundStyle(configuration.isOn ? Lumen.stage : Lumen.faint)
             }
             .frame(width: size, height: size)
-            .shadow(color: tint.opacity(configuration.isOn ? 0.35 : 0), radius: 12)
+            .lumenInteractiveTarget()
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

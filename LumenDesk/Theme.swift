@@ -38,20 +38,20 @@ enum Lumen {
     // its own and not a property of the surface it lands on.
 
     /// Ground beneath everything, and the well a control recesses into.
-    static let stage        = Color(hex: 0x05080C)
+    static let stage        = Color(hex: 0x101112)
     /// Large working areas: the inspector, sheets, secondary panels.
-    static let deck         = Color(hex: 0x080D13)
+    static let deck         = Color(hex: 0x17191B)
     /// A room's floor, and the standard panel fill everywhere else.
     ///
     /// The whole cool ramp from here up was lifted one step after the first
     /// build rendered: at the original values a room read as a hole in the
     /// page and the walls barely separated from the floor they enclosed. A
     /// drawing needs its sheet to be visibly lighter than the dark around it.
-    static let floor        = Color(hex: 0x0E141D)
+    static let floor        = Color(hex: 0x1D2022)
     /// The selected room's floor, and any hovered or raised surface.
-    static let floorRaised  = Color(hex: 0x151F2B)
+    static let floorRaised  = Color(hex: 0x272B2E)
     /// The loudest surface in the system, used for grouped controls.
-    static let stripLoud    = Color(hex: 0x1D2836)
+    static let stripLoud    = Color(hex: 0x32373A)
 
     // MARK: Walls
     //
@@ -60,34 +60,34 @@ enum Lumen {
     // reads as having thickness rather than as a hairline.
 
     /// The filled band a wall line sits on.
-    static let poche      = Color(hex: 0x1A2734)
+    static let poche      = Color(hex: 0x282D30)
     /// Interior partitions.
-    static let wall       = Color(hex: 0x33475A)
+    static let wall       = Color(hex: 0x50595E)
     /// The exterior envelope, and any structural edge.
-    static let wallOuter  = Color(hex: 0x63839B)
+    static let wallOuter  = Color(hex: 0x879094)
 
     // MARK: Separators
     //
     // Used sparingly. Plan separates surfaces by value and by wall; a rule only
     // appears where two areas share a value and still need a boundary.
 
-    static let ruleSoft = Color(hex: 0x131C26)
-    static let rule     = Color(hex: 0x2B3B4B)
+    static let ruleSoft = Color(hex: 0x303539)
+    static let rule     = Color(hex: 0x50585D)
 
     // MARK: Text
 
-    static let chalk = Color(hex: 0xE4EDF7)
-    static let meter = Color(hex: 0x9DB0C6)
-    static let muted = Color(hex: 0x6A7F96)
-    static let faint = Color(hex: 0x3D4E60)
+    static let chalk = Color(hex: 0xEDF0F1)
+    static let meter = Color(hex: 0xBCC3C7)
+    static let muted = Color(hex: 0xA0A9AE)
+    static let faint = Color(hex: 0x778187)
 
     /// Illumination. A lit key face, a fader cap, a powered legend.
-    static let lit = Color(hex: 0xF4F8FE)
+    static let lit = Color(hex: 0xF8FAFA)
 
     /// The drawing's annotation colour — the blue pencil a drafter reaches
     /// for. Dimensions and selection outlines only; it is not an accent and
     /// nothing decorative may spend it.
-    static let mark = Color(hex: 0xBFD9F5)
+    static let mark = Color(hex: 0xEDF0F1)
 
     // MARK: The one hue
     //
@@ -96,7 +96,7 @@ enum Lumen {
     // authored hue in the product, so a coloured pixel anywhere else on screen
     // is a fixture reporting its own colour.
 
-    static let link    = Color(hex: 0x5FE0D8)
+    static let link    = Color(hex: 0xB8C8C5)
     static let linkDim = Color(hex: 0x2C6E6A)
 
     /// Status. Both are rare and both always ship with an icon, because hue
@@ -159,7 +159,7 @@ enum Lumen {
 
     // MARK: Metrics
 
-    static let stripRadius: CGFloat = 10
+    static let stripRadius: CGFloat = 6
     static let controlRadius: CGFloat = 6
     /// No call site may produce a corner sharper than the system allows.
     static let minimumRadius: CGFloat = 6
@@ -197,7 +197,7 @@ enum Lumen {
     static let signal       = chalk
     static let signalBright = lit
     static let cyan         = link
-    static let focus        = link
+    static let focus        = lit
 
     /// A confirmed device is a network fact, so it speaks in link cyan.
     static let success = link
@@ -260,7 +260,7 @@ enum LumenType {
     /// On an obsidian ground they do not read at all, so the floor is applied
     /// here instead of at forty call sites, and it holds for the next one
     /// somebody writes.
-    static let minimumSize: CGFloat = 10.5
+    static let minimumSize: CGFloat = 12
 
     /// Names and titles. Standard-width SF Pro, sentence case at call sites.
     static func display(size: CGFloat, weight: Font.Weight = .semibold) -> Font {
@@ -271,7 +271,7 @@ enum LumenType {
     /// and tabular, because the whole point of a strip field is comparing
     /// numbers down a column.
     static func readout(size: CGFloat, weight: Font.Weight = .medium) -> Font {
-        .system(size: max(size, minimumSize), weight: weight, design: .monospaced)
+        .system(size: max(size, minimumSize), weight: weight).monospacedDigit()
     }
 
     /// Control labels. Sentence case in new code; the face is sans so that

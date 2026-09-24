@@ -56,9 +56,8 @@ struct FlashSafetyLimiter {
 /// ahead of its rivals the tempo estimate actually is, an ambiguous grid renders
 /// the smooth show rather than a confident wrong one.
 final class MusicChoreographyEngine {
-    /// Roughly how long a frame takes to leave the renderer, cross the LAN, and
-    /// light a fixture. On a predicted beat grid the show is evaluated that far
-    /// ahead so the swell lands *on* the beat instead of just after it.
+    /// Unmeasured legacy prediction bias, NOT a measured device latency.
+    /// Capture, dispatch, firmware and visible response must be measured separately.
     private static let outputLatencyCompensation: TimeInterval = 0.045
     /// Rise time of the brightness envelope. A swell that begins on the beat
     /// peaks after it, so the clock compensates for this as well as for
@@ -84,11 +83,6 @@ final class MusicChoreographyEngine {
     private var dynamics: Double = 0
     private var fastEnergy: Double = 0
     private var slowEnergy: Double = 0
-    private var moodSmoothed: Double = 0.5
-    private var chromaHueSmoothed: Double = 0
-    private var chromaCandidate = -1
-    private var chromaCandidateFrames = 0
-    private var chromaIndex = -1
     private var onsetEnvelope: Double = 0
     private var accentEnvelope: Double = 0
     private var colourIndex = 0
@@ -107,11 +101,6 @@ final class MusicChoreographyEngine {
         dynamics = 0
         fastEnergy = 0
         slowEnergy = 0
-        moodSmoothed = 0.5
-        chromaHueSmoothed = 0
-        chromaCandidate = -1
-        chromaCandidateFrames = 0
-        chromaIndex = -1
         onsetEnvelope = 0
         accentEnvelope = 0
         colourIndex = 0
@@ -119,7 +108,7 @@ final class MusicChoreographyEngine {
     }
 
     func makeFrame(
-        snapshot: AudioReactiveSnapshot,
+        snapshot input: AudioReactiveSnapshot,
         configuration: MusicModeConfiguration,
         topology: FixtureTopology,
         fixtures: [MusicFixtureDescriptor],
@@ -127,6 +116,7 @@ final class MusicChoreographyEngine {
         sequenceNumber: UInt64,
         reducedMotion: Bool = false
     ) -> MusicLightingFrame {
+        let snapshot = input.fresh(at: timestamp)
         let config = configuration.normalized(reducedMotion: reducedMotion)
         let targets = topology.expandedTargets(for: fixtures)
         guard !targets.isEmpty else {
@@ -197,18 +187,15 @@ final class MusicChoreographyEngine {
         let feltInterval = clock.interval > 0 ? clock.interval : 0.5
         let tempoRestraint = ((feltInterval - 0.22) / 0.26).clamped01
         let dynamicsGate = pow(dynamics.clamped01, 0.8)
-        let baseDepth = (0.3 + config.beatSensitivity * 1.15)
-            * (0.6 + config.effectIntensity * 0.4)
+        let baseDepth = config.beatSensitivity * 1.57
+            * (0.6 + config.effectIntensity * 0.4) * min(1, config.effectIntensity / 0.2)
             * (0.4 + 0.6 * tempoRestraint)
             * (0.12 + 0.88 * dynamicsGate)
 
-        let upperBrightness = max(
-            config.minimumBrightness,
-            config.maximumBrightness * config.masterBrightness
-        )
+        // Master scales both bounds. Final output is clamped AFTER envelopes/flash.
+        let lowerBrightness = config.minimumBrightness * config.masterBrightness
+        let upperBrightness = config.maximumBrightness * config.masterBrightness
         let palette = config.palette.map(Self.hsb)
-        let chromaHue = smoothedChromaHue(snapshot.chroma, dt: dt)
-        moodSmoothed = Self.follow(moodSmoothed, toward: snapshot.mood, dt: dt, timeConstant: 2.5)
         let phraseLift = config.phraseAware ? min(0.18, energyRise * 0.9) : 0
 
         // A room of two or three bulbs cannot show travel, so a sweep there is
@@ -228,7 +215,9 @@ final class MusicChoreographyEngine {
             let isMotion = target.role == .motion
             let isWash = target.role == .wash || target.role == .auto
 
-            let phase = spatialPhase(position: target.position, direction: config.movementDirection)
+            // A full turn at the two endpoints made two bulbs move identically.
+            let spatialPosition = topology.layout == .circular ? target.position : target.position * 0.75
+            let phase = spatialPhase(position: spatialPosition, direction: config.movementDirection)
             let wave = 0.5 + 0.5 * sin(phase * 2 * .pi)
             let stereoBias = 1 + (snapshot.stereo - 0.5) * 2 * config.stereoImage * (target.position - 0.5) * 2
             // Centred on 1 so movement tilts the room rather than dimming it.
@@ -250,30 +239,30 @@ final class MusicChoreographyEngine {
             else if isWash { depth *= 1.15 }
             else if isMotion { depth *= 0.92 }
             else if isAccent { depth *= 0.6 }
-            if isAccent { depth += accentEnvelope * 0.18 * config.percussionSensitivity }
-            if isHit { depth += snapshot.kick * config.bassSensitivity * 0.1 }
+            if isAccent { depth += accentEnvelope * 0.18 * config.effectIntensity * config.beatSensitivity }
+            if isHit { depth += snapshot.kick * config.bassSensitivity * 0.1 * config.effectIntensity * config.beatSensitivity }
             // Deliberately not clamped to 1: past that the swell holds at the
             // ceiling for part of the beat, which is what a punchy preset
             // should look like. Brightness itself is still clamped to `upper`,
             // so nothing clips into a discontinuity.
             depth = max(0, depth)
 
-            let bed = config.minimumBrightness + (upperBrightness - config.minimumBrightness) * bedLevel
+            let bed = lowerBrightness + (upperBrightness - lowerBrightness) * bedLevel
             var rawBrightness = bed + (upperBrightness - bed) * depth * pulseDrive.clamped01
 
             if silence {
                 switch config.silenceBehavior {
                 case .settle:
-                    rawBrightness = config.minimumBrightness
+                    rawBrightness = lowerBrightness
                 case .holdPalette:
-                    rawBrightness = config.minimumBrightness
-                        + (upperBrightness - config.minimumBrightness) * (0.08 + config.effectIntensity * 0.08)
+                    rawBrightness = lowerBrightness
+                        + (upperBrightness - lowerBrightness) * (0.08 + config.effectIntensity * 0.08)
                 case .fadeOut:
                     rawBrightness = 0
                 }
             }
             rawBrightness = max(
-                silence && config.silenceBehavior == .fadeOut ? 0 : config.minimumBrightness,
+                silence && config.silenceBehavior == .fadeOut ? 0 : lowerBrightness,
                 min(upperBrightness, rawBrightness)
             )
 
@@ -291,7 +280,9 @@ final class MusicChoreographyEngine {
             let release = 1 - exp(-dt / releaseTime)
             let coefficient = rawBrightness > previous ? attack : release
             var brightness = previous + (rawBrightness - previous) * coefficient
-            brightness = min(1, brightness + flashIntensity * (1 - brightness))
+            brightness += flashIntensity * max(0, upperBrightness - brightness)
+            brightness = max(silence && config.silenceBehavior == .fadeOut ? 0 : lowerBrightness,
+                             min(upperBrightness, brightness))
             brightnessEnvelopes[envelopeKey] = brightness
 
             // Colour: a palette entry held for a whole number of bars and
@@ -301,20 +292,9 @@ final class MusicChoreographyEngine {
             // the last moment.
             let spread = config.colorChangeIntensity * (0.35 + spatialFidelity * 0.65)
             let paletteMotion = target.position * spread * Double(max(1, palette.count - 1))
-                + paletteProgress
+                + paletteProgress + (isAccent && palette.count > 1 ? 1 : 0)
             var color = Self.paletteColor(palette, position: paletteMotion / Double(max(1, palette.count)))
-            color.hue = (color.hue + (moodSmoothed - 0.5) * 0.05 + chromaHue * 0.03).wrappedUnit
 
-            if isAccent {
-                // The accent role sits on the complementary colour for the
-                // whole show rather than teleporting there whenever a snare
-                // crosses a threshold, which used to read as a colour toggling
-                // on and off with the backbeat.
-                color.hue = (color.hue + 0.5).wrappedUnit
-                color.saturation *= 0.78
-            } else if isHit {
-                color.saturation = min(1, color.saturation + snapshot.kick * 0.06)
-            }
             if flashIntensity > 0 {
                 color.saturation *= 1 - flashIntensity * 0.8
             }
@@ -350,42 +330,6 @@ final class MusicChoreographyEngine {
     ) -> Double {
         guard timeConstant > 0 else { return target }
         return current + (target - current) * (1 - exp(-dt / timeConstant))
-    }
-
-    /// The argmax of the chroma vector flickers between near-equal bins every
-    /// analysis frame, and feeding it straight into the hue put a visible
-    /// wobble on every fixture. Require a new bin to lead clearly and hold that
-    /// lead, then glide the short way round the wheel rather than jumping.
-    private func smoothedChromaHue(_ chroma: [Double], dt: Double) -> Double {
-        if chroma.count >= 12 {
-            var best = 0.0
-            var runnerUp = 0.0
-            var index = 0
-            for (offset, value) in chroma.enumerated() {
-                if value > best {
-                    runnerUp = best
-                    best = value
-                    index = offset
-                } else if value > runnerUp {
-                    runnerUp = value
-                }
-            }
-            if best > 0.15, best > runnerUp * 1.15 {
-                if index == chromaCandidate {
-                    chromaCandidateFrames += 1
-                } else {
-                    chromaCandidate = index
-                    chromaCandidateFrames = 1
-                }
-                if chromaCandidateFrames >= 4 { chromaIndex = index }
-            }
-        }
-        let target = chromaIndex >= 0 ? Double(chromaIndex) / 12 : chromaHueSmoothed
-        var delta = target - chromaHueSmoothed
-        if delta > 0.5 { delta -= 1 }
-        if delta < -0.5 { delta += 1 }
-        chromaHueSmoothed = (chromaHueSmoothed + delta * (1 - exp(-dt / 2.5))).wrappedUnit
-        return chromaHueSmoothed
     }
 
     private func updateSustainedEnergy(_ energy: Double, at timestamp: TimeInterval) -> Bool {
@@ -457,7 +401,7 @@ final class MusicChoreographyEngine {
         // The reference advances on every detected beat. Include its position
         // on the grid before dividing into felt beats, or half-time restarts
         // its pulse halfway through every cycle.
-        let absoluteBeat = Double(snapshot.beatCount) + gridBeats
+        let absoluteBeat = Double(snapshot.gridBeatPosition ?? snapshot.beatCount) + gridBeats
         let beats = absoluteBeat * gridInterval / interval
         let wholeBeats = floor(beats)
         let beatInBar = Int(((Double(snapshot.beatInBar) + floor(gridBeats))
@@ -519,6 +463,7 @@ final class MusicChoreographyEngine {
         configuration: MusicModeConfiguration,
         dt: Double
     ) {
+        guard configuration.colorChangeIntensity > 0 else { return }
         if clock.strength > 0, clock.barRate > 0 {
             let barsPerColour = Double(max(1, Int((5 - configuration.colorChangeIntensity * 4).rounded())))
             let raw = clock.barPosition / barsPerColour
@@ -547,7 +492,8 @@ final class MusicChoreographyEngine {
     /// the clock, so gaining or losing tempo lock changes the speed of the
     /// motion without ever jumping its position.
     private func advanceMovement(clock: MusicalClock, configuration: MusicModeConfiguration, dt: Double) {
-        let wallClockRate = 0.06 + configuration.movementSpeed * 0.55
+        guard configuration.movementSpeed > 0, configuration.movementAmount > 0 else { return }
+        let wallClockRate = configuration.movementSpeed * 0.66
         var rate = wallClockRate
         if clock.strength > 0, clock.barRate > 0 {
             // One traverse every few bars at the default speed: motion that
@@ -561,7 +507,7 @@ final class MusicChoreographyEngine {
         if configuration.movementDirection == .alternating {
             // Reverse on the bar line while locked. Without a grid there are no
             // bars, so fall back to flipping every four detected beats.
-            let bar = clock.strength > 0 ? Int(floor(barsElapsed)) : lastBeatCount / max(1, clock.metre)
+            let bar = clock.strength > 0 ? Int(floor(clock.barPosition)) : lastBeatCount / max(1, clock.metre)
             if !bar.isMultiple(of: 2) { rate = -rate }
         }
         movementPhase += rate * dt

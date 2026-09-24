@@ -57,6 +57,30 @@ struct AudioReactiveSnapshot: Equatable {
     var phrasePosition: Int = 0
     var energySlope: Double = 0
     var sourceDescription: String = "Microphone input"
+    /// Last analyzed sample on the monotonic host clock, not UI publication time.
+    var analysisTimestamp: TimeInterval? = nil
+    var analysisCompletedAt: TimeInterval? = nil
+    var freshnessGrace: TimeInterval = 0.25
+    var rawRMS: Double = 0
+    var onset: Double = 0
+    var gridBeatPosition: Int? = nil
+    var analyzedSamples: Int64 = 0
+    var droppedBuffers: Int = 0
+
+    /// Stop extrapolating stale capture. Preserve beat count and theme; decay
+    /// musical evidence over one second, then let the existing silence policy settle.
+    func fresh(at timestamp: TimeInterval) -> AudioReactiveSnapshot {
+        guard let analysisTimestamp else { return self } // explicit synthetic snapshots
+        let age = max(0, timestamp - analysisTimestamp)
+        let weight = max(0, min(1, 1 - (age - freshnessGrace) / 1.0))
+        var next = self
+        next.level *= weight; next.energy *= weight; next.confidence *= weight
+        next.beat *= weight; next.pulse *= weight; next.kick *= weight
+        next.snare *= weight; next.percussion *= weight; next.bass *= weight
+        next.mids *= weight; next.highs *= weight; next.beatConfidence *= weight
+        if weight == 0 { next.isTempoLocked = false; next.tempo = 0 }
+        return next
+    }
 }
 
 final class AudioCaptureService {
@@ -90,6 +114,10 @@ final class AudioCaptureService {
     private var isStarting = false
     private(set) var isRunning = false
     private var startGeneration = 0
+    private var analyzerGeneration = 0 // analysisQueue only
+    private let ingressLock = NSLock()
+    private var droppedBuffers = 0
+    private var discontinuity = false
     private var startCompletions: [(AudioStartResult) -> Void] = []
     private var snapshotSubscribers: [UUID: (AudioReactiveSnapshot) -> Void] = [:]
     var onLevel: ((Double) -> Void)?
@@ -97,9 +125,9 @@ final class AudioCaptureService {
 
     #if os(macOS)
     private var systemAudioCapture: SystemAudioCapturing?
-    private let makeSystemAudioCapture: (@escaping (AVAudioPCMBuffer) -> Void) -> SystemAudioCapturing
+    private let makeSystemAudioCapture: (@escaping (AVAudioPCMBuffer, TimeInterval) -> Void) -> SystemAudioCapturing
 
-    init(makeSystemAudioCapture: @escaping (@escaping (AVAudioPCMBuffer) -> Void) -> SystemAudioCapturing = { SystemAudioCapture(onBuffer: $0) }) {
+    init(makeSystemAudioCapture: @escaping (@escaping (AVAudioPCMBuffer, TimeInterval) -> Void) -> SystemAudioCapturing = { SystemAudioCapture(onBuffer: $0) }) {
         self.makeSystemAudioCapture = makeSystemAudioCapture
     }
     #endif
@@ -164,10 +192,10 @@ final class AudioCaptureService {
         // macOS: system audio (Apple Music / other apps) is the SOLE source.
         // The microphone is never started here, so room noise can't pollute the
         // music analysis, and there is no silent mic fallback.
-        let capture = makeSystemAudioCapture { [weak self] buffer in
+        let capture = makeSystemAudioCapture { [weak self] buffer, capturedAt in
             // SystemAudioCapture already created an owned mono buffer. Avoid
             // allocating and copying it a second time before analysis.
-            self?.consume(buffer, requiresOwnedCopy: false, generation: generation)
+            self?.consume(buffer, requiresOwnedCopy: false, generation: generation, hostTime: capturedAt)
         }
         systemAudioCapture = capture
         capture.start { [weak self] result in
@@ -214,8 +242,10 @@ final class AudioCaptureService {
     /// replacing or relabelling them is scheduled there rather than racing a
     /// capture callback that is already analyzing a buffer.
     private func resetAnalyzer(sourceDescription: String) {
+        let generation = startGeneration
         analysisQueue.async { [weak self] in
             guard let self else { return }
+            self.analyzerGeneration = generation
             self.analyzer = MusicFeatureAnalyzer(sourceDescription: sourceDescription)
             self.lastPublishedHostTime = -Double.greatestFiniteMagnitude
         }
@@ -262,8 +292,9 @@ final class AudioCaptureService {
         let format = input.outputFormat(forBus: 0)
         guard format.channelCount > 0 else { return false }
 
-        input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
-            self?.consume(buffer, generation: generation)
+        input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, time in
+            let end = time.isHostTimeValid ? AVAudioTime.seconds(forHostTime: time.hostTime) + Double(buffer.frameLength) / buffer.format.sampleRate : ProcessInfo.processInfo.systemUptime
+            self?.consume(buffer, generation: generation, hostTime: end)
         }
 
         do {
@@ -276,9 +307,16 @@ final class AudioCaptureService {
     }
     #endif
 
-    private func consume(_ buffer: AVAudioPCMBuffer, requiresOwnedCopy: Bool = true, generation: Int) {
-        guard analysisSlot.wait(timeout: .now()) == .success else { return }
-        let hostTime = ProcessInfo.processInfo.systemUptime
+    private func consume(_ buffer: AVAudioPCMBuffer, requiresOwnedCopy: Bool = true, generation: Int, hostTime: TimeInterval) {
+        guard analysisSlot.wait(timeout: .now()) == .success else {
+            ingressLock.lock(); droppedBuffers += 1; discontinuity = true; ingressLock.unlock()
+            return
+        }
+        ingressLock.lock()
+        let resetRequired = discontinuity
+        let dropped = droppedBuffers
+        discontinuity = false
+        ingressLock.unlock()
         let analysisBuffer: AVAudioPCMBuffer
         if requiresOwnedCopy {
             guard let ownedBuffer = buffer.ownedFloatCopy() else {
@@ -292,7 +330,11 @@ final class AudioCaptureService {
         analysisQueue.async { [weak self] in
             guard let self else { return }
             defer { self.analysisSlot.signal() }
-            guard let snapshot = self.analyzer.analyze(analysisBuffer, hostTime: hostTime) else { return }
+            guard self.analyzerGeneration == generation else { return }
+            if resetRequired { self.analyzer.resetStream() }
+            guard var snapshot = self.analyzer.analyze(analysisBuffer, hostTime: hostTime) else { return }
+            snapshot.analysisCompletedAt = ProcessInfo.processInfo.systemUptime
+            snapshot.droppedBuffers = dropped
             guard snapshot.beat > 0 || hostTime - self.lastPublishedHostTime >= self.publicationInterval else { return }
             self.lastPublishedHostTime = hostTime
             DispatchQueue.main.async { [weak self] in
@@ -325,8 +367,9 @@ final class AudioCaptureService {
             try? session.setCategory(.playback, options: [.mixWithOthers])
             try? session.setActive(true)
             #endif
-            player.installTap(onBus: 0, bufferSize: 1024, format: file.processingFormat) { [weak self] buffer, _ in
-                self?.consume(buffer, generation: generation)
+            player.installTap(onBus: 0, bufferSize: 1024, format: file.processingFormat) { [weak self] buffer, time in
+                let end = time.isHostTimeValid ? AVAudioTime.seconds(forHostTime: time.hostTime) + Double(buffer.frameLength) / buffer.format.sampleRate : ProcessInfo.processInfo.systemUptime
+                self?.consume(buffer, generation: generation, hostTime: end)
             }
             fileTapInstalled = true
             try engine.start()
@@ -592,6 +635,8 @@ struct MIDIBeatClockTracker {
         snapshot.feltInterval = beatInterval
         snapshot.feltTempo = 60 / beatInterval
         snapshot.sourceDescription = "MIDI clock"
+        snapshot.analysisTimestamp = now
+        snapshot.freshnessGrace = beatInterval * 1.5
         return snapshot
     }
 }
@@ -706,6 +751,7 @@ final class MusicFeatureAnalyzer {
     private let beatTracker = BeatTracker()
     private var hostTimeOffset: TimeInterval = 0
     private var hasHostAnchor = false
+    private var lastBufferEnd: TimeInterval?
 
     init(sourceDescription: String) {
         self.sourceDescription = sourceDescription
@@ -724,10 +770,18 @@ final class MusicFeatureAnalyzer {
     /// - Parameter hostTime: When the buffer was captured, on the same clock
     ///   the renderer uses. Beat times are reported on that clock.
     func analyze(_ buffer: AVAudioPCMBuffer, hostTime: TimeInterval? = nil) -> AudioReactiveSnapshot? {
-        guard let channelData = buffer.floatChannelData, fftSetup != nil else { return nil }
+        guard !buffer.format.isInterleaved, let channelData = buffer.floatChannelData, fftSetup != nil else { return nil }
         let frameCount = Int(buffer.frameLength)
         let sampleRate = buffer.format.sampleRate
         guard frameCount > 0, sampleRate > 0 else { return nil }
+        if configuredSampleRate != 0 && configuredSampleRate != sampleRate { resetStream() }
+        // Accurate sample timestamps expose missing or duplicate audio. Never
+        // splice a discontinuity into the FFT as if it were a musical onset.
+        if let hostTime, let last = lastBufferEnd {
+            if hostTime <= last { return nil }
+            if abs(hostTime - last - Double(frameCount) / sampleRate) > 0.03 { resetStream() }
+        }
+        lastBufferEnd = hostTime
         configureIfNeeded(sampleRate: sampleRate)
 
         let channels = Int(buffer.format.channelCount)
@@ -816,7 +870,9 @@ final class MusicFeatureAnalyzer {
         peakLevel = rms > peakLevel
             ? peakLevel + (rms - peakLevel) * 0.25
             : max(0.0005, peakLevel * exp(-dt / 10))
-        let level = clamp((rms - noiseFloor) / max(0.015, peakLevel - noiseFloor))
+        // Fixed soft-knee loudness preserves quiet/loud contrast. Adaptive gain
+        // remains in the onset detector, where playback-volume independence is useful.
+        let level = clamp(log1p(max(0, rms - 0.001) * 20) / log1p(10))
 
         let bassRaw = bandMagnitude(bassBins)
         let midsRaw = bandMagnitude(midsBins)
@@ -825,7 +881,7 @@ final class MusicFeatureAnalyzer {
         bandPeak = loudestBand > bandPeak
             ? bandPeak + (loudestBand - bandPeak) * 0.3
             : max(0.000_02, bandPeak * exp(-dt / 8))
-        let bandScale = 0.9 / bandPeak
+        let bandScale = 0.9 / bandPeak * sqrt(level)
         let bass = clamp(bassRaw * bandScale)
         let mids = clamp(midsRaw * bandScale)
         let highs = clamp(highsRaw * bandScale)
@@ -940,7 +996,12 @@ final class MusicFeatureAnalyzer {
             spectrum: spectrumVector(),
             phrasePosition: (beatCount / metre) % 8,
             energySlope: slope,
-            sourceDescription: sourceDescription
+            sourceDescription: sourceDescription,
+            analysisTimestamp: streamTime + hostTimeOffset,
+            rawRMS: rms,
+            onset: onset,
+            gridBeatPosition: grid.beatCount,
+            analyzedSamples: processedSamples
         )
     }
 
@@ -1073,6 +1134,22 @@ final class MusicFeatureAnalyzer {
         }
     }
 
+    /// Reacquire after missing audio or a format change; old spectral windows,
+    /// tempo history and sample-rate arithmetic cannot cross that boundary.
+    func resetStream() {
+        ring = Array(repeating: 0, count: Self.windowSize)
+        ringWriteIndex = 0; samplesUntilHop = Self.hopSize; processedSamples = 0
+        previousLogMagnitudes = Array(repeating: 0, count: Self.windowSize / 2)
+        logMagnitudes = previousLogMagnitudes
+        beatTracker.reset()
+        hostTimeOffset = 0; hasHostAnchor = false; lastBufferEnd = nil
+        noiseFloor = 0.01; peakLevel = 0.02; bandPeak = 0.0005
+        odfScale = Self.minimumOnsetScale; kickScale = Self.minimumOnsetScale
+        snareScale = Self.minimumOnsetScale; hatScale = Self.minimumOnsetScale
+        noveltyBaseline = 0; noveltyDeviation = 0; beatCooldownRemaining = 0
+        pulseEnv = 0; dropEnv = 0; energyBaseline = 0; previousEnergy = 0
+    }
+
     private func configureIfNeeded(sampleRate: Double) {
         guard sampleRate != configuredSampleRate else { return }
         configuredSampleRate = sampleRate
@@ -1162,9 +1239,9 @@ protocol SystemAudioCapturing: AnyObject {
 final class SystemAudioCapture: NSObject, SCStreamOutput, SystemAudioCapturing {
     private var stream: SCStream?
     private var startTask: Task<Void, Never>?
-    private let onBuffer: (AVAudioPCMBuffer) -> Void
+    private let onBuffer: (AVAudioPCMBuffer, TimeInterval) -> Void
 
-    init(onBuffer: @escaping (AVAudioPCMBuffer) -> Void) { self.onBuffer = onBuffer }
+    init(onBuffer: @escaping (AVAudioPCMBuffer, TimeInterval) -> Void) { self.onBuffer = onBuffer }
 
     func start(completion: @escaping (SystemAudioStartResult) -> Void) {
         guard #available(macOS 13.0, *) else { completion(.unavailable); return }
@@ -1240,58 +1317,41 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, SystemAudioCapturing {
     }
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
-        guard type == .audio, let buffer = try? sampleBuffer.asMonoPCMBuffer() else { return }
-        onBuffer(buffer)
+        guard type == .audio, let buffer = try? sampleBuffer.asOwnedPCMBuffer() else { return }
+        let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
+        let end = pts + Double(buffer.frameLength) / buffer.format.sampleRate
+        onBuffer(buffer, end.isFinite ? end : ProcessInfo.processInfo.systemUptime)
     }
 }
 
 private extension CMSampleBuffer {
-    /// Copies ScreenCaptureKit's Float32 audio into an OWNED mono buffer by
-    /// averaging all channels. Owning the memory makes it safe to hand to the
-    /// analysis queue (the no-copy bufferList is only valid during this call),
-    /// and iterating every AudioBuffer/channel is the fix for the old code that
-    /// read only `mBuffers[0]` and dropped the right channel. Divides by the
-    /// number of channels actually summed so loudness is consistent.
-    func asMonoPCMBuffer() throws -> AVAudioPCMBuffer? {
-        guard let asbd = formatDescription?.audioStreamBasicDescription else { return nil }
+    /// Preserve planar channels (including stereo) in owned Float32 storage.
+    /// Reject unsupported formats explicitly rather than interpreting integers as floats.
+    func asOwnedPCMBuffer() throws -> AVAudioPCMBuffer? {
+        guard let asbd = formatDescription?.audioStreamBasicDescription,
+              asbd.mFormatID == kAudioFormatLinearPCM,
+              asbd.mFormatFlags & kAudioFormatFlagIsFloat != 0,
+              asbd.mBitsPerChannel == 32 else { return nil }
         let frames = AVAudioFrameCount(numSamples)
-        guard frames > 0,
-              let monoFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32,
-                                             sampleRate: asbd.mSampleRate,
-                                             channels: 1,
-                                             interleaved: false) else { return nil }
-        let n = Int(frames)
+        guard frames > 0, let format = AVAudioFormat(commonFormat: .pcmFormatFloat32,
+            sampleRate: asbd.mSampleRate, channels: asbd.mChannelsPerFrame, interleaved: false) else { return nil }
         return try withAudioBufferList { abl, _ -> AVAudioPCMBuffer? in
-            guard let out = AVAudioPCMBuffer(pcmFormat: monoFormat, frameCapacity: frames),
-                  let dst = out.floatChannelData?[0] else { return nil }
+            guard let out = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames),
+                  let dst = out.floatChannelData else { return nil }
             out.frameLength = frames
-            var summedChannels = 0
-            // Planar audio: one AudioBuffer per channel (mNumberChannels == 1).
-            // Interleaved: one buffer with mNumberChannels samples per frame.
-            // Handle both so the right channel is never lost.
+            var channel = 0
             for ab in abl {
-                guard let mData = ab.mData else { continue }
-                let src = mData.assumingMemoryBound(to: Float.self)
-                let ch = Int(ab.mNumberChannels)
-                let totalFloats = Int(ab.mDataByteSize) / MemoryLayout<Float>.size
-                if ch <= 1 {
-                    let count = min(n, totalFloats)
-                    for i in 0..<count { dst[i] += src[i] }
-                    summedChannels += 1
-                } else {
-                    let count = min(n, totalFloats / ch)
-                    for i in 0..<count {
-                        var acc: Float = 0
-                        for c in 0..<ch { acc += src[i * ch + c] }
-                        dst[i] += acc
-                    }
-                    summedChannels += ch
+                let count = Int(ab.mNumberChannels)
+                guard count > 0, let data = ab.mData,
+                      channel + count <= Int(asbd.mChannelsPerFrame),
+                      Int(ab.mDataByteSize) >= Int(frames) * count * MemoryLayout<Float>.size else { return nil }
+                let src = data.assumingMemoryBound(to: Float.self)
+                for c in 0..<count {
+                    for i in 0..<Int(frames) { dst[channel + c][i] = src[i * count + c] }
                 }
+                channel += count
             }
-            guard summedChannels > 0 else { return nil }
-            var divisor = Float(summedChannels)
-            vDSP_vsdiv(dst, 1, &divisor, dst, 1, vDSP_Length(n))
-            return out
+            return channel == Int(asbd.mChannelsPerFrame) ? out : nil
         }
     }
 }

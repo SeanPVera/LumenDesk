@@ -15,9 +15,19 @@ final class MusicLightingRenderer {
         let transport: MusicTransportKind
         let states: [MusicLightingState]
         let sequenceNumber: UInt64
+        let timestamp: TimeInterval
     }
 
     private var pendingByFixture: [String: PendingFrame] = [:]
+    struct Diagnostics {
+        var generatedFrames = 0
+        var coalescedStates = 0
+        var rejectedStates = 0
+        var commandsHandedOff = 0 // not UDP receipt or visible output
+    }
+    private(set) var diagnostics = Diagnostics()
+    private var latestSequence: [String: UInt64] = [:]
+    static let maximumFrameAge: TimeInterval = 0.25
     private var lastSentAt: [String: TimeInterval] = [:]
 
     func enqueue(
@@ -25,20 +35,33 @@ final class MusicLightingRenderer {
         fixtures: [MusicFixtureDescriptor],
         at timestamp: TimeInterval
     ) -> [MusicRenderCommand] {
+        diagnostics.generatedFrames += 1
         let fixtureByID = Dictionary(uniqueKeysWithValues: fixtures.map { ($0.id, $0) })
         let grouped = Dictionary(grouping: frame.states, by: \.fixtureID)
         for (fixtureID, states) in grouped {
             guard let fixture = fixtureByID[fixtureID] else { continue }
+            guard timestamp - frame.timestamp <= Self.maximumFrameAge,
+                  latestSequence[fixtureID].map({ frame.sequenceNumber > $0 }) ?? true else {
+                diagnostics.rejectedStates += 1
+                continue
+            }
+            latestSequence[fixtureID] = frame.sequenceNumber
+            if pendingByFixture[fixtureID] != nil { diagnostics.coalescedStates += 1 }
             pendingByFixture[fixtureID] = PendingFrame(
                 transport: fixture.transport,
                 states: states.sorted { ($0.segmentID ?? -1) < ($1.segmentID ?? -1) },
-                sequenceNumber: frame.sequenceNumber
+                sequenceNumber: frame.sequenceNumber,
+                timestamp: frame.timestamp
             )
         }
         return flush(fixtures: fixtures, at: timestamp)
     }
 
     func flush(fixtures: [MusicFixtureDescriptor], at timestamp: TimeInterval) -> [MusicRenderCommand] {
+        for (id, pending) in pendingByFixture where timestamp - pending.timestamp > Self.maximumFrameAge {
+            pendingByFixture.removeValue(forKey: id)
+            diagnostics.rejectedStates += 1
+        }
         let availableIDs = Set(fixtures.map(\.id))
         var commands: [MusicRenderCommand] = []
         for fixtureID in pendingByFixture.keys.sorted() where availableIDs.contains(fixtureID) {
@@ -49,6 +72,7 @@ final class MusicLightingRenderer {
             }
             pendingByFixture.removeValue(forKey: fixtureID)
             lastSentAt[fixtureID] = timestamp
+            diagnostics.commandsHandedOff += 1
             commands.append(MusicRenderCommand(
                 fixtureID: fixtureID,
                 transport: pending.transport,
@@ -63,11 +87,13 @@ final class MusicLightingRenderer {
         guard let fixtureIDs else {
             pendingByFixture.removeAll(keepingCapacity: true)
             lastSentAt.removeAll(keepingCapacity: true)
+            latestSequence.removeAll(keepingCapacity: true)
             return
         }
         for id in fixtureIDs {
             pendingByFixture.removeValue(forKey: id)
             lastSentAt.removeValue(forKey: id)
+            latestSequence.removeValue(forKey: id)
         }
     }
 

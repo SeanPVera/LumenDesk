@@ -1040,8 +1040,9 @@ final class LightManager: ObservableObject {
             reducedMotion: reducedMotion,
             useSyntheticPattern: isDemoMode && normalized.usesSyntheticDemoPattern,
             capture: capture,
-            onFrame: { [weak self] frame in
-                self?.renderMusicFrame(frame, scope: scope)
+            onFrame: { [weak self, weak run] frame in
+                guard let self, let run, self.effectRuns[scope] === run else { return }
+                self.renderMusicFrame(frame, scope: scope)
             },
             completion: { [weak self, weak run] result in
                 guard let self, let run, self.effectRuns[scope] === run else { return }
@@ -2842,7 +2843,9 @@ extension LightManager {
     private func renderMusicFrame(_ frame: MusicLightingFrame, scope: LightScope) {
         guard effectRuns[scope]?.effect.id == "music-pulse" else { return }
         let fixtures = musicFixtureDescriptors(in: scope)
-        let commands = musicLightingRenderer.enqueue(frame, fixtures: fixtures, at: frame.timestamp)
+        let ownedIDs = effectRuns[scope]?.animatedDeviceIDs ?? []
+        let activeFixtures = fixtures.filter { ownedIDs.contains($0.id) && device(withID: $0.id)?.isStale == false }
+        let commands = musicLightingRenderer.enqueue(frame, fixtures: activeFixtures, at: ProcessInfo.processInfo.systemUptime)
         for command in commands {
             guard let device = device(withID: command.fixtureID), let first = command.states.first else { continue }
             let color = Color(hue: first.hue, saturation: first.saturation, brightness: 1)
@@ -2853,7 +2856,13 @@ extension LightManager {
             }
 
             switch command.transport {
-            case .lifxLAN, .goveeLAN:
+            case .goveeLAN:
+                guard demoWorkspaceController.allowsLiveNetworking else { continue }
+                let rgb = color.rgbComponents
+                govee?.sendMusicColor(deviceID: device.backendID,
+                    r: Int(rgb.r * 255 * first.brightness), g: Int(rgb.g * 255 * first.brightness),
+                    b: Int(rgb.b * 255 * first.brightness))
+            case .lifxLAN:
                 sendEffectFrame(
                     device,
                     color: color,
@@ -2884,6 +2893,9 @@ extension LightManager {
         musicLightingRenderer.reset(fixtureIDs: ids)
         for id in ids {
             musicModelUpdateAt.removeValue(forKey: id)
+            if let device = device(withID: id), device.brand == .govee {
+                govee?.cancelMusicFrames(deviceID: device.backendID)
+            }
             guard let device = device(withID: id),
                   device.brand == .govee,
                   segmentProfile(for: device) != nil else { continue }

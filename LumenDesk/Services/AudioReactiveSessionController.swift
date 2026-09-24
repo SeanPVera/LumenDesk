@@ -106,6 +106,7 @@ final class AudioReactiveSessionController: ObservableObject {
     private var sessions: [LightScope: Session] = [:]
     private var renderTimer: Timer?
     private var sequenceNumber: UInt64 = 0
+    private var liveCaptureBeganAt: TimeInterval = 0
     private var analysisSnapshot = AudioReactiveSnapshot()
     private var lastSnapshotPublishedAt = -Double.greatestFiniteMagnitude
     private let previewPublicationInterval: TimeInterval = 0.1
@@ -119,6 +120,7 @@ final class AudioReactiveSessionController: ObservableObject {
         subscriptionToken = captureService.subscribe { [weak self] snapshot in
             Task { @MainActor in
                 guard let self, self.sessions.values.contains(where: { !$0.synthetic }) else { return }
+                guard snapshot.analysisTimestamp.map({ $0 >= self.liveCaptureBeganAt }) ?? true else { return }
                 self.analysisSnapshot = snapshot
                 let isPlaying = snapshot.confidence >= 0.025
                     || snapshot.level >= 0.025
@@ -151,6 +153,10 @@ final class AudioReactiveSessionController: ObservableObject {
             return
         }
         let startTime = now()
+        if !useSyntheticPattern && !sessions.values.contains(where: { !$0.synthetic }) {
+            liveCaptureBeganAt = startTime
+            analysisSnapshot = AudioReactiveSnapshot()
+        }
         let groove = MusicGroove.all.first { $0.id == selectedGrooveID } ?? MusicGroove.fourOnTheFloor
         let session = Session(
             configuration: configuration,
@@ -292,12 +298,20 @@ final class AudioReactiveSessionController: ObservableObject {
     private func renderTick() {
         guard !sessions.isEmpty else { return }
         let timestamp = now()
+        if sessions.values.contains(where: { !$0.synthetic }) {
+            let fresh = analysisSnapshot.fresh(at: timestamp)
+            isAudioPlaying = fresh.level >= 0.025 || fresh.energy >= 0.035
+            if timestamp - lastSnapshotPublishedAt >= previewPublicationInterval {
+                latestSnapshot = fresh
+                lastSnapshotPublishedAt = timestamp
+            }
+        }
         sequenceNumber &+= 1
         for (scope, session) in sessions {
             let snapshot = applyMusicalPolicy(
                 session.synthetic
                     ? syntheticSnapshot(groove: session.groove, startedAt: session.startedAt, timestamp: timestamp)
-                    : analysisSnapshot,
+                    : analysisSnapshot.fresh(at: timestamp),
                 configuration: session.configuration
             )
             if session.synthetic {

@@ -29,6 +29,7 @@ final class GoveeClient {
     private let commandGap: TimeInterval = 0.1
     private var queuedOrder: [String: [String]] = [:]          // deviceID -> kinds in send order
     private var queuedPayloads: [String: [String: Data]] = [:] // deviceID -> kind -> latest payload
+    private var volatileQueuedAt: [String: [String: TimeInterval]] = [:]
     private var drainScheduled: Set<String> = []
     private var earliestSend: [String: DispatchTime] = [:]
     /// Interface addresses we already hold a multicast membership on, so a
@@ -169,6 +170,23 @@ final class GoveeClient {
         enqueue(deviceID: deviceID, kind: "razer-frame", payload: GoveeProtocol.razerFrameRequest(colors: colors, blend: blend))
     }
 
+    /// Volatile solid frames use a distinct queue key and expiry so Stop can
+    /// cancel them before the ordinary restoration commands enter this queue.
+    func sendMusicColor(deviceID: String, r: Int, g: Int, b: Int) {
+        enqueue(deviceID: deviceID, kind: "music-color", payload: GoveeProtocol.colorRequest(r: r, g: g, b: b, kelvin: 0))
+    }
+
+    func cancelMusicFrames(deviceID: String) {
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.queuedOrder[deviceID, default: []].removeAll { $0 == "music-color" || $0 == "razer-frame" }
+            for kind in ["music-color", "razer-frame"] {
+                self.queuedPayloads[deviceID]?.removeValue(forKey: kind)
+                self.volatileQueuedAt[deviceID]?.removeValue(forKey: kind)
+            }
+        }
+    }
+
     /// Sends the Bluetooth-format packets that make a segment layout durable.
     /// Packets are chunked across datagrams to stay far below the UDP MTU,
     /// and queueing is exclusive: a rapid second apply replaces any unsent
@@ -218,6 +236,9 @@ final class GoveeClient {
             if self.queuedPayloads[deviceID, default: [:]].updateValue(payload, forKey: kind) == nil {
                 self.queuedOrder[deviceID, default: []].append(kind)
             }
+            if kind == "music-color" || kind == "razer-frame" {
+                self.volatileQueuedAt[deviceID, default: [:]][kind] = ProcessInfo.processInfo.systemUptime
+            }
             self.scheduleDrain(deviceID)
         }
     }
@@ -258,8 +279,12 @@ final class GoveeClient {
             if !order.isEmpty { scheduleDrain(deviceID) }
             return
         }
-        earliestSend[deviceID] = DispatchTime.now() + commandGap
-        sendCommand(payload, to: host, deviceID: deviceID, kind: kind)
+        let queuedAt = volatileQueuedAt[deviceID]?.removeValue(forKey: kind)
+        let expired = queuedAt.map { ProcessInfo.processInfo.systemUptime - $0 > MusicLightingRenderer.maximumFrameAge } ?? false
+        if !expired {
+            earliestSend[deviceID] = DispatchTime.now() + commandGap
+            sendCommand(payload, to: host, deviceID: deviceID, kind: kind)
+        }
         if order.isEmpty {
             queuedOrder.removeValue(forKey: deviceID)
             if queuedPayloads[deviceID]?.isEmpty == true {

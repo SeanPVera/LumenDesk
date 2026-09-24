@@ -18,6 +18,7 @@ export interface Device {
   reachable: boolean
   power: boolean
   brightness: number
+  controlRevision?: number
   color: RGB | null
   kelvin: number | null
   favorite?: boolean
@@ -271,7 +272,7 @@ export const deleteSchedule = (port: number, roomID: string, scheduleID: string)
 /** One colour per fixture. The bridge never opens a razer stream from this path. */
 export const postMusicFrame = (
   port: number,
-  states: { fixtureID: string; rgb: RGB }[],
+  states: { fixtureID: string; rgb: RGB; brightness?: number; transitionDuration?: number; restoring?: boolean; owner?: string; controlRevision?: number; release?: boolean }[],
 ) =>
   request<{ ok: boolean; applied: number }>(port, '/music/frame', {
     method: 'POST',

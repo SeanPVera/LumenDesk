@@ -82,6 +82,7 @@ jobs:
           BASE_PATH: ${{ steps.pages.outputs.base_path }}
         run: |
           npm ci
+          npm test
           npm run build
 
       - name: Build design prototype

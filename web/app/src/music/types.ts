@@ -115,6 +115,13 @@ export interface AudioReactiveSnapshot {
   phrasePosition: number;
   energySlope: number;
   sourceDescription: string;
+  analysisTimestamp?: number;
+  analysisCompletedAt?: number;
+  rawRMS?: number;
+  onset?: number;
+  gridBeatPosition?: number;
+  analyzedSamples?: number;
+  droppedBuffers?: number;
 }
 
 export function emptySnapshot(): AudioReactiveSnapshot {
@@ -256,4 +263,14 @@ export function synthSpectrum(
     bins[i] = Math.min(1, bass + body + mid + high);
   }
   return bins;
+}
+
+/** Matches AudioReactiveSnapshot.fresh; no raw PCM is retained for diagnostics. */
+export function freshSnapshot(input: AudioReactiveSnapshot, timestamp: number): AudioReactiveSnapshot {
+  if (input.analysisTimestamp == null) return input;
+  const weight = clamp01(1 - (Math.max(0, timestamp - input.analysisTimestamp) - .25));
+  const next = { ...input };
+  for (const key of ['level','energy','confidence','beat','pulse','kick','snare','percussion','bass','mids','highs','beatConfidence'] as const) next[key] *= weight;
+  if (weight === 0) { next.isTempoLocked = false; next.tempo = 0; }
+  return next;
 }

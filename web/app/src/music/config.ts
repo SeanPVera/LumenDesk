@@ -23,7 +23,7 @@ export const PRESET_COPY: Record<
   },
   balanced: {
     name: "Balanced",
-    summary: "Beat pulses, frequency colour, moderate movement.",
+    summary: "Beat accents, palette colour, moderate movement.",
     plain: "The everyday setting. Lights pulse with the beat, change colour as the music changes, and move a little.",
     bestFor: "Anything, if you are unsure",
   },
@@ -103,16 +103,16 @@ export const SOURCE_COPY: Record<string, { name: string; plain: string }> = {
 
 export const MUSIC_HELP = {
   steps: [
-    "Pick a preset from the panel below. Balanced is the safe first choice, and you can change it while the show runs.",
+    "Pick a preset from the panel below. Soundcheck is the default first choice, and you can change it while the show runs.",
     "Choose where the sound comes from. Each source button starts the show as soon as you pick it, and the microphone or a file may ask for permission first. Start then restarts whatever source you last chose.",
-    "Stop ends the show. The lights hold the last colour they were sent, so apply a scene from Library if you want them back where they were.",
+    "Stop ends the show and restores the starting colour and brightness while this show still owns the lights. A newer manual change takes priority.",
   ],
   readout:
     'The bars show what the page is hearing: overall volume, then bass, mids and highs. The dot flashes on each beat. Once the tempo locks — usually about four seconds of steady rhythm — the label changes from "Beat" to the speed in beats per minute and how many beats are in a bar.',
   roles:
     "Every light gets a job. Auto picks one for you and is fine for most rooms; change one only if you want that specific light doing something else.",
   safety:
-    "Flashing is blocked by default, because flashing light can trigger seizures and migraines in some people. Nothing here can exceed three flashes a second.",
+    "Flashing is blocked by default, because flashing light can trigger seizures and migraines in some people. Explicit flash requests are capped at three per second. Ordinary brightness changes can still be uncomfortable; no setting guarantees medical safety.",
   strips:
     "Strip lights follow as a single colour in the browser. Per-segment chases stay in the Mac and iPhone apps for now.",
 } as const;

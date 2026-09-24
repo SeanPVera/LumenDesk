@@ -8,7 +8,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "preview": "vite preview --host 0.0.0.0"
+    "preview": "vite preview --host 0.0.0.0",
+    "test": "tsc -p tsconfig.music-tests.json && node test/run.cjs"
   },
   "dependencies": {
     "react": "19.2.7",

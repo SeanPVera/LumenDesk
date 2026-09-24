@@ -16,6 +16,7 @@ protocol LIFXClientDelegate: AnyObject {
 /// current label and color via LightGet (101) and parse LightState (107).
 final class LIFXClient {
     weak var delegate: LIFXClientDelegate?
+    let musicMetrics = MusicDispatchMetrics()
 
     private let socket: UDPSocket
     private let queue = DispatchQueue(label: "LumenDesk.lifx")
@@ -91,15 +92,19 @@ final class LIFXClient {
         }
     }
 
-    func setColor(macHex: String, color: LIFXHSBK, durationMS: UInt32 = 200) {
+    func setColor(macHex: String, color: LIFXHSBK, durationMS: UInt32 = 200, musicTimestamp: TimeInterval? = nil) {
         queue.async { [weak self] in
             guard let self,
                   let host = self.addressesByMac[macHex],
                   let target = self.targetsByMac[macHex] else { return }
+            if let timestamp = musicTimestamp, ProcessInfo.processInfo.systemUptime - timestamp > MusicLightingRenderer.maximumFrameAge {
+                self.musicMetrics.record(age: ProcessInfo.processInfo.systemUptime - timestamp, expired: true)
+                return
+            }
             let payload = LIFXProtocol.setColorPayload(color, durationMS: durationMS)
             let packet = LIFXProtocol.packet(type: .lightSetColor, source: self.source,
                                              target: target, payload: payload)
-            self.sendCommand(packet, to: host)
+            self.sendCommand(packet, to: host, musicTimestamp: musicTimestamp)
         }
     }
 
@@ -125,10 +130,12 @@ final class LIFXClient {
         sendCommand(packet, to: host)
     }
 
-    private func sendCommand(_ data: Data, to host: String) {
+    private func sendCommand(_ data: Data, to host: String, musicTimestamp: TimeInterval? = nil) {
         do {
             try socket.send(data, to: host, port: LIFXProtocol.port)
+            if let musicTimestamp { musicMetrics.record(age: ProcessInfo.processInfo.systemUptime - musicTimestamp) }
         } catch {
+            if let musicTimestamp { musicMetrics.record(age: ProcessInfo.processInfo.systemUptime - musicTimestamp, failed: true) }
             delegate?.lifxCommandFailed(error)
         }
     }

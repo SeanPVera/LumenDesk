@@ -1,0 +1,5 @@
+const { writeFileSync } = require('node:fs')
+const { spawnSync } = require('node:child_process')
+writeFileSync('.test-build/package.json', '{"type":"module"}')
+const result = spawnSync(process.execPath, ['--import', './test/register.mjs', '--test', 'test/music.test.mjs'], { stdio: 'inherit' })
+process.exit(result.status ?? 1)

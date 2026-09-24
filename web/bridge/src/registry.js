@@ -21,6 +21,7 @@ export class Registry {
       brightness: 0,
       color: null,
       kelvin: null,
+      controlRevision: 0,
       ...existing,
       ...patch,
       lastSeen: this.now(),
@@ -40,6 +41,13 @@ export class Registry {
     const device = { ...existing, ...patch }
     this.devices.set(id, device)
     return device
+  }
+
+  /** Explicit user/scene/schedule actions revoke a music writer's ownership.
+   * Device status replies do not, so telemetry cannot cancel a show. */
+  claimControl(id) {
+    const device=this.get(id)
+    if(device) this.patch(id,{controlRevision:(device.controlRevision ?? 0)+1,musicOwner:null})
   }
 
   list() {

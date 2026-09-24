@@ -3,7 +3,7 @@ import type { Device, RGB } from './bridge'
 import { MUSIC_HELP, PRESET_COPY, ROLE_COPY, SOURCE_COPY, configurationFor } from './music/config'
 import { GROOVES } from './music/grooves'
 import { hsvToRgb } from './music/fixtures'
-import { WebMusicSession, frameToCommands, setFixtureRole } from './music/session'
+import { WebMusicSession, LatestMusicFrameSender, setFixtureRole, type MusicFrameCommand } from './music/session'
 import type { FixtureRole, MusicModePreset } from './music/types'
 
 const PRESETS: Exclude<MusicModePreset, 'custom'>[] = [
@@ -28,7 +28,7 @@ export function MusicModeView({
   port: number
   postFrame: (
     port: number,
-    states: { fixtureID: string; rgb: { r: number; g: number; b: number } }[],
+    states: MusicFrameCommand[],
   ) => Promise<unknown>
 }) {
   const sessionRef = useRef<WebMusicSession | null>(null)
@@ -44,28 +44,52 @@ export function MusicModeView({
   const [file, setFile] = useState<File | null>(null)
   const reachable = devices.filter(d => d.reachable)
 
-  // What the fixtures were showing before the show began. Music frames are the
-  // only thing this view changes on a light, so replaying these colours is a
-  // complete restore — without it, Stop simply froze the last frame on the
-  // lights and left them there.
-  const baseline = useRef<{ fixtureID: string; rgb: RGB }[] | null>(null)
+  // Restore color and independent brightness only while this session still
+  // owns the fixture. The bridge rejects restoration after a newer manual edit.
+  const baseline = useRef<MusicFrameCommand[] | null>(null)
+  const senderRef = useRef<LatestMusicFrameSender | null>(null)
+  const postRef = useRef(postFrame); postRef.current=postFrame
+  const portRef = useRef(port); portRef.current=port
+  const owner = useRef(crypto.randomUUID())
+  if (!senderRef.current) senderRef.current = new LatestMusicFrameSender(states=>postRef.current(portRef.current,states.map(state=>({
+    ...state,owner:owner.current,controlRevision:baseline.current?.find(b=>b.fixtureID===state.fixtureID)?.controlRevision
+  }))))
+  const sender=senderRef.current
+  const transition = useRef(Promise.resolve())
+  const transitionEpoch = useRef(0)
 
   const start = (source: Parameters<WebMusicSession['start']>[0], audio?: File) => {
+    const epoch=++transitionEpoch.current
+    transition.current=transition.current.then(async()=>{
+    if(epoch!==transitionEpoch.current) return
+    await sender.stop()
+    if(epoch!==transitionEpoch.current) return
     // Capture only when nothing is running: a Restart must not adopt a colour
     // the show itself painted as the state to go back to.
     if (!state.running) {
       baseline.current = reachable
-        .filter((d): d is Device & { color: RGB } => Boolean(d.color))
-        .map(d => ({ fixtureID: d.id, rgb: d.color }))
+        .filter((d): d is Device & { color: RGB } => Boolean(d.color) && session.state.fixtures.find(f=>f.id===d.id)?.role !== 'off')
+        .map(d => ({ fixtureID: d.id, rgb: d.color, brightness:d.brightness/100,restoring:true,owner:owner.current,controlRevision:d.controlRevision ?? 0 }))
     }
-    return session.start(source, audio)
+    await session.start(source, audio)
+    if (session.state.running && epoch===transitionEpoch.current) sender.start()
+    })
+    return transition.current
   }
 
-  const stop = async () => {
-    await session.stop()
-    const previous = baseline.current
-    baseline.current = null
-    if (previous?.length) await postFrame(port, previous).catch(() => undefined)
+  const stop = () => {
+    ++transitionEpoch.current
+    const previous=baseline.current; baseline.current=null
+    const restore=state.configuration.restorePreviousState
+    // Invalidate permission/capture work synchronously; serialize network restore
+    // before any subsequent start. No old HTTP frame can follow the restore.
+    const captureStopped=session.stop()
+    transition.current=(async()=>{
+      await captureStopped
+      await sender.stop()
+      if(previous?.length) await postFrame(port,restore?previous:previous.map(s=>({...s,restoring:false,release:true}))).catch(()=>undefined)
+    })()
+    return transition.current
   }
 
   // Leaving the tab or navigating away is a stop too, so the lights are not
@@ -79,12 +103,9 @@ export function MusicModeView({
   }, [session, reachable.map(d => d.id).join('|')])
 
   useEffect(() => {
-    session.setOnFrame(frame => {
-      const commands = frameToCommands(frame)
-      if (commands.length) postFrame(port, commands).catch(() => undefined)
-    })
+    session.setOnFrame(frame => sender.enqueue(frame))
     return () => session.setOnFrame(null)
-  }, [session, port, postFrame])
+  }, [session, sender])
 
   const snapshot = state.snapshot
   const presetCopyKey = state.configuration.preset === 'custom' ? 'balanced' : state.configuration.preset
@@ -197,6 +218,14 @@ export function MusicModeView({
         )}
       </div>
 
+      <details className="panel">
+        <summary>Music diagnostics</summary>
+        <p>Source: {state.source} · snapshot age {session.diagnostics.snapshotAge.toFixed(3)} s · samples analyzed {session.diagnostics.analyzedSamples} · capture buffers dropped {session.diagnostics.droppedBuffers}</p>
+        <p>Onset {(snapshot.onset ?? 0).toFixed(2)} · beat count {snapshot.beatCount} · confidence {snapshot.beatConfidence.toFixed(2)} · preset {state.configuration.preset}</p>
+        <p>Grid phase now {snapshot.beatInterval > 0 ? (((performance.now()/1000-snapshot.beatReferenceTime)/snapshot.beatInterval)%1).toFixed(2) : "unlocked"} · last render interval {session.diagnostics.renderInterval.toFixed(3)} s (target 0.050 s) · effective brightness {state.configuration.masterBrightness.toFixed(2)} · intensity {state.configuration.effectIntensity.toFixed(2)}</p>
+        <p>Generated {session.diagnostics.framesGenerated} · HTTP submitted {sender.diagnostics.submitted} · accepted {sender.diagnostics.accepted} · coalesced {sender.diagnostics.coalesced} · expired {sender.diagnostics.expired} · errors {sender.diagnostics.failures}</p>
+        <p>Preview shows generated frames. HTTP acceptance does not establish device receipt or visible timing. Brightness modulation can still be uncomfortable with flashes disabled.</p>
+      </details>
       <div className="panel meters">
         <Meter label="Input" value={snapshot.level} />
         <Meter label="Bass" value={snapshot.bass} />
@@ -228,13 +257,14 @@ export function MusicModeView({
                   <strong>{fixture.label}</strong>
                   <select
                     value={fixture.role}
+                    disabled={state.running && fixture.role === 'off'}
                     title={ROLE_COPY[fixture.role].plain}
                     onChange={event => {
                       setFixtureRole(session, fixture.id, event.target.value as FixtureRole)
                       session.patch({})
                     }}
                   >
-                    {ROLES.map(role => (
+                    {ROLES.filter(role=>!state.running || role !== 'off' || fixture.role === 'off').map(role => (
                       <option key={role} value={role}>
                         {ROLE_COPY[role].name}
                       </option>

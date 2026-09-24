@@ -4,6 +4,7 @@ import { clampPercent, percentToU16 } from './color.js'
 // direct control, scene apply and the scheduler — so all three behave the same.
 
 export function applyCommand({ device, command, registry, lifx, govee }) {
+  registry.claimControl?.(device.id)
   const client = device.brand === 'lifx' ? lifx : govee
 
   if (command.kind === 'power') {

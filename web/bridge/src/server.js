@@ -83,6 +83,7 @@ export function createServer({
   staticDir = null,
   store = null,
 }) {
+  const musicBrightnessOpened = new Set()
   const dispatch = {
     power: (device, body) => {
       const on = Boolean(body.on)
@@ -295,6 +296,8 @@ export function createServer({
         if (!device) return json(res, 404, { error: 'unknown device' })
 
         const body = await readJSON(req)
+        registry.claimControl(device.id)
+        musicBrightnessOpened.delete(device.id)
         const result = dispatch[action](device, body)
         if (result && result.error) return json(res, 400, result)
         if (!result) return json(res, 503, { error: 'device is not addressable yet' })
@@ -317,19 +320,46 @@ export function createServer({
           if (!device) continue
           const rgb = state.rgb
           if (!isValidRGB(rgb)) continue
-          const ok =
-            device.brand === 'lifx'
-              ? lifx.setColor(device, { rgb })
-              : govee.setColor(device, { rgb })
+          if (state.owner) {
+            if (state.controlRevision !== device.controlRevision) continue
+            if (device.musicOwner && device.musicOwner !== state.owner && performance.now()-(device.musicFrameAt ?? 0)<2000) continue
+            if ((state.restoring || state.release) && device.musicOwner !== state.owner) continue
+            if (state.release) {
+              registry.patch(id,{musicOwner:null});musicBrightnessOpened.delete(id);continue
+            }
+            if (!device.musicOwner || device.musicOwner !== state.owner) musicBrightnessOpened.delete(id)
+            registry.patch(id,{musicOwner:state.restoring?null:state.owner,musicFrameAt:performance.now()})
+          }
+          // RGB is chroma; brightness is independent (legacy RGB-only callers
+          // still retain the device's current brightness).
+          const level = Number.isFinite(state.brightness) ? Math.max(0,Math.min(1,state.brightness)) : undefined
+          const restoring = state.restoring === true
+          let payload = rgb
+          if (device.brand === 'govee' && level !== undefined) {
+            if (restoring) {
+              govee.setBrightness(device, level * 100)
+              musicBrightnessOpened.delete(device.id)
+            } else {
+              if (!musicBrightnessOpened.has(device.id)) {
+                govee.setBrightness(device,100)
+                musicBrightnessOpened.add(device.id)
+              }
+              payload = Object.fromEntries(Object.entries(rgb).map(([k,v])=>[k,Math.round(v*level)]))
+            }
+          }
+          const ok = device.brand === 'lifx'
+            ? lifx.setColor(device, {rgb,brightnessPercent:level === undefined ? undefined : level*100,
+                durationMS:Number.isFinite(state.transitionDuration)?Math.max(0,Math.min(500,state.transitionDuration*1000)):90})
+            : govee.setColor(device, {rgb:payload})
           if (ok) {
             // Colour only: this path never sends a power command, so it must
             // not record a power state it did not set. The device's own status
             // reply is what says whether the light is lit.
-            registry.patch(device.id, { color: rgb })
+            registry.patch(device.id, { color: payload, ...(level !== undefined ? {brightness: device.brand === 'lifx' || restoring ? level*100 : 100} : {}) })
             applied += 1
           }
         }
-        return json(res, 200, { ok: true, applied })
+        return json(res, 200, { ok: true, applied, stage: 'accepted-for-local-dispatch' })
       }
 
       if (store) {

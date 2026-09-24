@@ -1040,8 +1040,9 @@ final class LightManager: ObservableObject {
             reducedMotion: reducedMotion,
             useSyntheticPattern: isDemoMode && normalized.usesSyntheticDemoPattern,
             capture: capture,
-            onFrame: { [weak self] frame in
-                self?.renderMusicFrame(frame, scope: scope)
+            onFrame: { [weak self, weak run] frame in
+                guard let self, let run, self.effectRuns[scope] === run else { return }
+                self.renderMusicFrame(frame, scope: scope)
             },
             completion: { [weak self, weak run] result in
                 guard let self, let run, self.effectRuns[scope] === run else { return }
@@ -1213,7 +1214,7 @@ final class LightManager: ObservableObject {
     /// Sending them through the normal confirmation pipeline used to allocate
     /// three Tasks and publish several whole-app changes per light, per frame.
     private func sendEffectFrame(_ device: LightDevice, color: Color, brightness: Double,
-                                 duration: TimeInterval) {
+                                 duration: TimeInterval, musicTimestamp: TimeInterval? = nil) {
         guard demoWorkspaceController.allowsLiveNetworking else { return }
         switch device.brand {
         case .lifx:
@@ -1227,7 +1228,8 @@ final class LightManager: ObservableObject {
                     brightness: UInt16(brightness * 65535),
                     kelvin: UInt16(device.kelvin)
                 ),
-                durationMS: UInt32(max(0, min(500, Int(duration * 1_000))))
+                durationMS: UInt32(max(0, min(500, Int(duration * 1_000)))),
+                musicTimestamp: musicTimestamp
             )
         case .govee:
             let rgb = color.rgbComponents
@@ -2745,6 +2747,15 @@ extension Color {
 // MARK: - Music Mode
 
 extension LightManager {
+    var musicLIFXDispatch: MusicDispatchMetrics.Snapshot { lifx?.musicMetrics.snapshot() ?? .init() }
+    var musicGoveeDispatch: MusicDispatchMetrics.Snapshot { govee?.musicMetrics.snapshot() ?? .init() }
+    var musicRenderDiagnostics: MusicLightingRenderer.Diagnostics { musicLightingRenderer.diagnostics }
+
+    func setMusicReducedMotion(_ enabled: Bool) {
+        for scope in musicModeController.activeScopeIDs { effectRuns[scope]?.reducedMotion = enabled }
+        setMusicModeConfiguration(musicModeConfiguration)
+    }
+
     func setMusicModeConfiguration(_ configuration: MusicModeConfiguration) {
         musicModeConfiguration = configuration.normalized()
         persistApplicationState()
@@ -2842,7 +2853,9 @@ extension LightManager {
     private func renderMusicFrame(_ frame: MusicLightingFrame, scope: LightScope) {
         guard effectRuns[scope]?.effect.id == "music-pulse" else { return }
         let fixtures = musicFixtureDescriptors(in: scope)
-        let commands = musicLightingRenderer.enqueue(frame, fixtures: fixtures, at: frame.timestamp)
+        let ownedIDs = effectRuns[scope]?.animatedDeviceIDs ?? []
+        let activeFixtures = fixtures.filter { ownedIDs.contains($0.id) && device(withID: $0.id)?.isStale == false }
+        let commands = musicLightingRenderer.enqueue(frame, fixtures: activeFixtures, at: ProcessInfo.processInfo.systemUptime)
         for command in commands {
             guard let device = device(withID: command.fixtureID), let first = command.states.first else { continue }
             let color = Color(hue: first.hue, saturation: first.saturation, brightness: 1)
@@ -2853,29 +2866,38 @@ extension LightManager {
             }
 
             switch command.transport {
-            case .lifxLAN, .goveeLAN:
+            case .goveeLAN:
+                guard demoWorkspaceController.allowsLiveNetworking else { continue }
+                let rgb = color.rgbComponents
+                govee?.sendMusicColor(deviceID: device.backendID,
+                    r: Int(rgb.r * 255 * first.brightness), g: Int(rgb.g * 255 * first.brightness),
+                    b: Int(rgb.b * 255 * first.brightness))
+            case .lifxLAN:
                 sendEffectFrame(
                     device,
                     color: color,
                     brightness: first.brightness,
-                    duration: first.transitionDuration
+                    duration: first.transitionDuration, musicTimestamp: frame.timestamp
                 )
             case .goveeRealtimeSegments:
-                let segments = command.states.map { state in
-                    GoveeSegmentColor(
-                        color: Color(hue: state.hue, saturation: state.saturation, brightness: 1),
-                        brightness: state.brightness
-                    )
-                }
+                let states = musicCapabilityStates(command.states, fixtureID: command.fixtureID)
+                let segments = states.map { GoveeSegmentColor(color: Color(hue: $0.hue, saturation: $0.saturation, brightness: 1), brightness: $0.brightness, isOn: $0.brightness > 0) }
                 guard !segments.isEmpty else { continue }
-                previewSegments(
-                    device,
-                    state: zoneConstrained(
-                        GoveeSegmentState(colors: segments, gradient: false, isActive: false),
-                        for: device
-                    )
-                )
+                previewSegments(device, state: GoveeSegmentState(colors: segments, gradient: false, isActive: false))
             }
+        }
+    }
+
+    /// Shared by transport and preview: firmware masks are visible before send.
+    func musicCapabilityStates(_ states: [MusicLightingState], fixtureID: String) -> [MusicLightingState] {
+        guard let device = device(withID: fixtureID), device.brand == .govee,
+              states.first?.segmentID != nil else { return states }
+        let colors = states.map { GoveeSegmentColor(color: Color(hue: $0.hue, saturation: $0.saturation, brightness: 1), brightness: $0.brightness) }
+        let constrained = zoneConstrained(GoveeSegmentState(colors: colors, gradient: false, isActive: false), for: device)
+        return zip(states, constrained.colors).map { state, segment in
+            MusicLightingState(fixtureID: state.fixtureID, segmentID: state.segmentID, hue: state.hue,
+                saturation: state.saturation, brightness: segment.isOn ? segment.brightness : 0,
+                transitionDuration: state.transitionDuration, priority: state.priority)
         }
     }
 
@@ -2884,6 +2906,9 @@ extension LightManager {
         musicLightingRenderer.reset(fixtureIDs: ids)
         for id in ids {
             musicModelUpdateAt.removeValue(forKey: id)
+            if let device = device(withID: id), device.brand == .govee {
+                govee?.cancelMusicFrames(deviceID: device.backendID)
+            }
             guard let device = device(withID: id),
                   device.brand == .govee,
                   segmentProfile(for: device) != nil else { continue }

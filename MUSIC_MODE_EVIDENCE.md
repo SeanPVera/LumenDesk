@@ -1,275 +1,260 @@
-# Music Mode: why it read as flashing, and what changed
+# Music Mode production evidence — 2026-09-24
 
-This is the measurement record behind the choreography and beat-tracking
-changes. [MUSIC_MODE_ARCHITECTURE.md](MUSIC_MODE_ARCHITECTURE.md) describes the
-pipeline; this file says what it was measured doing, and what it does now.
+Reviewable patch: [PR #105](https://github.com/SeanPVera/LumenDesk/pull/105), branch
+`fix/music-mode-production-audit`. Nothing was merged, released or installed.
 
-## How these numbers were produced
+**Installed-app/source match is unknown.** This environment cannot inspect the
+user's installed macOS app or lights. Do not attribute an observed old build's
+behavior to this source. Record the installed app's version, build, executable
+hash and provenance before the listening comparison; version 1.0/build 1 alone
+cannot distinguish these commits.
 
-There is no Swift toolchain on Linux, so the Swift pipeline —
-`MusicFeatureAnalyzer`, `BeatTracker`/`MetreTracker`, `MusicChoreographyEngine`,
-`MusicLightingRenderer` and the session controller's 20 Hz render clock — was
-transliterated into Node and driven with synthesised audio.
+## Baseline and evidence provenance
 
-Two levels of fidelity, and the difference matters when reading the results:
+| Item | Established |
+|---|---|
+| Baseline | Clean `main@3ceeec29d88a9193be5c3402779a376a27b07e59`; tree `0192e4b3cfb06a900ab89d5acc258fe5dbfb829e` |
+| Recent changes | `3ceeec2` theme catalog (#102); `90aad38` Music Mode merge (#103), including `b2dc66c`; `c665f31` prior controls audit (#101) |
+| Instructions | CLAUDE.md, README, architecture, evidence and Music Mode control rows read; no applicable AGENTS.md found |
+| Local environment | Linux, Node v24.19.0; no Swift/Xcode or installed macOS app |
+| Native configuration | LumenDesk scheme, Debug; macOS 13 / iOS 16 deployment targets; Swift 5 language mode; `com.lumendesk.LumenDesk`, version 1.0/build 1, team SW2N54YNK3 unchanged |
+| Baseline local tests | `npm --prefix web/bridge test`: **58/58 passed**; web `npm ci` and `npm run build`: passed |
+| Baseline native evidence | Existing main Build run [35686114065](https://github.com/SeanPVera/LumenDesk/actions/runs/35686114065) succeeded. This is a retrieved CI result, not local execution |
+| New native execution | Actual macOS Swift/XCTest and generic iOS build through repository CI on macos-15; code-signing disabled only for CI, as before |
+| Physical evidence | None: no listening, visible lighting, device latency, packet-loss or installed-app measurements |
 
-- **The choreography, renderer and beat tracker ports are exact.** They are pure
-  arithmetic, transliterated statement by statement, and every constant is
-  diffed against the Swift mechanically.
-- **The analyzer port is structurally faithful but numerically approximate.**
-  Band layout, flux, auto-gain, envelopes and snapshot assembly are exact;
-  `vDSP_fft_zrip` is replaced by a plain radix-2 FFT scaled to match its output,
-  and the Hann window is the periodic form.
+The previous version of this document described an **uncommitted Node translation
+of Swift**, including claims of exact ports and simulated before/after percentages.
+Those figures and `music-mode-timeline.svg` are historical simulation material,
+not native production execution and not acceptance evidence for this patch. The
+shipped TypeScript tests below execute the real browser implementation, and are
+labeled separately from Swift. No third DSP implementation was introduced.
 
-The harness is deliberately **not** committed. This repository already carries
-one parallel implementation of the music pipeline in `web/`, with explicit
-lockstep rules, because parallel implementations drift and the drift causes real
-bugs. A third copy that neither the app nor CI exercises would rot immediately
-and then mislead whoever read it next. The durable form of these measurements is
-the regression tests in `LumenDeskTests/MusicModeTests.swift`; the method is
-described here precisely enough to rebuild.
+## Material findings, ranked by likely contribution
 
-The port is validated against an assertion that already passes in Swift:
-`MusicModeTests.testAnalyzerReportsTheMusicalPulseNotTheOnsetRate` feeds a
-120 BPM kick with sixteenth hats and asserts tempo 120 ± 6, interval 0.5 ± 0.03,
-lock before 8 s, and a beat count within 2.5 of the true count. The port
-reproduces it: **tempo 119.82, interval 0.5008, lock at 3.84 s, 21 beats against
-20.3 expected.**
+Ranking is a causal assessment of source and deterministic tests, not an observed
+ranking in the user's room. Browser-only findings do not explain a native app by
+themselves.
 
-Everything below is measured on synthetic material. None of it is evidence about
-physical light timing; see [What still needs a human and a
-room](#what-still-needs-a-human-and-a-room).
+| Rank / location | Trigger and mechanism | Visible consequence / status |
+|---|---|---|
+| 1. Browser `session.ts` Worklet/tick; bridge `/music/frame` | Latest 128-sample worklet buffer overwritten until a 20 Hz render tick; at 48 kHz only about 2,560/48,000 samples/s reach analysis under ideal scheduling. Stale PCM can be analyzed again. RGB value did not control LIFX's separate brightness channel; 250 ms default transitions repeatedly interrupted | A discontinuous, slowed analysis clock and missing brightness envelope. Confirmed source path plus pre-fix regression failures. Continuous capture consumption, independent brightness and transitions repaired |
+| 2. `MusicChoreographyEngine.makeFrame`, native + web | Minimum floor bypasses master zero; flashes and old smoothing state bypass a newly lowered ceiling; nonzero base accent persists at sensitivity zero. Independent auto-gain makes quiet audio approach loud levels | Controls cannot restrain output as labeled; dynamics lose contrast. Native baseline tests fail, current tests exercise final bounds, zero response, PCM dynamics. Bed remains independent of accents; crest bounded without flattening every loud beat |
+| 3. `AudioLevelMonitor` / freshness / engine | Receipt-time anchoring, unmarked dropped buffers, sample-rate history splice, and last snapshot held indefinitely after missing input. Off-grid max-envelope reuses the last onset | False seams or persistent energy after useful capture disappears. Monotonic buffer-end timing, discontinuity reset, duplicate rejection, generations and explicit freshness added. PCM/stale tests run; real interruption remains H |
+| 4. Palette progression / role color | Accent invents a complement; transient mood/chroma alters selected colors; zero color-change still progresses; reacquired absolute beat count moves palette immediately | Theme drift and unrelated hue changes. All-role one-color and zero-hold tests fail on baseline Swift; fixed in both engines. New reacquisition test preserves current position |
+| 5. Small-room topology / stereo | Linear positions 0 and 1 coincide on the sine wave; Mac capture downmix removes stereo before analyzer; metre samples only the hop where a predicted event fires | Two bulbs move together, stereo control is ineffective, metre sees a poor sample of kick weight. Linear spacing and preserved channels repaired; completed beat windows feed metre. Physical layout/automatic metre reliability still limited |
+| 6. Renderer / transports / lifecycle | Renderer accepts old sequence/age; native ordinary Govee pending color survives stop; web launches overlapping HTTP requests and can restore over a newer manual edit | Stale changes, queue lag and scene interference. Latest-frame expiry, cancellation, owner guards, serialized web stop/restore, bridge revision checks added and tested at component/loopback levels |
+| 7. Evidence and UI claims | “Working,” “safe,” “20 fps,” and timing compensation conflate bindings, generated output and visible output | Misleading confidence. Diagnostics distinguish stages; no-flash wording, sustained-energy labels, unsupported-control reasons and documents corrected |
 
-## Before and after, on one screen
+## Rechecking the previous fixes
 
-![Before and after timelines](music-mode-timeline.svg)
+- **Dense kicks/hats and the prior dotted-tempo regression:** existing native
+  `testTempoHoldsThePulseThroughDenseRealisticMaterial` now actually executes in
+  macOS CI, with its >90% correct-tempo and <4 switches assertions unchanged.
+  The original 120 BPM kick/hat lock and beat-count tests also remain intact.
+  This supports those fixtures, not all music.
+- **Sustained false confidence:** native 20 s continuous chord test retains zero
+  locked snapshots and confidence <.38; production web chord test also has zero
+  locks after settling. Does not establish behavior for vibrato, tremolo or room noise.
+- **Envelope/comfort:** existing native ratio, quiet restraint, large-swing rate,
+  low-confidence and half-time tests retained. New headroom curve initially broke
+  role contrast and quiet restraint, then a broad Hit contour broke half-time
+  contrast. CI caught these; production contours were corrected without relaxing
+  those assertions. These are engineering proxies, not medical/perceptual guarantees.
+- **Color stability:** earlier smoothing did not preserve single-color theme
+  identity for every role or make zero mean hold. New tests establish both.
+- **Native/web drift:** substantive capture, analyzer, MIDI, beat-count and
+  brightness differences were present. Corrected production paths now have tests
+  in both languages; no claim of bit-exact FFT or complete behavioral parity.
+- **Pacing:** renderer unit limits do not establish transport throughput. Native
+  Govee still has 100 ms/device datagram spacing underneath a 50 ms segment handoff
+  ceiling. A claim that transport was conclusively “not the bottleneck” was unsupported.
+- **Latency:** `outputLatencyCompensation = .045` remains an assumption. The engine
+  also predicts by 0.8 × its .026 s attack. Neither number is a hardware measurement.
 
-Eight seconds of the dense 124 BPM groove on the default preset. Dashed lines are
-the generator's true beat times. Top to bottom: the audio envelope; the detected
-tempo (red flipping between 124 and 82.7, green flat at 124); wash brightness
-before and after; hit brightness before and after; and the wash hue as a colour
-strip, before and after. This is a simulation of the choreography, not evidence
-about physical light timing.
+## Reproducible methods and results
 
-## What was actually wrong
+### Actual native production tests
 
-Four findings, in order of how much they contributed.
+`MusicModeTests.testPCMProductionPipelineAcrossFormatsAndDynamics` drives the
+production analyzer → choreography → renderer using continuous PCM kick + dense
+sixteenth hats for 14 s, Soundcheck, one LIFX fixture, approximately 20 Hz rendering.
+The generator uses a running sample offset; no oscillator restarts at buffer seams.
+There is no audio capture framework or real transport in this deterministic test.
 
-### 1. The tempo estimate flipped between the beat and its dotted relative, at full confidence
+| Sample rate / chunk | Locked render samples after 8 s | Within 120 ± 6 BPM | Renderer handoffs over 14 s |
+|---|---:|---:|---:|
+| 48 kHz / 128 | 119 | 119 (100%) | 140 |
+| 48 kHz / 1024 | 119 | 119 (100%) | 184 |
+| 44.1 kHz / 512 | 120 | 120 (100%) | 140 |
+| 44.1 kHz / 2048 | 121 | 121 (100%) | 151 |
 
-On a realistic 124 BPM groove — swept kick, noise snare, sixteenth hats, moving
-bassline — the tracker did not settle on 124. It alternated between 124.3 and
-**82.7 BPM, which is exactly the dotted quarter** (1.5× the beat period), and it
-reported `beatConfidence = 1.000` the whole time.
+These values were emitted by native CI at `53e4f24` and remained the same in
+subsequent PCM runs. At least 60 locked render samples avoids vacuous success;
+>90% within ±6 BPM tolerates onset/FFT resolution while excluding half, double
+and dotted relatives. Sample age must be <= one 512-sample hop + 1 ms, excluding
+real capture buffering. Handoffs must be <=235 (60 ms minimum plus first frame).
+Different chunk boundaries change handoff count; these are not device receipts.
 
-| Dense 124 BPM groove, 26 s | before | after |
-| --- | --- | --- |
-| Locked frames within 4 % of the true pulse | **59 %** | **100 %** |
-| Tempo switches while locked (>10 % jump) | **44** | **0** |
-| Range of reported tempo | 82.6 – 124.5 | 124.2 – 124.3 |
+Other native production cases:
 
-Each switch ran `resyncPhase`, which re-anchors the grid. The choreography
-extrapolates its brightness contour from that anchor, so the contour restarted
-at an arbitrary point dozens of times a run. That is flashing with no relation to
-the music, and no amount of smoothing downstream could have hidden it.
+- Fixed-level 440 Hz PCM at .04 and .8 amplitude: reported levels **.18099 and
+  1.0**. Quiet must remain >.1 and separation >.3; this is analyzer level, not
+  light brightness. Onset gain remains adaptive. Duplicate timestamp rejected.
+- Forty-second continuous PCM ramp 110→130 BPM and step 108→132 BPM at 18 s:
+  **375/375** locked snapshots within ±6 BPM during final eight seconds for each.
+  This tests settled recovery/drift, not an instantaneous transition guarantee.
+- Ten seconds rhythm, twelve silence, fourteen recovery: late silence unlocks
+  with energy <.01; recovered grid is 120 ±6. Stale non-silent snapshots also
+  fade through silence policy rather than retriggering forever.
+- Existing onset-driven BeatTracker tests cover gap prediction, phase, tempo
+  changes and non-rhythmic input. Existing direct MetreTracker tests cover 3 and 4;
+  deterministic Demo grooves cover 3/4, 5/4, 6/8, 7/8 and half-time. These are
+  **not** all PCM automatic-metre validation.
+- Native manager/controller tests cover shared permission, canceled starts,
+  source conflicts, multiple scopes, excluded fixtures, live configuration,
+  restore preferences, failed startup and legacy persistence. Renderer tests
+  cover coalescing, provider pacing, stale sequence/age rejection and reset.
 
-Three things caused it, and all three are fixed:
+For a deterministic CSV of actual production output, set
+`TEST_RUNNER_MUSIC_TRACE_PATH=/absolute/path/music-production.csv` when running
+xcodebuild with the named PCM test (Xcode forwards it as `MUSIC_TRACE_PATH`).
+The CI Build workflow uploads this synthetic CSV as `music-production-trace`. Columns contain format, time, tempo, confidence,
+onset, event count, level, generated brightness and handoff count. This trace
+contains only synthetic test data. The app's generated preview additionally uses
+the shared real-device capability mask; it is not a physical-light preview.
 
-- The broadband onset function is dominated by hi-hats, and hats correlate just
-  as well at 1.5× the beat as the kick does at 1×. The kick band was mixed into
-  one signal *before* the transform, at 40 % weight, where it could not win the
-  argument. It is now autocorrelated separately and votes on the score.
-- A beat period rarely lands on a whole number of analysis hops, so its
-  correlation peak splits across two lags while a rival that does land on one
-  keeps its peak intact. The autocorrelation is now 3-tap smoothed before the
-  comb sum, which removes that bin-alignment bias.
-- Confidence measured the winner's prominence against the *mean of every lag*,
-  which stays near 1 when two candidates are neck and neck. It now measures the
-  gap to the nearest genuinely different period, so a coin-flip reports as one.
+### Before/after regressions on the same native inputs
 
-A disagreeing period must also now win several estimates in a row before the grid
-moves, and a simple musical relative (half, double, dotted) has to argue twice as
-long, because those are the likeliest ways to be wrong.
+`scripts/check_music_controls_baseline.sh` archives exactly `3ceeec2`, copies the
+same two new control tests into that temporary checkout, builds Swift and runs
+only those tests. It requires assertion failures in **both** tests; a compile
+failure is not accepted as evidence. Current code runs the same assertions in
+its regular suite.
 
-### 2. A sustained chord locked a tempo and pulsed the room
+| Identical test / settings | Baseline native | Repaired native |
+|---|---|---|
+| Master .5 / maximum .2, live after bright frame; flash enabled; then master 0 | Failed bounds/black assertions | Pass |
+| Every role, red-only palette, noisy mood/chroma; then color-change 0 across bars | Failed hue/hold assertions | Pass |
 
-Three held tones, no rhythmic content at all:
+Run [36008143805](https://github.com/SeanPVera/LumenDesk/actions/runs/36008143805)
+shows the baseline tests ran and failed (963 assertions across two tests), while
+the repaired suite at `53e4f24` passed 234 tests and the iOS build. Assertion count
+reflects repeated color samples, not 963 independent defects.
 
-| 20 s pad | before | after |
-| --- | --- | --- |
-| Frames reporting a locked tempo | **88 %** | **0 %** |
-| Peak beat confidence | **1.000** | 0.143 |
+### Shipped web production code and loopback transport
 
-The onset function still ripples on a held note, and the auto-gain amplifies that
-ripple. Variance alone cannot tell it apart from music. Locking now also requires
-the onset function to be *peaky* — drums give a tall crest against a low floor, a
-held chord does not.
+`npm --prefix web/app test` compiles `src/music` using
+`tsconfig.music-tests.json`, then imports those emitted modules. There is no
+copied analyzer/engine in the harness. **21 tests pass** at the final local check.
+The first six assertions were also run against unchanged baseline modules before
+repairs: **all six failed** (zero master, live ceiling, role palette, zero color,
+independent brightness/transition, no render-clock PCM re-analysis).
 
-### 3. Every beat hit the same brightness, and the fall was a snap
+Four-format kick/hat cases: 100% of locked render samples after 8 s were within
+±6 BPM; final tempos **119.856** at 48 kHz and **120.084** at 44.1 kHz. A quiet .04
+versus loud .8 kick signal produces mean generated brightness **.1851 vs .2951**
+over seconds 5–10, same Soundcheck fixture/settings. The >.08 separation checks
+retained dynamics, not merely lower variance. Chord, drift/step, duplicate/stale
+input, stereo/rate switch, sample consumption, zero control, role/half-time,
+MIDI and one-in-flight cancellation tests also execute. A deferred audio-close
+regression failed on the intermediate patch, then passed after guarding Stop
+completion by generation; an old close cannot stop a replacement session.
 
-`musicalRelease` was `min(0.3, max(0.06, interval × 0.12))`. At 120 BPM that is
-`0.5 × 0.12 = 0.06`, the floor — so **for every tempo at or above 120 BPM the
-release time constant was pinned at 60 ms.** At the 20 Hz render clock that is a
-coefficient of 0.56 per frame: the light tracked the beat contour almost
-instantly, plunging and recovering twice a second at full depth.
+`npm --prefix web/bridge test`: **60/60 pass**, versus 58 baseline. New loopback
+integration cases verify independent LIFX HSBK brightness/transition and Govee
+RGB/global-brightness behavior, restoration, and rejection after newer manual
+control. Existing tests assert no invented `razer`, `ptReal` or LIFX segment
+packets on the browser path. Loopback device simulators receive real UDP; that is
+stronger than a mocked send, but still not physical firmware or Wi-Fi.
 
-Meanwhile `drive` was clamped with `min(1, …)` and saturated on most beats, so
-peak brightness was the same whether the music was loud or quiet.
+### Adversarial ambiguity probe: unresolved, not a passing accuracy test
 
-Brightness is now a **bed plus a swell**. The bed is where a fixture rests; it
-follows loudness over about half a second and carries dynamics. The swell is an
-accent occupying part of the headroom above the bed, and it carries rhythm.
-Because a fixture falls back to the bed rather than to the floor, a beat reads as
-an accent on a lit room instead of the room going dark and coming back.
+After `npm --prefix web/app test`, run:
 
-Measured on a locked 124 BPM grid at the real 20 Hz render clock, counting
-monotonic runs that cover at least 0.25 of the brightness range — each one a
-visible jump up or drop down:
+```sh
+cd web/app
+node --import ./test/register.mjs test/probe-ambiguity.mjs
+```
 
-| Large swings per second | before | after |
-| --- | --- | --- |
-| Hit fixture, Soundcheck (default) | **4.07** | **1.47** |
-| Hit fixture, Club | **4.13** | **1.95** |
-| Hit fixture, Concert | **4.13** | **2.65** |
-| Wash fixture, Club | **2.60** | **0.29** |
-| Wash fixture, Concert | **4.07** | **0.53** |
+This imports the shipped analyzer. It reports characterization without disguising
+an accuracy failure as a green regression. All signals use continuous 48 kHz PCM,
+1024-sample buffers and an intended 120 BPM grid:
 
-At 124 BPM there are 2.07 beats per second. Four swings a second is two per beat,
-up and down — the rate the eye reads as strobing. The bar accent was also
-deepened so only the strong beats swing hard, which is why the count drops below
-one per beat without the beat becoming invisible.
+| 24 s input | Final observed web result | Interpretation |
+|---|---|---|
+| Syncopated kicks at beats 0, 1.5, 2.5 with snare/backbeat and sixteenth hats | ~80.09 BPM, confidence .625, automatic double feel | **Wrong dotted relative persists**; not certified fixed |
+| Sparse half-time kick/snare with dense hats | Unlocked, confidence .206 | Falls back to atmosphere; does not prove correct automatic half-time recognition |
+| Strong kick every third beat | ~119.86 BPM, metre 6 | **3 versus 6 ambiguity persists**; override is needed |
 
-Peak-to-trough ratio within a beat, and across a whole run, on the default preset
-through the full pipeline:
+These probe numbers are web production results, **not Swift execution**. A
+matching PCM native ambiguity corpus and broader genre/recording comparisons are
+still needed. Existing native half-time rendering and explicit metre support
+remain tested; reliable automatic metre identification is not claimed.
 
-| Scenario | wash ratio before → after | hit ratio before → after |
-| --- | --- | --- |
-| four-on-floor 124 | 2.10 → **1.34** | 2.55 → **1.50** |
-| syncopated 100 | 2.09 → **1.38** | 2.69 → **1.64** |
-| tempo change 100→132 | 2.69 → **1.61** | 3.29 → **1.88** |
-| breakdown 128 | 2.39 → **1.81** | 2.97 → **1.95** |
-| half-time 140 | 2.37 → **1.35** | 2.88 → **1.63** |
-| sustained pad | 2.56 → **1.14** | 2.50 → **1.08** |
+## Build and test execution record
 
-Perceived lightness is roughly L^0.43, so the same raw depth low in the range
-looks far bigger than high in it. Measured in that space, total brightness
-distance travelled per second on the wash fell from 0.66 to 0.27 on the dense
-groove — a 59 % reduction — while the beat stayed visible at a median per-beat
-ratio of 1.28.
+Commands used locally:
 
-### 4. Colour chased noise and snapped at arbitrary points
+```sh
+npm --prefix web/bridge test
+npm --prefix web/app ci
+npm --prefix web/app test
+npm --prefix web/app run build
+git diff --check
+python3 scripts/audit_lighting_themes.py
+```
 
-Three separate causes, all fixed:
+Native CI commands (macos-15, actual Xcode):
 
-- `chromaToHue` took the argmax of a 12-bin chroma vector every analysis frame.
-  Two near-equal bins flip constantly on real music. With realistic chroma noise
-  the hue travelled **0.3145 turns per second**; it now travels **0.0274** — an
-  11.5× reduction — because a new bin must lead by 15 % and hold that lead for
-  four frames before the hue follows it, and then it glides.
-- `mood` is a per-frame band ratio and was fed in raw. It is now smoothed over
-  2.5 s.
-- Palette progression was a free-running accumulator quantized to *its own*
-  integer boundaries. Entries-per-bar was not an integer, so a colour change
-  landed at a different point in every bar rather than on a bar line, about 0.7
-  times a second at the default setting. Colour is now held for a whole number of
-  bars and crossed over during one beat at the bar line. Frames on which the hue
-  changed at all fell from 63 of 340 to 33 of 340.
+```sh
+xcodebuild -project LumenDesk.xcodeproj -scheme LumenDesk -configuration Debug \
+  -destination 'platform=macOS' -parallel-testing-enabled NO \
+  -derivedDataPath "$RUNNER_TEMP/DerivedData/macOS" \
+  CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO test
+scripts/check_music_controls_baseline.sh
+xcodebuild -project LumenDesk.xcodeproj -scheme LumenDesk -configuration Debug \
+  -destination 'generic/platform=iOS' -derivedDataPath "$RUNNER_TEMP/DerivedData/iOS" \
+  CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+```
 
-An accent fixture also used to flip hue by 180° whenever `snare × sensitivity`
-crossed 0.42, with no hysteresis — a colour toggling on and off with the
-backbeat. The accent role now simply sits on the complementary colour for the
-whole show and expresses the snare through depth instead.
+- Initial patch native run [36006797033](https://github.com/SeanPVera/LumenDesk/actions/runs/36006797033): macOS tests and iOS build passed.
+- `53e4f24` run [36008143805](https://github.com/SeanPVera/LumenDesk/actions/runs/36008143805): 234 native tests passed, baseline regression failures proved, iOS build passed.
+- `4665a7d` run [36009456152](https://github.com/SeanPVera/LumenDesk/actions/runs/36009456152): 236 native tests, **2 failed** (Hit contrast, quiet restraint); later iOS step not run.
+- `56acc2b` run [36010100374](https://github.com/SeanPVera/LumenDesk/actions/runs/36010100374): 236 native tests, **1 failed** (half-time contrast); later iOS step not run. Assertions retained; Hit crest corrected.
+- `083b122` run [36011406391](https://github.com/SeanPVera/LumenDesk/actions/runs/36011406391): **236 native tests passed**, baseline failures proved, generic iOS build passed.
+- Final native code `f96986a` run [36011775226](https://github.com/SeanPVera/LumenDesk/actions/runs/36011775226): **236 native tests passed**, synthetic CSV uploaded, baseline failures proved, generic iOS build passed. [Download native production trace](https://github.com/SeanPVera/LumenDesk/actions/runs/36011775226/artifacts/10812707802). The subsequent web-only Stop-completion fix passes 21 local production tests and the web build; native code is unchanged.
+- Final local bridge suite: **60/60 passed**. Web production build, `git diff --check`, and the 48-theme catalog audit passed.
+- Web PR workflow builds/tests only; its deployment job is restricted to main. No site was published by this patch.
+- Not run: installed app/UI automation, signing/notarization, physical capture permission flows, browser permission dialogs/tab teardown, device acknowledgements/visible output, congested real LAN, offline/reconnect on actual firmware, medical safety evaluation.
 
-### Smaller findings, same direction
+## Practical listening and next measurement
 
-- `phraseLift` read `energySlope`, which is the difference between two analysis
-  hops 10.7 ms apart — measurement noise, worth up to 0.22 of a fixture's drive.
-  It now reads the gap between a 0.7 s and a 5 s energy envelope, which is a
-  phrase building.
-- Off the grid, drive was `max(beat, pulse)` — an onset envelope retriggered by
-  every hi-hat. It is now a smoothed envelope with a bounded 0.28 s fall, so
-  dense transients raise a level instead of firing a burst.
-- Movement was a full-depth brightness oscillator applied to rooms of two or
-  three bulbs, which cannot show travel. Its brightness depth now scales with how
-  many targets the room actually has; segmented fixtures keep the full treatment.
-- The latency compensation paid for transport but not for the envelope's own rise
-  time, so peaks landed late. Frame-time bias moved from **+17 to +40 ms (late)**
-  to **−21 to −33 ms (early)**. With the assumed 45 ms transport-plus-firmware
-  delay, that is roughly 60–85 ms late before and 12–24 ms late after — but the
-  45 ms figure is an assumption in the code, not a measurement, and this is the
-  one number that genuinely needs a camera and a real bulb.
+1. Establish the installed build's provenance. Save a scene; choose Soundcheck,
+   no-flash mode, your real fixture order. Use two bulbs first, then a strip; keep
+   brightness comfortable. Open diagnostics and note source, age, confidence and
+   transport counters. Do not assume a counter means a light changed.
+2. Steady dance material: kick should anchor recognizable accents while added
+   sixteenth hats do not make the whole room sparkle at hat rate. Compare Wash
+   and Hit; verify master zero, a live low ceiling and single-color palette.
+3. Half-time/syncopation: compare Auto and the Half-time preset. Check for an
+   unwanted accent on intervening beats or an 80/120/160 relative. If the grid is
+   wrong, record its confidence rather than claiming the recording is wrong.
+4. Sustained/quiet music: pad/vocal intro should hold atmosphere and lose grid
+   confidence. Quiet should remain useful; louder material should gain headroom.
+   Pause/end capture and verify settling, then Stop and confirm restoration.
+5. Changing tempo and non-4/4: try a gradual ramp and a track transition, then a
+   waltz with Auto and explicit 3/4. Observe lock release/recovery and check that
+   color does not jump when the grid returns.
+6. Lifecycle: rapid start/stop, source replacement, two non-overlapping rooms,
+   overlapping manual edits, one offline light and reconnection. New manual
+   intent must survive Stop. For supported Govee segments, verify saved active
+   zones remain fixed and no persistent-write behavior occurs during playback.
 
-### What was not wrong
-
-- **Flashes are not the cause and never were.** `photosensitivitySafeMode`
-  defaults to `true` and no preset overrides it, so `FlashSafetyLimiter` blocks
-  every flash out of the box. `flashApplied` was false on every frame of every
-  scenario. The flashing the complaint describes is the brightness envelope
-  itself, not the flash feature. The 3 Hz hard ceiling is untouched.
-- **The analyzer's front end is sound.** Gapless STFT, log-magnitude flux over
-  log-spaced bands, volume-independent onset strength: none of that needed
-  changing, and none of it did.
-- **Command throughput is not a bottleneck.** The renderer's per-transport
-  ceilings hold at ~10 commands per second per fixture in every scenario, before
-  and after, with coalescing absorbing the rest. There is no backlog.
-
-## Native and web did differ materially
-
-The web client had drifted from Swift in four ways beyond the shared defects, all
-now closed:
-
-| | before | after |
-| --- | --- | --- |
-| `musicalClock` | omitted the `beatCount` term, so half-time restarted its pulse every cycle | matches Swift |
-| `paletteColor` | clamped ramp — reached the last entry and snapped back | cyclic, matches Swift |
-| `sustainedLift` | absent | present |
-| Bar rate | derived from the felt interval | derived from the grid interval, matches Swift |
-
-Constants across `MusicChoreographyEngine.swift`, `choreography.ts` and the
-measurement port are now diffed mechanically and agree.
-
-## Regression tests
-
-In `LumenDeskTests/MusicModeTests.swift`. Each pins behaviour the old engine got
-wrong, and the three marked † fail against the old engine:
-
-| Test | Asserts | Old engine |
-| --- | --- | --- |
-| `testBeatIsVisibleWithoutBecomingAStrobe` | median per-beat ratio in 1.15 – 2.0 | 1.51 (passes; upper bound is the guard) |
-| `testLargeBrightnessSwingsStayBelowTheFlickerRate` † | hit < 2.5 swings/s, wash < 1.0 | 4.12 / 2.59 |
-| `testLowBeatConfidenceDoesNotInventAPulse` † | per-beat ratio < 1.08 at confidence 0.2 | 1.135 |
-| `testHueHoldsThroughChromaAndMoodNoise` † | < 0.1 hue turns/s, no frame over 30° | 0.318 turns/s |
-| `testQuietMaterialIsNoMoreModulatedThanLoud` | quiet ≤ loud + 0.02 | passes |
-| `testPaletteHoldsAcrossBarsInsteadOfChasingTransients` | colour changes on < 20 % of frames, and does change | 18.5 % (passes by a hair) |
-| `testTempoHoldsThePulseThroughDenseRealisticMaterial` | > 90 % of locked frames within 4 % of the pulse, < 4 switches | 59 %, 44 switches |
-| `testSustainedChordNeverLocksATempo` | never locks, confidence stays under 0.38 | locked 88 % of frames at confidence 1.0 |
-
-The two tracker tests go through `MusicFeatureAnalyzer` with synthesised audio
-rather than driving `BeatTracker` with a hand-written onset function. That is
-deliberate: **fed an idealised onset function the old search handled dense
-subdivisions perfectly.** The failure only appears in the flux of real material,
-which is why the existing bare-ODF tests in `BeatTrackerTests` never caught it.
-
-## What still needs a human and a room
-
-Nothing here is evidence that the lights look good, only that the signals the
-lights follow are better behaved. These remain open:
-
-1. **Audible-to-visible timing on real hardware.** Film a bulb and a speaker
-   together and measure the offset. The 45 ms `outputLatencyCompensation` is an
-   assumption; LIFX LAN and Govee LAN almost certainly differ, and Govee's
-   razer stream differs again. If the measured delay is not ~45 ms, that constant
-   should be split per transport.
-2. **Listening on real music.** Synthetic grooves cannot tell you whether a
-   change lands musically. Worth an hour each on four-on-the-floor house, a
-   half-time hip-hop track, something with a rubato intro, and a live recording
-   that drifts in tempo.
-3. **Does the wash now read as too subtle?** Median per-beat ratio 1.28 is a
-   deliberate, measured choice. It may be a touch conservative in a bright room,
-   and `beatSensitivity` is the knob — but if it consistently wants turning up,
-   the default should move, not the user.
-4. **Govee RGBIC segment behaviour** under the revised frame rate, on firmware.
-5. **Multi-room load**, where several scopes share one analyzer.
-6. **The `pad` case on real ambient music.** Refusing to lock is right for a held
-   chord; it should be confirmed that genuinely ambient *music* with a slow pulse
-   still gets a show rather than going inert.
+**Most useful next measurement:** record audio reference and visible light output
+with a synchronized photodiode (or adequately timed high-frame-rate camera), plus
+the new software timing counters, separately for LIFX, ordinary Govee and segment
+streaming. Measure latency distribution and beat-alignment error under quiet and
+loaded LAN conditions. That would separate analysis/clock error from command
+queueing and firmware delay, and provide a defensible replacement for the 45 ms
+assumption. Do not tune it from successful UDP submission alone.

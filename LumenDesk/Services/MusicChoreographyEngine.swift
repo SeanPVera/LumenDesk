@@ -85,8 +85,10 @@ final class MusicChoreographyEngine {
     private var slowEnergy: Double = 0
     private var onsetEnvelope: Double = 0
     private var accentEnvelope: Double = 0
-    private var colourIndex = 0
-    private var lastColourIndex = 0
+    private var lastPaletteHold: Int?
+    private var paletteFadeFrom: Double = 0
+    private var paletteFadeTo: Double = 0
+    private var paletteFadeBar: Double = 0
 
     func reset() {
         lastBeatCount = 0
@@ -103,8 +105,8 @@ final class MusicChoreographyEngine {
         slowEnergy = 0
         onsetEnvelope = 0
         accentEnvelope = 0
-        colourIndex = 0
-        lastColourIndex = 0
+        lastPaletteHold = nil
+        paletteFadeFrom = 0; paletteFadeTo = 0; paletteFadeBar = 0
     }
 
     func makeFrame(
@@ -226,7 +228,7 @@ final class MusicChoreographyEngine {
 
             // The bed: where this fixture rests between accents.
             let bassBed = snapshot.bass * config.bassSensitivity * 0.1
-            let sustainedLift = sustainedEnergyEvent ? 0.06 + fastEnergy * 0.08 : 0
+            let sustainedLift = config.phraseAware && sustainedEnergyEvent ? 0.06 + fastEnergy * 0.08 : 0
             var bedLevel = 0.1 + pow(dynamics.clamped01, 0.7) * 0.4 + bassBed + phraseLift + sustainedLift
             // A hit fixture rests darker so it has headroom to punch; a wash
             // sits in the room and only lifts.
@@ -241,11 +243,9 @@ final class MusicChoreographyEngine {
             else if isAccent { depth *= 0.6 }
             if isAccent { depth += accentEnvelope * 0.18 * config.effectIntensity * config.beatSensitivity }
             if isHit { depth += snapshot.kick * config.bassSensitivity * 0.1 * config.effectIntensity * config.beatSensitivity }
-            // Deliberately not clamped to 1: past that the swell holds at the
-            // ceiling for part of the beat, which is what a punchy preset
-            // should look like. Brightness itself is still clamped to `upper`,
-            // so nothing clips into a discontinuity.
-            depth = max(0, depth)
+            // Soft-limit accent depth to leave headroom without flat-topping
+            // every strong beat. The lit bed remains independent.
+            depth = 1 - exp(-max(0, depth) * 1.6)
 
             let bed = lowerBrightness + (upperBrightness - lowerBrightness) * bedLevel
             var rawBrightness = bed + (upperBrightness - bed) * depth * pulseDrive.clamped01
@@ -463,28 +463,26 @@ final class MusicChoreographyEngine {
         configuration: MusicModeConfiguration,
         dt: Double
     ) {
-        guard configuration.colorChangeIntensity > 0 else { return }
+        guard configuration.colorChangeIntensity > 0 else { lastPaletteHold = nil; return }
         if clock.strength > 0, clock.barRate > 0 {
             let barsPerColour = Double(max(1, Int((5 - configuration.colorChangeIntensity * 4).rounded())))
-            let raw = clock.barPosition / barsPerColour
-            let index = Int(floor(raw))
-            // Beats elapsed inside the current hold, so the cross-fade lasts
-            // exactly one beat however long the hold is.
-            let within = (raw - floor(raw)) * barsPerColour * Double(clock.metre)
-            let blend = within.clamped01
-            if index != colourIndex {
-                lastColourIndex = colourIndex
-                colourIndex = index
+            let hold = Int(floor(clock.barPosition / barsPerColour))
+            if let previous = lastPaletteHold, hold != previous {
+                paletteFadeFrom = paletteProgress
+                paletteFadeTo = paletteProgress + 1
+                paletteFadeBar = clock.barPosition
+            } else if lastPaletteHold == nil {
+                // Reacquisition adopts the current colour. Never map a new grid
+                // count directly onto the palette and teleport across entries.
+                paletteFadeFrom = paletteProgress; paletteFadeTo = paletteProgress
+                paletteFadeBar = clock.barPosition
             }
-            paletteProgress = Double(lastColourIndex)
-                + Double(colourIndex - lastColourIndex) * blend
+            lastPaletteHold = hold
+            let blend = ((clock.barPosition - paletteFadeBar) * Double(clock.metre)).clamped01
+            paletteProgress = paletteFadeFrom + (paletteFadeTo - paletteFadeFrom) * blend
         } else {
-            // Off the grid there are no bars for a change to land on, so the
-            // palette drifts slowly and continuously instead of snapping:
-            // roughly one entry every twelve seconds at full intensity.
-            paletteProgress += dt * (0.02 + configuration.colorChangeIntensity * 0.06)
-            colourIndex = Int(floor(paletteProgress))
-            lastColourIndex = colourIndex
+            lastPaletteHold = nil
+            paletteProgress += dt * configuration.colorChangeIntensity * 0.08
         }
     }
 

@@ -11,7 +11,7 @@ python3 - "$repo_root" "$comparison_dir" <<'PY'
 from pathlib import Path
 import sys
 current=Path(sys.argv[1], 'LumenDeskTests/MusicModeTests.swift').read_text()
-methods=current[current.index('    func testMasterZeroAndLiveCeilingIncludeFlashes'):current.index('    func testStaleCaptureSettlesInsteadOfRetriggeringLastOnset')]
+methods=current[current.index('    func testMasterZeroAndLiveCeilingIncludeFlashes'):current.index('    func testPaletteDoesNotJumpWhenTempoIsReacquired')]
 p=Path(sys.argv[2], 'LumenDeskTests/MusicModeTests.swift')
 p.write_text(p.read_text().replace('final class MusicModeTests: XCTestCase {','final class MusicModeTests: XCTestCase {\n'+methods))
 PY

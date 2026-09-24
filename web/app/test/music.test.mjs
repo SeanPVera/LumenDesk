@@ -158,3 +158,59 @@ test('format change resets sample clock and stereo survives analysis',()=>{
   assert.equal(next.analyzedSamples,2048)
   assert.ok(Math.abs(next.analysisTimestamp-(100+2048/44100))<.001)
 })
+
+test('tempo reacquisition never teleports palette position',()=>{
+  const engine=new MusicChoreographyEngine(),config=configurationFor('soundcheck')
+  let previous
+  for(let i=0;i<100;i++) previous=engine.makeFrame({...emptySnapshot(),level:.4,energy:.4,confidence:.8},config,topology,fixtures,100+i*.05,i).states[0]
+  const locked={...snapshot(105),beatCount:99,gridBeatPosition:99,beatReferenceTime:105}
+  const next=engine.makeFrame(locked,config,topology,fixtures,105,100).states[0]
+  const delta=Math.abs(next.hue-previous.hue)
+  assert.ok(Math.min(delta,1-delta)<.005)
+})
+test('accents retain headroom rather than clipping every strong beat',()=>{
+  const values=frames({...configurationFor('concert'),minimumBrightness:0,maximumBrightness:1,masterBrightness:1,movementAmount:0})
+  assert.ok(values.every(s=>s.brightness<1))
+  assert.ok(Math.max(...values.map(s=>s.brightness))>.5)
+})
+
+test('immediate Stop wins over a pending Start', async()=>{
+  globalThis.window=globalThis
+  const session=new WebMusicSession()
+  const start=session.start('demo')
+  await session.stop();await start
+  assert.equal(session.state.running,false)
+  assert.equal(session.timer,null)
+})
+test('zero beat response removes rhythmic accents; two-bulb movement has distinct positions',()=>{
+  const config={...configurationFor('soundcheck'),beatSensitivity:0,bassSensitivity:0,movementAmount:0,colorChangeIntensity:0,phraseAware:false}
+  const steady=frames(config).slice(160).map(s=>s.brightness)
+  assert.ok(Math.max(...steady)-Math.min(...steady)<.001)
+  const moving={...config,movementAmount:1,movementSpeed:.5}
+  const pair=[{...fixtures[0],role:'motion'},{...fixtures[0],id:'b',role:'motion'}]
+  const layout={...topology,fixtureOrder:['a','b']}
+  const engine=new MusicChoreographyEngine()
+  const out=engine.makeFrame(snapshot(100),moving,layout,pair,100,1)
+  assert.ok(Math.abs(out.states[0].brightness-out.states[1].brightness)>.01)
+})
+
+// Phase is integrated per sample; changing tempo never restarts the oscillator
+// at a buffer seam. Windows straddle boundaries just as they do in capture.
+test('PCM tracker follows gradual drift and reacquires a changed tempo',()=>{
+  for(const mode of ['drift','step']) {
+    const analyzer=new MusicFeatureAnalyzer(mode),rate=48000;let phase=0,locked=0,correct=0
+    for(let offset=0;offset<rate*40;offset+=1024){
+      const pcm=Float32Array.from({length:1024},(_,i)=>{
+        const t=(offset+i)/rate,bpm=mode==='drift'?110+.5*t:t<18?108:132
+        phase+=bpm/60/rate
+        const b=phase%1,h=(phase*4)%1
+        return .7*Math.sin(2*Math.PI*65*t)*Math.exp(-b/.09)*(1-Math.exp(-b/.004))
+          +.12*Math.sin(2*Math.PI*8000*t)*Math.exp(-h/.096)*(1-Math.exp(-h/.004))
+      })
+      const t=(offset+1024)/rate,s=analyzer.analyze(pcm,100+t,undefined,rate)
+      if(t>32&&s?.isTempoLocked){locked++;if(Math.abs(s.tempo-(mode==='drift'?110+.5*t:132))<6)correct++}
+    }
+    assert.ok(locked>250)
+    assert.ok(correct/locked>.9,`${mode}: ${correct}/${locked}`)
+  }
+})

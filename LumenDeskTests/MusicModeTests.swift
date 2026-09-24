@@ -48,6 +48,22 @@ final class MusicModeTests: XCTestCase {
         XCTAssertEqual(hues.min()!, hues.max()!, accuracy: 0.000001)
     }
 
+    func testPaletteDoesNotJumpWhenTempoIsReacquired() {
+        let engine = MusicChoreographyEngine()
+        let fixture = MusicFixtureDescriptor(id: "f", label: "Fixture", transport: .lifxLAN)
+        let config = MusicModeConfiguration.configuration(for: .soundcheck)
+        var previous = 0.0
+        for index in 0..<100 {
+            let input = AudioReactiveSnapshot(level: 0.4, energy: 0.4, confidence: 0.8)
+            previous = engine.makeFrame(snapshot: input, configuration: config, topology: FixtureTopology(), fixtures: [fixture], timestamp: 100 + Double(index) * 0.05, sequenceNumber: UInt64(index)).states[0].hue
+        }
+        var input = lockedSnapshot(at: 105, reference: 105, interval: 0.5)
+        input.gridBeatPosition = 99
+        let next = engine.makeFrame(snapshot: input, configuration: config, topology: FixtureTopology(), fixtures: [fixture], timestamp: 105, sequenceNumber: 100).states[0].hue
+        let delta = abs(next - previous)
+        XCTAssertLessThan(min(delta,1-delta),0.005)
+    }
+
     func testStaleCaptureSettlesInsteadOfRetriggeringLastOnset() {
         let engine = MusicChoreographyEngine()
         let fixture = MusicFixtureDescriptor(id: "f", label: "Fixture", transport: .lifxLAN)
@@ -157,6 +173,37 @@ final class MusicModeTests: XCTestCase {
         XCTAssertLessThan(try XCTUnwrap(duringSilence).energy, 0.01)
         XCTAssertTrue(try XCTUnwrap(recovered).isTempoLocked)
         XCTAssertEqual(try XCTUnwrap(recovered).tempo, 120, accuracy: 6)
+    }
+
+    func testPCMTempoDriftAndStepRecovery() throws {
+        for gradual in [true, false] {
+            let analyzer = MusicFeatureAnalyzer(sourceDescription: "Synthetic tempo change")
+            let rate = 48000.0
+            let format = AVAudioFormat(standardFormatWithSampleRate: rate, channels: 1)!
+            var phase = 0.0, locked = 0, correct = 0
+            for offset in stride(from: 0, to: Int(rate * 40), by: 1024) {
+                let pcm = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 1024)!
+                pcm.frameLength = 1024
+                for index in 0..<1024 {
+                    let t = Double(offset + index) / rate
+                    let bpm = gradual ? 110 + 0.5 * t : (t < 18 ? 108.0 : 132.0)
+                    phase += bpm / 60 / rate
+                    let b = phase.truncatingRemainder(dividingBy: 1)
+                    let h = (phase * 4).truncatingRemainder(dividingBy: 1)
+                    let kick = 0.7 * sin(2 * .pi * 65 * t) * exp(-b / 0.09) * (1 - exp(-b / 0.004))
+                    let hat = 0.12 * sin(2 * .pi * 8000 * t) * exp(-h / 0.096) * (1 - exp(-h / 0.004))
+                    pcm.floatChannelData![0][index] = Float(kick + hat)
+                }
+                let t = Double(offset + 1024) / rate
+                if let snapshot = analyzer.analyze(pcm, hostTime: 100 + t), t > 32, snapshot.isTempoLocked {
+                    locked += 1
+                    if abs(snapshot.tempo - (gradual ? 110 + 0.5 * t : 132)) < 6 { correct += 1 }
+                }
+            }
+            XCTAssertGreaterThan(locked, 250)
+            XCTAssertGreaterThan(Double(correct) / Double(max(1, locked)), 0.9)
+            print("MUSIC_METRIC native tempoChange gradual=\(gradual) correct=\(correct)/\(locked)")
+        }
     }
 
     @MainActor

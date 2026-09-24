@@ -136,8 +136,10 @@ export class WebMusicSession {
   }
 
   async start(source: AudioSourceKind, file?: File): Promise<void> {
-    await this.stop()
-    const generation = ++this.generation
+    const stopped = this.stop()
+    const generation = this.generation
+    await stopped
+    if (generation !== this.generation) return
     this.captureSequence = 0
     this.inputSnapshot = emptySnapshot()
     this.state.snapshot = emptySnapshot()
@@ -206,7 +208,8 @@ export class WebMusicSession {
     } else {
       this.state.snapshot = freshSnapshot(this.inputSnapshot, timestamp)
     }
-    const snapshot = this.state.snapshot
+    // The display and engine each age the original snapshot once.
+    const snapshot = this.state.source === 'demo' ? this.state.snapshot : {...this.inputSnapshot}
     const config = this.state.configuration
     if (config.metreOverride !== 'auto') {
       snapshot.metre = config.metreOverride
@@ -219,7 +222,7 @@ export class WebMusicSession {
     this.diagnostics.framesGenerated++
     this.diagnostics.snapshotAge = snapshot.analysisTimestamp == null ? 0 : Math.max(0,timestamp-snapshot.analysisTimestamp)
     const frame = this.choreography.makeFrame(
-      this.state.snapshot,
+      snapshot,
       this.state.configuration,
       this.state.topology,
       this.state.fixtures,
@@ -236,7 +239,9 @@ export class WebMusicSession {
     const audio = new AudioContext()
     const blob = new Blob([WORKLET], { type: 'text/javascript' })
     const url = URL.createObjectURL(blob)
-    try { await audio.audioWorklet.addModule(url) } finally { URL.revokeObjectURL(url) }
+    try { await audio.audioWorklet.addModule(url) }
+    catch (error) { await audio.close().catch(()=>undefined); throw error }
+    finally { URL.revokeObjectURL(url) }
     if (generation !== this.generation) { await audio.close(); throw new Error('Capture start cancelled') }
     this.audio = audio
     return audio

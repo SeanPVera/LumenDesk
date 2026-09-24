@@ -317,7 +317,7 @@ final class AudioReactiveSessionController: ObservableObject {
             let snapshot = applyMusicalPolicy(
                 session.synthetic
                     ? syntheticSnapshot(groove: session.groove, startedAt: session.startedAt, timestamp: timestamp)
-                    : analysisSnapshot.fresh(at: timestamp),
+                    : analysisSnapshot,
                 configuration: session.configuration
             )
             if session.synthetic {

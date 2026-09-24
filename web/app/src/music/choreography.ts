@@ -75,8 +75,10 @@ export class MusicChoreographyEngine {
   private slowEnergy = 0;
   private onsetEnvelope = 0;
   private accentEnvelope = 0;
-  private colourIndex = 0;
-  private lastColourIndex = 0;
+  private lastPaletteHold: number | null = null;
+  private paletteFadeFrom = 0;
+  private paletteFadeTo = 0;
+  private paletteFadeBar = 0;
 
   reset(): void {
     this.lastBeatCount = 0;
@@ -93,8 +95,8 @@ export class MusicChoreographyEngine {
     this.slowEnergy = 0;
     this.onsetEnvelope = 0;
     this.accentEnvelope = 0;
-    this.colourIndex = 0;
-    this.lastColourIndex = 0;
+    this.lastPaletteHold = null;
+    this.paletteFadeFrom = this.paletteFadeTo = this.paletteFadeBar = 0;
   }
 
   makeFrame(
@@ -195,7 +197,7 @@ export class MusicChoreographyEngine {
 
       // The bed: where this fixture rests between accents.
       const bassBed = snapshot.bass * config.bassSensitivity * 0.1;
-      const sustainedLift = this.sustainedEnergyEvent ? 0.06 + this.fastEnergy * 0.08 : 0;
+      const sustainedLift = config.phraseAware && this.sustainedEnergyEvent ? 0.06 + this.fastEnergy * 0.08 : 0;
       let bedLevel = 0.1 + Math.pow(clamp01(this.dynamics), 0.7) * 0.4 + bassBed + phraseLift + sustainedLift;
       // A hit fixture rests darker so it has headroom to punch.
       if (isHit) bedLevel *= 0.76;
@@ -210,9 +212,8 @@ export class MusicChoreographyEngine {
       else if (isAccent) depth *= 0.6;
       if (isAccent) depth += this.accentEnvelope * 0.18 * config.effectIntensity * config.beatSensitivity;
       if (isHit) depth += snapshot.kick * config.bassSensitivity * 0.1 * config.effectIntensity * config.beatSensitivity;
-      // Deliberately not clamped to 1: past that the swell holds at the ceiling
-      // for part of the beat, which is what a punchy preset should look like.
-      depth = Math.max(0, depth);
+      // Same soft headroom curve as the native engine.
+      depth = 1 - Math.exp(-Math.max(0, depth) * 1.6);
 
       const bed = lowerBrightness + (upperBrightness - lowerBrightness) * bedLevel;
       let rawBrightness = bed + (upperBrightness - bed) * depth * clamp01(pulseDrive);
@@ -341,26 +342,21 @@ export class MusicChoreographyEngine {
    * the bar and changed colour about twice a second at the default setting.
    */
   private advancePalette(_newBeats: number, clock: MusicalClock, configuration: MusicModeConfiguration, dt: number): void {
-    if (configuration.colorChangeIntensity <= 0) return;
+    if (configuration.colorChangeIntensity <= 0) { this.lastPaletteHold = null; return; }
     if (clock.strength > 0 && clock.barRate > 0) {
-      const barsPerColour = Math.max(1, Math.round(5 - configuration.colorChangeIntensity * 4));
-      const raw = clock.barPosition / barsPerColour;
-      const index = Math.floor(raw);
-      // Beats elapsed inside the current hold, so the cross-fade lasts exactly
-      // one beat however long the hold is.
-      const within = (raw - Math.floor(raw)) * barsPerColour * clock.metre;
-      const blend = clamp01(within);
-      if (index !== this.colourIndex) {
-        this.lastColourIndex = this.colourIndex;
-        this.colourIndex = index;
+      const barsPerColour = Math.max(1,Math.round(5-configuration.colorChangeIntensity*4));
+      const hold = Math.floor(clock.barPosition/barsPerColour);
+      if (this.lastPaletteHold != null && hold !== this.lastPaletteHold) {
+        this.paletteFadeFrom=this.paletteProgress;this.paletteFadeTo=this.paletteProgress+1;this.paletteFadeBar=clock.barPosition;
+      } else if (this.lastPaletteHold == null) {
+        this.paletteFadeFrom=this.paletteFadeTo=this.paletteProgress;this.paletteFadeBar=clock.barPosition;
       }
-      this.paletteProgress = this.lastColourIndex + (this.colourIndex - this.lastColourIndex) * blend;
+      this.lastPaletteHold=hold;
+      const blend=clamp01((clock.barPosition-this.paletteFadeBar)*clock.metre);
+      this.paletteProgress=this.paletteFadeFrom+(this.paletteFadeTo-this.paletteFadeFrom)*blend;
     } else {
-      // Off the grid there are no bars for a change to land on, so the palette
-      // drifts slowly and continuously instead of snapping.
-      this.paletteProgress += dt * (0.02 + configuration.colorChangeIntensity * 0.06);
-      this.colourIndex = Math.floor(this.paletteProgress);
-      this.lastColourIndex = this.colourIndex;
+      this.lastPaletteHold=null;
+      this.paletteProgress+=dt*configuration.colorChangeIntensity*.08;
     }
   }
 

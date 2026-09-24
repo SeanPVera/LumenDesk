@@ -726,8 +726,6 @@ final class MusicFeatureAnalyzer {
     // Automatic gain. Everything the show reacts to is normalized against a
     // fast-attack / slow-decay peak so the choreography looks the same whether
     // the music is quiet or cranked.
-    private var noiseFloor: Double = 0.01
-    private var peakLevel: Double = 0.02
     private var bandPeak: Double = 0.0005
     private var odfScale = MusicFeatureAnalyzer.minimumOnsetScale
     private var kickScale = MusicFeatureAnalyzer.minimumOnsetScale
@@ -864,12 +862,6 @@ final class MusicFeatureAnalyzer {
         )
         updateSpectrum()
 
-        // Loudness: track the quiet floor and a fast-attack, slowly-decaying
-        // peak, then normalize between them so level reads 0…1 at any volume.
-        noiseFloor += (min(rms, noiseFloor + 0.002) - noiseFloor) * decayCoefficient(dt: dt, timeConstant: 10)
-        peakLevel = rms > peakLevel
-            ? peakLevel + (rms - peakLevel) * 0.25
-            : max(0.0005, peakLevel * exp(-dt / 10))
         // Fixed soft-knee loudness preserves quiet/loud contrast. Adaptive gain
         // remains in the onset detector, where playback-volume independence is useful.
         let level = clamp(log1p(max(0, rms - 0.001) * 20) / log1p(10))
@@ -1143,7 +1135,7 @@ final class MusicFeatureAnalyzer {
         logMagnitudes = previousLogMagnitudes
         beatTracker.reset()
         hostTimeOffset = 0; hasHostAnchor = false; lastBufferEnd = nil
-        noiseFloor = 0.01; peakLevel = 0.02; bandPeak = 0.0005
+        bandPeak = 0.0005
         odfScale = Self.minimumOnsetScale; kickScale = Self.minimumOnsetScale
         snareScale = Self.minimumOnsetScale; hatScale = Self.minimumOnsetScale
         noveltyBaseline = 0; noveltyDeviation = 0; beatCooldownRemaining = 0

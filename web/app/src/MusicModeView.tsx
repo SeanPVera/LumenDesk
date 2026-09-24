@@ -44,15 +44,14 @@ export function MusicModeView({
   const [file, setFile] = useState<File | null>(null)
   const reachable = devices.filter(d => d.reachable)
 
-  // What the fixtures were showing before the show began. Music frames are the
-  // only thing this view changes on a light, so replaying these colours is a
-  // complete restore — without it, Stop simply froze the last frame on the
-  // lights and left them there.
+  // Restore color and independent brightness only while this session still
+  // owns the fixture. The bridge rejects restoration after a newer manual edit.
   const baseline = useRef<MusicFrameCommand[] | null>(null)
   const senderRef = useRef<LatestMusicFrameSender | null>(null)
   const postRef = useRef(postFrame); postRef.current=postFrame
+  const portRef = useRef(port); portRef.current=port
   const owner = useRef(crypto.randomUUID())
-  if (!senderRef.current) senderRef.current = new LatestMusicFrameSender(states=>postRef.current(port,states.map(state=>({
+  if (!senderRef.current) senderRef.current = new LatestMusicFrameSender(states=>postRef.current(portRef.current,states.map(state=>({
     ...state,owner:owner.current,controlRevision:baseline.current?.find(b=>b.fixtureID===state.fixtureID)?.controlRevision
   }))))
   const sender=senderRef.current

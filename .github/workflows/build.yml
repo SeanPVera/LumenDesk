@@ -56,7 +56,7 @@ jobs:
           mkdir -p "$ASSET_OUTPUT"
           xcrun actool \
             LumenDesk/Assets.xcassets \
-            "LumenDesk/Preview Content/Preview Assets.xcassets" \
+            "LumenDesk/Views/Preview Content/Preview Assets.xcassets" \
             --compile "$ASSET_OUTPUT" \
             --output-partial-info-plist "$RUNNER_TEMP/LumenDeskAssetInfo.plist" \
             --output-format human-readable-text \
@@ -69,6 +69,12 @@ jobs:
             --target-device mac \
             --minimum-deployment-target 13.0 \
             --platform macosx
+
+      - name: Configure rendered review environment
+        env:
+          LUMENDESK_RENDER_DIRECTORY: ${{ runner.temp }}
+        run: |
+          python3 scripts/configure_visual_review.py
 
       - name: Test macOS Debug
         env:
@@ -84,6 +90,15 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             test
+
+      - name: Inspect rendered review output
+        run: python3 scripts/print_visual_review.py "$RUNNER_TEMP/LumenDesk-Visual-QA"
+
+      - name: Analyze macOS
+        run: |
+          xcodebuild -project "$PROJECT" -scheme "$SCHEME" -configuration "$CONFIGURATION" \
+            -destination "platform=macOS" -derivedDataPath "$RUNNER_TEMP/DerivedData/macOS" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO analyze
 
       - name: Build generic iOS device
         run: |

@@ -349,15 +349,13 @@ struct LumenSelector<Value: Hashable>: View {
             if showsLabel {
                 LumenEyebrow(text: label)
             }
-            HStack(spacing: 2) {
-                ForEach(options) { option in
-                    Button {
-                        selection = option.value
-                    } label: {
-                        segment(for: option)
+            Group {
+                if options.count > 4 {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 4)], spacing: 4) {
+                        choices
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityAddTraits(selection == option.value ? [.isButton, .isSelected] : .isButton)
+                } else {
+                    HStack(spacing: 4) { choices }
                 }
             }
             .padding(2.5)
@@ -367,6 +365,14 @@ struct LumenSelector<Value: Hashable>: View {
         .accessibilityLabel(label)
     }
 
+    private var choices: some View {
+        ForEach(options) { option in
+            Button { selection = option.value } label: { segment(for: option) }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selection == option.value ? [.isButton, .isSelected] : .isButton)
+        }
+    }
+
     private func segment(for option: LumenOption<Value>) -> some View {
         let active = selection == option.value
         return HStack(spacing: 5) {
@@ -374,12 +380,12 @@ struct LumenSelector<Value: Hashable>: View {
                 Image(systemName: symbol).font(.system(size: 10, weight: .medium))
             }
             Text(option.title)
-                .font(.system(size: 11.5, weight: .medium))
+                .font(.system(size: 13, weight: .medium))
                 .lineLimit(1)
         }
         .foregroundStyle(active ? Lumen.chalk : Lumen.muted)
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 5)
+        .frame(minHeight: 44)
         .background(
             RoundedRectangle(cornerRadius: Lumen.controlRadius, style: .continuous)
                 .fill(active ? Lumen.stripLoud : Color.clear)

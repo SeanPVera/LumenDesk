@@ -11,9 +11,7 @@ struct MusicModeView: View {
     @State private var advancedExpanded = false
     @State private var showUnsafeWarning = false
     @State private var showFileImporter = false
-    /// Lightweight view preferences, stored the way the rest of the app stores
-    /// them. Both start on so a first-time user gets the walkthrough and the
-    /// plain-English captions without going looking for them.
+    /// Existing help preferences survive the workspace redesign.
     @AppStorage("LumenDesk.musicMode.quickStart.v1") private var showsQuickStart = true
     @AppStorage("LumenDesk.musicMode.plainHelp.v1") private var showsPlainHelp = true
 
@@ -231,7 +229,7 @@ struct MusicModeView: View {
 
     private var topologyEditor: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
+            VStack(alignment: .leading, spacing: 12) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Which light does what")
                         .font(LumenType.display(size: 15, weight: .semibold))
@@ -239,8 +237,7 @@ struct MusicModeView: View {
                         .font(.caption).foregroundStyle(Lumen.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 3) {
+                VStack(alignment: .leading, spacing: 3) {
                     Picker("Layout", selection: Binding(
                         get: { topology.layout },
                         set: { topology.layout = $0; commitTopology() }
@@ -253,15 +250,15 @@ struct MusicModeView: View {
                         Text(topology.layout.plainSummary)
                             .font(.caption)
                             .foregroundStyle(Lumen.textTertiary)
-                            .multilineTextAlignment(.trailing)
-                            .frame(maxWidth: 260)
+                            .multilineTextAlignment(.leading)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }
 
             if showsPlainHelp {
-                VStack(alignment: .leading, spacing: 6) {
+                DisclosureGroup("Role & ordering guide") {
+                    VStack(alignment: .leading, spacing: 6) {
                     Text(MusicModeHelp.roles)
                         .font(.caption)
                         .foregroundStyle(Lumen.textSecondary)
@@ -289,13 +286,15 @@ struct MusicModeView: View {
                     LumenPanelShape(radius: 3, chamfer: 10)
                         .fill(Lumen.surfaceRaised)
                 )
+                }
             }
 
             let ordered = topology.orderedFixtures(fixtures)
             let includedOrdered = topology.includedFixtures(fixtures)
             ForEach(Array(ordered.enumerated()), id: \.element.id) { index, fixture in
                 let isExcluded = topology.excludedFixtureIDs.contains(fixture.id)
-                HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 10) {
                     if let position = includedOrdered.firstIndex(where: { $0.id == fixture.id }) {
                         Text("\(position + 1)").font(.caption.monospacedDigit()).foregroundStyle(Lumen.textTertiary)
                             .frame(width: 20)
@@ -311,7 +310,9 @@ struct MusicModeView: View {
                     if fixture.segmentCount > 0 {
                         Text("+ \(fixture.segmentCount) segments").font(.caption).foregroundStyle(Lumen.textTertiary)
                     }
-                    Picker("Role", selection: roleBinding(fixture.id)) {
+                    }
+                    HStack(spacing: 10) {
+                    Picker("Role for \(fixture.label)", selection: roleBinding(fixture.id)) {
                         ForEach(FixtureRole.allCases.filter { !isRunning || $0 != .off || fixture.role == .off }) {
                             Text($0.displayName).tag($0)
                         }
@@ -319,6 +320,7 @@ struct MusicModeView: View {
                     .labelsHidden()
                     .fixedSize()
                     .disabled(isExcluded || (isRunning && fixture.role == .off))
+                    .accessibilityLabel("Role for \(fixture.label)")
                     .help(fixture.resolvedRole.plainSummary)
                     .accessibilityHint(fixture.resolvedRole.plainSummary)
                     Spacer()
@@ -326,6 +328,7 @@ struct MusicModeView: View {
                         Image(systemName: isExcluded ? "eye.slash" : "eye")
                     }
                     .buttonStyle(.borderless)
+                    .lumenInteractiveTarget()
                     .foregroundStyle(isExcluded ? Lumen.textTertiary : Lumen.success)
                     .disabled(isRunning)
                     .help(isRunning ? "Stop the show to change which lights are included." : "")
@@ -345,6 +348,7 @@ struct MusicModeView: View {
                     .buttonStyle(.borderless).disabled(index == ordered.count - 1 || isExcluded)
                     .accessibilityLabel("Move \(fixture.label) later")
                     .lumenInteractiveTarget()
+                    }
                 }
                 .padding(.vertical, 8)
                 .opacity(isExcluded ? 0.7 : 1)

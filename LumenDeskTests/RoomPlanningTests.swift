@@ -330,6 +330,8 @@ final class RoomWorkspaceRenderTests: XCTestCase {
         try await capture("scenes", LibraryWorkspaceView(scope: .constant(scope)), manager, width: 900, height: 800)
         try await capture("music-stopped", ScrollView { MusicModeView(scope: .constant(scope)).padding(24) },
                           manager, width: 1000, height: 1100)
+        try await capture("music-compact", ScrollView { MusicModeView(scope: .constant(scope)).padding(16) },
+                          manager, width: 620, height: 2100)
         var config = MusicModeConfiguration.configuration(for: .ambient)
         config.usesSyntheticDemoPattern = true
         manager.startMusicMode(configuration: config, scope: scope, reducedMotion: true)
@@ -337,8 +339,14 @@ final class RoomWorkspaceRenderTests: XCTestCase {
                           manager, width: 1000, height: 1100)
         try await capture("effect-owner", PlanWorkspaceView(scope: .constant(scope)), manager, width: 1100, height: 950)
         manager.stopAllEffects()
+        let effect = try XCTUnwrap(LightingCatalog.effects.first { $0.id != "music-pulse" })
+        manager.startEffect(effect, scope: scope)
+        try await capture("dynamic-effect", PlanWorkspaceView(scope: .constant(scope)), manager, width: 1100, height: 950)
+        manager.stopAllEffects()
+        try await capture("room-arrangement", RoomArrangementSheet(), manager, width: 820, height: 850)
         let strip = try XCTUnwrap(manager.devices.first { manager.segmentProfile(for: $0)?.layout == .cobStrip })
         try await capture("segment-studio", GoveeSegmentEditorView(device: strip), manager, width: 1000, height: 780)
+        try await capture("segment-compact", GoveeSegmentEditorView(device: strip), manager, width: 620, height: 850)
         try await capture("discovery-partial", DevicesWorkspaceView(), manager, width: 850, height: 900)
         try await capture("onboarding", OnboardingView(onFinish: {}), manager, width: 760, height: 720)
     }
@@ -367,9 +375,7 @@ final class RoomWorkspaceRenderTests: XCTestCase {
         // The connector can read job logs even without an execution workspace.
         // JPEG is a review transport; the lossless originals are CI artifacts.
         let jpeg = try XCTUnwrap(bitmap.representation(using: .jpeg, properties: [.compressionFactor: 0.75]))
-        print("LUMEN_VISUAL_BEGIN|\(name)|\(Int(width))x\(Int(height))")
-        print(jpeg.base64EncodedString())
-        print("LUMEN_VISUAL_END|\(name)")
+        try jpeg.write(to: directory.appendingPathComponent("\(name).jpg"))
         XCTAssertGreaterThan(data.count, 1000, "Rendering produced no useful image")
     }
 }

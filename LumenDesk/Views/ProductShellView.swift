@@ -2,11 +2,8 @@ import SwiftUI
 
 // MARK: - Product navigation
 //
-// Five destinations, named in the vocabulary of the thing the app controls.
-// "Home", "Library", "Automation", and "Devices" described the software; Desk,
-// Looks, Cues, and Rig describe the lighting, and every one of them is shorter
-// than the word it replaced. The case names are unchanged so nothing that
-// switches on a destination had to move.
+// One room scope owns Light, Compositions and Music. Schedules and device
+// administration remain separate destinations; preferences keep native access.
 
 enum LumenDeskDestination: String, CaseIterable, Identifiable {
     case home = "Room"
@@ -28,12 +25,7 @@ enum LumenDeskDestination: String, CaseIterable, Identifiable {
 
 // MARK: - Shell
 
-/// The window. On macOS a fixed icon rail beside the working area, with the
-/// inspector living inside the Desk itself; on iPhone a four-item tab bar.
-///
-/// The rail replaced a 228 pt sidebar that spent its top on a three-line
-/// wordmark and gave each destination a channel number. A list of five things
-/// does not need addressing, and the space it cost belonged to the fixtures.
+/// Named horizontal workspace navigation on Mac; native tabs on iPhone.
 struct LumenDeskShellView: View {
     @EnvironmentObject private var manager: LightManager
     @State private var destination: LumenDeskDestination = .home

@@ -137,7 +137,7 @@ struct GoveeSegmentEditorView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             if manager.isDemoMode {
-                Label("Demo mode: the layout is saved and simulated, no packets are sent.", systemImage: "sparkles")
+                Label("Demo mode: the layout is saved and simulated, no packets are sent.", systemImage: "play.rectangle")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -199,96 +199,49 @@ struct GoveeSegmentEditorView: View {
     }
 
     private var stringLightView: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            ForEach(Array(stringLightRows.enumerated()), id: \.offset) { _, indexes in
-                let range = indexes.sorted()
-                HStack(spacing: 8) {
-                    Text("\((range.first ?? 0) + 1)–\((range.last ?? 0) + 1)")
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(.tertiary)
-                        .frame(width: 44, alignment: .trailing)
-                    ZStack {
-                        Capsule()
-                            .fill(Lumen.hairlineStrong)
-                            .frame(height: 2)
-                        HStack(spacing: profile.stringLightStyle == .bead ? 4 : 7) {
+        ScrollView(.horizontal) {
+            VStack(alignment: .leading, spacing: 12) {
+                ForEach(Array(stringLightRows.enumerated()), id: \.offset) { row, indexes in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(row.isMultiple(of: 2) ? "Order →" : "← Order")
+                            .font(.caption).foregroundStyle(Lumen.meter)
+                        HStack(spacing: 4) {
                             ForEach(indexes, id: \.self) { index in
-                                stringLightUnit(index)
+                                segmentCell(index: index, width: 44)
                             }
                         }
                     }
-                    .frame(maxWidth: .infinity,
-                           minHeight: profile.stringLightStyle == .bead ? 22 : 32)
                 }
             }
         }
-        .padding(10)
-        .background(Lumen.surfaceRaised, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Lumen.hairline, lineWidth: 0.5))
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("String light with \(draft.segmentCount) \(unitName)s")
-    }
-
-    private func stringLightUnit(_ index: Int) -> some View {
-        let isSelected = selection.contains(index)
-        return Button {
-            toggleSelection(index)
-        } label: {
-            Group {
-                if profile.stringLightStyle == .bead {
-                    Circle()
-                        .fill(color(at: index))
-                        .frame(width: isSelected ? 15 : 11, height: isSelected ? 15 : 11)
-                        .shadow(color: color(at: index).opacity(0.7), radius: 3)
-                } else {
-                    Image(systemName: "lightbulb.fill")
-                        .font(.system(size: isSelected ? 25 : 21, weight: .medium))
-                        .foregroundStyle(color(at: index))
-                        .shadow(color: color(at: index).opacity(0.55), radius: 3)
-                }
-            }
-            .frame(maxWidth: .infinity, minHeight: 28)
-            .overlay(Circle().stroke(isSelected ? Color.accentColor : Color.clear,
-                                     lineWidth: isSelected ? 2 : 0))
-            .animation(.spring(duration: 0.15), value: isSelected)
-        }
-        .buttonStyle(.plain)
-        .help("\(unitName.capitalized) \(index + 1)")
-        .accessibilityLabel("\(unitName.capitalized) \(index + 1)")
-        .accessibilityValue(isSelected ? "selected" : "not selected")
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityLabel("String light with \(draft.segmentCount) \(unitName)s in alternating rows")
     }
 
     private var curtainColumnView: some View {
-        HStack(alignment: .top, spacing: 5) {
-            ForEach(0..<draft.segmentCount, id: \.self) { index in
-                let isSelected = selection.contains(index)
-                Button {
-                    toggleSelection(index)
-                } label: {
-                    VStack(spacing: 3) {
-                        ForEach(0..<10, id: \.self) { _ in
-                            Circle()
-                                .fill(color(at: index))
-                                .frame(width: 8, height: 8)
+        ScrollView(.horizontal) {
+            HStack(alignment: .top, spacing: 6) {
+                ForEach(0..<draft.segmentCount, id: \.self) { index in
+                    let isSelected = selection.contains(index)
+                    Button { toggleSelection(index) } label: {
+                        VStack(spacing: 4) {
+                            Rectangle().fill(color(at: index)).frame(width: 20, height: 90)
+                            Text("\(index + 1)").font(.caption.monospacedDigit())
+                            Image(systemName: isSelected ? "checkmark.square.fill" : "square")
                         }
+                        .foregroundStyle(Lumen.chalk)
+                        .frame(width: 44, height: 142)
+                        .overlay(RoundedRectangle(cornerRadius: 6)
+                            .stroke(isSelected ? Lumen.lit : Lumen.rule, lineWidth: isSelected ? 2 : 1))
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 7)
-                    .background(color(at: index).opacity(0.07), in: Capsule())
-                    .overlay(Capsule().stroke(isSelected ? Color.accentColor : Lumen.hairline,
-                                              lineWidth: isSelected ? 2 : 0.5))
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Curtain column \(index + 1)")
+                    .accessibilityValue(isSelected ? "Selected" : "Not selected")
+                    .accessibilityAddTraits(isSelected ? .isSelected : [])
                 }
-                .buttonStyle(.plain)
-                .help("Curtain column \(index + 1)")
-                .accessibilityLabel("Curtain column \(index + 1)")
-                .accessibilityValue(isSelected ? "selected" : "not selected")
-                .accessibilityAddTraits(isSelected ? .isSelected : [])
             }
+            .padding(2)
         }
-        .padding(10)
-        .background(Lumen.surfaceRaised, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Lumen.hairline, lineWidth: 0.5))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Curtain with \(draft.segmentCount) editable columns")
     }
@@ -345,9 +298,9 @@ struct GoveeSegmentEditorView: View {
         }
         .padding(.horizontal, 12)
         .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
-        .background(heldColor(at: index).opacity(isLit ? 0.08 : 0.02), in: RoundedRectangle(cornerRadius: 12))
+        .background(heldColor(at: index).opacity(isLit ? 0.08 : 0.02), in: RoundedRectangle(cornerRadius: 6))
         .overlay {
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: 6)
                 .stroke(isSelected ? Color.accentColor : Lumen.hairline,
                         lineWidth: isSelected ? 2 : 0.5)
         }
@@ -411,8 +364,8 @@ struct GoveeSegmentEditorView: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Lumen.surfaceRaised, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Lumen.hairline, lineWidth: 0.5))
+        .background(Lumen.surfaceRaised, in: RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Lumen.hairline, lineWidth: 0.5))
         .accessibilityElement(children: .contain)
     }
 
@@ -435,7 +388,8 @@ struct GoveeSegmentEditorView: View {
             applyZoneCombination(zones)
         } label: {
             Text(zones.map { profile.zoneShortName($0) }.joined(separator: " + "))
-                .font(.caption2.weight(isCurrent ? .semibold : .regular))
+                .font(.caption.weight(isCurrent ? .semibold : .regular))
+                .frame(minHeight: 44)
                 .padding(.horizontal, 9)
                 .padding(.vertical, 5)
                 .background(isCurrent ? Color.accentColor.opacity(0.22) : Lumen.surfaceLoud, in: Capsule())
@@ -809,18 +763,20 @@ struct GoveeSegmentEditorView: View {
     private var footer: some View {
         VStack(alignment: .leading, spacing: 8) {
             Divider()
-            HStack {
+            VStack(alignment: .leading, spacing: 12) {
                 Text(profile.appliesViaStream
                      ? "This light family can't store the edited layout in its own firmware, so Apply holds it from LumenDesk and restores it automatically while LumenDesk is running."
                      : "Live preview is temporary. Apply pauses the preview and writes the layout to the light so it survives power cycles; editing again resumes the preview.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
+                HStack {
                 Spacer()
                 Button("Revert") { revert() }
                     .disabled(openingState == nil || openingState == draft)
                 Button("Apply to Light") { applyToLight() }
                     .buttonStyle(LumenPrimaryButtonStyle())
+                }
             }
         }
     }

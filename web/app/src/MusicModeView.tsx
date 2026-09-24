@@ -4,7 +4,7 @@ import { MUSIC_HELP, PRESET_COPY, ROLE_COPY, SOURCE_COPY, configurationFor } fro
 import { GROOVES } from './music/grooves'
 import { hsvToRgb } from './music/fixtures'
 import { WebMusicSession, frameToCommands, setFixtureRole } from './music/session'
-import type { FixtureRole, MusicModePreset } from './music/types'
+import { AURORA_PALETTE, SUNSET_PALETTE, OCEAN_PALETTE, CLUB_PALETTE, type FixtureRole, type MusicModePreset, type MusicModeConfiguration } from './music/types'
 
 const PRESETS: Exclude<MusicModePreset, 'custom'>[] = [
   'ambient',
@@ -42,6 +42,30 @@ export function MusicModeView({
     () => session.version,
   )
   const state = session.state
+  const [reduceMotion, setReduceMotion] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+  useEffect(() => {
+    const query = window.matchMedia('(prefers-reduced-motion: reduce)')
+    const update = () => setReduceMotion(query.matches)
+    query.addEventListener('change', update)
+    return () => query.removeEventListener('change', update)
+  }, [])
+  const configure = (configuration: MusicModeConfiguration) => session.patch({
+    configuration: reduceMotion ? { ...configuration, allowsFlashes: false, movementAmount: Math.min(.2, configuration.movementAmount) } : configuration,
+  })
+  useEffect(() => { if (reduceMotion) configure(state.configuration) }, [reduceMotion])
+  const adjust = (key: 'masterBrightness' | 'effectIntensity' | 'beatSensitivity' | 'movementAmount' | 'movementSpeed' | 'colorChangeIntensity', value: number) =>
+    configure({ ...state.configuration, [key]: value, preset: 'custom' })
+  const orderedFixtures = [...state.fixtures].sort((a, b) => {
+    const index = (id: string) => { const i = state.topology.fixtureOrder.indexOf(id); return i < 0 ? Number.MAX_SAFE_INTEGER : i }
+    return index(a.id) - index(b.id)
+  })
+  const moveFixture = (id: string, offset: number) => {
+    const ids = orderedFixtures.map(f => f.id)
+    const from = ids.indexOf(id), to = from + offset
+    if (from < 0 || to < 0 || to >= ids.length) return
+    ;[ids[from], ids[to]] = [ids[to], ids[from]]
+    session.patch({ topology: { ...state.topology, fixtureOrder: ids } })
+  }
   useEffect(() => { onRunningChange?.(state.running); return () => onRunningChange?.(false) }, [state.running, onRunningChange])
   void version
   const [file, setFile] = useState<File | null>(null)
@@ -92,7 +116,7 @@ export function MusicModeView({
   const snapshot = state.snapshot
   const presetCopyKey = state.configuration.preset === 'custom' ? 'balanced' : state.configuration.preset
   const tempo =
-    snapshot.isTempoLocked && snapshot.tempo > 0
+    state.source !== 'midi' && snapshot.isTempoLocked && snapshot.tempo > 0 && snapshot.beatConfidence >= .4
       ? `${Math.round(snapshot.feltTempo || snapshot.tempo)} · ${snapshot.metre}/${snapshot.metre === 6 ? 8 : 4}`
       : 'Beat'
 
@@ -112,6 +136,7 @@ export function MusicModeView({
           ))}
         </ol></details>
         <p className="note">{MUSIC_HELP.safety}</p>
+        <p className="note">{reduceMotion ? "Reduced Motion: flashes blocked; movement limited." : state.configuration.photosensitivitySafeMode ? "Photosensitivity-safe mode: flashes blocked." : "Controlled flashes enabled."} Stopping recalls the captured fixture colors.</p>
         <div className="music-toolbar">
           <button
             className="primary"
@@ -173,13 +198,14 @@ export function MusicModeView({
             <button
               key={id}
               className={state.configuration.preset === id ? 'chip on' : 'chip'}
-              onClick={() => session.patch({ configuration: configurationFor(id) })}
+              aria-pressed={state.configuration.preset === id}
+              onClick={() => configure(configurationFor(id))}
             >
               {PRESET_COPY[id].name}
             </button>
           ))}
         </div>
-        <p>{PRESET_COPY[presetCopyKey].plain}</p>
+        <p>{state.configuration.preset === 'custom' ? 'Custom balance. Choosing a preset replaces these adjustments.' : PRESET_COPY[presetCopyKey].plain}</p>
         <p className="meta">
           Good for: {PRESET_COPY[presetCopyKey].bestFor} · {PRESET_COPY[presetCopyKey].summary}
         </p>
@@ -205,21 +231,45 @@ export function MusicModeView({
         <Meter label="Energy" value={snapshot.energy} />
         <div className="beat-readout">
 
-          <strong>{tempo === 'Beat' ? 'Finding a pulse' : tempo}</strong>
-          <span>Confidence {Math.round(snapshot.beatConfidence * 100)}%</span>
+          <strong>{state.source === 'midi' ? 'MIDI clock input' : !state.running ? 'Stopped' : tempo === 'Beat' ? 'Finding a pulse' : tempo}</strong>
+          <span>{state.source === 'midi' ? 'Tempo estimation unavailable' : `Confidence ${Math.round(snapshot.beatConfidence * 100)}%`}</span>
         </div>
         <p className="note">Audio input and musical interpretation. Generated colors below are not device confirmations.</p>
         <details><summary>Audio diagnostics</summary><Meter label="Bass" value={snapshot.bass}/><Meter label="Mids" value={snapshot.mids}/><Meter label="Highs" value={snapshot.highs}/></details>
       </div>
 
       <div className="panel">
+        <h2>Show balance</h2>
+        <div className="music-adjustments">
+          {([
+            ['masterBrightness', 'Master brightness'], ['effectIntensity', 'Intensity'],
+            ['beatSensitivity', 'Beat sensitivity'], ['movementAmount', 'Movement'],
+            ['movementSpeed', 'Movement speed'], ['colorChangeIntensity', 'Color variation'],
+          ] as const).map(([key, label]) => <label key={key} className="field">
+            {label} <output>{Math.round(state.configuration[key] * 100)}%</output>
+            <input type="range" min="0" max={key === 'movementAmount' && reduceMotion ? '.2' : '1'} step=".01"
+              value={state.configuration[key]} onChange={e => adjust(key, Number(e.target.value))}/>
+          </label>)}
+        </div>
+        <h3>Color palette</h3>
+        <div className="palette-choices">{[
+          {name:'Aurora', colors:AURORA_PALETTE}, {name:'Sunset', colors:SUNSET_PALETTE},
+          {name:'Ocean', colors:OCEAN_PALETTE}, {name:'Club', colors:CLUB_PALETTE},
+        ].map(p => <button key={p.name} onClick={() => configure({...state.configuration, palette:p.colors, preset:'custom'})}
+          aria-pressed={p.colors.map(c=>c.hex).join() === state.configuration.palette.map(c=>c.hex).join()}>
+          <span className="palette-strip" aria-hidden="true">{p.colors.map((c,i)=><span key={i} style={{background:'#'+c.hex.toString(16).padStart(6,'0')}}/>)}</span>
+          {p.name}
+        </button>)}</div>
+      </div>
+
+      <div className="panel">
         <p className="eyebrow">Which light does what</p>
         <p>{MUSIC_HELP.roles}</p>
         {state.fixtures.length === 0 ? (
-          <p>No lights yet. Scan from Home, or run a demo groove to watch the lights move without any hardware.</p>
+          <p>No lights yet. Use Find lights in Room, or run a demo groove to watch the lights move without any hardware.</p>
         ) : (
           <ul className="fixture-list">
-            {state.fixtures.map(fixture => {
+            {orderedFixtures.map((fixture, index) => {
               const stateFor = state.frame?.states.find(s => s.fixtureID === fixture.id)
               const rgb = stateFor ? hsvToRgb(stateFor.hue, stateFor.saturation, stateFor.brightness) : null
               return (
@@ -228,7 +278,7 @@ export function MusicModeView({
                     className="fixture-swatch"
                     style={rgb ? { background: `rgb(${rgb.r} ${rgb.g} ${rgb.b})` } : undefined}
                   />
-                  <strong>{fixture.label}</strong>
+                  <strong>{index + 1}. {fixture.label}</strong>
                   <select
                     aria-label={`Role for ${fixture.label}`}
                     value={fixture.role}
@@ -244,6 +294,10 @@ export function MusicModeView({
                       </option>
                     ))}
                   </select>
+                  <div className="fixture-order">
+                    <button disabled={index === 0} aria-label={`Move ${fixture.label} earlier`} onClick={() => moveFixture(fixture.id,-1)}>↑</button>
+                    <button disabled={index === orderedFixtures.length - 1} aria-label={`Move ${fixture.label} later`} onClick={() => moveFixture(fixture.id,1)}>↓</button>
+                  </div>
                 </li>
               )
             })}

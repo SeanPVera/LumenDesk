@@ -180,7 +180,7 @@ export function HomeView({ devices, controls, onBulk, onScan, scanning }: {
         <p className="field-caption">Fixture order · select to control</p>
         <div className="emitters">
           {devices.map(d => <button key={d.id} className="emitter"
-            aria-pressed={active.includes(d.id)} onClick={() => toggle(d.id)}
+            title={d.name} aria-pressed={active.includes(d.id)} onClick={() => toggle(d.id)}
             aria-label={`${d.name}, ${!d.reachable ? 'not responding' : d.power ? `${d.brightness}% on` : 'off'}`}>
             <span className="emission" style={{
               background: d.power && d.reachable ? rgbToHex(d.color ?? {r: 255,g:255,b:255}) : 'var(--surface)',

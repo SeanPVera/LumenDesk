@@ -67,7 +67,7 @@ small, .note, .meta, .count { font-size: .86rem; color: var(--secondary); }
 .emitter strong { font-size: .95rem; font-weight: 500; overflow-wrap: anywhere; }
 .emitter > span:not(.emission):not(.selection-mark) { font-size: .8rem; color: var(--secondary); }
 .emitter[aria-pressed=true] { border: 2px solid var(--text); padding: 11px; }
-.emission { display: block; height: 32px; margin: 12px 12px 6px; border-radius: 2px; }
+.emission { display: block; border: 1px solid var(--rule); height: 32px; margin: 12px 12px 6px; border-radius: 2px; }
 .selection-mark { position: absolute; right: 5px; top: 2px; font-size: .9rem; color: var(--text); }
 .room-editing { display: grid; grid-template-columns: minmax(0, 1fr) minmax(290px, 360px); gap: 40px; align-items: start; }
 .section-line { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
@@ -101,7 +101,7 @@ small, .note, .meta, .count { font-size: .86rem; color: var(--secondary); }
 .star { font-size: 1.2rem; padding: 4px 10px; background: transparent; }
 .swatches { display: flex; flex-wrap: wrap; gap: 10px; }
 .swatch { width: 44px; height: 44px; }
-.chip.active, .chip.on, .nav.active { background: var(--text); color: var(--canvas); }
+.chip.active, .chip.on, .music-toolbar .nav.active { background: var(--text); color: var(--canvas); }
 .group { margin-top: 28px; }
 .group-title { display: flex; gap: 12px; align-items: baseline; margin-bottom: 12px; }
 .row { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; padding: 16px 0; border-bottom: 1px solid var(--soft-rule); }
@@ -154,7 +154,12 @@ meter { width: 100%; height: 12px; accent-color: var(--text); }
   .content-head { align-items: flex-start; gap: 8px; }
   .room-scope { font-size: 1.2rem; max-width: 210px; }
   .light-field { padding: 12px; }
-  .emitters { gap: 8px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .emitters { gap: 6px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .emitter { padding: 6px; }
+  .emitter[aria-pressed=true] { padding: 5px; }
+  .emitter strong { font-size: .8rem; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .emission { margin: 14px 3px 6px; height: 28px; }
+  .light-field > .note { font-size: .75rem; }
   .fixture-swatch { width: 32px; }
   .music-desk .meters { grid-template-columns: 1fr 1fr; }
   .beat-readout { grid-column: 1 / -1; }
@@ -168,3 +173,12 @@ meter { width: 100%; height: 12px; accent-color: var(--text); }
 @media (forced-colors: active) {
   .emitter[aria-pressed=true], button[aria-current=page] { border: 2px solid Highlight; }
 }
+
+.music-adjustments { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px 28px; }
+.palette-choices { display: flex; flex-wrap: wrap; gap: 12px; }
+.palette-choices button { width: 130px; background: transparent; border-color: var(--rule); }
+.palette-choices button[aria-pressed=true] { border: 2px solid var(--text); }
+.palette-strip { display: flex; height: 14px; margin-bottom: 8px; }
+.palette-strip span { flex: 1; }
+.fixture-order { display: flex; gap: 4px; }
+@media (max-width: 620px) { .fixture-list li { flex-wrap: wrap; } .fixture-list strong { flex-basis: calc(100% - 90px); } }

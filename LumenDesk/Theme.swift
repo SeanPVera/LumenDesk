@@ -5,29 +5,11 @@ import AppKit
 import UIKit
 #endif
 
-// MARK: - LumenDesk design system — "Plan"
+// MARK: - LumenDesk design system — Light in place
 //
-// The room is the primary object. The screen is a drawing of the home, and
-// every lit fixture pools its own colour onto it, so a dark room reads from
-// across the desk without reading a word.
-//
-//     The plan is not a floor plan. It is a seating chart.
-//
-// It does not have to be architecturally correct, it has to be consistent. A
-// kitchen that stays top-right is learned in about a day and never unlearned,
-// which is why an overlapping drop is refused rather than tidied away and why
-// every default position in `PlanLayout` is deterministic.
-//
-// The ground is cold. An earlier direction argued for warm near-black on the
-// grounds that home light lives at 2200-4000 K, but that reasoning belongs to
-// an interface standing *inside* the lamp's own colour. A plan looks down at a
-// room from outside it, at night, and a cold floor is what makes a 2200 K
-// bedside lamp read as warm when it pools on one.
-//
-// Two colours are authored into the interface and no more. Link cyan means
-// network truth and nothing else. Mark is the drawing's annotation colour, the
-// blue pencil a drafter reaches for, and it is reserved for dimensions and
-// selection. Every other colour on screen is a fixture reporting its own.
+// Achromatic structure contains lighting color. Room state, selection and
+// connectivity also have text or shape. Saved placement is relative, never
+// calibrated architecture. See DESIGN_SYSTEM.md for implemented tokens and limits.
 
 enum Lumen {
 
@@ -84,17 +66,10 @@ enum Lumen {
     /// Illumination. A lit key face, a fader cap, a powered legend.
     static let lit = Color(hex: 0xF8FAFA)
 
-    /// The drawing's annotation colour — the blue pencil a drafter reaches
-    /// for. Dimensions and selection outlines only; it is not an accent and
-    /// nothing decorative may spend it.
+    /// Selection and annotations share the neutral foreground.
     static let mark = Color(hex: 0xEDF0F1)
 
-    // MARK: The one hue
-    //
-    // Link cyan means the network, and nothing else. Discovery, a confirmed
-    // packet, a round-trip figure, an address. It is deliberately the only
-    // authored hue in the product, so a coloured pixel anywhere else on screen
-    // is a fixture reporting its own colour.
+    // MARK: Network and status
 
     static let link    = Color(hex: 0xB8C8C5)
     static let linkDim = Color(hex: 0x2C6E6A)
@@ -267,9 +242,8 @@ enum LumenType {
         .system(size: max(size, minimumSize), weight: weight)
     }
 
-    /// Measured values: levels, kelvin, counts, timings, addresses. Monospaced
-    /// and tabular, because the whole point of a strip field is comparing
-    /// numbers down a column.
+    /// Measured values use system text with tabular digits. Technical identifiers
+    /// opt into a monospace face at their call site.
     static func readout(size: CGFloat, weight: Font.Weight = .medium) -> Font {
         .system(size: max(size, minimumSize), weight: weight).monospacedDigit()
     }

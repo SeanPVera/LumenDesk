@@ -8,7 +8,8 @@ const output = process.env.LUMENDESK_WEB_QA_DIRECTORY ?? '/tmp/LumenDesk-Web-QA'
 await mkdir(output, { recursive: true })
 const server = spawn(process.execPath, ['node_modules/vite/bin/vite.js', '--host', '127.0.0.1', '--port', '4174'], { stdio: 'pipe' })
 const browser = await chromium.launch()
-const page = await browser.newPage({ viewport: { width: 1100, height: 900 }, colorScheme: 'dark' })
+const context = await browser.newContext({ viewport: { width: 1100, height: 900 }, colorScheme: 'dark' })
+const page = await context.newPage()
 const errors = []
 page.on('pageerror', error => errors.push(error.message))
 const devices = [
@@ -87,7 +88,13 @@ try {
   assert.deepEqual(commands.find(x=>x.path==='/scenes').data.deviceIDs.sort(),['govee:two','lifx:one','lifx:three'])
   await capture('web-scenes')
   await page.getByRole('button',{name:'Music',exact:true}).click()
+  await page.getByRole('slider',{name:/^Intensity/}).press('Home')
+  await page.getByText('Custom balance. Choosing a preset replaces these adjustments.').waitFor()
+  await page.getByRole('button',{name:'Move Reading lamp later',exact:true}).click()
+  assert.match(await page.locator('.fixture-list li').first().innerText(),/Bookshelf/)
   await capture('web-music-stopped')
+  await capture('web-music-390',390,844)
+  await page.setViewportSize({width:1100,height:900})
   await page.getByRole('button',{name:'Demo groove',exact:true}).click()
   await page.getByText(/Running · Demo groove/).waitFor()
   assert.equal(await page.getByLabel('Control room').isDisabled(),true)

@@ -42,7 +42,8 @@ struct PlanWorkspaceView: View {
                     if lights.isEmpty {
                         emptyState
                     } else {
-                        RoomLightField(lights: lights, room: room, selectedIDs: $selectedIDs)
+                        RoomLightField(lights: lights, room: room, selectedIDs: $selectedIDs,
+                                       showsSpatialPlacement: geometry.size.width >= max(720, CGFloat(lights.count) * 155))
                         sectionPicker
                         switch section {
                         case .control:
@@ -211,7 +212,7 @@ struct PlanWorkspaceView: View {
                 Text("Fixtures").font(.headline)
                 Spacer()
                 Text("\(selectedIDs.count) selected").font(.caption).foregroundStyle(Lumen.meter)
-                Button("Select all") { selectedIDs = Set(visibleLights.map(\.id)) }
+                Button(searchText.isEmpty ? "Select all" : "Select visible") { selectedIDs = Set(visibleLights.map(\.id)) }
                     .buttonStyle(LumenSecondaryButtonStyle(compact: true))
             }
             TextField("Find a fixture", text: $searchText)
@@ -225,7 +226,9 @@ struct PlanWorkspaceView: View {
                 Text("No fixtures match. Clear the search to see this room.")
                     .foregroundStyle(Lumen.meter)
             }
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: layout == WorkspaceLayout.list.rawValue ? 280 : 250), spacing: 16)], spacing: 0) {
+            LazyVGrid(columns: layout == WorkspaceLayout.list.rawValue
+                      ? [GridItem(.flexible())]
+                      : [GridItem(.adaptive(minimum: 250), spacing: 16)], spacing: 0) {
                 ForEach(visibleLights) { light in
                     RoomFixtureLine(light: light, selected: selectedIDs.contains(light.id),
                                     compact: density == InterfaceDensity.compact.rawValue) {
@@ -278,19 +281,21 @@ struct RoomLightField: View {
     let room: Room?
     @Binding var selectedIDs: Set<String>
     @State private var arranging = false
+    var showsSpatialPlacement = true
+    private var usesPlacement: Bool { showsSpatialPlacement && room != nil && lights.count <= 8 }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text(room == nil ? "Fixture order" : "Relative placement")
+                Text(usesPlacement ? "Relative placement" : "Fixture order")
                     .font(.caption).foregroundStyle(Lumen.meter)
                 Spacer()
-                if room != nil && lights.count <= 8 {
+                if usesPlacement {
                     Toggle("Arrange", isOn: $arranging).toggleStyle(LumenChipStyle())
                 }
                 Text("Select to control").font(.caption).foregroundStyle(Lumen.meter)
             }
-            if let room, lights.count <= 8 {
+            if let room, usesPlacement {
                 GeometryReader { geometry in
                     ForEach(lights) { light in
                         let anchor = manager.planAnchor(for: light.id, in: room)
@@ -486,32 +491,69 @@ struct RoomArrangementSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var roomID: UUID?
     @State private var lightID: String?
+    @State private var placementError: String?
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                Text("Arrange rooms").font(.headline)
-                Spacer()
-                Button("Done") { dismiss() }
-            }
-            Text("Relative organization, not a measured floor plan. Move a room or use the controls below.")
-                .foregroundStyle(Lumen.meter)
-            ScrollView([.horizontal, .vertical]) {
-                PlanBoardView(arranging: true, selectedRoomID: $roomID, selectedLightID: $lightID)
-                    .frame(width: 600, height: max(420, CGFloat(manager.rooms.count) * 90))
-            }
-            ForEach(manager.rooms) { room in
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
                 HStack {
-                    Text(room.name)
+                    Text("Arrange rooms").font(.headline)
                     Spacer()
-                    Button("Earlier") { manager.moveRoom(room.id, by: -1) }
-                    Button("Later") { manager.moveRoom(room.id, by: 1) }
+                    Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
                 }
+                Text("Relative organization, not a measured floor plan. Drag a room or edit its position and size below.")
+                    .foregroundStyle(Lumen.meter)
+                ScrollView(.horizontal) {
+                    PlanBoardView(arranging: true, selectedRoomID: $roomID, selectedLightID: $lightID)
+                        .frame(width: 600, height: max(420, CGFloat(manager.rooms.count) * 90))
+                }
+                if let placementError {
+                    Label(placementError, systemImage: "exclamationmark.triangle")
+                        .font(.callout).foregroundStyle(Lumen.warn)
+                }
+                ForEach(manager.rooms) { room in
+                    DisclosureGroup(room.name) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Stepper("Column: \((room.planFrame?.column ?? 0) + 1)",
+                                    value: frameBinding(room, \.column), in: 0...5)
+                            Stepper("Row: \((room.planFrame?.row ?? 0) + 1)",
+                                    value: frameBinding(room, \.row), in: 0...999)
+                            Stepper("Width: \(room.planFrame?.width ?? 1) columns",
+                                    value: frameBinding(room, \.width), in: 1...6)
+                            Stepper("Height: \(room.planFrame?.height ?? 1) rows",
+                                    value: frameBinding(room, \.height), in: 1...999)
+                            HStack {
+                                Text("Room list order")
+                                Spacer()
+                                Button("Earlier") { manager.moveRoom(room.id, by: -1) }
+                                    .accessibilityLabel("Move \(room.name) earlier in room list")
+                                Button("Later") { manager.moveRoom(room.id, by: 1) }
+                                    .accessibilityLabel("Move \(room.name) later in room list")
+                            }
+                        }
+                        .padding(.vertical, 12)
+                    }
+                }
+                Button("Reset arrangement") { manager.resetPlanLayout(); placementError = nil }
             }
-            Button("Reset arrangement") { manager.resetPlanLayout() }
+            .padding(20)
         }
-        .padding(20)
         .onAppear { manager.ensurePlanLayout() }
         .sheetFrame(minWidth: 620, idealWidth: 820, minHeight: 560, idealHeight: 700)
+    }
+
+    private func frameBinding(_ room: Room, _ key: WritableKeyPath<RoomPlanFrame, Int>) -> Binding<Int> {
+        Binding(
+            get: { (manager.rooms.first { $0.id == room.id }?.planFrame ?? RoomPlanFrame(column: 0, row: 0))[keyPath: key] },
+            set: { value in
+                guard var frame = manager.rooms.first(where: { $0.id == room.id })?.planFrame else { return }
+                frame[keyPath: key] = value
+                if manager.setPlanFrame(frame, for: room.id) {
+                    placementError = nil
+                } else {
+                    placementError = "\(room.name) was not moved. That position overlaps another room or leaves the six-column board. Choose a free position; no layout was changed."
+                }
+            })
     }
 }
 

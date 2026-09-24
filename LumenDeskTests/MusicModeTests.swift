@@ -132,7 +132,8 @@ final class MusicModeTests: XCTestCase {
             XCTAssertLessThanOrEqual(commands, 235) // <= 1/.06 Hz plus first frame
             print("MUSIC_METRIC native rate=\(rate) chunk=\(chunk) locked=\(locked) correct=\(correct) handoffs=\(commands)")
         }
-        if let path = ProcessInfo.processInfo.environment["MUSIC_TRACE_PATH"] {
+        if let path = ProcessInfo.processInfo.environment["MUSIC_TRACE_PATH"]
+            ?? ProcessInfo.processInfo.environment["TEST_RUNNER_MUSIC_TRACE_PATH"] {
             try csv.write(toFile: path, atomically: true, encoding: .utf8)
         }
     }

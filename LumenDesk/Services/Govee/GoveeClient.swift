@@ -232,13 +232,14 @@ final class GoveeClient {
     // MARK: - Paced per-device send queue
 
     private func enqueue(deviceID: String, kind: String, payload: Data) {
+        let enqueuedAt = ProcessInfo.processInfo.systemUptime
         queue.async { [weak self] in
             guard let self, self.addressByDevice[deviceID] != nil else { return }
             if self.queuedPayloads[deviceID, default: [:]].updateValue(payload, forKey: kind) == nil {
                 self.queuedOrder[deviceID, default: []].append(kind)
             }
             if kind == "music-color" || kind == "razer-frame" {
-                self.volatileQueuedAt[deviceID, default: [:]][kind] = ProcessInfo.processInfo.systemUptime
+                self.volatileQueuedAt[deviceID, default: [:]][kind] = enqueuedAt
             }
             self.scheduleDrain(deviceID)
         }

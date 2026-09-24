@@ -116,8 +116,10 @@ Other native production cases:
   restore preferences, failed startup and legacy persistence. Renderer tests
   cover coalescing, provider pacing, stale sequence/age rejection and reset.
 
-For a deterministic CSV of actual production output, set `MUSIC_TRACE_PATH` when
-running the named PCM test. Columns contain format, time, tempo, confidence,
+For a deterministic CSV of actual production output, set
+`TEST_RUNNER_MUSIC_TRACE_PATH=/absolute/path/music-production.csv` when running
+xcodebuild with the named PCM test (Xcode forwards it as `MUSIC_TRACE_PATH`).
+The CI Build workflow uploads this synthetic CSV as `music-production-trace`. Columns contain format, time, tempo, confidence,
 onset, event count, level, generated brightness and handoff count. This trace
 contains only synthetic test data. The app's generated preview additionally uses
 the shared real-device capability mask; it is not a physical-light preview.

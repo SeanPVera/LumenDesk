@@ -71,6 +71,8 @@ jobs:
             --platform macosx
 
       - name: Test macOS Debug
+        env:
+          TEST_RUNNER_MUSIC_TRACE_PATH: ${{ runner.temp }}/music-production.csv
         run: |
           xcodebuild \
             -project "$PROJECT" \
@@ -82,6 +84,13 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             test
+
+      - name: Save synthetic production Music Mode trace
+        uses: actions/upload-artifact@v4
+        with:
+          name: music-production-trace
+          path: ${{ runner.temp }}/music-production.csv
+          if-no-files-found: error
 
       - name: Prove control regressions fail on the audited baseline
         run: scripts/check_music_controls_baseline.sh

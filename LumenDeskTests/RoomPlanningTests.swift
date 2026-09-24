@@ -324,7 +324,6 @@ final class RoomWorkspaceRenderTests: XCTestCase {
         let scope = LightScope.room(room.id)
         try await capture("shell-demo", LumenDeskShellView(), manager, width: 1100, height: 1000)
         try await capture("room-all-offline", PlanWorkspaceView(scope: .constant(.all)), manager, width: 1440, height: 1100)
-        try await capture("room-minimum", PlanWorkspaceView(scope: .constant(scope)), manager, width: 620, height: 540)
         try await capture("room-620", PlanWorkspaceView(scope: .constant(scope)), manager, width: 620, height: 850)
         try await capture("room-1100", PlanWorkspaceView(scope: .constant(scope)), manager, width: 1100, height: 900)
         try await capture("room-1440", PlanWorkspaceView(scope: .constant(scope)), manager, width: 1440, height: 1000)

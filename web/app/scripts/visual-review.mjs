@@ -64,7 +64,7 @@ async function audit(name) {
   const axe = await new AxeBuilder({page}).analyze()
   await writeFile(output+'/accessibility-'+name+'.json',JSON.stringify(axe,null,2))
   console.log('ACCESSIBILITY '+name,JSON.stringify(axe.violations.map(v=>({id:v.id,impact:v.impact,nodes:v.nodes.length}))))
-  assert.equal(axe.violations.filter(v=>['critical','serious'].includes(v.impact)).length,0,name+' has serious accessibility violations')
+  assert.equal(axe.violations.length,0,name+' has accessibility violations')
 }
 try {
   for(let i=0;i<80;i++){try{await fetch('http://127.0.0.1:4174');break}catch{await new Promise(r=>setTimeout(r,100))}}
@@ -108,6 +108,10 @@ try {
   await page.getByRole('button',{name:'Light',exact:true}).click()
   await page.emulateMedia({reducedMotion:'reduce'})
   await capture('web-reduced-motion',620,850)
+  state.devices=Array.from({length:24},(_,i)=>({...structuredClone(devices[i%devices.length]),id:'review:'+i,name:`Fixture ${i+1} with a long installation name`,roomID:'lounge',reachable:i%7!==0}))
+  await page.reload()
+  await page.getByRole('heading',{name:'Fixtures',exact:true}).waitFor()
+  await capture('web-room-24-fixtures',1440,950)
   state.devices=[]
   await page.reload()
   await page.getByRole('heading',{name:'No lights found yet'}).waitFor()

@@ -30,12 +30,13 @@ export function BridgeSetup({
 }) {
   const checking = state === 'checking'
   return (
-    <div className="shell centered">
+    <main className="shell centered">
       <div className="panel wide">
         <span className="eyebrow">Local control only</span>
         <h1>{checking ? 'Connecting to your lights' : 'Connect your local lights'}</h1>
         <p>LumenDesk needs a local bridge to reach your LIFX and Govee lights.
           Start it on this computer, then open its local address. No account is required.</p>
+        <p className="note">Connecting checks the bridge without changing your lights. You can safely retry.</p>
 
 
         <ol className="steps">
@@ -142,6 +143,6 @@ npm run app`}</code>
           </div>
         )}
       </div>
-    </div>
+    </main>
   )
 }

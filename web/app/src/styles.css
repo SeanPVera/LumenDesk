@@ -194,3 +194,7 @@ meter { width: 100%; height: 12px; accent-color: var(--text); }
 .music-performance .meters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .music-performance .beat-readout, .music-performance .meters > p, .music-performance .meters > details { grid-column: 1 / -1; }
 @media (max-width: 899px) { .music-performance { grid-template-columns: minmax(0, 1fr); gap: 0; } }
+
+/* Keep shared output reachable in larger installations. */
+.emitters { max-height: 320px; overflow-y: auto; }
+@media (min-width: 900px) { .output-controls { position: sticky; top: 24px; } }

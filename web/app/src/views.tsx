@@ -177,7 +177,7 @@ export function HomeView({ devices, controls, onBulk, onScan, scanning }: {
   return <section className="room-workspace" aria-label="Room lighting">
     {!devices.length ? <EmptyLights scanning={scanning} onScan={onScan} /> : <>
       <div className="light-field" aria-label="Fixtures in this room">
-        <p className="field-caption">Fixture order · select to control</p>
+        <p className="field-caption">Fixture order · select to control{devices.length > 12 && ' · scroll for more fixtures'}</p>
         <div className="emitters">
           {devices.map(d => <button key={d.id} className="emitter"
             title={d.name} aria-pressed={active.includes(d.id)} onClick={() => toggle(d.id)}

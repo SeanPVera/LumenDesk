@@ -64,12 +64,12 @@ struct LumenFader: View {
             if showsHeader {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(label)
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.system(size: 11.5, weight: .medium))
                         .foregroundStyle(Lumen.meter)
                         .lineLimit(1)
                     Spacer(minLength: 8)
                     Text(readout)
-                        .font(LumenType.readout(size: 12, weight: .medium))
+                        .font(LumenType.readout(size: 11.5, weight: .medium))
                         .foregroundStyle(editing ? Lumen.lit : Lumen.chalk)
                         .monospacedDigit()
                 }
@@ -291,7 +291,7 @@ private struct LumenChipFace: View {
             configuration.isOn.toggle()
         } label: {
             configuration.label
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(size: 11.5, weight: .medium))
                 .foregroundStyle(configuration.isOn ? Lumen.stage : Lumen.meter)
                 .padding(.horizontal, 11)
                 .padding(.vertical, 5)

@@ -1,0 +1,135 @@
+{
+  "native": {
+    "revision": "c843bd3f8e862af17182af7178358fc2ff45b27f",
+    "run": 36037899212,
+    "tests": 241,
+    "failures": 0,
+    "macOSAnalysis": "passed",
+    "genericIOSBuild": "passed",
+    "renderedStates": 21
+  },
+  "bridge": {
+    "tests": 60,
+    "failures": 0,
+    "environments": [
+      "CI",
+      "local"
+    ],
+    "physicalDevices": false
+  },
+  "webMusic": {
+    "tests": 21,
+    "failures": 0
+  },
+  "browser": {
+    "command": "node scripts/visual-review.mjs",
+    "result": "passed",
+    "environment": "local Playwright Chromium 141",
+    "states": [
+      {
+        "name": "web-room-1100",
+        "width": 1100,
+        "height": 900,
+        "overflow": false
+      },
+      {
+        "name": "web-room-1440",
+        "width": 1440,
+        "height": 950,
+        "overflow": false
+      },
+      {
+        "name": "web-room-620",
+        "width": 620,
+        "height": 850,
+        "overflow": false
+      },
+      {
+        "name": "web-room-390",
+        "width": 390,
+        "height": 844,
+        "overflow": false
+      },
+      {
+        "name": "web-selection",
+        "width": 1100,
+        "height": 900,
+        "overflow": false
+      },
+      {
+        "name": "web-scenes",
+        "width": 1100,
+        "height": 900,
+        "overflow": false
+      },
+      {
+        "name": "web-music-initial",
+        "width": 1100,
+        "height": 900,
+        "overflow": false
+      },
+      {
+        "name": "web-music-stopped",
+        "width": 1100,
+        "height": 900,
+        "overflow": false
+      },
+      {
+        "name": "web-music-390",
+        "width": 390,
+        "height": 844,
+        "overflow": false
+      },
+      {
+        "name": "web-music-running",
+        "width": 1100,
+        "height": 900,
+        "overflow": false
+      },
+      {
+        "name": "web-reduced-motion",
+        "width": 620,
+        "height": 850,
+        "overflow": false
+      },
+      {
+        "name": "web-room-24-fixtures",
+        "width": 1440,
+        "height": 950,
+        "overflow": false
+      },
+      {
+        "name": "web-empty",
+        "width": 1100,
+        "height": 900,
+        "overflow": false
+      },
+      {
+        "name": "web-connection-unavailable",
+        "width": 620,
+        "height": 850,
+        "overflow": false
+      }
+    ],
+    "axe": {
+      "room": {
+        "violations": 0,
+        "passes": 32,
+        "incomplete": 1
+      },
+      "music": {
+        "violations": 0,
+        "passes": 37,
+        "incomplete": 1
+      },
+      "setup": {
+        "violations": 0,
+        "passes": 27,
+        "incomplete": 0
+      }
+    }
+  },
+  "physicalDeviceValidation": "not performed",
+  "manualAppleAccessibility": "not performed",
+  "finalCombinedCI": "not run after external PR closure"
+}

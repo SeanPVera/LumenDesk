@@ -77,10 +77,14 @@ jobs:
             -scheme "$SCHEME" \
             -configuration "$CONFIGURATION" \
             -destination "platform=macOS" \
+            -parallel-testing-enabled NO \
             -derivedDataPath "$RUNNER_TEMP/DerivedData/macOS" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             test
+
+      - name: Prove control regressions fail on the audited baseline
+        run: scripts/check_music_controls_baseline.sh
 
       - name: Build generic iOS device
         run: |

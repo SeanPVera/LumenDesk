@@ -1,5 +1,5 @@
 import { normalizeConfiguration } from "./config";
-import { FLASH_HARD_CEILING, clamp01, wrapUnit, type AudioReactiveSnapshot, type FixtureRole, type FixtureTopology, type MusicFixtureDescriptor, type MusicLightingFrame, type MusicLightingState, type MusicModeConfiguration, type MusicMovementDirection, type MusicPaletteColor, type MusicSpatialTarget } from "./types";
+import { FLASH_HARD_CEILING, clamp01, wrapUnit, type AudioReactiveSnapshot, type FixtureRole, type FixtureTopology, type MusicFixtureDescriptor, type MusicLightingFrame, type MusicLightingState, type MusicModeConfiguration, type MusicMovementDirection, type MusicPaletteColor, type MusicSpatialTarget, freshSnapshot } from "./types";
 
 export class FlashSafetyLimiter {
   static hardMaximumFrequency = FLASH_HARD_CEILING;
@@ -73,11 +73,6 @@ export class MusicChoreographyEngine {
   private dynamics = 0;
   private fastEnergy = 0;
   private slowEnergy = 0;
-  private moodSmoothed = 0.5;
-  private chromaHueSmoothed = 0;
-  private chromaCandidate = -1;
-  private chromaCandidateFrames = 0;
-  private chromaIndex = -1;
   private onsetEnvelope = 0;
   private accentEnvelope = 0;
   private colourIndex = 0;
@@ -96,11 +91,6 @@ export class MusicChoreographyEngine {
     this.dynamics = 0;
     this.fastEnergy = 0;
     this.slowEnergy = 0;
-    this.moodSmoothed = 0.5;
-    this.chromaHueSmoothed = 0;
-    this.chromaCandidate = -1;
-    this.chromaCandidateFrames = 0;
-    this.chromaIndex = -1;
     this.onsetEnvelope = 0;
     this.accentEnvelope = 0;
     this.colourIndex = 0;
@@ -108,7 +98,7 @@ export class MusicChoreographyEngine {
   }
 
   makeFrame(
-    snapshot: AudioReactiveSnapshot,
+    input: AudioReactiveSnapshot,
     configuration: MusicModeConfiguration,
     topology: FixtureTopology,
     fixtures: MusicFixtureDescriptor[],
@@ -116,6 +106,7 @@ export class MusicChoreographyEngine {
     sequenceNumber: number,
     reducedMotion = false,
   ): MusicLightingFrame {
+    const snapshot = freshSnapshot(input, timestamp);
     const config = normalizeConfiguration(configuration, reducedMotion);
     const targets = expandedTargets(topology, fixtures);
     if (targets.length === 0) {
@@ -172,15 +163,14 @@ export class MusicChoreographyEngine {
     const tempoRestraint = clamp01((feltInterval - 0.22) / 0.26);
     const dynamicsGate = Math.pow(clamp01(this.dynamics), 0.8);
     const baseDepth =
-      (0.3 + config.beatSensitivity * 1.15) *
-      (0.6 + config.effectIntensity * 0.4) *
+      (config.beatSensitivity * 1.57) *
+      (0.6 + config.effectIntensity * 0.4) * Math.min(1, config.effectIntensity / 0.2) *
       (0.4 + 0.6 * tempoRestraint) *
       (0.12 + 0.88 * dynamicsGate);
 
-    const upperBrightness = Math.max(config.minimumBrightness, config.maximumBrightness * config.masterBrightness);
+    const lowerBrightness = config.minimumBrightness * config.masterBrightness;
+    const upperBrightness = config.maximumBrightness * config.masterBrightness;
     const palette = config.palette.map(toHsb);
-    const chromaHue = this.smoothedChromaHue(snapshot.chroma, dt);
-    this.moodSmoothed = follow(this.moodSmoothed, snapshot.mood, dt, 2.5);
     const phraseLift = config.phraseAware ? Math.min(0.18, energyRise * 0.9) : 0;
 
     // A room of two or three bulbs cannot show travel, so a sweep there is one
@@ -192,7 +182,7 @@ export class MusicChoreographyEngine {
 
     const states: MusicLightingState[] = [];
     for (const target of targets) {
-      const phase = spatialPhase(target.position, config.movementDirection, this.movementPhase);
+      const phase = spatialPhase(topology.layout === "circular" ? target.position : target.position * 0.75, config.movementDirection, this.movementPhase);
       const wave = 0.5 + 0.5 * Math.sin(phase * 2 * Math.PI);
       const stereoBias = 1 + (snapshot.stereo - 0.5) * 2 * config.stereoImage * (target.position - 0.5) * 2;
       // Centred on 1 so movement tilts the room rather than dimming it.
@@ -218,25 +208,25 @@ export class MusicChoreographyEngine {
       else if (isWash) depth *= 1.15;
       else if (isMotion) depth *= 0.92;
       else if (isAccent) depth *= 0.6;
-      if (isAccent) depth += this.accentEnvelope * 0.18 * config.percussionSensitivity;
-      if (isHit) depth += snapshot.kick * config.bassSensitivity * 0.1;
+      if (isAccent) depth += this.accentEnvelope * 0.18 * config.effectIntensity * config.beatSensitivity;
+      if (isHit) depth += snapshot.kick * config.bassSensitivity * 0.1 * config.effectIntensity * config.beatSensitivity;
       // Deliberately not clamped to 1: past that the swell holds at the ceiling
       // for part of the beat, which is what a punchy preset should look like.
       depth = Math.max(0, depth);
 
-      const bed = config.minimumBrightness + (upperBrightness - config.minimumBrightness) * bedLevel;
+      const bed = lowerBrightness + (upperBrightness - lowerBrightness) * bedLevel;
       let rawBrightness = bed + (upperBrightness - bed) * depth * clamp01(pulseDrive);
 
       if (silence) {
-        if (config.silenceBehavior === "settle") rawBrightness = config.minimumBrightness;
+        if (config.silenceBehavior === "settle") rawBrightness = lowerBrightness;
         else if (config.silenceBehavior === "holdPalette") {
           rawBrightness =
-            config.minimumBrightness +
-            (upperBrightness - config.minimumBrightness) * (0.08 + config.effectIntensity * 0.08);
+            lowerBrightness +
+            (upperBrightness - lowerBrightness) * (0.08 + config.effectIntensity * 0.08);
         } else rawBrightness = 0;
       }
       rawBrightness = Math.max(
-        silence && config.silenceBehavior === "fadeOut" ? 0 : config.minimumBrightness,
+        silence && config.silenceBehavior === "fadeOut" ? 0 : lowerBrightness,
         Math.min(upperBrightness, rawBrightness),
       );
 
@@ -252,7 +242,8 @@ export class MusicChoreographyEngine {
       const release = 1 - Math.exp(-dt / releaseTime);
       const coefficient = rawBrightness > previous ? attack : release;
       let brightness = previous + (rawBrightness - previous) * coefficient;
-      brightness = Math.min(1, brightness + flashIntensity * (1 - brightness));
+      brightness += flashIntensity * Math.max(0, upperBrightness - brightness);
+      brightness = Math.max(silence && config.silenceBehavior === "fadeOut" ? 0 : lowerBrightness, Math.min(upperBrightness, brightness));
       this.brightnessEnvelopes.set(envelopeKey, brightness);
 
       // A palette entry held for a whole number of bars and cross-faded over
@@ -260,17 +251,8 @@ export class MusicChoreographyEngine {
       // one gradient.
       const spread = config.colorChangeIntensity * (0.35 + spatialFidelity * 0.65);
       const paletteMotion =
-        target.position * spread * Math.max(1, palette.length - 1) + this.paletteProgress;
+        target.position * spread * Math.max(1, palette.length - 1) + this.paletteProgress + (isAccent && palette.length > 1 ? 1 : 0);
       const color = paletteColor(palette, paletteMotion / Math.max(1, palette.length));
-      color.hue = wrapUnit(color.hue + (this.moodSmoothed - 0.5) * 0.05 + chromaHue * 0.03);
-      if (isAccent) {
-        // The accent role sits on the complementary colour for the whole show
-        // rather than teleporting there whenever a snare crosses a threshold.
-        color.hue = wrapUnit(color.hue + 0.5);
-        color.saturation *= 0.78;
-      } else if (isHit) {
-        color.saturation = Math.min(1, color.saturation + snapshot.kick * 0.06);
-      }
       if (flashIntensity > 0) color.saturation *= 1 - flashIntensity * 0.8;
 
       states.push({
@@ -313,7 +295,7 @@ export class MusicChoreographyEngine {
     // The reference advances on every detected beat. Include its position on
     // the grid before dividing into felt beats, or half-time restarts its
     // pulse halfway through every cycle.
-    const absoluteBeat = snapshot.beatCount + gridBeats;
+    const absoluteBeat = (snapshot.gridBeatPosition ?? snapshot.beatCount) + gridBeats;
     const beats = (absoluteBeat * gridInterval) / interval;
     const whole = Math.floor(beats);
     const beatInBar = (((snapshot.beatInBar + Math.floor(gridBeats)) % metre) + metre) % metre;
@@ -330,42 +312,6 @@ export class MusicChoreographyEngine {
       metre,
       barPosition: absoluteBeat / metre,
     };
-  }
-
-  /**
-   * The argmax of the chroma vector flickers between near-equal bins every
-   * analysis frame. Require a new bin to lead clearly and hold that lead, then
-   * glide the short way round the wheel rather than jumping.
-   */
-  private smoothedChromaHue(chroma: number[], dt: number): number {
-    if (chroma && chroma.length >= 12) {
-      let best = 0;
-      let runnerUp = 0;
-      let index = 0;
-      for (let i = 0; i < chroma.length; i += 1) {
-        if (chroma[i] > best) {
-          runnerUp = best;
-          best = chroma[i];
-          index = i;
-        } else if (chroma[i] > runnerUp) {
-          runnerUp = chroma[i];
-        }
-      }
-      if (best > 0.15 && best > runnerUp * 1.15) {
-        if (index === this.chromaCandidate) this.chromaCandidateFrames += 1;
-        else {
-          this.chromaCandidate = index;
-          this.chromaCandidateFrames = 1;
-        }
-        if (this.chromaCandidateFrames >= 4) this.chromaIndex = index;
-      }
-    }
-    const target = this.chromaIndex >= 0 ? this.chromaIndex / 12 : this.chromaHueSmoothed;
-    let delta = target - this.chromaHueSmoothed;
-    if (delta > 0.5) delta -= 1;
-    if (delta < -0.5) delta += 1;
-    this.chromaHueSmoothed = wrapUnit(this.chromaHueSmoothed + delta * (1 - Math.exp(-dt / 2.5)));
-    return this.chromaHueSmoothed;
   }
 
   private updateSustainedEnergy(energy: number, timestamp: number): boolean {
@@ -395,6 +341,7 @@ export class MusicChoreographyEngine {
    * the bar and changed colour about twice a second at the default setting.
    */
   private advancePalette(_newBeats: number, clock: MusicalClock, configuration: MusicModeConfiguration, dt: number): void {
+    if (configuration.colorChangeIntensity <= 0) return;
     if (clock.strength > 0 && clock.barRate > 0) {
       const barsPerColour = Math.max(1, Math.round(5 - configuration.colorChangeIntensity * 4));
       const raw = clock.barPosition / barsPerColour;
@@ -418,7 +365,8 @@ export class MusicChoreographyEngine {
   }
 
   private advanceMovement(clock: MusicalClock, configuration: MusicModeConfiguration, dt: number): void {
-    const wallClockRate = 0.06 + configuration.movementSpeed * 0.55;
+    if (configuration.movementSpeed <= 0 || configuration.movementAmount <= 0) return;
+    const wallClockRate = configuration.movementSpeed * 0.66;
     let rate = wallClockRate;
     if (clock.strength > 0 && clock.barRate > 0) {
       // One traverse every few bars at the default speed: motion that reads as
@@ -429,7 +377,7 @@ export class MusicChoreographyEngine {
     }
     this.barsElapsed += (clock.barRate > 0 ? clock.barRate : 0.5) * dt;
     if (configuration.movementDirection === "alternating") {
-      const bar = clock.strength > 0 ? Math.floor(this.barsElapsed) : Math.floor(this.lastBeatCount / Math.max(1, clock.metre));
+      const bar = clock.strength > 0 ? Math.floor(clock.barPosition) : Math.floor(this.lastBeatCount / Math.max(1, clock.metre));
       if (bar % 2 !== 0) rate = -rate;
     }
     this.movementPhase += rate * dt;
@@ -446,7 +394,7 @@ export function expandedTargets(
   const ordered: MusicFixtureDescriptor[] = [];
   for (const id of topology.fixtureOrder) {
     const fixture = byID.get(id);
-    if (fixture && seen.add(id)) ordered.push(fixture);
+    if (fixture && !seen.has(id)) { seen.add(id); ordered.push(fixture); }
   }
   const rest = fixtures
     .filter((f) => !seen.has(f.id))
@@ -564,7 +512,7 @@ function paletteColor(palette: HSB[], position: number): HSB {
   const a = palette[index];
   const b = palette[(index + 1) % palette.length];
   return {
-    hue: lerpHue(a.hue, b.hue, t),
+    hue: a.saturation <= 0.08 ? b.hue : b.saturation <= 0.08 ? a.hue : lerpHue(a.hue, b.hue, t),
     saturation: a.saturation + (b.saturation - a.saturation) * t,
     brightness: a.brightness + (b.brightness - a.brightness) * t,
   };

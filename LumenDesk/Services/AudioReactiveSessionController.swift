@@ -251,6 +251,12 @@ final class AudioReactiveSessionController: ObservableObject {
         session.topology = topology
         session.fixtures = fixtures
         session.reducedMotion = reducedMotion
+        session.lastPreviewPublishedAt = -Double.greatestFiniteMagnitude
+    }
+
+    func effectiveConfiguration(for scope: LightScope) -> MusicModeConfiguration? {
+        guard let session = sessions[scope] else { return nil }
+        return session.configuration.normalized(reducedMotion: session.reducedMotion)
     }
 
     func setGroove(_ grooveID: String) {

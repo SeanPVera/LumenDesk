@@ -127,17 +127,13 @@ export class BeatTracker {
     const metre = this.metreOverride === "auto" ? detected.metre : this.metreOverride;
     const feel =
       this.feelPreference === "auto" ? detected.feel : this.feelPreference;
-    if (metre !== BeatTracker.beatsPerBar) {
-      BeatTracker.beatsPerBar = metre;
-      this.barEnergies = new Array(metre).fill(0);
-    }
     this.grid.metre = metre;
     this.grid.metreConfidence = detected.metreConfidence;
     this.grid.timeFeel = feel;
     const multiplier = feel === "half" ? 2 : feel === "double" ? 0.5 : 1;
     this.grid.feltInterval = this.grid.interval * multiplier;
     this.grid.feltTempo = this.grid.tempo / multiplier;
-    this.grid.beatInBar = ((this.grid.beatCount - this.barOffset) % metre + metre) % metre;
+    this.grid.beatInBar = metre === 4 ? ((this.grid.beatCount - this.barOffset) % 4 + 4) % 4 : this.grid.beatCount % metre;
   }
 
   private emitBeats(time: number): number {

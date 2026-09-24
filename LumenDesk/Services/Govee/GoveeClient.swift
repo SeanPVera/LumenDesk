@@ -14,6 +14,7 @@ protocol GoveeClientDelegate: AnyObject {
 /// status requests on UDP 4002 (so we bind there) and accept commands on 4003.
 final class GoveeClient {
     weak var delegate: GoveeClientDelegate?
+    let musicMetrics = MusicDispatchMetrics()
 
     private let socket: UDPSocket
     private let queue = DispatchQueue(label: "LumenDesk.govee")
@@ -281,9 +282,10 @@ final class GoveeClient {
         }
         let queuedAt = volatileQueuedAt[deviceID]?.removeValue(forKey: kind)
         let expired = queuedAt.map { ProcessInfo.processInfo.systemUptime - $0 > MusicLightingRenderer.maximumFrameAge } ?? false
+        if expired, let queuedAt { musicMetrics.record(age: ProcessInfo.processInfo.systemUptime - queuedAt, expired: true) }
         if !expired {
             earliestSend[deviceID] = DispatchTime.now() + commandGap
-            sendCommand(payload, to: host, deviceID: deviceID, kind: kind)
+            sendCommand(payload, to: host, deviceID: deviceID, kind: kind, queuedAt: queuedAt)
         }
         if order.isEmpty {
             queuedOrder.removeValue(forKey: deviceID)
@@ -295,10 +297,12 @@ final class GoveeClient {
         }
     }
 
-    private func sendCommand(_ data: Data, to host: String, deviceID: String, kind: String) {
+    private func sendCommand(_ data: Data, to host: String, deviceID: String, kind: String, queuedAt: TimeInterval? = nil) {
         do {
             try socket.send(data, to: host, port: GoveeProtocol.controlPort)
+            if let queuedAt { musicMetrics.record(age: ProcessInfo.processInfo.systemUptime - queuedAt) }
         } catch {
+            if let queuedAt { musicMetrics.record(age: ProcessInfo.processInfo.systemUptime - queuedAt, failed: true) }
             delegate?.goveeCommandFailed(deviceID: deviceID, kind: kind, error: error)
         }
     }

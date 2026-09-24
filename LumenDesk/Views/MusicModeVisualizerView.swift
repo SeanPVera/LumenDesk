@@ -3,6 +3,7 @@ import SwiftUI
 /// A vendor-neutral preview of the same fixture and segment frame sent to the
 /// renderer. It remains useful in Demo Mode and when no hardware is reachable.
 struct MusicModeVisualizerView: View {
+    @EnvironmentObject private var manager: LightManager
     @ObservedObject var controller: AudioReactiveSessionController
     let scope: LightScope
     let fixtures: [MusicFixtureDescriptor]
@@ -26,6 +27,27 @@ struct MusicModeVisualizerView: View {
                 }
             }
 
+            DisclosureGroup("Music diagnostics") {
+                let snapshot = controller.latestSnapshot
+                let age = snapshot.analysisTimestamp.map { max(0, ProcessInfo.processInfo.systemUptime - $0) }
+                let analysisDelay = snapshot.analysisCompletedAt.flatMap { completed in snapshot.analysisTimestamp.map { max(0, completed - $0) } }
+                let diagnostics = manager.musicRenderDiagnostics
+                Text("Source: \(controller.sourceStatus.displayName) · snapshot age: \(age.map { String(format: "%.3f s", $0) } ?? "synthetic / unavailable")")
+                Text("Capture to analysis: \(analysisDelay.map { String(format: "%.3f s", $0) } ?? "unavailable") · dropped buffers: \(snapshot.droppedBuffers)")
+                Text(String(format: "RMS %.4f · onset %.2f · beat count %d · BPM %.1f · confidence %.2f", snapshot.rawRMS, snapshot.onset, snapshot.beatCount, snapshot.tempo, snapshot.beatConfidence))
+                if let config = controller.effectiveConfiguration(for: scope) {
+                    Text("Preset: \(config.preset.displayName) · beat: \(config.beatSensitivity, specifier: "%.2f") · intensity: \(config.effectIntensity, specifier: "%.2f") · brightness: \(config.masterBrightness, specifier: "%.2f")")
+                }
+                Text("Generated: \(diagnostics.generatedFrames) · coalesced: \(diagnostics.coalescedStates) · rejected: \(diagnostics.rejectedStates) · transport handoffs: \(diagnostics.commandsHandedOff)")
+                let lifx = manager.musicLIFXDispatch
+                let govee = manager.musicGoveeDispatch
+                Text("Local UDP submissions: LIFX \(lifx.submitted), Govee volatile \(govee.submitted) · failures \(lifx.failed + govee.failed) · expired \(lifx.expired + govee.expired)")
+                Text("Maximum transport queue age: \(max(lifx.maximumQueueAge,govee.maximumQueueAge), specifier: "%.3f") s")
+                Text("Preview shows generated frames with device zone limits. Handoffs do not establish UDP receipt or visible timing. The 45 ms prediction bias is unmeasured. No raw audio is saved.")
+            }
+            .font(.caption)
+            .foregroundStyle(Lumen.textSecondary)
+
             if fixtures.isEmpty {
                 Text("Choose a scope containing at least one light to preview its choreography.")
                     .font(.caption)
@@ -43,7 +65,7 @@ struct MusicModeVisualizerView: View {
     }
 
     private func fixtureRow(_ fixture: MusicFixtureDescriptor) -> some View {
-        let states = frame?.states.filter { $0.fixtureID == fixture.id } ?? []
+        let states = manager.musicCapabilityStates(frame?.states.filter { $0.fixtureID == fixture.id } ?? [], fixtureID: fixture.id)
         return HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(fixture.label).font(LumenType.display(size: 14, weight: .semibold))
@@ -83,7 +105,7 @@ struct MusicModeVisualizerView: View {
         return Color(
             hue: state.hue,
             saturation: state.saturation,
-            brightness: max(0.04, state.brightness)
+            brightness: state.brightness
         )
     }
 

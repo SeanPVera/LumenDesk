@@ -1214,7 +1214,7 @@ final class LightManager: ObservableObject {
     /// Sending them through the normal confirmation pipeline used to allocate
     /// three Tasks and publish several whole-app changes per light, per frame.
     private func sendEffectFrame(_ device: LightDevice, color: Color, brightness: Double,
-                                 duration: TimeInterval) {
+                                 duration: TimeInterval, musicTimestamp: TimeInterval? = nil) {
         guard demoWorkspaceController.allowsLiveNetworking else { return }
         switch device.brand {
         case .lifx:
@@ -1228,7 +1228,8 @@ final class LightManager: ObservableObject {
                     brightness: UInt16(brightness * 65535),
                     kelvin: UInt16(device.kelvin)
                 ),
-                durationMS: UInt32(max(0, min(500, Int(duration * 1_000))))
+                durationMS: UInt32(max(0, min(500, Int(duration * 1_000)))),
+                musicTimestamp: musicTimestamp
             )
         case .govee:
             let rgb = color.rgbComponents
@@ -2746,6 +2747,15 @@ extension Color {
 // MARK: - Music Mode
 
 extension LightManager {
+    var musicLIFXDispatch: MusicDispatchMetrics.Snapshot { lifx?.musicMetrics.snapshot() ?? .init() }
+    var musicGoveeDispatch: MusicDispatchMetrics.Snapshot { govee?.musicMetrics.snapshot() ?? .init() }
+    var musicRenderDiagnostics: MusicLightingRenderer.Diagnostics { musicLightingRenderer.diagnostics }
+
+    func setMusicReducedMotion(_ enabled: Bool) {
+        for scope in musicModeController.activeScopeIDs { effectRuns[scope]?.reducedMotion = enabled }
+        setMusicModeConfiguration(musicModeConfiguration)
+    }
+
     func setMusicModeConfiguration(_ configuration: MusicModeConfiguration) {
         musicModeConfiguration = configuration.normalized()
         persistApplicationState()
@@ -2867,24 +2877,27 @@ extension LightManager {
                     device,
                     color: color,
                     brightness: first.brightness,
-                    duration: first.transitionDuration
+                    duration: first.transitionDuration, musicTimestamp: frame.timestamp
                 )
             case .goveeRealtimeSegments:
-                let segments = command.states.map { state in
-                    GoveeSegmentColor(
-                        color: Color(hue: state.hue, saturation: state.saturation, brightness: 1),
-                        brightness: state.brightness
-                    )
-                }
+                let states = musicCapabilityStates(command.states, fixtureID: command.fixtureID)
+                let segments = states.map { GoveeSegmentColor(color: Color(hue: $0.hue, saturation: $0.saturation, brightness: 1), brightness: $0.brightness, isOn: $0.brightness > 0) }
                 guard !segments.isEmpty else { continue }
-                previewSegments(
-                    device,
-                    state: zoneConstrained(
-                        GoveeSegmentState(colors: segments, gradient: false, isActive: false),
-                        for: device
-                    )
-                )
+                previewSegments(device, state: GoveeSegmentState(colors: segments, gradient: false, isActive: false))
             }
+        }
+    }
+
+    /// Shared by transport and preview: firmware masks are visible before send.
+    func musicCapabilityStates(_ states: [MusicLightingState], fixtureID: String) -> [MusicLightingState] {
+        guard let device = device(withID: fixtureID), device.brand == .govee,
+              states.first?.segmentID != nil else { return states }
+        let colors = states.map { GoveeSegmentColor(color: Color(hue: $0.hue, saturation: $0.saturation, brightness: 1), brightness: $0.brightness) }
+        let constrained = zoneConstrained(GoveeSegmentState(colors: colors, gradient: false, isActive: false), for: device)
+        return zip(states, constrained.colors).map { state, segment in
+            MusicLightingState(fixtureID: state.fixtureID, segmentID: state.segmentID, hue: state.hue,
+                saturation: state.saturation, brightness: segment.isOn ? segment.brightness : 0,
+                transitionDuration: state.transitionDuration, priority: state.priority)
         }
     }
 

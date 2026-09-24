@@ -140,6 +140,50 @@ final class MusicModeTests: XCTestCase {
     }
 
 
+    func testPCMConfidenceLossAndRecovery() throws {
+        let analyzer = MusicFeatureAnalyzer(sourceDescription: "Synthetic loss and recovery")
+        var duringSilence: AudioReactiveSnapshot?
+        var recovered: AudioReactiveSnapshot?
+        for index in 0..<3375 { // 36 seconds at 48 kHz / 512
+            let time = Double(index * 512) / 48000
+            let pcm = time >= 10 && time < 22
+                ? buffer(frames: 512)
+                : rhythmBuffer(startSample: index * 512, frames: 512, sampleRate: 48000, beatPeriod: 0.5, includeHiHats: true)
+            let snapshot = analyzer.analyze(pcm, hostTime: 100 + time + 512.0/48000)
+            if time > 21 && time < 22 { duringSilence = snapshot }
+            if time > 35 { recovered = snapshot }
+        }
+        XCTAssertFalse(try XCTUnwrap(duringSilence).isTempoLocked)
+        XCTAssertLessThan(try XCTUnwrap(duringSilence).energy, 0.01)
+        XCTAssertTrue(try XCTUnwrap(recovered).isTempoLocked)
+        XCTAssertEqual(try XCTUnwrap(recovered).tempo, 120, accuracy: 6)
+    }
+
+    @MainActor
+    func testLiveReducedMotionAndControlExtremesReachSession() throws {
+        let manager = LightManager(persistenceStore: MusicModePersistenceSpy())
+        manager.enterDemoMode()
+        var config = MusicModeConfiguration.configuration(for: .concert)
+        config.usesSyntheticDemoPattern = true
+        manager.startMusicMode(configuration: config)
+        for value in [0.0,0.5,1.0] {
+            config.masterBrightness = value; config.beatSensitivity = value
+            config.effectIntensity = value; config.movementAmount = value
+            manager.setMusicModeConfiguration(config)
+            let effective = try XCTUnwrap(manager.musicModeController.effectiveConfiguration(for: .all))
+            XCTAssertEqual(effective.masterBrightness,value)
+            XCTAssertEqual(effective.beatSensitivity,value)
+            manager.musicModeController.renderNowForTesting()
+            let frame = try XCTUnwrap(manager.musicModeController.latestFrame(for: .all))
+            XCTAssertTrue(frame.states.allSatisfy { $0.brightness <= config.maximumBrightness * value + 0.000001 })
+        }
+        manager.setMusicReducedMotion(true)
+        let reduced = try XCTUnwrap(manager.musicModeController.effectiveConfiguration(for: .all))
+        XCTAssertLessThanOrEqual(reduced.movementAmount,0.18)
+        XCTAssertEqual(reduced.flashIntensity,0)
+        manager.stopAllEffects()
+    }
+
     func testSilenceProducesQuietBoundedFeatures() throws {
         let analyzer = MusicFeatureAnalyzer(sourceDescription: "Test")
         let snapshot = try XCTUnwrap(analyzer.analyze(buffer()))

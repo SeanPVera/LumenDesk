@@ -105,3 +105,27 @@ final class MusicLightingRenderer {
         }
     }
 }
+
+/// Aggregate-only transport instrumentation. Local socket submission is not
+/// acknowledgement, delivery, or visible response. No audio or frame history.
+final class MusicDispatchMetrics {
+    struct Snapshot {
+        var submitted = 0
+        var failed = 0
+        var expired = 0
+        var maximumQueueAge: TimeInterval = 0
+    }
+    private let lock = NSLock()
+    private var value = Snapshot()
+    func record(age: TimeInterval, failed: Bool = false, expired: Bool = false) {
+        lock.lock(); defer { lock.unlock() }
+        value.maximumQueueAge = max(value.maximumQueueAge, max(0, age))
+        if expired { value.expired += 1 }
+        else if failed { value.failed += 1 }
+        else { value.submitted += 1 }
+    }
+    func snapshot() -> Snapshot {
+        lock.lock(); defer { lock.unlock() }
+        return value
+    }
+}

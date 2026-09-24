@@ -48,7 +48,7 @@ npm run app
 
 That serves the app from the bridge itself at <http://127.0.0.1:8765> — one origin for the page and the lights, so no browser permission is involved. Leave the terminal open while you use it.
 
-The web client covers Home (favourites, rooms, search, filters, bulk actions), Library (save and apply scenes), Music Mode (beat-tracked choreography in the browser, posted as frames to the bridge), Automation (daily schedules, which run in the bridge so they fire with no page open), Devices (rooms, naming, diagnostics) and Settings. Govee RGBIC segment editing and LIFX matrix control remain native-app features. Web Music Mode sends a single colour per fixture per frame — it does not speak the Govee razer stream, so RGBIC strips follow as one wash until that encoder is ported in lockstep with `ProtocolTests`.
+The web client opens on **Room**, with one selected scope shared by **Light**, **Compositions** and **Music**. Light offers fixture selection and grouped power, brightness, color and white controls; Compositions captures that room and applies saved scenes to their original fixtures. **Schedules**, **Devices** and **Settings** stay separate. Govee RGBIC segment editing and LIFX matrix control remain native-app features. Browser Music sends one color per fixture; it does not invent segment transport. See [the redesign report](REDESIGN_REPORT.md) for implementation and validation evidence.
 
 The published page at <https://seanpvera.github.io/LumenDesk/> can also drive the bridge (`npm start`, API only), but current browsers gate a website's access to your local network behind a permission prompt, so that route may be blocked. Everything still stays on your own network — the page talks only to the bridge on `127.0.0.1`, with no account and no cloud. The web client currently covers discovery, power, brightness, colour and white, scenes, schedules, and Music Mode; segment control remains native. See [`web/README.md`](web/README.md) for details.
 
@@ -221,7 +221,7 @@ Room features include:
 - Apply themes and animated effects to a room.
 - Pause and resume automation for a room.
 
-On the Plan (the app's Home screen), every room's block carries its own power switch, so shutting a whole room off never requires opening anything first. Tapping a room or one of its fixtures reaches that room's full controls — brightness, All On/All Off, schedules, and every light's own color, white balance, and segment editor — through the inspector column on Mac, or a room sheet on iPhone/iPad. Each light listed there also carries a direct "Full controls" link, so a single fixture's color and white-balance controls are one tap away rather than nested behind the room.
+The **Room** workspace keeps the selected room or All lights visible above its fixture field. Nothing selected means room-wide output. Select one fixture for its precise inspector, or several for shared power, brightness, color and white controls. Offline fixtures remain visible and are excluded from live group commands. The running show names the scope it owns and offers **Stop & restore** or **Keep current light** before manual editing. **Room actions** contains assignment, membership, naming and optional relative arrangement; no architectural scale is implied.
 
 Deleted rooms can be restored with the app's undo affordances when available.
 
@@ -342,7 +342,7 @@ Applying a theme never starts an animation and never introduces flashing.
 
 ### Music Mode
 
-Music Mode makes your lights follow whatever music is playing. Open the Lighting Library, go to Music Mode, pick a room and a preset, press Start. That is the whole thing.
+Music Mode makes your lights follow whatever music is playing. Open Room, choose a room, open Music, choose a preset, then press Start. That is the whole thing.
 
 The rest of this section is the plain-English guide. The technical description follows it under [How Music Mode works](#how-music-mode-works), and the data flow lives in [Music Mode architecture](MUSIC_MODE_ARCHITECTURE.md).
 
@@ -351,7 +351,7 @@ The rest of this section is the plain-English guide. The technical description f
 **On a Mac**
 
 1. **Play something.** Any app counts — Spotify, YouTube, a game, a DJ set. LumenDesk listens to the sound your Mac is already making.
-2. **Pick a room and a preset.** Choose the room at the top right of Music Mode, then pick a preset. **Balanced** is the safe first choice.
+2. **Pick a room and a preset.** Choose the room in the workspace header, then pick a preset. **Balanced** is the safe first choice.
 3. **Press Start Music Mode.** The first time, macOS asks for **Screen Recording** permission. That is the only way any app is allowed to hear your Mac's audio; turn LumenDesk on in System Settings, come back, and press Start again. Nothing is recorded or saved.
 
 **On an iPhone or iPad**
@@ -449,7 +449,7 @@ If **Reduced Motion** is on in your system accessibility settings, LumenDesk kee
 
 #### How Music Mode works
 
-Music Mode is a first-class section of the Lighting Library. It turns the existing `music-pulse` effect into a configurable choreography session while preserving that identifier for saved-state compatibility.
+Music Mode is a first-class section of the selected Room workspace. It turns the existing `music-pulse` effect into a configurable choreography session while preserving that identifier for saved-state compatibility.
 
 - Real beat tracking. LumenDesk estimates the tempo of what is playing and choreographs to the beat grid it predicts, rather than reacting to every transient. The kick band is scored separately from the full spectrum to resist dense hi-hats. Continuous synthetic kick/hat and chord tests exercise this, but syncopation can still produce a wrong relative tempo. The tracker also listens for 3/4, 5/4, 6/8 and 7/8, and for half- or double-time feel, with manual overrides when automatic metre or feel is wrong. The detected tempo and metre are shown next to the beat indicator once it locks; music with no clear pulse falls back to a smooth energy-driven show automatically.
 - Brightness is a resting level plus an accent. The resting level follows how loud the music is over about half a second, so quiet passages, breakdowns and sustained notes genuinely pull the room back, and a beat lifts the light above that level rather than dropping it to the floor and back. Colour is held for whole bars and crossed over on a bar line. The intended result is a lit room with recognizable accents; turn **Beat sensitivity** up if you want the accents harder.
@@ -579,7 +579,7 @@ Demo Mode is useful for screenshots, testing UI flows, or learning the app befor
 
 ### Interface
 
-LumenDesk draws its own controls. Brightness and colour temperature use a console fader with an engraved scale and a monospaced readout rather than a system slider; a light's power is an illuminated key rather than a switch; modes are chosen with a machined selector rather than a segmented picker; and a light's colour is shown as a lens plate rather than a coloured dot. Interface chrome stays achromatic so that on any screen, the coloured thing is the light. Every one of these controls is keyboard reachable and exposes a VoiceOver label, value, and adjustable action where relevant. Window chrome, toolbars, menus, alerts, and sheets remain platform-native.
+LumenDesk uses a neutral field of named emitters with one shared editing surface. Color belongs to fixture output, palettes and scene scores. Faders expose numeric values, keyboard adjustments and accessibility labels; selection uses checkmarks and boundaries as well as color. Native windows, menus, alerts, color pickers and sheets retain platform behavior. [Design system](DESIGN_SYSTEM.md) records tokens, minimum window sizes and remaining manual accessibility checks.
 
 ### Accessibility and interface preferences
 
@@ -727,7 +727,7 @@ This rewrites `LumenDesk.xcodeproj` from the declarative project configuration.
 ### 7. Light a room to music
 
 - Play music on this device, or have it playing out loud if you are on an iPhone or iPad.
-- Open the Lighting Library and choose **Music Mode**.
+- Open **Room → Music**.
 - Pick the room you want at the top, and pick a preset — **Balanced** if you are not sure.
 - Press **Start Music Mode** and grant the permission macOS or iOS asks for the first time.
 - Press **Stop** when you are done; your lights go back to how they were.
@@ -771,7 +771,7 @@ design-prototype/                   # Simulated UX mockup, published under /prot
 LumenDesk/
 ├── LumenDeskApp.swift              # App entry point, macOS commands, settings scene, menu bar extra
 ├── ContentView.swift               # Main workspace, header, search, filters, bulk actions, shortcut sheet
-├── Theme.swift                     # Spectral Bench tokens, panel geometry, backdrop, button styles, mark
+├── Theme.swift                     # Light in place tokens, surfaces, button styles, mark
 ├── DesignControls.swift            # Instrument controls: fader, power key, rocker, chips, selector, lens, meters
 ├── Info.plist                      # Local network and platform privacy metadata
 ├── LumenDesk.entitlements          # Sandbox and network entitlements
@@ -880,7 +880,7 @@ If LumenDesk reports a bind failure for Govee, another app may already be listen
 
 - On **macOS**, Music Mode reacts to **system audio from any app**. Make sure something is actually playing; there is no musical input to analyze during silence. **Open Audio File** and **MIDI Clock** are the other sources when the system mix is not what you want.
 - Grant **Screen Recording** to LumenDesk (macOS) or **microphone** access (iOS) when prompted. MIDI clock needs the MIDI entitlement and a connected interface or IAC bus.
-- Open **Lighting Library → Music Mode**, choose a preset and scope, then select **Start**.
+- Open **Room → Music**, choose a room and preset, then select **Start**.
 - Confirm the audio is loud enough for the input being monitored.
 - Stop and restart Music Mode after changing permissions.
 - A fixture set to **Off** or excluded from the topology is left untouched on purpose.

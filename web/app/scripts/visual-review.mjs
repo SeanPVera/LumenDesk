@@ -19,7 +19,7 @@ const devices = [
   {id:'lifx:office',name:'Desk',brand:'lifx',ip:'192.0.2.4',reachable:true,power:false,brightness:60,color:{r:220,g:235,b:255},kelvin:6000,roomID:'office'},
 ]
 const state = {devices,rooms:[{id:'lounge',name:'Living room',lightIDs:devices.slice(0,3).map(d=>d.id),schedules:[]},{id:'office',name:'Office',lightIDs:['lifx:office'],schedules:[]}],
- scenes:[{id:'evening',name:'Late reading',createdAt:'2026-09-24T00:00:00Z',snapshots:Object.fromEntries(devices.slice(0,2).map(d=>[d.id,d]))}],favorites:[]}
+ scenes:[{id:'evening',name:'Late reading',createdAt:'2026-09-24T00:00:00Z',snapshots:Object.fromEntries(devices.slice(0,2).map(d=>[d.id,structuredClone(d)]))}],favorites:[]}
 const commands = []
 let unavailable = false
 await page.route('**/*', async route => {
@@ -60,6 +60,12 @@ async function capture(name, width = 1100, height = 900) {
   assert.equal(overflow,false,name+' overflows horizontally')
   results.push({name,width,height,overflow})
 }
+async function audit(name) {
+  const axe = await new AxeBuilder({page}).analyze()
+  await writeFile(output+'/accessibility-'+name+'.json',JSON.stringify(axe,null,2))
+  console.log('ACCESSIBILITY '+name,JSON.stringify(axe.violations.map(v=>({id:v.id,impact:v.impact,nodes:v.nodes.length}))))
+  assert.equal(axe.violations.filter(v=>['critical','serious'].includes(v.impact)).length,0,name+' has serious accessibility violations')
+}
 try {
   for(let i=0;i<80;i++){try{await fetch('http://127.0.0.1:4174');break}catch{await new Promise(r=>setTimeout(r,100))}}
   await page.goto('http://127.0.0.1:4174')
@@ -69,10 +75,7 @@ try {
   await capture('web-room-1440',1440,950)
   await capture('web-room-620',620,850)
   await capture('web-room-390',390,844)
-  const axe = await new AxeBuilder({page}).analyze()
-  await writeFile(output+'/accessibility.json',JSON.stringify(axe,null,2))
-  console.log('ACCESSIBILITY',JSON.stringify(axe.violations.map(v=>({id:v.id,impact:v.impact,nodes:v.nodes.length}))))
-  assert.equal(axe.violations.filter(v=>['critical','serious'].includes(v.impact)).length,0,'Room has serious accessibility violations')
+  await audit('room')
   await page.setViewportSize({width:1100,height:900})
   await page.getByRole('button',{name:/Reading lamp, .*on/}).click()
   await page.getByRole('button',{name:/Bookshelf light.*on/}).click()
@@ -95,6 +98,7 @@ try {
   assert.match(await page.locator('.fixture-list li').first().innerText(),/Bookshelf/)
   await capture('web-music-stopped')
   await capture('web-music-390',390,844)
+  await audit('music')
   await page.setViewportSize({width:1100,height:900})
   await page.getByRole('button',{name:'Demo groove',exact:true}).click()
   await page.getByText(/Running · Demo groove/).waitFor()
@@ -112,6 +116,7 @@ try {
   await page.reload()
   await page.getByRole('heading',{name:'Connect your local lights'}).waitFor()
   await capture('web-connection-unavailable',620,850)
+  await audit('setup')
   assert.deepEqual(errors,[],'Browser runtime errors')
   console.log('UI_ASSERTIONS_PASS: scope, multi-selection, scoped scene capture, music scope lock, overflow, runtime errors, room accessibility')
 } finally {

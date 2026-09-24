@@ -7,10 +7,9 @@ Two pieces that together let a browser control real lights:
   loopback HTTP API. See [bridge/README.md](bridge/README.md).
 - **`app/`** — the React web client, published to GitHub Pages at
   <https://seanpvera.github.io/LumenDesk/>. It holds no protocol logic; it
-  talks only to the bridge. Destinations mirroring the native shell: Home
-  (favourites, rooms, search, filters, bulk actions), Library (scenes),
-  Music Mode (DSP in the browser, frames posted to the bridge), Automation
-  (schedules), Devices (rooms and naming) and Settings.
+  talks only to the bridge. **Room** owns a shared room picker and **Light**,
+  **Compositions** and **Music** sections. **Schedules**, **Devices** and
+  **Settings** contain secondary tasks.
 
 The split exists because browsers cannot open raw UDP sockets, and GitHub Pages
 has no server to relay through. Keeping the UDP in a local helper preserves
@@ -21,7 +20,7 @@ LumenDesk's local-only promise — no account, no cloud, nothing off your networ
 The browser client analyses the music in the page itself and posts the resulting
 colours to the bridge; nothing is uploaded anywhere. To run a show:
 
-1. Pick a preset. **Soundcheck** is the default first choice, and presets can be
+1. Choose a room in **Room**, open **Music**, and pick a preset. **Soundcheck** is the default first choice, and presets can be
    changed while the show is running.
 2. Choose where the sound comes from. Each source button starts the show the
    moment you pick it, so choose the preset first if you want it applied from
@@ -31,9 +30,10 @@ colours to the bridge; nothing is uploaded anywhere. To run a show:
    recording software. **Demo groove** is a built-in rhythm with no audio at
    all, which is how you see the lights move before committing to a track.
    **Start** restarts whatever source you last chose.
-3. Watch the meters for what the page is hearing. The label under the beat dot
-   changes from "Beat" to the tempo and bar count once it locks, which normally
-   takes about four seconds of steady rhythm.
+3. Read Input, Energy and the confidence-qualified tempo alongside generated
+   fixture output. Roles and Earlier/Later buttons describe choreography order.
+   Show balance exposes the existing brightness, intensity, sensitivity, movement
+   and palette controls. Detailed analyzer and transport values stay in diagnostics.
 
 **Stop** cancels capture, discards pending frames, drains the one in-flight frame
 request, and restores the starting color and brightness while the show still owns
@@ -70,3 +70,11 @@ onset/beat confidence and generated/HTTP counters. HTTP acceptance means queued
 for local dispatch, not acknowledged or visibly rendered. The browser analyzes
 continuous stereo batches at capture cadence, renders at 20 Hz and sends at most
 10 HTTP frames/s, keeping one in flight and one latest pending frame.
+
+## Interface review
+
+`node scripts/visual-review.mjs` in `app/` runs production React in Chromium
+against a mocked bridge. It checks room command scope, scene capture IDs, Music
+controls/order/scope locking, overflow and axe accessibility, and saves screenshots.
+CI installs Playwright 1.56.1 and axe Playwright 4.10.2 for this task without adding
+runtime dependencies. These checks do not establish physical light behavior.

@@ -111,16 +111,25 @@ Documented in `MUSIC_MODE_ARCHITECTURE.md`; read it before touching the pipeline
 
 ### Views and navigation
 
-`RootView` (in `LumenDeskApp.swift`) chooses `OnboardingView` on first run, then `LumenDeskShellView` (`Views/ProductShellView.swift`): on macOS a `NavigationSplitView` with Home, Library, Automation, Devices, and Settings destinations; on iOS a `TabView` with the first four as tabs and Settings presented as a sheet from the toolbar. The Home workspace (search, filters, bulk selection) is `HomeWorkspaceView`, also in `ProductShellView.swift`. The top-level `ContentView` in `ContentView.swift` is legacy — the running app never instantiates it (even its preview renders the shell) — but the file still hosts components the shell does use (`CommandToastView`, `BulkActionBar`, `DiscoveryDiagnosticsCard`), so make workspace changes in `HomeWorkspaceView`, not there. macOS-only surfaces — command menus with keyboard shortcuts, the Settings scene, configuration import/export, and the `MenuBarExtra` controller — live behind `#if os(macOS)`, a pattern used throughout.
+`RootView` selects onboarding or `LumenDeskShellView`. The current shell uses
+named Room / Schedules / Devices / Settings navigation on macOS and native tabs
+plus Settings access on iOS. `PlanWorkspaceView` is now the selected-room workspace:
+Light, Compositions and Music share one `LightScope` binding. `RoomConfigurationView`
+and `RoomArrangementSheet` hold advanced organization. The file name Plan remains
+for source compatibility; the primary workspace is not the old whole-home drawing.
+`ContentView` remains legacy, with shared toast/diagnostic components still used.
 
-The app is locked to dark mode. Visual styling comes from the "Spectral Bench" brand system, whose one rule is **chrome is achromatic, colour means light**: interface surfaces are cool obsidian neutrals, the only authored colour is a single sampled dispersion ramp (`Lumen.spectrum`), illumination is beam white, and a device's own colour appears only inside the controls that show or edit it. The `Lumen` token namespace in `Theme.swift` is the source of truth in code; `BRAND_IDENTITY.md` documents strategy and voice, `DESIGN_SYSTEM.md` documents the palette/typography/state matrix, and `SWIFTUI_HANDOFF.md` records what the system replaced and the pitfalls of extending it.
+The dark visual system is **Light in place**. `Theme.swift` holds neutral tokens;
+fixture colors appear as output content. `DesignControls.swift` retains accessible
+faders and buttons with native menus, fields, sheets and color pickers. Do not
+reintroduce decorative console hardware or an icon-only navigation rail. Read
+`DESIGN_SYSTEM.md` and `REDESIGN_REPORT.md` for the current hierarchy and validation.
 
-`Views/../DesignControls.swift` (`LumenDesk/DesignControls.swift`) holds the bespoke instrument layer that replaces the platform's stock controls — `LumenFader` for `Slider`, `LumenPowerKeyStyle`/`LumenRockerStyle` for switches, `LumenSelector` for segmented pickers, `LumenChipStyle` for button toggles, the console key button styles, and `LumenLens` for a fixture's colour. **Use these instead of stock SwiftUI controls in app UI**; native toolbars, menus, alerts, and sheets stay native. Two constraints bite when extending it: a `ButtonStyle`/`ToggleStyle` is not in the view hierarchy, so `@Environment` inside one is never populated (extract an inner `View`, as `LumenKeyFace` does), and custom styles cannot read `.tint()` or `.controlSize()`, so state a call site used to express with `.tint` must move into the style.
 
 ## Conventions and invariants
 
 - **Scope guard for UI work** (from `SWIFTUI_HANDOFF.md`): visual refactors must not change LAN protocols, discovery, scheduling semantics, scene persistence, held-segment-layout behavior, or command transport. Keep behavioral changes separately testable from presentation changes.
 - **Volatile vs. durable segment state**: live preview (razer) is intentionally volatile — closing Segment Studio without applying is a true cancel. Only Apply writes durable state. Devices whose firmware has no segment storage (H60B0 lamps, string/curtain/outdoor lights) get their layouts *held* by LumenDesk and re-applied every 30 s, on reconnect, on power-on, and at launch — don't "fix" that re-apply loop away.
-- **Tests** (XCTest, `@testable import LumenDesk`): mirror the existing style — inject `now`/`sleep`/`calendar` instead of sleeping, generate PCM buffers or deterministic feature snapshots for audio paths, and test protocol encoders byte-for-byte (`ProtocolTests`). Coordinator-level behavior (command lifecycle, confirmation, schedules, persistence migration, demo isolation) is where coverage lives; there are no UI tests.
+- **Tests** (XCTest, `@testable import LumenDesk`): mirror the existing style — inject `now`/`sleep`/`calendar` instead of sleeping, generate PCM buffers or deterministic feature snapshots for audio paths, and test protocol encoders byte-for-byte (`ProtocolTests`). Coordinator-level behavior (command lifecycle, confirmation, schedules, persistence migration, demo isolation) is where coverage lives; there is no XCUITest target. Opt-in AppKit-hosted production view captures live in RoomPlanningTests; browser interaction/axe review lives in web/app/scripts/visual-review.mjs.
 - Debug builds set `REGISTER_WITH_LAUNCH_SERVICES=NO` on macOS so temporary DerivedData builds don't become candidates for the Screen Recording permission relaunch; Music Mode re-registers the running bundle before requesting access. Keep this when touching `project.yml`.
 - `README.md` is the detailed user-facing feature reference — update it when behavior, shortcuts, or supported devices change.

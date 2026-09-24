@@ -143,21 +143,15 @@ export function MusicModeView({
 
   return (
     <section className="music-desk">
-      <div className="panel">
+      <div className="panel music-transport">
         <p className="eyebrow">Music Mode</p>
         <h2>{state.running ? 'Music is controlling this room' : 'Ready for music'}</h2>
-        <p>
-          Pick a preset, then pick where the sound comes from. The music is analysed in this
-          browser tab and never uploaded anywhere; only the resulting colours go to the bridge
-          running on your own machine.
-        </p>
-        <details><summary>Getting started</summary><ol className="steps">
-          {MUSIC_HELP.steps.map(step => (
-            <li key={step}>{step}</li>
-          ))}
-        </ol></details>
-        <p className="note">{MUSIC_HELP.safety}</p>
-        <p className="note">{reduceMotion ? "Reduced Motion: flashes blocked; movement limited." : state.configuration.photosensitivitySafeMode ? "No-flash mode: explicit flashes blocked." : "Controlled flashes enabled."} Brightness changes can still be uncomfortable. Stopping recalls the captured fixture colors.</p>
+        <details><summary>Sources, getting started, and flash limits</summary>
+          <p>Audio is analyzed locally in this tab. Only lighting commands go to your bridge.</p>
+          <ol className="steps">{MUSIC_HELP.steps.map(step => <li key={step}>{step}</li>)}</ol>
+          <p>{MUSIC_HELP.safety}</p>
+        </details>
+        <p className="note">{reduceMotion ? "Reduced Motion: flashes blocked; movement limited." : state.configuration.photosensitivitySafeMode ? "No-flash mode: explicit flashes blocked." : "Controlled flashes enabled."} Brightness changes can still be uncomfortable. Stop restores the captured output.</p>
         <div className="music-toolbar">
           <button
             className="primary"
@@ -227,9 +221,6 @@ export function MusicModeView({
           ))}
         </div>
         <p>{state.configuration.preset === 'custom' ? 'Custom balance. Choosing a preset replaces these adjustments.' : PRESET_COPY[presetCopyKey].plain}</p>
-        <p className="meta">
-          Good for: {PRESET_COPY[presetCopyKey].bestFor} · {PRESET_COPY[presetCopyKey].summary}
-        </p>
         {state.source === 'demo' && (
           <label className="field">
             Demo groove
@@ -247,14 +238,8 @@ export function MusicModeView({
         )}
       </div>
 
-      <details className="panel">
-        <summary>Music diagnostics</summary>
-        <p>Source: {state.source} · snapshot age {session.diagnostics.snapshotAge.toFixed(3)} s · samples analyzed {session.diagnostics.analyzedSamples} · capture buffers dropped {session.diagnostics.droppedBuffers}</p>
-        <p>Onset {(snapshot.onset ?? 0).toFixed(2)} · beat count {snapshot.beatCount} · confidence {snapshot.beatConfidence.toFixed(2)} · preset {state.configuration.preset}</p>
-        <p>Grid phase now {snapshot.beatInterval > 0 ? (((performance.now()/1000-snapshot.beatReferenceTime)/snapshot.beatInterval)%1).toFixed(2) : "unlocked"} · last render interval {session.diagnostics.renderInterval.toFixed(3)} s (target 0.050 s) · effective brightness {state.configuration.masterBrightness.toFixed(2)} · intensity {state.configuration.effectIntensity.toFixed(2)}</p>
-        <p>Generated {session.diagnostics.framesGenerated} · HTTP submitted {sender.diagnostics.submitted} · accepted {sender.diagnostics.accepted} · coalesced {sender.diagnostics.coalesced} · expired {sender.diagnostics.expired} · errors {sender.diagnostics.failures}</p>
-        <p>Preview shows generated frames. HTTP acceptance does not establish device receipt or visible timing. Brightness modulation can still be uncomfortable with flashes disabled.</p>
-      </details>
+      <div className="music-performance">
+        <div className="music-output">
       <div className="panel meters">
         <Meter label="Input" value={snapshot.level} />
         <Meter label="Energy" value={snapshot.energy} />
@@ -268,32 +253,8 @@ export function MusicModeView({
       </div>
 
       <div className="panel">
-        <h2>Show balance</h2>
-        <div className="music-adjustments">
-          {([
-            ['masterBrightness', 'Master brightness'], ['effectIntensity', 'Intensity'],
-            ['beatSensitivity', 'Beat sensitivity'], ['movementAmount', 'Movement'],
-            ['movementSpeed', 'Movement speed'], ['colorChangeIntensity', 'Color variation'],
-          ] as const).map(([key, label]) => <label key={key} className="field">
-            {label} <output>{Math.round(state.configuration[key] * 100)}%</output>
-            <input aria-label={label} type="range" min="0" max={key === 'movementAmount' && reduceMotion ? '.2' : '1'} step=".01"
-              value={state.configuration[key]} onChange={e => adjust(key, Number(e.target.value))}/>
-          </label>)}
-        </div>
-        <h3>Color palette</h3>
-        <div className="palette-choices">{[
-          {name:'Aurora', colors:AURORA_PALETTE}, {name:'Sunset', colors:SUNSET_PALETTE},
-          {name:'Ocean', colors:OCEAN_PALETTE}, {name:'Club', colors:CLUB_PALETTE},
-        ].map(p => <button key={p.name} onClick={() => configure({...state.configuration, palette:p.colors, preset:'custom'})}
-          aria-pressed={p.colors.map(c=>c.hex).join() === state.configuration.palette.map(c=>c.hex).join()}>
-          <span className="palette-strip" aria-hidden="true">{p.colors.map((c,i)=><span key={i} style={{background:'#'+c.hex.toString(16).padStart(6,'0')}}/>)}</span>
-          {p.name}
-        </button>)}</div>
-      </div>
-
-      <div className="panel">
         <p className="eyebrow">Which light does what</p>
-        <p>{MUSIC_HELP.roles}</p>
+        <p className="note">Generated output in fixture order. Assign roles and move fixtures with the arrow buttons.</p>
         {state.fixtures.length === 0 ? (
           <p>No lights yet. Use Find lights in Room, or run a demo groove to watch the lights move without any hardware.</p>
         ) : (
@@ -342,6 +303,40 @@ export function MusicModeView({
           ))}
         </dl></details>
       </div>
+        </div>
+      <div className="panel">
+        <h2>Show balance</h2>
+        <div className="music-adjustments">
+          {([
+            ['masterBrightness', 'Master brightness'], ['effectIntensity', 'Intensity'],
+            ['beatSensitivity', 'Beat sensitivity'], ['movementAmount', 'Movement'],
+            ['movementSpeed', 'Movement speed'], ['colorChangeIntensity', 'Color variation'],
+          ] as const).map(([key, label]) => <label key={key} className="field">
+            {label} <output>{Math.round(state.configuration[key] * 100)}%</output>
+            <input aria-label={label} type="range" min="0" max={key === 'movementAmount' && reduceMotion ? '.2' : '1'} step=".01"
+              value={state.configuration[key]} onChange={e => adjust(key, Number(e.target.value))}/>
+          </label>)}
+        </div>
+        <h3>Color palette</h3>
+        <div className="palette-choices">{[
+          {name:'Aurora', colors:AURORA_PALETTE}, {name:'Sunset', colors:SUNSET_PALETTE},
+          {name:'Ocean', colors:OCEAN_PALETTE}, {name:'Club', colors:CLUB_PALETTE},
+        ].map(p => <button key={p.name} onClick={() => configure({...state.configuration, palette:p.colors, preset:'custom'})}
+          aria-pressed={p.colors.map(c=>c.hex).join() === state.configuration.palette.map(c=>c.hex).join()}>
+          <span className="palette-strip" aria-hidden="true">{p.colors.map((c,i)=><span key={i} style={{background:'#'+c.hex.toString(16).padStart(6,'0')}}/>)}</span>
+          {p.name}
+        </button>)}</div>
+      </div>
+
+      </div>
+      <details className="panel">
+        <summary>Music diagnostics</summary>
+        <p>Source: {state.source} · snapshot age {session.diagnostics.snapshotAge.toFixed(3)} s · samples analyzed {session.diagnostics.analyzedSamples} · capture buffers dropped {session.diagnostics.droppedBuffers}</p>
+        <p>Onset {(snapshot.onset ?? 0).toFixed(2)} · beat count {snapshot.beatCount} · confidence {snapshot.beatConfidence.toFixed(2)} · preset {state.configuration.preset}</p>
+        <p>Grid phase now {snapshot.beatInterval > 0 ? (((performance.now()/1000-snapshot.beatReferenceTime)/snapshot.beatInterval)%1).toFixed(2) : "unlocked"} · last render interval {session.diagnostics.renderInterval.toFixed(3)} s (target 0.050 s) · effective brightness {state.configuration.masterBrightness.toFixed(2)} · intensity {state.configuration.effectIntensity.toFixed(2)}</p>
+        <p>Generated {session.diagnostics.framesGenerated} · HTTP submitted {sender.diagnostics.submitted} · accepted {sender.diagnostics.accepted} · coalesced {sender.diagnostics.coalesced} · expired {sender.diagnostics.expired} · errors {sender.diagnostics.failures}</p>
+        <p>Preview shows generated frames. HTTP acceptance does not establish device receipt or visible timing. Brightness modulation can still be uncomfortable with flashes disabled.</p>
+      </details>
       <p className="meta">
         {MUSIC_HELP.strips} Colours go to the bridge on port {port}.
       </p>

@@ -34,15 +34,9 @@ export function BridgeSetup({
       <div className="panel wide">
         <span className="eyebrow">Local control only</span>
         <h1>{checking ? 'Connecting to your lights' : 'Connect your local lights'}</h1>
-        <p>
-          Browsers cannot open the raw UDP sockets that LIFX and Govee lights speak, so a small
-          helper runs on your machine and does it for you — no account, no cloud, nothing leaves
-          your network.
-        </p>
-        <p>
-          The helper can also <strong>serve this app itself</strong>, so the page and the lights are then the same local service, so no browser
-          permission is involved.
-        </p>
+        <p>LumenDesk needs a local bridge to reach your LIFX and Govee lights.
+          Start it on this computer, then open its local address. No account is required.</p>
+
 
         <ol className="steps">
           <li>

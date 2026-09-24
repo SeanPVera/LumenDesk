@@ -30,3 +30,12 @@ System text names things, tabular numbers measure, monospace is reserved for dia
 Keep transports, effects, capture/DSP, persistence schema, identifiers, held layouts and restore semantics. A scoped scene-capture parameter is a focused extension of the existing capture path (default remains all), not another scene model. Selection reconciliation and scene scope need regression tests.
 
 Affected: ProductShellView, PlanWorkspaceView, Theme/DesignControls, LightRow, MusicModeView/Visualizer, segment/Luna editors, setup surfaces, production web App/views/styles, scoped scene capture, existing tests and documentation. Reuse compiled files where possible; any added test must be registered in pbxproj.
+
+## Integration and environment update
+
+PR #105 landed on main as 2e46663 during implementation. It is incorporated in
+this branch with its capture, control, transport, lifecycle and regression tests
+preserved. Its engineering changes are upstream work, not a design rewrite.
+Local Linux execution later became available. An isolated checkout now supports
+web builds, tests and browser rendering; Apple compilation/rendering still uses
+GitHub Actions. The earlier environment note records the original constraint.

@@ -182,3 +182,15 @@ meter { width: 100%; height: 12px; accent-color: var(--text); }
 .palette-strip span { flex: 1; }
 .fixture-order { display: flex; gap: 4px; }
 @media (max-width: 620px) { .fixture-list li { flex-wrap: wrap; } .fixture-list strong { flex-basis: calc(100% - 90px); } }
+
+/* Choreography: interpretation and fixture output beside shared balance. */
+.music-transport { gap: 12px; }
+.music-transport details { padding: 0; border: 0; }
+.music-performance { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(300px, 1fr); gap: 32px; }
+.music-output { min-width: 0; }
+.music-performance .music-adjustments { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.music-performance .fixture-list li { flex-wrap: wrap; }
+.music-performance .fixture-list strong { flex: 1 1 180px; }
+.music-performance .meters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.music-performance .beat-readout, .music-performance .meters > p, .music-performance .meters > details { grid-column: 1 / -1; }
+@media (max-width: 899px) { .music-performance { grid-template-columns: minmax(0, 1fr); gap: 0; } }

@@ -1,26 +1,8 @@
 import SwiftUI
 
-// MARK: - Wash instrument controls
-//
-// The controls a lighting board needs do not exist in the standard library, so
-// LumenDesk draws its own. They are built on the tokens in `Theme.swift` and
-// follow the same rule: every fixture owns a strip, and the strip is lit by
-// the fixture.
-//
-// What changed from Spectral Bench, and why:
-//
-// - Uppercase and letter-spacing left every label. Uppercase has no
-//   descenders and a flat x-height, so a screen carrying forty tracked-out
-//   legends gives the eye no shape to lock onto and every line ends up
-//   weighing the same. Hierarchy is size and weight now.
-// - Borders left almost everything. A 1 px hairline around each control on a
-//   near-black ground was drawing sixty boxes to say what value already said.
-// - Etched fader graduations left the fader. They read as instrumentation up
-//   close and as noise at a glance, and the number beside the fader was
-//   already exact.
-//
-// Nothing in this file talks to a device: these are presentation only, driven
-// by bindings the views already own.
+// MARK: - Shared light controls
+// Presentation only: bindings retain existing command/commit behavior.
+// Neutral chrome, visible focus, tabular values and keyboard/VoiceOver actions.
 
 // MARK: - Fader
 
@@ -82,12 +64,12 @@ struct LumenFader: View {
             if showsHeader {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(label)
-                        .font(.system(size: 11.5, weight: .medium))
+                        .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(Lumen.meter)
                         .lineLimit(1)
                     Spacer(minLength: 8)
                     Text(readout)
-                        .font(LumenType.readout(size: 11.5, weight: .medium))
+                        .font(LumenType.readout(size: 12, weight: .medium))
                         .foregroundStyle(editing ? Lumen.lit : Lumen.chalk)
                         .monospacedDigit()
                 }
@@ -309,7 +291,7 @@ private struct LumenChipFace: View {
             configuration.isOn.toggle()
         } label: {
             configuration.label
-                .font(.system(size: 11.5, weight: .medium))
+                .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(configuration.isOn ? Lumen.stage : Lumen.meter)
                 .padding(.horizontal, 11)
                 .padding(.vertical, 5)

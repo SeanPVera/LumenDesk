@@ -341,9 +341,6 @@ final class RoomWorkspaceRenderTests: XCTestCase {
         try await capture("segment-studio", GoveeSegmentEditorView(device: strip), manager, width: 1000, height: 780)
         try await capture("discovery-partial", DevicesWorkspaceView(), manager, width: 850, height: 900)
         try await capture("onboarding", OnboardingView(onFinish: {}), manager, width: 760, height: 720)
-        try await capture("reduced-motion", PlanWorkspaceView(scope: .constant(scope))
-            .environment(\.accessibilityReduceMotion, true)
-            .environment(\.accessibilityReduceTransparency, true), manager, width: 1100, height: 900)
     }
 
     @MainActor

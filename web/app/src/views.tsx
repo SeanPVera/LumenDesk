@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useState } from 'react'
 import {
   type Device,
   type Room,
@@ -160,155 +160,81 @@ export function LightCard({
 
 // MARK: Home
 
-export function HomeView({
-  devices,
-  rooms,
-  controls,
-  onBulk,
-  onScan,
-  scanning,
-}: {
-  devices: Device[]
-  rooms: Room[]
-  controls: Controls
+export function HomeView({ devices, controls, onBulk, onScan, scanning }: {
+  devices: Device[]; rooms: Room[]; controls: Controls
   onBulk: (ids: string[], action: 'on' | 'off') => void
-  onScan: () => void
-  scanning: boolean
+  onScan: () => void; scanning: boolean
 }) {
-  const [query, setQuery] = useState('')
-  const [filter, setFilter] = useState<'all' | 'on' | 'off' | 'favorites' | 'offline'>('all')
   const [selected, setSelected] = useState<string[]>([])
-
-  const visible = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    return devices.filter(d => {
-      if (q && !d.name.toLowerCase().includes(q) && !(d.ip ?? '').includes(q)) return false
-      if (filter === 'on') return d.power
-      if (filter === 'off') return !d.power
-      if (filter === 'favorites') return d.favorite
-      if (filter === 'offline') return !d.reachable
-      return true
-    })
-  }, [devices, query, filter])
-
-  const favorites = visible.filter(d => d.favorite)
-  const grouped = rooms
-    .map(room => ({ room, lights: visible.filter(d => room.lightIDs.includes(d.id)) }))
-    .filter(g => g.lights.length > 0)
-  const unassigned = visible.filter(d => !d.roomID)
-
-  const toggleSelect = (id: string) =>
-    setSelected(s => (s.includes(id) ? s.filter(x => x !== id) : [...s, id]))
-
-  // Drop anything the current search or filter hides, so a bulk action can
-  // never reach a light the user cannot see.
-  const visibleIDs = visible.map(d => d.id)
-  const activeSelection = selected.filter(x => visibleIDs.includes(x))
-  useEffect(() => {
-    setSelected(s => (s.length === s.filter(x => visibleIDs.includes(x)).length ? s : s.filter(x => visibleIDs.includes(x))))
-  }, [query, filter]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  return (
-    <section>
-      <div className="toolbar">
-        <input
-          className="search"
-          type="search"
-          placeholder="Search lights…"
-          value={query}
-          onChange={e => setQuery(e.target.value)}
-        />
-        <div className="filters" role="group" aria-label="Filter lights">
-          {(['all', 'on', 'off', 'favorites', 'offline'] as const).map(f => (
-            <button
-              key={f}
-              className={`chip${filter === f ? ' active' : ''}`}
-              onClick={() => setFilter(f)}
-            >
-              {f === 'all' ? 'All' : f[0].toUpperCase() + f.slice(1)}
-            </button>
-          ))}
+  const [query, setQuery] = useState('')
+  const visible = devices.filter(d => d.name.toLowerCase().includes(query.trim().toLowerCase()))
+  const active = selected.filter(id => devices.some(d => d.id === id))
+  const targets = (selected.length ? devices.filter(d => active.includes(d.id)) : devices).filter(d => d.reachable)
+  const level = targets.length ? Math.round(targets.reduce((sum, d) => sum + d.brightness, 0) / targets.length) : 0
+  const toggle = (id: string) => setSelected(ids => ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id])
+  const color = rgbToHex(targets[0]?.color ?? {r: 255, g: 255, b: 255})
+  const mixed = new Set(targets.map(d => rgbToHex(d.color ?? {r: 255, g: 255, b: 255}))).size > 1
+  return <section className="room-workspace" aria-label="Room lighting">
+    {!devices.length ? <EmptyLights scanning={scanning} onScan={onScan} /> : <>
+      <div className="light-field" aria-label="Fixtures in this room">
+        <p className="field-caption">Fixture order · select to control</p>
+        <div className="emitters">
+          {devices.map(d => <button key={d.id} className="emitter"
+            aria-pressed={active.includes(d.id)} onClick={() => toggle(d.id)}
+            aria-label={`${d.name}, ${!d.reachable ? 'not responding' : d.power ? `${d.brightness}% on` : 'off'}`}>
+            <span className="emission" style={{
+              background: d.power && d.reachable ? rgbToHex(d.color ?? {r: 255,g:255,b:255}) : 'var(--surface)',
+              opacity: d.power && d.reachable ? 0.25 + d.brightness / 135 : 1,
+            }} aria-hidden="true" />
+            <strong>{d.name}</strong>
+            <span>{!d.reachable ? 'Not responding' : d.power ? `${d.brightness}% · On` : 'Off'}</span>
+            <span className="selection-mark" aria-hidden="true">{active.includes(d.id) ? '✓' : '+'}</span>
+          </button>)}
         </div>
-        <button className="ghost" onClick={onScan} disabled={scanning}>
-          {scanning ? 'Scanning…' : 'Scan again'}
-        </button>
+        <p className="note">Ordered fixtures. The bridge does not report physical positions or segment output.</p>
       </div>
-
-      {activeSelection.length > 0 && (
-        <div className="bulk" role="region" aria-label="Bulk actions">
-          <span>
-            <strong>{activeSelection.length}</strong> selected
-          </span>
-          <button onClick={() => onBulk(activeSelection, 'on')}>All on</button>
-          <button onClick={() => onBulk(activeSelection, 'off')}>All off</button>
-          <button className="ghost" onClick={() => setSelected([])}>
-            Clear
-          </button>
+      <div className="room-editing">
+        <div className="fixture-directory">
+          <div className="section-line"><h2>Fixtures</h2><button onClick={() => setSelected(visible.map(d => d.id))}>Select visible</button></div>
+          <input type="search" aria-label="Find a fixture" placeholder="Find a fixture" value={query} onChange={e => setQuery(e.target.value)} />
+          {active.some(id => !visible.some(d => d.id === id)) && <p className="note">Your selection includes fixtures hidden by this search.</p>}
+          <ul className="fixture-rows">{visible.map(d => <li key={d.id}>
+            <label><input type="checkbox" checked={active.includes(d.id)} onChange={() => toggle(d.id)} />
+              <span><strong>{d.name}</strong><small>{d.brand.toUpperCase()} · Whole-fixture color</small></span>
+            </label>
+            <span>{!d.reachable ? 'Offline' : d.power ? `${d.brightness}%` : 'Off'}</span>
+          </li>)}</ul>
+          {!visible.length && <p>No fixtures match this search.</p>}
         </div>
-      )}
-
-      {devices.length === 0 ? (
-        <EmptyLights scanning={scanning} onScan={onScan} />
-      ) : visible.length === 0 ? (
-        <p className="empty">No lights match that search.</p>
-      ) : (
-        <>
-          {favorites.length > 0 && filter !== 'favorites' && (
-            <Group title="Favourites">
-              <ul className="grid">
-                {favorites.map(d => (
-                  <LightCard key={d.id} device={d} controls={controls} compact />
-                ))}
-              </ul>
-            </Group>
-          )}
-
-          {grouped.map(({ room, lights }) => (
-            <Group key={room.id} title={room.name} count={lights.length}>
-              <div className="group-actions">
-                {/* The whole room, not just the lights a filter left visible. */}
-                <button className="chip" onClick={() => onBulk(room.lightIDs, 'on')}>
-                  Room on
-                </button>
-                <button className="chip" onClick={() => onBulk(room.lightIDs, 'off')}>
-                  Room off
-                </button>
-              </div>
-              <ul className="grid">
-                {lights.map(d => (
-                  <LightCard
-                    key={d.id}
-                    device={d}
-                    controls={controls}
-                    selectable
-                    selected={selected.includes(d.id)}
-                    onSelect={toggleSelect}
-                  />
-                ))}
-              </ul>
-            </Group>
-          ))}
-
-          {unassigned.length > 0 && (
-            <Group title={grouped.length ? 'Unassigned' : 'All lights'} count={unassigned.length}>
-              <ul className="grid">
-                {unassigned.map(d => (
-                  <LightCard
-                    key={d.id}
-                    device={d}
-                    controls={controls}
-                    selectable
-                    selected={selected.includes(d.id)}
-                    onSelect={toggleSelect}
-                  />
-                ))}
-              </ul>
-            </Group>
-          )}
-        </>
-      )}
-    </section>
-  )
+        <section className="output-controls" aria-label="Selected output controls">
+          <div className="section-line"><h2>{selected.length ? `${active.length} selected` : 'Room output'}</h2>
+            {selected.length > 0 && <button onClick={() => setSelected([])}>Clear</button>}</div>
+          <p className="meta">{targets.length} available · changes apply to {selected.length ? 'your selection' : 'this room'}</p>
+          <div className="toolbar">
+            <button className="primary" disabled={!targets.length} onClick={() => onBulk(targets.map(d => d.id), 'on')}>On</button>
+            <button disabled={!targets.length} onClick={() => onBulk(targets.map(d => d.id), 'off')}>Off</button>
+          </div>
+          <label className="field">Brightness <output>{level}%</output>
+            <input type="range" min="0" max="100" value={level} disabled={!targets.length}
+              onChange={e => targets.forEach(d => controls.brightness(d, Number(e.target.value)))} />
+          </label>
+          <label className="color-control">Color
+            <input type="color" value={color} disabled={!targets.length}
+              onChange={e => targets.forEach(d => controls.color(d, hexToRGB(e.target.value)))} />
+            <span>{mixed ? 'Mixed' : color.toUpperCase()}</span>
+          </label>
+          <label className="field">White temperature <output>{targets[0]?.kelvin ?? 3500} K</output>
+            <input type="range" min="2500" max="9000" step="100" value={targets[0]?.kelvin ?? 3500} disabled={!targets.length}
+              onChange={e => targets.forEach(d => controls.kelvin(d, Number(e.target.value)))} />
+          </label>
+          <p className="note">Color and white replace the current whole-fixture output. Hardware limits still apply.</p>
+          {active.length === 1 && <details><summary>Fixture details</summary>
+            <ul className="inspector-list"><LightCard device={devices.find(d => d.id === active[0])!} controls={controls} compact /></ul>
+          </details>}
+        </section>
+      </div>
+    </>}
+  </section>
 }
 
 function Group({ title, count, children }: { title: string; count?: number; children: React.ReactNode }) {
@@ -360,7 +286,7 @@ export function LibraryView({
       <div className="panel">
         <h2>Save the current lighting</h2>
         <p>
-          Captures every light's power, brightness and colour right now, so you can bring it back
+          Captures this room's power, brightness and colour right now, so you can bring it back
           in one click. {devices.length} light{devices.length === 1 ? '' : 's'} will be included.
         </p>
         <form
@@ -388,9 +314,9 @@ export function LibraryView({
       {scenes.length === 0 ? (
         <p className="empty">No scenes saved yet.</p>
       ) : (
-        <ul className="grid">
+        <ul className="composition-list">
           {scenes.map(scene => (
-            <li key={scene.id} className="card">
+            <li key={scene.id} className="composition">
               <div className="card-head">
                 <div>
                   <h2>{scene.name}</h2>
@@ -400,11 +326,13 @@ export function LibraryView({
                   </p>
                 </div>
               </div>
+              <SceneScore scene={scene} />
+              <p className="note">Recalls its saved fixtures, including any outside the current room.</p>
               <div className="whites">
                 <button className="primary" onClick={() => onApply(scene)}>
                   Apply
                 </button>
-                <button className="ghost" onClick={() => onDelete(scene)}>
+                <button className="ghost" onClick={() => { if (window.confirm(`Delete “${scene.name}”? This cannot be undone in the browser.`)) onDelete(scene) }}>
                   Delete
                 </button>
               </div>
@@ -414,6 +342,19 @@ export function LibraryView({
       )}
     </section>
   )
+}
+
+function SceneScore({ scene }: { scene: Scene }) {
+  return <div className="scene-score" aria-label="Saved fixture color and level">
+    {Object.keys(scene.snapshots ?? {}).sort().map(id => {
+      const s = scene.snapshots[id] as { power?: boolean; brightness?: number; color?: {r:number;g:number;b:number} }
+      return <span key={id} style={{
+        background: s.color ? rgbToHex(s.color) : 'var(--secondary)',
+        height: s.power === false ? 3 : 8 + Math.max(0, Math.min(100, s.brightness ?? 50)) * 0.3,
+        opacity: s.power === false ? 0.25 : 1,
+      }} />
+    })}
+  </div>
 }
 
 // MARK: Automation (schedules)

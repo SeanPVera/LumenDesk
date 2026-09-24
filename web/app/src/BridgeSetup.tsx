@@ -33,15 +33,14 @@ export function BridgeSetup({
     <div className="shell centered">
       <div className="panel wide">
         <span className="eyebrow">Local control only</span>
-        <h1>Start the LumenDesk bridge</h1>
+        <h1>{checking ? 'Connecting to your lights' : 'Connect your local lights'}</h1>
         <p>
           Browsers cannot open the raw UDP sockets that LIFX and Govee lights speak, so a small
           helper runs on your machine and does it for you — no account, no cloud, nothing leaves
           your network.
         </p>
         <p>
-          The helper can also <strong>serve this app itself</strong>, which is the route that
-          always works: the page and the lights are then the same local service, so no browser
+          The helper can also <strong>serve this app itself</strong>, so the page and the lights are then the same local service, so no browser
           permission is involved.
         </p>
 
@@ -63,7 +62,7 @@ npm run app`}</code>
           </li>
           <li>
             <strong>Open <code>http://127.0.0.1:8765</code></strong> — that address is this same
-            app, served by the bridge, and it can always reach your lights. Keep the terminal open;
+            app, served by the bridge, and it can send commands on your network. Keep the terminal open;
             the bridge only runs while it does.
           </li>
         </ol>

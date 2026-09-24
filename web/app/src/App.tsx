@@ -41,10 +41,10 @@ import { MusicModeView } from './MusicModeView'
 type Destination = 'home' | 'library' | 'music' | 'automation' | 'devices' | 'settings'
 
 const NAV: { id: Destination; label: string; icon: string }[] = [
-  { id: 'home', label: 'Home', icon: '⌂' },
-  { id: 'library', label: 'Library', icon: '✦' },
+  { id: 'home', label: 'Room', icon: '⌂' },
+  { id: 'library', label: 'Compositions', icon: '' },
   { id: 'music', label: 'Music', icon: '♩' },
-  { id: 'automation', label: 'Automation', icon: '◷' },
+  { id: 'automation', label: 'Schedules', icon: '◷' },
   { id: 'devices', label: 'Devices', icon: '⌁' },
   { id: 'settings', label: 'Settings', icon: '⚙' },
 ]
@@ -75,6 +75,8 @@ export default function App() {
   const [scanning, setScanning] = useState(false)
   const [attempts, setAttempts] = useState(0)
   const [servedByBridge, setServedByBridge] = useState(false)
+  const [roomID, setRoomID] = useState('all')
+  const [musicRunning, setMusicRunning] = useState(false)
   // Ids with a command in flight, so a poll cannot overwrite an optimistic
   // value with a reading taken before the command landed.
   const inFlight = useRef(new Set<string>())
@@ -99,6 +101,7 @@ export default function App() {
         ),
       )
       setRooms(next.rooms)
+      setRoomID(current => current === 'all' || next.rooms.some(r => r.id === current) ? current : 'all')
       setScenes(next.scenes)
       setState('connected')
       setError(null)
@@ -229,23 +232,25 @@ export default function App() {
   }
 
   const reachable = devices.filter(d => d.reachable).length
+  const room = rooms.find(r => r.id === roomID)
+  const scopedDevices = room ? devices.filter(d => room.lightIDs.includes(d.id)) : devices
+  const inWorkspace = ['home', 'library', 'music'].includes(destination)
 
   return (
     <div className="shell app">
-      <nav className="sidebar" aria-label="Sections">
+      <nav className="workspace-nav" aria-label="Sections">
         <div className="brand">
-          <span className="dot" aria-hidden="true" />
+          <span className="light-mark" aria-hidden="true" />
           <h1>LumenDesk</h1>
         </div>
         <ul>
-          {NAV.map(item => (
+          {NAV.filter(item => !['library', 'music'].includes(item.id)).map(item => (
             <li key={item.id}>
               <button
-                className={destination === item.id ? 'nav active' : 'nav'}
+                className={(destination === item.id || (item.id === 'home' && inWorkspace)) ? 'nav active' : 'nav'}
                 onClick={() => setDestination(item.id)}
-                aria-current={destination === item.id ? 'page' : undefined}
+                aria-current={(destination === item.id || (item.id === 'home' && inWorkspace)) ? 'page' : undefined}
               >
-                <span aria-hidden="true">{item.icon}</span>
                 {item.label}
               </button>
             </li>
@@ -260,8 +265,25 @@ export default function App() {
 
       <main className="content">
         <header className="content-head">
-          <h1>{NAV.find(n => n.id === destination)?.label}</h1>
+          {inWorkspace ? <>
+            <div>
+              <label className="scope-label" htmlFor="room-scope">Control room</label>
+              <select id="room-scope" className="room-scope" value={roomID} disabled={musicRunning}
+                onChange={e => setRoomID(e.target.value)}>
+                <option value="all">All lights</option>
+                {rooms.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+              </select>
+              <p className="meta">{scopedDevices.filter(d => d.power && d.reachable).length} lit · {scopedDevices.length} fixtures · {scopedDevices.filter(d => !d.reachable).length} not responding</p>
+              {musicRunning && <p className="note">Stop Music Mode before changing rooms.</p>}
+            </div>
+            <button onClick={scan} disabled={scanning}>{scanning ? 'Searching…' : 'Find lights'}</button>
+          </> : <h1>{NAV.find(n => n.id === destination)?.label}</h1>}
         </header>
+        {inWorkspace && <nav className="workspace-sections" aria-label="Room controls">
+          {(['home', 'library', 'music'] as const).map(id => <button key={id}
+            aria-current={destination === id ? 'page' : undefined}
+            onClick={() => setDestination(id)}>{id === 'home' ? 'Light' : id === 'library' ? 'Compositions' : 'Music'}</button>)}
+        </nav>}
 
         {error && (
           <p className="error" role="alert">
@@ -271,7 +293,8 @@ export default function App() {
 
         {destination === 'home' && (
           <HomeView
-            devices={devices}
+            key={roomID}
+            devices={scopedDevices}
             rooms={rooms}
             controls={controls}
             onBulk={bulk}
@@ -282,14 +305,14 @@ export default function App() {
         {destination === 'library' && (
           <LibraryView
             scenes={scenes}
-            devices={devices}
-            onSave={name => mutate(() => saveScene(port, name), `Saved “${name}”`)}
+            devices={scopedDevices}
+            onSave={name => mutate(() => saveScene(port, name, scopedDevices.map(d => d.id)), `Saved “${name}”`)}
             onApply={scene => mutate(() => applyScene(port, scene.id), `Applied “${scene.name}”`)}
             onDelete={scene => mutate(() => deleteScene(port, scene.id), `Deleted “${scene.name}”`)}
           />
         )}
         {destination === 'music' && (
-          <MusicModeView devices={devices} port={port} postFrame={postMusicFrame} />
+          <MusicModeView devices={scopedDevices} port={port} postFrame={postMusicFrame} onRunningChange={setMusicRunning} />
         )}
         {destination === 'automation' && (
           <AutomationView

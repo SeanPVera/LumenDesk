@@ -23,8 +23,10 @@ export function MusicModeView({
   devices,
   port,
   postFrame,
+  onRunningChange,
 }: {
   devices: Device[]
+  onRunningChange?: (running: boolean) => void
   port: number
   postFrame: (
     port: number,
@@ -40,6 +42,7 @@ export function MusicModeView({
     () => session.version,
   )
   const state = session.state
+  useEffect(() => { onRunningChange?.(state.running); return () => onRunningChange?.(false) }, [state.running, onRunningChange])
   void version
   const [file, setFile] = useState<File | null>(null)
   const reachable = devices.filter(d => d.reachable)
@@ -97,17 +100,17 @@ export function MusicModeView({
     <section className="music-desk">
       <div className="panel">
         <p className="eyebrow">Music Mode</p>
-        <h2>Your lights follow the music.</h2>
+        <h2>{state.running ? 'Music is controlling this room' : 'Ready for music'}</h2>
         <p>
           Pick a preset, then pick where the sound comes from. The music is analysed in this
           browser tab and never uploaded anywhere; only the resulting colours go to the bridge
           running on your own machine.
         </p>
-        <ol className="steps">
+        <details><summary>Getting started</summary><ol className="steps">
           {MUSIC_HELP.steps.map(step => (
             <li key={step}>{step}</li>
           ))}
-        </ol>
+        </ol></details>
         <p className="note">{MUSIC_HELP.safety}</p>
         <div className="music-toolbar">
           <button
@@ -199,14 +202,14 @@ export function MusicModeView({
 
       <div className="panel meters">
         <Meter label="Input" value={snapshot.level} />
-        <Meter label="Bass" value={snapshot.bass} />
-        <Meter label="Mids" value={snapshot.mids} />
-        <Meter label="Highs" value={snapshot.highs} />
+        <Meter label="Energy" value={snapshot.energy} />
         <div className="beat-readout">
-          <span className={`beat-dot${snapshot.beat > 0.25 ? ' lit' : ''}`} />
-          <span>{tempo}</span>
+
+          <strong>{tempo === 'Beat' ? 'Finding a pulse' : tempo}</strong>
+          <span>Confidence {Math.round(snapshot.beatConfidence * 100)}%</span>
         </div>
-        <p className="note">{MUSIC_HELP.readout}</p>
+        <p className="note">Audio input and musical interpretation. Generated colors below are not device confirmations.</p>
+        <details><summary>Audio diagnostics</summary><Meter label="Bass" value={snapshot.bass}/><Meter label="Mids" value={snapshot.mids}/><Meter label="Highs" value={snapshot.highs}/></details>
       </div>
 
       <div className="panel">
@@ -227,6 +230,7 @@ export function MusicModeView({
                   />
                   <strong>{fixture.label}</strong>
                   <select
+                    aria-label={`Role for ${fixture.label}`}
                     value={fixture.role}
                     title={ROLE_COPY[fixture.role].plain}
                     onChange={event => {
@@ -245,14 +249,14 @@ export function MusicModeView({
             })}
           </ul>
         )}
-        <dl className="role-legend">
+        <details><summary>What the roles mean</summary><dl className="role-legend">
           {ROLES.map(role => (
             <div key={role}>
               <dt>{ROLE_COPY[role].name}</dt>
               <dd>{ROLE_COPY[role].plain}</dd>
             </div>
           ))}
-        </dl>
+        </dl></details>
       </div>
       <p className="meta">
         {MUSIC_HELP.strips} Colours go to the bridge on port {port}.

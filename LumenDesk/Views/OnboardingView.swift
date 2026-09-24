@@ -9,6 +9,7 @@ import SwiftUI
 /// Every step is skippable so no one is ever trapped.
 struct OnboardingView: View {
     @EnvironmentObject var manager: LightManager
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// Called when the user finishes or skips. The caller flips the persisted
     /// "has onboarded" flag.
@@ -45,10 +46,7 @@ struct OnboardingView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 8)
                     .id(step)
-                    .transition(.asymmetric(
-                        insertion: .move(edge: .trailing).combined(with: .opacity),
-                        removal:   .move(edge: .leading).combined(with: .opacity)
-                    ))
+                    .transition(.opacity)
                 }
                 .scrollIndicators(.hidden)
 
@@ -70,7 +68,7 @@ struct OnboardingView: View {
                           ? AnyShapeStyle(Lumen.beamBright)
                           : AnyShapeStyle(Lumen.hairlineStrong))
                     .frame(width: s == step ? 30 : 16, height: 3)
-                    .animation(.easeOut(duration: 0.25), value: step)
+                    .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: step)
             }
             Spacer()
             if step != .done {

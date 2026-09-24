@@ -514,6 +514,10 @@ struct LibraryWorkspaceView: View {
 
             if !embedded && !manager.activeEffects.isEmpty { runningEffects }
 
+            TextField("Find a composition", text: $searchText)
+                .textFieldStyle(.roundedBorder)
+                .accessibilityLabel("Find a composition")
+
             LumenSelector(
                 label: "Library section",
                 selection: $section,

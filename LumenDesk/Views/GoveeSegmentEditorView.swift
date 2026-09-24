@@ -165,7 +165,7 @@ struct GoveeSegmentEditorView: View {
             case .curtain:
                 return "Choose one or more vertical columns. With nothing selected, painting updates the whole curtain."
             default:
-                return "Tap or drag across segments to select them. With nothing selected, painting fills the whole strip."
+                return "Select numbered segments to paint them. With nothing selected, painting fills the whole strip."
             }
         }
         return "\(selection.count) \(unitName)\(selection.count == 1 ? "" : "s") selected — colors and brightness apply to the selection."

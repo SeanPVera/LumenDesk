@@ -2,7 +2,7 @@ export function hannWindow(size: number): Float64Array {
   const window = new Float64Array(size);
   if (size <= 1) return window;
   for (let i = 0; i < size; i += 1) {
-    window[i] = 0.5 * (1 - Math.cos((2 * Math.PI * i) / (size - 1)));
+    window[i] = 0.5 * (1 - Math.cos((2 * Math.PI * i) / size));
   }
   return window;
 }

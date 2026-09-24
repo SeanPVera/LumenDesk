@@ -14,6 +14,7 @@ if variables is None:
 for key, value in {
     "LUMENDESK_RENDER_QA": "1",
     "LUMENDESK_RENDER_DIRECTORY": os.environ["LUMENDESK_RENDER_DIRECTORY"],
+    "MUSIC_TRACE_PATH": str(Path(os.environ["LUMENDESK_RENDER_DIRECTORY"]) / "music-production.csv"),
 }.items():
     ET.SubElement(variables, "EnvironmentVariable", key=key, value=value, isEnabled="YES")
 tree.write(path, encoding="UTF-8", xml_declaration=True)

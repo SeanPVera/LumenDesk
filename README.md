@@ -378,7 +378,7 @@ Press **Stop** when you are done. Unless you turn it off, every light goes back 
 
 You can change presets while the music is playing. Moving any slider switches the preset to **Custom**, and picking a named preset afterwards writes over those values, so a customised setup does not survive a trip through the other presets.
 
-Every preset accents the beat without strobing to it. **Concert** and **Club** hit hardest, **Ambient** barely moves, and none of them flash unless you turn photosensitivity-safe mode off yourself after the warning. If a preset feels too calm in a bright room, **Beat response** and **Effect intensity** are the two sliders that deepen the accent.
+Presets shape rhythmic accents over a sustained light level. **Concert** and **Club** hit hardest, **Ambient** barely moves, and none of them flash unless you turn no-flash mode off yourself after the warning. If a preset feels too calm in a bright room, **Beat sensitivity** and **Effect intensity** are the two sliders that deepen the accent.
 
 #### Giving each light a job
 
@@ -430,9 +430,9 @@ Your flash settings, safe mode, and every slider stay exactly where you left the
 
 Three switches are worth knowing:
 
-- **Photosensitivity-safe mode** is on by default and blocks flashing outright, because flashing light can trigger seizures and migraines in some people. Even with it off, LumenDesk never flashes more than three times a second — that limit cannot be raised, by you or by a preset.
+- **No-flash mode** is on by default and blocks explicit flash requests. Ordinary brightness changes can still be uncomfortable. The maximum of three explicit flashes per second is a software limit, not a guarantee of medical safety.
 - **Restore previous state when stopped** puts every light back how it was when you press Stop. On by default.
-- **Phrase-aware lifts** lets the show notice when a section is building and lift with it, instead of treating every bar the same.
+- **Sustained-energy lifts** follows slower changes in measured energy. It is not reliable chorus, phrase or drop recognition.
 
 If **Reduced Motion** is on in your system accessibility settings, LumenDesk keeps movement small and never flashes, whatever the preset says.
 
@@ -451,15 +451,15 @@ If **Reduced Motion** is on in your system accessibility settings, LumenDesk kee
 
 Music Mode is a first-class section of the Lighting Library. It turns the existing `music-pulse` effect into a configurable choreography session while preserving that identifier for saved-state compatibility.
 
-- Real beat tracking. LumenDesk estimates the tempo of what is playing and choreographs to the beat grid it predicts, rather than reacting to every transient. The kick band is scored separately from the full spectrum, so a wall of hi-hats cannot drag the estimate onto a subdivision or a dotted relative of the beat, and the tracker refuses to lock onto material with no real pulse — a held chord will not produce a phantom tempo. The tracker also listens for 3/4, 5/4, 6/8 and 7/8, and for half- or double-time feel, so a waltz and a head-nod groove do not get forced onto four-four. The detected tempo and metre are shown next to the beat indicator once it locks; music with no clear pulse falls back to a smooth energy-driven show automatically.
-- Brightness is a resting level plus an accent. The resting level follows how loud the music is over about half a second, so quiet passages, breakdowns and sustained notes genuinely pull the room back, and a beat lifts the light above that level rather than dropping it to the floor and back. Colour is held for whole bars and crossed over on a bar line. The result is a room that breathes with the music instead of blinking at it; turn **Beat response** up if you want the accents harder.
+- Real beat tracking. LumenDesk estimates the tempo of what is playing and choreographs to the beat grid it predicts, rather than reacting to every transient. The kick band is scored separately from the full spectrum to resist dense hi-hats. Continuous synthetic kick/hat and chord tests exercise this, but syncopation can still produce a wrong relative tempo. The tracker also listens for 3/4, 5/4, 6/8 and 7/8, and for half- or double-time feel, with manual overrides when automatic metre or feel is wrong. The detected tempo and metre are shown next to the beat indicator once it locks; music with no clear pulse falls back to a smooth energy-driven show automatically.
+- Brightness is a resting level plus an accent. The resting level follows how loud the music is over about half a second, so quiet passages, breakdowns and sustained notes genuinely pull the room back, and a beat lifts the light above that level rather than dropping it to the floor and back. Colour is held for whole bars and crossed over on a bar line. The intended result is a lit room with recognizable accents; turn **Beat sensitivity** up if you want the accents harder.
 - Built-in presets: Ambient, Balanced, Concert, Cinematic, Soundcheck, Club, Half-time, and Waltz, plus a persisted Custom configuration.
 - Fixture roles. Each light can be wash, hit, accent, motion, or off. Auto assigns RGBIC strips to motion, downstage to hit, rear to accent, and everything else to wash, so a mixed room layers without tagging every fixture.
 - Beat, bass, percussion, color-change, brightness, movement, silence, palette, metre, feel, stereo, and restoration controls.
 - Explicit left-to-right, front-to-back, circular, or custom fixture topology. Rooms with no saved topology use deterministic label-and-ID ordering rather than discovery order.
 - Vendor-neutral lighting frames translated to combined LIFX HSBK, efficient ordinary Govee LAN color, or volatile Govee RGBIC segment streaming.
 - Independent transport ceilings and latest-frame coalescing so a slower bulb does not hold back an RGBIC stream.
-- Photosensitivity-safe mode is enabled by default. Flash requests are disabled in safe mode and are always subject to an absolute 3-per-second ceiling plus the user's lower configured limit.
+- No-flash mode is enabled by default. Flash requests are disabled in safe mode and are always subject to an absolute 3-per-second ceiling plus the user's lower configured limit.
 - Reduced Motion limits spatial movement and disables flashes.
 - Demo Mode includes LIFX-style bulbs, Govee bulbs, segmented Govee fixtures, and deterministic grooves (four-on-the-floor, half-time, waltz, odd metre, breaks) with no copyrighted audio.
 - Sources: system audio on macOS, microphone on iOS, a user-selected audio file on both, and MIDI beat clock.
@@ -468,7 +468,7 @@ Rooms share one live audio source. Start additional rooms with the same source; 
 
 During a show, you can change an included fixture between wash, hit, accent, motion, and auto. Stop first to change inclusion or move a fixture into or out of Off. The restore-on-stop preference can be changed while the show runs. Half-time pulses span two detected beats while palette and movement timing retain the detected bar length.
 
-On macOS the default source is system audio and requires Screen Recording permission. On iPhone and iPad the default source is the microphone. Open Audio File uses the existing user-selected file grant so iOS can follow a track the microphone cannot hear. MIDI clock needs a MIDI interface or IAC bus. See [Music Mode architecture](MUSIC_MODE_ARCHITECTURE.md) for the data flow and safety boundaries.
+On macOS the default source is system audio and requires Screen Recording permission. On iPhone and iPad the default source is the microphone. Open Audio File uses the existing user-selected file grant so iOS can follow a track the microphone cannot hear. MIDI clock needs a MIDI interface or IAC bus. See [Music Mode architecture](MUSIC_MODE_ARCHITECTURE.md), [production evidence](MUSIC_MODE_EVIDENCE.md), and the [control audit](CONTROLS_AUDIT.md) for tested behavior and limitations. The diagnostics disclosure distinguishes generated frames from local transport submission. The 45 ms timing bias remains unmeasured, and an installed app must be matched to its source revision before comparing behavior.
 
 ### Animated effects
 

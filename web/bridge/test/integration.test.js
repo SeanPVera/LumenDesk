@@ -381,3 +381,28 @@ test('a Govee device that announces a stale address is still commandable', async
   })
   await waitFor(() => strip.brightness === 61)
 })
+
+test('explicit music brightness reaches LIFX and Govee, and restores both', async () => {
+  const devices = registry.list(), l = devices.find(d=>d.brand==='lifx'), g = devices.find(d=>d.brand==='govee')
+  const send = states => api('/music/frame',{method:'POST',headers:{'Content-Type':'application/json',Origin:ORIGIN},body:JSON.stringify({states})})
+  const before = {l:bulb.color.brightness,g:strip.brightness}
+  let result=await send([l,g].map(d=>({fixtureID:d.id,rgb:{r:255,g:0,b:0},brightness:.2,transitionDuration:.09})))
+  assert.equal(result.body.stage,'accepted-for-local-dispatch')
+  await waitFor(()=>Math.abs(bulb.color.brightness-percentToU16(20))<=1 && strip.color.r===51 && strip.brightness===100)
+  assert.equal(bulb.color.saturation,65535)
+  result=await send([{fixtureID:l.id,rgb:{r:255,g:0,b:0},brightness:before.l/65535,restoring:true},
+    {fixtureID:g.id,rgb:{r:255,g:0,b:0},brightness:before.g/100,restoring:true}])
+  assert.equal(result.body.applied,2)
+  await waitFor(()=>Math.abs(bulb.color.brightness-before.l)<=1 && strip.brightness===before.g && strip.color.r===255)
+})
+
+test('newer manual control revokes music frames and stale restoration', async()=>{
+  const device=registry.list().find(d=>d.brand==='lifx'), revision=device.controlRevision
+  const send=state=>api('/music/frame',{method:'POST',headers:{'Content-Type':'application/json',Origin:ORIGIN},body:JSON.stringify({states:[state]})})
+  const frame={fixtureID:device.id,rgb:{r:255,g:0,b:0},brightness:.2,owner:'regression-show',controlRevision:revision}
+  assert.equal((await send(frame)).body.applied,1)
+  await api(`/devices/${encodeURIComponent(device.id)}/brightness`,{method:'POST',headers:{'Content-Type':'application/json',Origin:ORIGIN},body:JSON.stringify({value:65})})
+  assert.equal((await send(frame)).body.applied,0)
+  assert.equal((await send({...frame,restoring:true})).body.applied,0)
+  await waitFor(()=>Math.abs(bulb.color.brightness-percentToU16(65))<=1)
+})

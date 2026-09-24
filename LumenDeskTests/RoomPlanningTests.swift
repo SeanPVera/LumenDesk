@@ -258,6 +258,8 @@ final class RoomWorkspaceTests: XCTestCase {
 
     func testSelectionDropsRemovedFixturesWithoutInventingMembers() {
         XCTAssertEqual(RoomWorkspaceSelection.reconciled(selected: ["a", "b"], available: ["b", "c"]), ["b"])
+        let removed = RoomWorkspaceSelection.reconciled(selected: ["gone"], available: ["b", "c"])
+        XCTAssertEqual(RoomWorkspaceSelection.targets(selected: removed, available: ["b", "c"]), [])
     }
 
     @MainActor

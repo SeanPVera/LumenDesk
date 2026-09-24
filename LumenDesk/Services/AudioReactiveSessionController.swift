@@ -105,7 +105,10 @@ final class AudioReactiveSessionController: ObservableObject {
     private var subscriptionToken: AudioCaptureService.SubscriptionToken?
     private var sessions: [LightScope: Session] = [:]
     private var renderTimer: Timer?
+    private var lastRenderAt: TimeInterval?
+    private(set) var lastRenderInterval: TimeInterval = 0
     private var sequenceNumber: UInt64 = 0
+    private var liveCaptureBeganAt: TimeInterval = 0
     private var analysisSnapshot = AudioReactiveSnapshot()
     private var lastSnapshotPublishedAt = -Double.greatestFiniteMagnitude
     private let previewPublicationInterval: TimeInterval = 0.1
@@ -119,6 +122,7 @@ final class AudioReactiveSessionController: ObservableObject {
         subscriptionToken = captureService.subscribe { [weak self] snapshot in
             Task { @MainActor in
                 guard let self, self.sessions.values.contains(where: { !$0.synthetic }) else { return }
+                guard snapshot.analysisTimestamp.map({ $0 >= self.liveCaptureBeganAt }) ?? true else { return }
                 self.analysisSnapshot = snapshot
                 let isPlaying = snapshot.confidence >= 0.025
                     || snapshot.level >= 0.025
@@ -151,6 +155,10 @@ final class AudioReactiveSessionController: ObservableObject {
             return
         }
         let startTime = now()
+        if !useSyntheticPattern && !sessions.values.contains(where: { !$0.synthetic }) {
+            liveCaptureBeganAt = startTime
+            analysisSnapshot = AudioReactiveSnapshot()
+        }
         let groove = MusicGroove.all.first { $0.id == selectedGrooveID } ?? MusicGroove.fourOnTheFloor
         let session = Session(
             configuration: configuration,
@@ -245,6 +253,12 @@ final class AudioReactiveSessionController: ObservableObject {
         session.topology = topology
         session.fixtures = fixtures
         session.reducedMotion = reducedMotion
+        session.lastPreviewPublishedAt = -Double.greatestFiniteMagnitude
+    }
+
+    func effectiveConfiguration(for scope: LightScope) -> MusicModeConfiguration? {
+        guard let session = sessions[scope] else { return nil }
+        return session.configuration.normalized(reducedMotion: session.reducedMotion)
     }
 
     func setGroove(_ grooveID: String) {
@@ -279,6 +293,7 @@ final class AudioReactiveSessionController: ObservableObject {
 
     private func startRenderTimerIfNeeded() {
         guard renderTimer == nil else { return }
+        lastRenderAt = nil
         renderTick()
         // Lighting and preview output do not benefit from display-refresh
         // cadence. Twenty frames per second remains fluid and cuts a third of
@@ -292,6 +307,16 @@ final class AudioReactiveSessionController: ObservableObject {
     private func renderTick() {
         guard !sessions.isEmpty else { return }
         let timestamp = now()
+        lastRenderInterval = lastRenderAt.map { max(0, timestamp - $0) } ?? 0
+        lastRenderAt = timestamp
+        if sessions.values.contains(where: { !$0.synthetic }) {
+            let fresh = analysisSnapshot.fresh(at: timestamp)
+            isAudioPlaying = fresh.level >= 0.025 || fresh.energy >= 0.035
+            if timestamp - lastSnapshotPublishedAt >= previewPublicationInterval {
+                latestSnapshot = fresh
+                lastSnapshotPublishedAt = timestamp
+            }
+        }
         sequenceNumber &+= 1
         for (scope, session) in sessions {
             let snapshot = applyMusicalPolicy(

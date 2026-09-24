@@ -205,7 +205,11 @@ struct PlanWorkspaceView: View {
             } else {
                 RoomOutputControls(lights: targets, title: selectedIDs.isEmpty
                                    ? manager.scopeDisplayName(scope)
-                                   : "\(selectedIDs.count) selected fixtures")
+                                   : "\(targets.count) selected fixtures")
+            }
+            if !selectedIDs.isEmpty && targets.isEmpty {
+                Text("The selected fixtures are no longer in this room. Clear selection to control the room.")
+                    .font(.callout).foregroundStyle(Lumen.warn)
             }
             if !selectedIDs.isEmpty {
                 Menu("Move selected fixtures") {
@@ -490,7 +494,7 @@ struct RoomOutputControls: View {
                 get: { lights.first?.color ?? .white },
                 set: { manager.setColor(deviceIDs: ids, color: $0) }), supportsOpacity: false)
                 .disabled(ids.isEmpty || owned)
-            if Set(lights.map { $0.color.hsbComponents.h }).count > 1 {
+            if Set(lights.map { $0.color.hsbComponents.h }).count > 1 || Set(lights.map { $0.color.hsbComponents.s }).count > 1 {
                 Text("Mixed colors. Picking a color replaces the selected output.")
                     .font(.caption).foregroundStyle(Lumen.meter)
             }
@@ -1494,4 +1498,3 @@ struct RoomPoolCanvas: View {
         .accessibilityHidden(true)
     }
 }
-

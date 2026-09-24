@@ -11,6 +11,8 @@ struct MusicModeView: View {
     @State private var advancedExpanded = false
     @State private var showUnsafeWarning = false
     @State private var showFileImporter = false
+    @State private var audioStatus: MusicAudioSourceStatus = .idle
+    @State private var inputChannels: Int?
     /// Existing help preferences survive the workspace redesign.
     @AppStorage("LumenDesk.musicMode.quickStart.v1") private var showsQuickStart = true
     @AppStorage("LumenDesk.musicMode.plainHelp.v1") private var showsPlainHelp = true
@@ -18,6 +20,13 @@ struct MusicModeView: View {
     private var fixtures: [MusicFixtureDescriptor] { manager.musicFixtureDescriptors(in: scope) }
     private var includedFixtures: [MusicFixtureDescriptor] { topology.includedFixtures(fixtures) }
     private var isRunning: Bool { manager.activeEffects[scope] == "music-pulse" }
+
+    private var stereoUnavailableReason: String? {
+        if topology.expandedTargets(for: fixtures).count < 2 { return "Stereo image needs at least two fixture or segment positions." }
+        if audioStatus == .midiClock { return "MIDI clock has timing only, with no stereo audio." }
+        if isRunning && inputChannels == 1 { return "This source is mono; stereo image needs a stereo source." }
+        return nil
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -36,16 +45,19 @@ struct MusicModeView: View {
             quickStart
         }
         .onAppear { reloadForScope() }
+        .onReceive(manager.musicModeController.$sourceStatus) { audioStatus = $0 }
+        .onReceive(manager.musicModeController.$latestSnapshot.map(\.inputChannels).removeDuplicates()) { inputChannels = $0 }
         .onChange(of: scope) { _ in reloadForScope() }
-        .alert("Disable photosensitivity-safe mode?", isPresented: $showUnsafeWarning) {
-            Button("Keep Safe Mode", role: .cancel) {}
-            Button("Disable Safe Limits", role: .destructive) {
+        .onChange(of: reduceMotion) { manager.setMusicReducedMotion($0) }
+        .alert("Allow optional flashes?", isPresented: $showUnsafeWarning) {
+            Button("Keep No-Flash Mode", role: .cancel) {}
+            Button("Allow Flashes", role: .destructive) {
                 configuration.photosensitivitySafeMode = false
                 configuration.preset = .custom
                 commitConfiguration()
             }
         } message: {
-            Text("Music Mode will still enforce its absolute 3 flashes-per-second ceiling and your selected frequency, but flashing can affect people with photosensitivity. Safe Mode is recommended.")
+            Text("Music Mode will still enforce its absolute 3 flashes-per-second ceiling and your selected frequency, but flashing can affect people with photosensitivity. No-flash mode is recommended. Ordinary brightness changes can still be uncomfortable; no setting guarantees medical safety.")
         }
         .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.audio], allowsMultipleSelection: false) { result in
             guard case .success(let urls) = result, let url = urls.first else { return }
@@ -418,23 +430,24 @@ struct MusicModeView: View {
                 Divider().overlay(Lumen.hairline)
                 Toggle("Allow controlled flashes", isOn: binding(\.allowsFlashes))
                     .toggleStyle(LumenRockerStyle())
+                    .disabled(configuration.photosensitivitySafeMode || reduceMotion)
                     .help(MusicModeHelp.allowsFlashes)
                 helpCaption(MusicModeHelp.allowsFlashes)
                 musicSlider("Flash intensity", value: binding(\.flashIntensity), icon: "bolt.fill",
                             help: MusicModeHelp.flashIntensity)
-                    .disabled(configuration.photosensitivitySafeMode || !configuration.allowsFlashes)
+                    .disabled(configuration.photosensitivitySafeMode || !configuration.allowsFlashes || reduceMotion)
                 LumenFader(label: "Maximum flash frequency",
                            value: frequencyBinding,
                            range: 0...FlashSafetyLimiter.hardMaximumFrequency,
                            step: 0.25,
                            track: .tint(Lumen.warning),
                            format: { String(format: "%.2f/s", $0) })
-                .disabled(configuration.photosensitivitySafeMode || !configuration.allowsFlashes)
+                .disabled(configuration.photosensitivitySafeMode || !configuration.allowsFlashes || reduceMotion)
                 .help(MusicModeHelp.maximumFlashFrequency)
                 .accessibilityHint(MusicModeHelp.maximumFlashFrequency)
                 helpCaption(MusicModeHelp.maximumFlashFrequency)
 
-                Toggle("Photosensitivity-safe mode", isOn: Binding(
+                Toggle("No-flash mode", isOn: Binding(
                     get: { configuration.photosensitivitySafeMode },
                     set: { enabled in
                         if enabled {
@@ -474,7 +487,11 @@ struct MusicModeView: View {
                 helpCaption(configuration.timeFeel.plainSummary)
                 musicSlider("Stereo image", value: binding(\.stereoImage), icon: "headphones",
                             help: MusicModeHelp.stereoImage)
-                Toggle("Phrase-aware lifts", isOn: binding(\.phraseAware))
+                    .disabled(stereoUnavailableReason != nil)
+                if let reason = stereoUnavailableReason {
+                    Text(reason).font(.caption).foregroundStyle(Lumen.textSecondary)
+                }
+                Toggle("Sustained-energy lifts", isOn: binding(\.phraseAware))
                     .toggleStyle(LumenRockerStyle())
                     .help(MusicModeHelp.phraseAware)
                 helpCaption(MusicModeHelp.phraseAware)
@@ -486,6 +503,8 @@ struct MusicModeView: View {
                 helpCaption(MusicModeHelp.restorePreviousState)
                 if manager.isDemoMode {
                     Toggle("Use deterministic demo rhythm", isOn: binding(\.usesSyntheticDemoPattern))
+                        .disabled(isRunning)
+                        .help("Stop the show before changing the capture source.")
                     Picker("Demo groove", selection: Binding(
                         get: { manager.musicModeController.selectedGrooveID },
                         set: { manager.musicModeController.setGroove($0) }

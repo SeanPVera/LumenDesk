@@ -5,6 +5,233 @@ import XCTest
 @testable import LumenDesk
 
 final class MusicModeTests: XCTestCase {
+    func testMasterZeroAndLiveCeilingIncludeFlashes() {
+        let engine = MusicChoreographyEngine()
+        let fixture = MusicFixtureDescriptor(id: "f", label: "Fixture", transport: .lifxLAN)
+        var config = MusicModeConfiguration.configuration(for: .concert)
+        var input = lockedSnapshot(at: 100, reference: 100, interval: 0.5)
+        input.snare = 1; input.percussion = 1
+        _ = engine.makeFrame(snapshot: input, configuration: config, topology: FixtureTopology(), fixtures: [fixture], timestamp: 100, sequenceNumber: 1)
+        config.photosensitivitySafeMode = false
+        config.masterBrightness = 0.5; config.minimumBrightness = 0.08; config.maximumBrightness = 0.2
+        let capped = engine.makeFrame(snapshot: input, configuration: config, topology: FixtureTopology(), fixtures: [fixture], timestamp: 100.05, sequenceNumber: 2)
+        XCTAssertLessThanOrEqual(capped.states[0].brightness, 0.1)
+        config.masterBrightness = 0
+        let black = engine.makeFrame(snapshot: input, configuration: config, topology: FixtureTopology(), fixtures: [fixture], timestamp: 100.1, sequenceNumber: 3)
+        XCTAssertEqual(black.states[0].brightness, 0)
+    }
+
+    func testEveryRolePreservesSingleColorThemeAndZeroHoldsPalette() {
+        for role in [FixtureRole.wash, .hit, .accent, .motion] {
+            let engine = MusicChoreographyEngine()
+            let fixture = MusicFixtureDescriptor(id: "f", label: "Fixture", transport: .lifxLAN, role: role)
+            var config = MusicModeConfiguration.configuration(for: .soundcheck)
+            config.palette = [MusicPaletteColor(0xFF0000)]
+            config.colorChangeIntensity = 0
+            for index in 0..<240 {
+                let t = 100 + Double(index) * 0.05
+                var input = lockedSnapshot(at: t, reference: 100, interval: 0.5)
+                input.mood = 1; input.chroma = [0,0,0,0,0,0,1,0,0,0,0,0]
+                let state = engine.makeFrame(snapshot: input, configuration: config, topology: FixtureTopology(), fixtures: [fixture], timestamp: t, sequenceNumber: UInt64(index)).states[0]
+                XCTAssertEqual(state.hue, 0, accuracy: 0.000001)
+            }
+        }
+        let engine = MusicChoreographyEngine()
+        let fixture = MusicFixtureDescriptor(id: "f", label: "Fixture", transport: .lifxLAN)
+        var config = MusicModeConfiguration.configuration(for: .soundcheck)
+        config.colorChangeIntensity = 0
+        var hues: [Double] = []
+        for index in 0..<240 {
+            let t = 100 + Double(index) * 0.05
+            hues.append(engine.makeFrame(snapshot: lockedSnapshot(at: t, reference: 100, interval: 0.5), configuration: config, topology: FixtureTopology(), fixtures: [fixture], timestamp: t, sequenceNumber: UInt64(index)).states[0].hue)
+        }
+        XCTAssertEqual(hues.min()!, hues.max()!, accuracy: 0.000001)
+    }
+
+    func testPaletteDoesNotJumpWhenTempoIsReacquired() {
+        let engine = MusicChoreographyEngine()
+        let fixture = MusicFixtureDescriptor(id: "f", label: "Fixture", transport: .lifxLAN)
+        let config = MusicModeConfiguration.configuration(for: .soundcheck)
+        var previous = 0.0
+        for index in 0..<100 {
+            let input = AudioReactiveSnapshot(level: 0.4, energy: 0.4, confidence: 0.8)
+            previous = engine.makeFrame(snapshot: input, configuration: config, topology: FixtureTopology(), fixtures: [fixture], timestamp: 100 + Double(index) * 0.05, sequenceNumber: UInt64(index)).states[0].hue
+        }
+        var input = lockedSnapshot(at: 105, reference: 105, interval: 0.5)
+        input.gridBeatPosition = 99
+        let next = engine.makeFrame(snapshot: input, configuration: config, topology: FixtureTopology(), fixtures: [fixture], timestamp: 105, sequenceNumber: 100).states[0].hue
+        let delta = abs(next - previous)
+        XCTAssertLessThan(min(delta,1-delta),0.005)
+    }
+
+    func testStaleCaptureSettlesInsteadOfRetriggeringLastOnset() {
+        let engine = MusicChoreographyEngine()
+        let fixture = MusicFixtureDescriptor(id: "f", label: "Fixture", transport: .lifxLAN)
+        var config = MusicModeConfiguration.configuration(for: .soundcheck)
+        config.silenceBehavior = .fadeOut
+        var input = lockedSnapshot(at: 100, reference: 100, interval: 0.5)
+        input.analysisTimestamp = 100; input.pulse = 1; input.snare = 1
+        var brightness = 1.0
+        for index in 0..<160 {
+            brightness = engine.makeFrame(snapshot: input, configuration: config, topology: FixtureTopology(), fixtures: [fixture], timestamp: 100 + Double(index) * 0.05, sequenceNumber: UInt64(index)).states[0].brightness
+        }
+        XCTAssertFalse(input.fresh(at: 102).isTempoLocked)
+        XCTAssertLessThan(brightness, 0.001)
+    }
+
+    func testRendererRejectsOldSequenceExpiredFramesAndResetPending() {
+        let renderer = MusicLightingRenderer()
+        let fixture = MusicFixtureDescriptor(id: "f", label: "Fixture", transport: .goveeLAN)
+        func frame(_ sequence: UInt64, _ timestamp: Double) -> MusicLightingFrame {
+            MusicLightingFrame(states: [.init(fixtureID: "f", hue: 0, saturation: 1, brightness: 0.5, transitionDuration: 0.1)], timestamp: timestamp, sequenceNumber: sequence, sustainedEnergyEvent: false, flashApplied: false)
+        }
+        XCTAssertEqual(renderer.enqueue(frame(2,100), fixtures: [fixture], at: 100).count,1)
+        XCTAssertTrue(renderer.enqueue(frame(1,100.1), fixtures: [fixture], at: 100.1).isEmpty)
+        XCTAssertTrue(renderer.enqueue(frame(3,100), fixtures: [fixture], at: 101).isEmpty)
+        _ = renderer.enqueue(frame(4,101), fixtures: [fixture], at: 101)
+        _ = renderer.enqueue(frame(5,101.01), fixtures: [fixture], at: 101.01)
+        renderer.reset(fixtureIDs: ["f"])
+        XCTAssertTrue(renderer.flush(fixtures: [fixture], at: 102).isEmpty)
+        XCTAssertEqual(renderer.diagnostics.rejectedStates,2)
+    }
+
+    /// This is the production PCM analyzer -> choreography -> renderer, not a
+    /// translation. Prints aggregate evidence; optional CSV contains synthetic
+    /// features/commands only, never microphone or system-audio recordings.
+    func testPCMProductionPipelineAcrossFormatsAndDynamics() throws {
+        var csv = "rate,chunk,time,tempo,confidence,onset,beatCount,level,generatedBrightness,handedOff\n"
+        for (rate, chunk) in [(48000.0,128), (48000,1024), (44100,512), (44100,2048)] {
+            let analyzer = MusicFeatureAnalyzer(sourceDescription: "Synthetic regression")
+            let engine = MusicChoreographyEngine()
+            let renderer = MusicLightingRenderer()
+            let fixtures = [MusicFixtureDescriptor(id: "f", label: "Fixture", transport: .lifxLAN)]
+            let config = MusicModeConfiguration.configuration(for: .soundcheck)
+            var sample = 0, locked = 0, correct = 0, commands = 0
+            var renderAt = 100.0
+            while sample < Int(rate * 14) {
+                let count = min(chunk, Int(rate * 14) - sample)
+                let pcm = rhythmBuffer(startSample: sample, frames: AVAudioFrameCount(count), sampleRate: rate, beatPeriod: 0.5, includeHiHats: true)
+                let end = 100 + Double(sample + count) / rate
+                if let snapshot = analyzer.analyze(pcm, hostTime: end), end >= renderAt {
+                    let frame = engine.makeFrame(snapshot: snapshot, configuration: config, topology: FixtureTopology(), fixtures: fixtures, timestamp: end, sequenceNumber: UInt64(sample))
+                    let output = renderer.enqueue(frame, fixtures: fixtures, at: end)
+                    commands += output.count
+                    if end > 108, snapshot.isTempoLocked {
+                        locked += 1
+                        if abs(snapshot.tempo - 120) < 6 { correct += 1 }
+                    }
+                    XCTAssertFalse(frame.flashApplied)
+                    XCTAssertLessThanOrEqual(end - (snapshot.analysisTimestamp ?? 0), 512 / rate + 0.001)
+                    csv += "\(rate),\(chunk),\(end),\(snapshot.tempo),\(snapshot.beatConfidence),\(snapshot.onset),\(snapshot.beatCount),\(snapshot.level),\(frame.states[0].brightness),\(output.count)\n"
+                    renderAt += 0.05
+                }
+                sample += count
+            }
+            XCTAssertGreaterThan(locked, 60)
+            XCTAssertGreaterThan(Double(correct) / Double(max(1,locked)), 0.9)
+            XCTAssertLessThanOrEqual(commands, 235) // <= 1/.06 Hz plus first frame
+            print("MUSIC_METRIC native rate=\(rate) chunk=\(chunk) locked=\(locked) correct=\(correct) handoffs=\(commands)")
+        }
+        if let path = ProcessInfo.processInfo.environment["MUSIC_TRACE_PATH"]
+            ?? ProcessInfo.processInfo.environment["TEST_RUNNER_MUSIC_TRACE_PATH"] {
+            try csv.write(toFile: path, atomically: true, encoding: .utf8)
+        }
+    }
+
+    func testPCMLevelRetainsQuietLoudContrastAndRejectsDuplicates() throws {
+        func level(_ amplitude: Float) throws -> Double {
+            let analyzer = MusicFeatureAnalyzer(sourceDescription: "Synthetic")
+            var result = 0.0
+            for index in 0..<100 {
+                let pcm = buffer(frequency: 440, amplitude: amplitude, startSample: index * 1024)
+                let snapshot = try XCTUnwrap(analyzer.analyze(pcm, hostTime: 100 + Double((index+1)*1024)/48000))
+                result = snapshot.level
+                XCTAssertNil(analyzer.analyze(pcm,hostTime:100 + Double((index+1)*1024)/48000))
+            }
+            return result
+        }
+        let quiet = try level(0.04), loud = try level(0.8)
+        XCTAssertGreaterThan(quiet,0.1)
+        XCTAssertGreaterThan(loud-quiet,0.3)
+        print("MUSIC_METRIC native quiet=\(quiet) loud=\(loud)")
+    }
+
+
+    func testPCMConfidenceLossAndRecovery() throws {
+        let analyzer = MusicFeatureAnalyzer(sourceDescription: "Synthetic loss and recovery")
+        var duringSilence: AudioReactiveSnapshot?
+        var recovered: AudioReactiveSnapshot?
+        for index in 0..<3375 { // 36 seconds at 48 kHz / 512
+            let time = Double(index * 512) / 48000
+            let pcm = time >= 10 && time < 22
+                ? buffer(frames: 512)
+                : rhythmBuffer(startSample: index * 512, frames: 512, sampleRate: 48000, beatPeriod: 0.5, includeHiHats: true)
+            let snapshot = analyzer.analyze(pcm, hostTime: 100 + time + 512.0/48000)
+            if time > 21 && time < 22 { duringSilence = snapshot }
+            if time > 35 { recovered = snapshot }
+        }
+        XCTAssertFalse(try XCTUnwrap(duringSilence).isTempoLocked)
+        XCTAssertLessThan(try XCTUnwrap(duringSilence).energy, 0.01)
+        XCTAssertTrue(try XCTUnwrap(recovered).isTempoLocked)
+        XCTAssertEqual(try XCTUnwrap(recovered).tempo, 120, accuracy: 6)
+    }
+
+    func testPCMTempoDriftAndStepRecovery() throws {
+        for gradual in [true, false] {
+            let analyzer = MusicFeatureAnalyzer(sourceDescription: "Synthetic tempo change")
+            let rate = 48000.0
+            let format = AVAudioFormat(standardFormatWithSampleRate: rate, channels: 1)!
+            var phase = 0.0, locked = 0, correct = 0
+            for offset in stride(from: 0, to: Int(rate * 40), by: 1024) {
+                let pcm = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 1024)!
+                pcm.frameLength = 1024
+                for index in 0..<1024 {
+                    let t = Double(offset + index) / rate
+                    let bpm = gradual ? 110 + 0.5 * t : (t < 18 ? 108.0 : 132.0)
+                    phase += bpm / 60 / rate
+                    let b = phase.truncatingRemainder(dividingBy: 1)
+                    let h = (phase * 4).truncatingRemainder(dividingBy: 1)
+                    let kick = 0.7 * sin(2 * .pi * 65 * t) * exp(-b / 0.09) * (1 - exp(-b / 0.004))
+                    let hat = 0.12 * sin(2 * .pi * 8000 * t) * exp(-h / 0.096) * (1 - exp(-h / 0.004))
+                    pcm.floatChannelData![0][index] = Float(kick + hat)
+                }
+                let t = Double(offset + 1024) / rate
+                if let snapshot = analyzer.analyze(pcm, hostTime: 100 + t), t > 32, snapshot.isTempoLocked {
+                    locked += 1
+                    if abs(snapshot.tempo - (gradual ? 110 + 0.5 * t : 132)) < 6 { correct += 1 }
+                }
+            }
+            XCTAssertGreaterThan(locked, 250)
+            XCTAssertGreaterThan(Double(correct) / Double(max(1, locked)), 0.9)
+            print("MUSIC_METRIC native tempoChange gradual=\(gradual) correct=\(correct)/\(locked)")
+        }
+    }
+
+    @MainActor
+    func testLiveReducedMotionAndControlExtremesReachSession() throws {
+        let manager = LightManager(persistenceStore: MusicModePersistenceSpy())
+        manager.enterDemoMode()
+        var config = MusicModeConfiguration.configuration(for: .concert)
+        config.usesSyntheticDemoPattern = true
+        manager.startMusicMode(configuration: config)
+        for value in [0.0,0.5,1.0] {
+            config.masterBrightness = value; config.beatSensitivity = value
+            config.effectIntensity = value; config.movementAmount = value
+            manager.setMusicModeConfiguration(config)
+            let effective = try XCTUnwrap(manager.musicModeController.effectiveConfiguration(for: .all))
+            XCTAssertEqual(effective.masterBrightness,value)
+            XCTAssertEqual(effective.beatSensitivity,value)
+            manager.musicModeController.renderNowForTesting()
+            let frame = try XCTUnwrap(manager.musicModeController.latestFrame(for: .all))
+            XCTAssertTrue(frame.states.allSatisfy { $0.brightness <= config.maximumBrightness * value + 0.000001 })
+        }
+        manager.setMusicReducedMotion(true)
+        let reduced = try XCTUnwrap(manager.musicModeController.effectiveConfiguration(for: .all))
+        XCTAssertLessThanOrEqual(reduced.movementAmount,0.18)
+        XCTAssertEqual(reduced.flashIntensity,0)
+        manager.stopAllEffects()
+    }
+
     func testSilenceProducesQuietBoundedFeatures() throws {
         let analyzer = MusicFeatureAnalyzer(sourceDescription: "Test")
         let snapshot = try XCTUnwrap(analyzer.analyze(buffer()))

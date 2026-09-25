@@ -472,7 +472,9 @@ struct NanoleafShapesStudio: View {
                 get: { averageIntensity(targets, in: session) },
                 set: { value in shapes.edit(deviceID) { $0.edit { $0.setIntensity(value, panels: targets) } } }),
                        onEditingChanged: { editing in
-                           shapes.edit(deviceID) { editing ? $0.beginContinuousEdit() : $0.endContinuousEdit() }
+                           shapes.edit(deviceID) { session in
+                               if editing { session.beginContinuousEdit() } else { session.endContinuousEdit() }
+                           }
                        })
             HStack(spacing: 8) {
                 Button("Turn off") { shapes.edit(deviceID) { $0.edit { $0.setIntensity(0, panels: targets) } } }

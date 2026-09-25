@@ -73,6 +73,7 @@
 		B300000000000000000002 /* NanoleafCredentialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000002 /* NanoleafCredentialStore.swift */; };
 		B300000000000000000003 /* NanoleafPairingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000003 /* NanoleafPairingView.swift */; };
 		B300000000000000000004 /* NanoleafTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000004 /* NanoleafTests.swift */; };
+		B300000000000000000013 /* NanoleafShapesManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000013 /* NanoleafShapesManagerTests.swift */; };
 		B300000000000000000011 /* NanoleafShapesStudioView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000011 /* NanoleafShapesStudioView.swift */; };
 		B300000000000000000012 /* NanoleafSceneLibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000012 /* NanoleafSceneLibraryView.swift */; };
 		B300000000000000000005 /* LossyCodable.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000005 /* LossyCodable.swift */; };
@@ -170,6 +171,7 @@
 		A300000000000000000002 /* NanoleafCredentialStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/Nanoleaf/NanoleafCredentialStore.swift; sourceTree = "<group>"; };
 		A300000000000000000003 /* NanoleafPairingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/NanoleafPairingView.swift; sourceTree = "<group>"; };
 		A300000000000000000004 /* NanoleafTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NanoleafTests.swift; sourceTree = "<group>"; };
+		A300000000000000000013 /* NanoleafShapesManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NanoleafShapesManagerTests.swift; sourceTree = "<group>"; };
 		A300000000000000000011 /* NanoleafShapesStudioView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/NanoleafShapesStudioView.swift; sourceTree = "<group>"; };
 		A300000000000000000012 /* NanoleafSceneLibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/NanoleafSceneLibraryView.swift; sourceTree = "<group>"; };
 		A300000000000000000005 /* LossyCodable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/LossyCodable.swift; sourceTree = "<group>"; };
@@ -347,6 +349,7 @@
 			isa = PBXGroup;
 			children = (
 				A300000000000000000004 /* NanoleafTests.swift */,
+				A300000000000000000013 /* NanoleafShapesManagerTests.swift */,
 				A30000000000000000000E /* NanoleafShapesTests.swift */,
 				A30000000000000000000F /* NanoleafShapesClientTests.swift */,
 				A300000000000000000010 /* NanoleafShapesControllerTests.swift */,
@@ -528,6 +531,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				B300000000000000000004 /* NanoleafTests.swift in Sources */,
+				B300000000000000000013 /* NanoleafShapesManagerTests.swift in Sources */,
 				B30000000000000000000E /* NanoleafShapesTests.swift in Sources */,
 				B30000000000000000000F /* NanoleafShapesClientTests.swift in Sources */,
 				B300000000000000000010 /* NanoleafShapesControllerTests.swift in Sources */,

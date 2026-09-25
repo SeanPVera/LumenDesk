@@ -200,7 +200,8 @@ struct NanoleafEffectEditor: View {
     @ViewBuilder private func optionControl(_ index: Int) -> some View {
         let option = definition.options[index]
         let spec = plugin?.options.first { $0.name == option.name }
-        let label = NanoleafPluginDescription.label(for: option.name)
+        let label = NanoleafOptionValue.label(for: option.name)
+        let tenths = NanoleafOptionValue.isTenthsOfSecond(option.name)
         switch option.value {
         case .bool(let value):
             Toggle(label, isOn: Binding(get: { value }, set: { definition.options[index].value = .bool($0) }))
@@ -216,9 +217,11 @@ struct NanoleafEffectEditor: View {
             if let low = spec?.minValue, let high = spec?.maxValue, high > low {
                 LumenFader(label: label, value: Binding(get: { Double(value) },
                                                         set: { definition.options[index].value = .int(Int($0.rounded())) }),
-                           range: low...high, step: 1, format: { "\(Int($0.rounded()))" })
+                           range: low...high, step: 1,
+                           format: { tenths ? String(format: "%.1f s", $0 / 10) : "\(Int($0.rounded()))" })
             } else {
-                Stepper("\(label): \(value)", value: Binding(get: { value }, set: { definition.options[index].value = .int($0) }))
+                Stepper(tenths ? "\(label): \(String(format: "%.1f s", Double(value) / 10))" : "\(label): \(value)",
+                        value: Binding(get: { value }, set: { definition.options[index].value = .int(max(0, $0)) }))
             }
         case .double(let value):
             if let low = spec?.minValue, let high = spec?.maxValue, high > low {

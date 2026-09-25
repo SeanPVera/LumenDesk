@@ -53,6 +53,7 @@ struct DeviceInspectorView: View {
                 Button("Identify") { manager.identify(device) }
                 Button("Retry") { manager.retry(device) }
             }
+            if device.brand == .nanoleaf { NanoleafEffectsControl(device: device) }
             ForEach(manager.diagnostics(for: device)) { diagnostic in DiagnosticRow(diagnostic: diagnostic) }
             let command = manager.commandState(for: device.id)
             if command.phase != .idle || manager.confirmedStates[device.id] != nil {
@@ -182,7 +183,7 @@ struct PreciseColorEditorView: View {
             channel("Green", value: $green, tint: .green)
             channel("Blue", value: $blue, tint: .blue)
             LumenFader(label: "White temperature", value: $kelvin,
-                       range: 2500...9000, step: 50, track: .kelvin,
+                       range: device.kelvinRange, step: 50, track: .kelvin,
                        format: { "\(Int($0))K" })
             if !manager.recentColors.isEmpty {
                 Text("Recent colors").font(.caption.weight(.semibold)).foregroundStyle(.secondary)

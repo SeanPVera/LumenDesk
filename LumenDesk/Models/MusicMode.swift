@@ -608,6 +608,7 @@ extension FixtureTopology {
 enum MusicTransportKind: String, Codable, Equatable {
     case lifxLAN
     case goveeLAN
+    case nanoleafLAN
     case goveeRealtimeSegments
 }
 

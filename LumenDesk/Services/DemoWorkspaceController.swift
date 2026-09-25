@@ -12,6 +12,7 @@ struct LightRuntimeSnapshot {
     let kelvin: Int
     let segments: GoveeSegmentState?
     let matrix: LIFXMatrixState?
+    var nanoleafAppearance: NanoleafAppearance? = nil
 }
 
 /// Owns the isolated demo workspace and the live workspace held while Demo

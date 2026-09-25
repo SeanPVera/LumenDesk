@@ -24,12 +24,15 @@ targets:
         LSApplicationCategoryType: public.app-category.utilities
         LSMinimumSystemVersion: "13.0"
         NSHumanReadableCopyright: "Copyright © 2026 SeanPVera"
-        NSLocalNetworkUsageDescription: LumenDesk discovers and controls LIFX and Govee smart bulbs on your local network.
+        NSLocalNetworkUsageDescription: LumenDesk discovers and controls LIFX, Govee, and Nanoleaf Shapes lights on your local network.
         NSMicrophoneUsageDescription: LumenDesk analyzes music and room audio levels locally to animate music-reactive lighting effects.
         NSScreenCaptureUsageDescription: LumenDesk can capture system audio from music apps locally to drive music-reactive lightshows.
         NSBonjourServices:
           - _lifx._udp
           - _hap._tcp
+          - _nanoleafapi._tcp
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait

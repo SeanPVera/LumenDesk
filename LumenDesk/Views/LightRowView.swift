@@ -285,6 +285,7 @@ struct LightRowView: View {
             if manager.segmentProfile(for: device) != nil {
                 segmentStudioRow
             }
+            if device.brand == .nanoleaf { NanoleafEffectsControl(device: device).disabled(selectionMode) }
             if device.isLIFXLuna {
                 lunaStudioRow
             }
@@ -474,7 +475,7 @@ struct LightRowView: View {
         LumenFader(
             label: "White balance",
             value: kelvinBinding,
-            range: 2500...9000,
+            range: device.kelvinRange,
             step: 100,
             track: .kelvin,
             format: { "\(Int($0))K" }

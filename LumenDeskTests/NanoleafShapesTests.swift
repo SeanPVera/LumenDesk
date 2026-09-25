@@ -432,6 +432,67 @@ final class NanoleafShapesTests: XCTestCase {
                        "a panel the wall no longer has lights nothing")
     }
 
+    func testTheEditorDrawsOnlyColoursItCanJustify() throws {
+        let layout = try arrangement(Self.mixedWall()).layout
+        let orange = NanoleafRGB(hex: "#FF8000")!
+        let sent: [Int: NanoleafRGB] = [9: orange, 5555: orange]
+        let design = NanoleafDisplayFixtures.design
+
+        let draft = NanoleafPanelDisplay.resolve(layout: layout, output: .nativeEffect(name: "Forest"),
+                                                 lastSent: sent, draft: design, wholeWall: nil)
+        XCTAssertEqual(draft.source, .draft, "an open draft is what the editor shows, whatever is playing")
+        XCTAssertEqual(draft.colors.count, layout.paintablePanels.count)
+
+        let shown = NanoleafPanelDisplay.resolve(layout: layout, output: .design(confirmed: true),
+                                                 lastSent: sent, draft: nil, wholeWall: nil)
+        XCTAssertEqual(shown.source, .sent)
+        XCTAssertEqual(shown.colors, [9: orange], "a panel the wall no longer has is not drawn")
+
+        let white = NanoleafRGB.approximatingKelvin(2700)
+        let solid = NanoleafPanelDisplay.resolve(layout: layout, output: .white, lastSent: sent, draft: nil, wholeWall: white)
+        XCTAssertEqual(solid.source, .wholeWall)
+        XCTAssertEqual(Set(solid.colors.values), [white])
+        XCTAssertEqual(solid.colors.count, layout.paintablePanels.count)
+        XCTAssertEqual(NanoleafPanelDisplay.resolve(layout: layout, output: .solid, lastSent: [:], draft: nil, wholeWall: nil).source,
+                       .unknown, "without the whole-wall colour a solid wall is not guessed")
+
+        let off = NanoleafPanelDisplay.resolve(layout: layout, output: .off, lastSent: sent, draft: nil, wholeWall: white)
+        XCTAssertEqual(off.source, .off)
+        XCTAssertEqual(Set(off.colors.values), [.black])
+
+        for output: NanoleafOutputState in [.unknown, .nativeEffect(name: "Forest"), .external("Other app")] {
+            let unknown = NanoleafPanelDisplay.resolve(layout: layout, output: output, lastSent: sent, draft: nil, wholeWall: white)
+            XCTAssertEqual(unknown.source, .unknown)
+            XCTAssertTrue(unknown.colors.isEmpty, "\(output) never draws last-sent colours as if they were showing")
+        }
+    }
+
+    func testWhitePointsAndMasterBrightnessPreviewSensibly() {
+        let warm = NanoleafRGB.approximatingKelvin(2700)
+        XCTAssertEqual(warm.red, 255)
+        XCTAssertGreaterThan(warm.red, warm.green)
+        XCTAssertGreaterThan(warm.green, warm.blue)
+        let daylight = NanoleafRGB.approximatingKelvin(6500)
+        XCTAssertGreaterThanOrEqual(min(daylight.red, daylight.green, daylight.blue), 240)
+        XCTAssertLessThan(NanoleafRGB.approximatingKelvin(1800).blue, warm.blue)
+        XCTAssertEqual(NanoleafRGB(red: 200, green: 100, blue: 0).scaled(by: 0.5), NanoleafRGB(red: 100, green: 50, blue: 0))
+        XCTAssertEqual(NanoleafRGB(red: 200, green: 100, blue: 0).scaled(by: .nan), .black)
+    }
+
+    func testPanelsAreNumberedAlongTheWallAsOrientedAndFillSelectionsInOrder() throws {
+        let layout = try arrangement(Self.mixedWall()).layout
+        XCTAssertEqual(layout.panelNumbers(rotationDegrees: 0),
+                       [31000: 1, 9: 2, 5120: 3, 64001: 4, 1204: 5, 77: 6])
+        XCTAssertEqual(layout.panelNumbers(rotationDegrees: 180),
+                       [77: 1, 1204: 2, 5120: 3, 64001: 4, 9: 5, 31000: 6])
+        let tones: [(hue: Double, saturation: Double, level: Double)] = [(0, 1, 1), (1.0 / 3, 1, 1), (2.0 / 3, 1, 0.5)]
+        let filled = NanoleafDesignBuilder.colors(tones: tones, panels: [77, 9, 5120], layout: layout, rotationDegrees: 0)
+        XCTAssertEqual(filled[9]?.rgb, NanoleafRGB(red: 255, green: 0, blue: 0))
+        XCTAssertEqual(filled[5120]?.rgb, NanoleafRGB(red: 0, green: 255, blue: 0))
+        XCTAssertEqual(filled[77]?.rgb, NanoleafRGB(red: 0, green: 0, blue: 128))
+        XCTAssertNil(filled[31000], "panels outside the selection are left alone")
+    }
+
     func testDesignsRoundTripAndRejectDamagedEntries() throws {
         var design = NanoleafPanelDesign.uniform(NanoleafPanelColor(hue: 0.1, saturation: 0.5, intensity: 0.7), panelIDs: [3, 1, 2])
         design.paint(.black, panels: [2])
@@ -550,9 +611,9 @@ final class NanoleafShapesTests: XCTestCase {
         XCTAssertEqual(state(true, "ct", "Evening", nil), .white)
         XCTAssertEqual(state(true, "effect", "*Static*", .design), .design(confirmed: true))
         XCTAssertEqual(state(true, "effect", "*Static*", .preview), .preview)
-        XCTAssertEqual(state(true, "effect", "*Static*", nil), .external("A static layout LumenDesk did not send"))
+        XCTAssertEqual(state(true, "effect", "*Static*", nil), .external("A static layout LumenDesk can\u{2019}t account for"))
         XCTAssertEqual(state(true, "effect", "*ExtControl*", .stream(owner: "music")), .stream(owner: "music"))
-        XCTAssertEqual(state(true, "effect", "*ExtControl*", nil), .external("Another program is streaming to the wall"))
+        XCTAssertEqual(state(true, "effect", "*ExtControl*", nil), .external("A live stream LumenDesk isn\u{2019}t sending"))
         XCTAssertEqual(state(true, "effect", "*Dynamic*", .design), .external("A temporary animated scene from another app"))
         XCTAssertEqual(state(true, "effect", "Evening", .design), .nativeEffect(name: "Evening"),
                        "a scene chosen elsewhere supersedes LumenDesk's claim")
@@ -776,4 +837,9 @@ final class NanoleafShapesTests: XCTestCase {
         XCTAssertEqual(NanoleafOptionValue.label(for: "transTime"), "Transition")
         XCTAssertEqual(NanoleafOptionValue.label(for: "someNewOption"), "Some new option")
     }
+}
+
+private enum NanoleafDisplayFixtures {
+    static let design = NanoleafPanelDesign.uniform(NanoleafPanelColor(hue: 0.5, saturation: 1, intensity: 1),
+                                                    panelIDs: [9, 77, 1204, 5120, 31000, 64001])
 }

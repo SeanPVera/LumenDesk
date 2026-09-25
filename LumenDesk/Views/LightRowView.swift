@@ -8,6 +8,9 @@ struct LightRowView: View {
     var selectionMode: Bool = false
     var selected: Bool = false
     var onToggleSelection: (() -> Void)? = nil
+    /// The room workspace shows the Shapes editor inline, so its row omits
+    /// the entry that would open the same editor again as a sheet.
+    var showsShapesStudioEntry: Bool = true
 
     @State private var renamingName: Bool = false
     @State private var nameDraft: String = ""
@@ -16,6 +19,7 @@ struct LightRowView: View {
     @State private var showingPreciseColor = false
     @State private var showingSegmentStudio = false
     @State private var showingLunaStudio = false
+    @State private var showingShapesStudio = false
 
     private enum LightColorMode: String, CaseIterable {
         case color = "Color"
@@ -100,6 +104,9 @@ struct LightRowView: View {
         .sheet(isPresented: $showingPreciseColor) { PreciseColorEditorView(device: device).environmentObject(manager) }
         .sheet(isPresented: $showingSegmentStudio) { GoveeSegmentEditorView(device: device).environmentObject(manager) }
         .sheet(isPresented: $showingLunaStudio) { LIFXLunaEditorView(device: device).environmentObject(manager) }
+        .sheet(isPresented: $showingShapesStudio) {
+            NanoleafShapesStudio(device: device, shapes: manager.shapes, presentation: .sheet).environmentObject(manager)
+        }
         .contextMenu { if !selectionMode { roomMenuContents } }
     }
 
@@ -285,11 +292,47 @@ struct LightRowView: View {
             if manager.segmentProfile(for: device) != nil {
                 segmentStudioRow
             }
-            if device.brand == .nanoleaf { NanoleafEffectsControl(device: device).disabled(selectionMode) }
+            if device.brand == .nanoleaf {
+                if showsShapesStudioEntry { shapesStudioRow }
+                NanoleafEffectsControl(device: device).disabled(selectionMode)
+            }
             if device.isLIFXLuna {
                 lunaStudioRow
             }
         }
+    }
+
+    private var shapesStudioRow: some View {
+        Button {
+            showingShapesStudio = true
+        } label: {
+            HStack(spacing: 8) {
+                NanoleafMiniWall(shapes: manager.shapes, deviceID: device.id, fallback: device.color,
+                                 lit: device.isOn && !device.isStale)
+                    .frame(width: 44, height: 30)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Shapes panels")
+                        .font(.caption.weight(.semibold))
+                    Text(shapesRowTitle)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Image(systemName: "hexagon")
+                    .font(.caption)
+                    .accessibilityHidden(true)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(selectionMode)
+        .help("Orient the wall, select panels and paint them")
+        .accessibilityLabel("Shapes panels for \(device.label)")
+    }
+
+    private var shapesRowTitle: String {
+        guard let layout = manager.shapes.layout(device.id) else { return "Waiting for the layout" }
+        return "\(layout.paintablePanels.count) panels \u{00B7} orientation \(manager.shapes.displayOrientation(device.id))\u{00B0}"
     }
 
     private var lunaStudioRow: some View {
@@ -600,6 +643,9 @@ struct LightRowView: View {
         }
         if device.isLIFXLuna {
             Button("Luna Color Studio\u{2026}") { showingLunaStudio = true }
+        }
+        if device.brand == .nanoleaf {
+            Button("Shapes Panels\u{2026}") { showingShapesStudio = true }
         }
         if device.isStale { Button("Retry Connection") { manager.retry(device) } }
         if manager.commandState(for: device.id).phase == .failed { Button("Keep Trying") { manager.retryCommand(for: device) } }

@@ -65,11 +65,11 @@ enum NanoleafOutputState: Equatable {
             switch claim {
             case .design: return .design(confirmed: true)
             case .preview: return .preview
-            default: return .external("A static layout LumenDesk did not send")
+            default: return .external("A static layout LumenDesk can\u{2019}t account for")
             }
         case "*ExtControl*":
             if case .stream(let owner) = claim { return .stream(owner: owner) }
-            return .external("Another program is streaming to the wall")
+            return .external("A live stream LumenDesk isn\u{2019}t sending")
         case "*Dynamic*":
             return .external("A temporary animated scene from another app")
         case "*Solid*":
@@ -302,6 +302,89 @@ struct NanoleafEditingSession: Equatable {
     }
 }
 
+// MARK: - What the editor draws
+
+/// What the editor draws on each panel, and where that comes from. The
+/// canvas never paints a colour it cannot justify: while the controller plays
+/// an animation it will not describe, panels draw as unknown, not as a guess.
+struct NanoleafPanelDisplay: Equatable {
+    enum Source: Equatable {
+        /// The editing session's draft. On the wall only while previewed.
+        case draft
+        /// What LumenDesk last sent: its design, preview or live stream.
+        case sent
+        /// One colour or one white across every panel.
+        case wholeWall
+        case off
+        /// Something is playing whose panel colours cannot be read.
+        case unknown
+    }
+
+    let source: Source
+    /// Light panels with a known colour. A panel missing here is unknown.
+    let colors: [Int: NanoleafRGB]
+
+    /// `wholeWall` is the colour a solid or white output puts on every panel,
+    /// as the caller renders it; without it those outputs are unknown too.
+    static func resolve(layout: NanoleafLayout, output: NanoleafOutputState, lastSent: [Int: NanoleafRGB],
+                        draft: NanoleafPanelDesign?, wholeWall: NanoleafRGB?) -> NanoleafPanelDisplay {
+        let ids = layout.paintablePanels.map(\.panelID)
+        if let draft {
+            let frames = draft.frames(for: layout, transition: 0)
+            return NanoleafPanelDisplay(source: .draft,
+                                        colors: Dictionary(frames.map { ($0.panelID, $0.rgb) }, uniquingKeysWith: { _, new in new }))
+        }
+        switch output {
+        case .design, .preview, .stream:
+            let onWall = Set(ids)
+            return NanoleafPanelDisplay(source: .sent, colors: lastSent.filter { onWall.contains($0.key) })
+        case .solid, .white:
+            guard let wholeWall else { return NanoleafPanelDisplay(source: .unknown, colors: [:]) }
+            return NanoleafPanelDisplay(source: .wholeWall,
+                                        colors: Dictionary(ids.map { ($0, wholeWall) }, uniquingKeysWith: { first, _ in first }))
+        case .off:
+            return NanoleafPanelDisplay(source: .off,
+                                        colors: Dictionary(ids.map { ($0, NanoleafRGB.black) }, uniquingKeysWith: { first, _ in first }))
+        case .unknown, .nativeEffect, .external:
+            return NanoleafPanelDisplay(source: .unknown, colors: [:])
+        }
+    }
+}
+
+extension NanoleafRGB {
+    /// An approximate sRGB rendering of a white point, for drawing a wall
+    /// set to colour temperature. Display only; nothing is sent from it.
+    static func approximatingKelvin(_ kelvin: Int) -> NanoleafRGB {
+        let temperature = Double(min(40_000, max(1_000, kelvin))) / 100
+        func clamp(_ value: Double) -> UInt8 { UInt8(min(255, max(0, value.rounded()))) }
+        let red = temperature <= 66 ? 255 : 329.698727446 * pow(temperature - 60, -0.1332047592)
+        let green = temperature <= 66
+            ? 99.4708025861 * log(temperature) - 161.1195681661
+            : 288.1221695283 * pow(temperature - 60, -0.0755148492)
+        let blue = temperature >= 66 ? 255
+            : (temperature <= 19 ? 0 : 138.5177312231 * log(temperature - 10) - 305.0447927307)
+        return NanoleafRGB(red: clamp(red), green: clamp(green), blue: clamp(blue))
+    }
+
+    /// The same colour at `level` of its value: how a whole-wall colour
+    /// looks at the master brightness the controller applies to it.
+    func scaled(by level: Double) -> NanoleafRGB {
+        let factor = min(1, max(0, level.isFinite ? level : 0))
+        func scale(_ channel: UInt8) -> UInt8 { UInt8((Double(channel) * factor).rounded()) }
+        return NanoleafRGB(red: scale(red), green: scale(green), blue: scale(blue))
+    }
+}
+
+extension NanoleafLayout {
+    /// Each light panel's number as the editor labels it: 1 is the leftmost
+    /// panel on the wall as oriented, then onward to the right.
+    func panelNumbers(rotationDegrees: Double) -> [Int: Int] {
+        Dictionary(spatialPositions(rotationDegrees: rotationDegrees, axis: .leftToRight)
+            .enumerated().map { ($0.element.panelID, $0.offset + 1) },
+                   uniquingKeysWith: { first, _ in first })
+    }
+}
+
 // MARK: - Library
 
 /// A design kept in LumenDesk for reuse. It remembers which controller it
@@ -419,6 +502,22 @@ enum NanoleafDesignBuilder {
             colors[entry.panelID] = NanoleafPanelColor(hue: tone.hue, saturation: tone.saturation, intensity: tone.level)
         }
         return NanoleafPanelDesign(colors: colors)
+    }
+
+    /// Spreads tones over only `panels`, in the order they sit along `axis`:
+    /// how a theme or palette fills a selection instead of the whole wall.
+    static func colors(tones: [(hue: Double, saturation: Double, level: Double)], panels: Set<Int>,
+                       layout: NanoleafLayout, rotationDegrees: Double,
+                       axis: NanoleafSpatialAxis = .leftToRight) -> [Int: NanoleafPanelColor] {
+        guard !tones.isEmpty else { return [:] }
+        let placed = layout.spatialPositions(rotationDegrees: rotationDegrees, axis: axis)
+            .filter { panels.contains($0.panelID) }
+        var colors: [Int: NanoleafPanelColor] = [:]
+        for (index, entry) in placed.enumerated() {
+            let tone = tones[min(index, tones.count - 1)]
+            colors[entry.panelID] = NanoleafPanelColor(hue: tone.hue, saturation: tone.saturation, intensity: tone.level)
+        }
+        return colors
     }
 
     /// A design from the colours a stored static scene settles on.

@@ -356,7 +356,43 @@ final class RoomWorkspaceRenderTests: XCTestCase {
         try await capture("segment-studio", GoveeSegmentEditorView(device: strip), manager, width: 1000, height: 780)
         try await capture("segment-compact", GoveeSegmentEditorView(device: strip), manager, width: 620, height: 850)
         try await capture("discovery-partial", DevicesWorkspaceView(), manager, width: 850, height: 900)
+        try await captureShapes(manager)
         try await capture("onboarding", OnboardingView(onFinish: {}), manager, width: 760, height: 720)
+    }
+
+    /// The Shapes wall in the Demo Lounge: the studio inline in the room at
+    /// three widths, as a sheet, mid-edit with a selection, turned 90°, and
+    /// while Music Mode streams panel by panel.
+    @MainActor
+    private func captureShapes(_ manager: LightManager) async throws {
+        let lounge = try XCTUnwrap(manager.rooms.first { $0.name == "Demo Lounge" })
+        let scope = LightScope.room(lounge.id)
+        let wall = try XCTUnwrap(manager.devices.first { $0.brand == .nanoleaf })
+        let layout = try XCTUnwrap(manager.shapes.layout(wall.id))
+        try await capture("shapes-room-1440", PlanWorkspaceView(scope: .constant(scope), initialSelection: [wall.id]),
+                          manager, width: 1440, height: 1500)
+        try await capture("shapes-room-900", PlanWorkspaceView(scope: .constant(scope), initialSelection: [wall.id]),
+                          manager, width: 900, height: 2100)
+        try await capture("shapes-room-620", PlanWorkspaceView(scope: .constant(scope), initialSelection: [wall.id]),
+                          manager, width: 620, height: 2400)
+        let picked = Set(layout.spatialPositions(rotationDegrees: 0, axis: .leftToRight).prefix(3).map(\.panelID))
+        manager.shapes.beginSession(wall.id, origin: .appliedDesign, design: try XCTUnwrap(manager.shapes.designs[wall.id]))
+        manager.shapes.edit(wall.id) { $0.edit { $0.paint(NanoleafPanelColor(hue: 0.55, saturation: 0.9, intensity: 1), panels: picked) } }
+        try await capture("shapes-editing", NanoleafShapesStudio(device: wall, shapes: manager.shapes, presentation: .sheet,
+                                                                 initialSelection: picked),
+                          manager, width: 1100, height: 1500)
+        manager.shapes.endSession(wall.id)
+        manager.requestShapesOrientation(90, for: wall)
+        try await capture("shapes-rotated", NanoleafShapesStudio(device: wall, shapes: manager.shapes, presentation: .sheet),
+                          manager, width: 1100, height: 1300)
+        manager.requestShapesOrientation(0, for: wall)
+        var config = MusicModeConfiguration.configuration(for: .ambient)
+        config.usesSyntheticDemoPattern = true
+        manager.startMusicMode(configuration: config, scope: scope, reducedMotion: true)
+        try await Task.sleep(nanoseconds: 700_000_000)
+        try await capture("shapes-music", PlanWorkspaceView(scope: .constant(scope), initialSelection: [wall.id]),
+                          manager, width: 1100, height: 1500)
+        manager.stopAllEffects()
     }
 
     @MainActor

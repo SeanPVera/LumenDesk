@@ -140,17 +140,24 @@ struct NanoleafWallTransform: Equatable {
         self.init(rotationDegrees: rotationDegrees, pivot: NanoleafGeometry.pivot(of: layout))
     }
 
-    private var radians: Double { rotationDegrees * .pi / 180 }
+    /// Cosine and sine of the rotation, exact at right angles: sin(180°) in
+    /// floating point is 1.2e-16, which would otherwise decide the order of
+    /// panels that sit in one column.
+    private var trig: (c: Double, s: Double) {
+        let radians = rotationDegrees * .pi / 180
+        func snapped(_ value: Double) -> Double { abs(value) < 1e-12 ? 0 : value }
+        return (snapped(cos(radians)), snapped(sin(radians)))
+    }
 
     func wall(fromRaw point: NanoleafPoint) -> NanoleafPoint {
         let dx = point.x - pivot.x
         let dy = point.y - pivot.y
-        let c = cos(radians), s = sin(radians)
+        let (c, s) = trig
         return NanoleafPoint(dx * c + dy * s, -dx * s + dy * c)
     }
 
     func raw(fromWall point: NanoleafPoint) -> NanoleafPoint {
-        let c = cos(radians), s = sin(radians)
+        let (c, s) = trig
         return NanoleafPoint(point.x * c - point.y * s + pivot.x,
                              point.x * s + point.y * c + pivot.y)
     }
@@ -323,8 +330,11 @@ extension NanoleafLayout {
             }
         }
 
+        // Quantised so that panels in one line tie exactly at any angle and
+        // fall back to ID order, instead of being ordered by rounding noise.
+        func quantised(_ value: Double) -> Double { (min(1, max(0, value)) * 1e9).rounded() / 1e9 }
         return centers
-            .map { NanoleafSpatialPosition(panelID: $0.id, position: min(1, max(0, position($0.point)))) }
+            .map { NanoleafSpatialPosition(panelID: $0.id, position: quantised(position($0.point))) }
             .sorted { $0.position == $1.position ? $0.panelID < $1.panelID : $0.position < $1.position }
     }
 }

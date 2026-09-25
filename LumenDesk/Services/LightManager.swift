@@ -1773,6 +1773,13 @@ extension LightManager {
 
     // MARK: Shapes panels
 
+    /// Asks a Shapes controller for a fresh reading: layout, orientation and
+    /// what it is showing. Nothing is sent in Demo Mode.
+    func refreshShapes(_ device: LightDevice) {
+        guard device.brand == .nanoleaf else { return }
+        refresh(device)
+    }
+
     static func shapesSnapshot(from state: PersistedApplicationState) -> NanoleafShapesController.Snapshot {
         NanoleafShapesController.Snapshot(designs: state.nanoleafDesigns,
                                           savedDesigns: state.nanoleafSavedDesigns,

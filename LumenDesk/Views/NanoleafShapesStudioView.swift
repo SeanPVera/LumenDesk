@@ -135,7 +135,9 @@ struct NanoleafShapesStudio: View {
 
     private var statusLine: String {
         guard let layout = wall.arrangement?.layout else { return "Layout not read yet" }
-        var parts = ["\(layout.paintablePanels.count) panels", layout.shapeSummary, "showing: \(wall.output.summary)"]
+        let showing = manager.isDemoMode ? "\(wall.output.summary.replacingOccurrences(of: ", reported by the controller", with: "")) (simulated)"
+            : wall.output.summary
+        var parts = ["\(layout.paintablePanels.count) panels", layout.shapeSummary, "showing: \(showing)"]
         if !device.isOn { parts.append("wall is off") }
         return parts.joined(separator: " \u{00B7} ")
     }
@@ -161,6 +163,7 @@ struct NanoleafShapesStudio: View {
         VStack(alignment: .leading, spacing: 12) {
             NanoleafWallCanvas(layout: layout, rotation: rotation, display: display(layout),
                                selection: selection, cursor: cursor,
+                               fit: orientationDraft == nil ? .tight : .rotationStable,
                                onTap: { toggle($0) },
                                onMarquee: { selection.formUnion($0); cursor = $0.sorted().first },
                                onIdentify: { shapes.identifyPanel($0, on: deviceID) })
@@ -207,10 +210,19 @@ struct NanoleafShapesStudio: View {
         }
         return VStack(alignment: .leading, spacing: 4) {
             Text(origin).font(.caption.weight(.semibold)).foregroundStyle(Lumen.chalk)
-            Text("Filled number = selected \u{00B7} dashed edge = off \u{00B7} hatched ? = unknown \u{00B7} dashed ring = keyboard cursor. Colours are shown before master brightness (\(Int((device.brightness * 100).rounded()))%).")
+            Text("Filled number = selected \u{00B7} dashed edge = off \u{00B7} hatched ? = unknown \u{00B7} dashed ring = keyboard cursor. \(brightnessNote)")
                 .font(.caption).foregroundStyle(Lumen.meter)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    /// Where the level on the canvas comes from. A live show carries each
+    /// panel's level in its colour and holds master brightness at full.
+    private var brightnessNote: String {
+        if case .stream = wall.output, session == nil {
+            return "Live frames carry each panel\u{2019}s level; master brightness is held at full while the show runs."
+        }
+        return "Colours are shown before master brightness (\(Int((device.brightness * 100).rounded()))%)."
     }
 
     private func selectionBar(_ layout: NanoleafLayout) -> some View {
@@ -304,7 +316,8 @@ struct NanoleafShapesStudio: View {
         let value = orientationDraft ?? current
         return VStack(alignment: .leading, spacing: 10) {
             Text("Orientation").font(.headline)
-            Text(state.summary).font(.caption).foregroundStyle(state.isFailed ? Lumen.warn : Lumen.meter)
+            Text(manager.isDemoMode ? "\(current)\u{00B0} \u{00B7} simulated wall" : state.summary)
+                .font(.caption).foregroundStyle(state.isFailed ? Lumen.warn : Lumen.meter)
                 .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 8) {
                 Button { orientationDraft = NanoleafOrientation.normalized(value - 90) } label: {

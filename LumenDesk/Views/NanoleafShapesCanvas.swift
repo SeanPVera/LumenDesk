@@ -48,6 +48,9 @@ struct NanoleafWallCanvas: View {
     var interactive = true
     /// Shows the "up on the wall" reference and the controller's position.
     var showsReference = true
+    /// `.tight` fills the canvas; `.rotationStable` keeps one scale while an
+    /// orientation is being tried, so the drawing turns without resizing.
+    var fit: NanoleafCanvasMapping.Fit = .tight
     var onTap: (Int) -> Void = { _ in }
     var onMarquee: (Set<Int>) -> Void = { _ in }
     var onIdentify: ((Int) -> Void)?
@@ -59,7 +62,7 @@ struct NanoleafWallCanvas: View {
         GeometryReader { geometry in
             let mapping = NanoleafCanvasMapping(layout: layout, rotationDegrees: rotation,
                                                 width: geometry.size.width, height: geometry.size.height,
-                                                inset: showsReference ? 30 : 6, fit: .rotationStable)
+                                                inset: showsReference ? 30 : 6, fit: fit)
             let numbers = layout.panelNumbers(rotationDegrees: rotation)
             ZStack {
                 Canvas { context, _ in draw(in: &context, mapping: mapping, numbers: numbers) }

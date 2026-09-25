@@ -228,6 +228,80 @@ xcodebuild -project LumenDesk.xcodeproj -scheme LumenDesk -configuration Debug \
 - Web PR workflow builds/tests only; its deployment job is restricted to main. No site was published by this patch.
 - Not run: installed app/UI automation, signing/notarization, physical capture permission flows, browser permission dialogs/tab teardown, device acknowledgements/visible output, congested real LAN, offline/reconnect on actual firmware, medical safety evaluation.
 
+## Review findings on #103, verified and resolved
+
+Codex reviewed #103 and posted seven findings three minutes before it merged, so
+they landed on `main` unaddressed. Each was checked against the shipped code
+rather than taken on its word. Two were already fixed by #105, four were real,
+and one was real in its diagnosis but wrong in its prescription.
+
+| Finding | Verdict | Resolution |
+| --- | --- | --- |
+| P1 Octave-equivalent candidates treated as rivals | **Confirmed, a regression #103 introduced** | Fixed here |
+| P1 Kick band counted in both tempo votes | Diagnosis correct, prescription regresses | Weighting kept; see below |
+| P2 Challenger streak ignores the confidence gate | **Confirmed** | Fixed here |
+| P2 Bar position derived from an offset `beatCount` | **Confirmed** | Fixed here |
+| P2 Palette indices not seeded from the current grid | Real, already fixed by #105 | No change |
+| P2 Chroma persistence never reset | Superseded by #105 | No change |
+| P2 Palette cross-fade not blended by strength | Largely defused by #105's reacquisition branch | No change |
+
+### The octave finding was a real regression, and 180 BPM is its worst case
+
+Confidence measures the gap to the nearest *rival* period. A periodic pulse
+necessarily correlates at every octave of its period, so #103 counted the half
+as a rival against the whole. Measured through the analyzer on a clean groove:
+
+| Locked frames, 8 s onward | before #103 | after #103 | after this change |
+| --- | --- | --- | --- |
+| 140 BPM | 100 % | 100 % | 100 % |
+| 155 BPM | 100 % | 100 % | 100 % |
+| 168 BPM | 100 % | 100 % | 100 % |
+| **180 BPM** | **100 %** | **0 %** (peak confidence 0.277) | **100 %** |
+| 190 BPM | 100 % | 100 % | 100 % |
+
+180 is the worst case because the 120-centred log-normal prior scores its half at
+90 *higher* than 180 itself, so the two tie exactly where the separation term is
+most fragile and confidence collapses below the 0.38 lock threshold. A 180 BPM
+track therefore got no grid at all and fell back to the transient-driven show —
+the behaviour #103 existed to remove.
+
+The guard is now one rule covering both cases: skip a lag whose ratio to the
+winner is within 0.14 of a whole octave. At ratio 1 that is the winner's own
+peak; at 2 or ½ it is the same pulse at another metrical level. The dotted
+relative at 1.5× is 0.585 octaves away and still counts as a rival, which is what
+#103's original fix depended on.
+
+### The kick-vote finding was right about the arithmetic and wrong about the fix
+
+`analyzeHop` passes `onset * 0.6 + kick * 0.4` as the tracker's broadband
+function while the kick band also votes at 0.45, so the kick carries about two
+thirds of the total vote rather than the nominal 0.45. That is real, and the code
+now says so instead of implying a clean 55/45 split.
+
+Passing the unmixed broadband function instead — the suggested fix — was measured
+and regresses both of the results #103 was built on:
+
+| | pre-mix (shipped) | unmixed onset |
+| --- | --- | --- |
+| Dense 124 BPM groove, locked frames | 100 % | **0 %** |
+| Held chord, locked frames | 0 % | **51 %** (peak confidence 0.434) |
+
+The pre-mix is what gives the broadband function enough low-band weight to find
+the beat through dense hats, and the peakiness gate reads that same history,
+which is why the pad regressed too. The weighting stays. The divergence the
+finding also named — native pre-mixing while the web passed its raw onset — was
+already closed by #105, which brought the web onto the same pre-mixed signal.
+
+### Verification
+
+- `testFastRegularPulseStillLocks` drives the analyzer at 168, 180 and 190 BPM
+  and requires a lock on over 90 % of frames with the tempo within 5 % of the
+  pulse after octave folding. It fails against #103's tracker at 180.
+- `testBarPositionStepsOnTheDownbeatDespiteAnOffsetBeatCount` offsets `beatCount`
+  by one against `beatInBar` and asserts colour only ever starts moving on the
+  downbeat. Replaying the shipped `advancePalette` with that offset puts every
+  colour change on beat 3 of the bar; with the fix, every one lands on beat 0.
+
 ## Practical listening and next measurement
 
 1. Establish the installed build's provenance. Save a scene; choose Soundcheck,

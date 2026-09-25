@@ -272,9 +272,17 @@ export class BeatTracker {
         this.challengerInterval = near
           ? this.challengerInterval * 0.6 + estimate.interval * 0.4
           : estimate.interval;
-        this.challengerStreak = near ? this.challengerStreak + 1 : 1;
+        // Only an estimate that would itself justify the move counts toward
+        // the streak; counting every one let a run of ambiguous estimates plus
+        // a single marginal win re-anchor the grid.
+        const convincing = estimate.confidence > 0.45;
+        if (near) {
+          this.challengerStreak = convincing ? this.challengerStreak + 1 : this.challengerStreak;
+        } else {
+          this.challengerStreak = convincing ? 1 : 0;
+        }
         const required = isSimpleRelative(estimate.interval, this.grid.interval) ? 4 : 2;
-        if (this.challengerStreak >= required && estimate.confidence > 0.45) {
+        if (this.challengerStreak >= required && convincing) {
           this.grid.interval = this.challengerInterval;
           this.resyncPhase(now);
           this.challengerStreak = 0;
@@ -383,7 +391,13 @@ export class BeatTracker {
     // reports near 1 even when a rival period is neck and neck.
     let rivalScore = 0;
     for (let lag = minimumLag; lag <= maximumLag; lag += 1) {
-      if (Math.abs(Math.log2(lag / bestLag)) < 0.14) continue;
+      // A periodic pulse correlates at every octave of its period, so half
+      // and double are the same pulse at another metrical level, not a rival
+      // reading. Counting the octave as a rival kept a clean 180 BPM pulse
+      // below the lock threshold, because the 120-centred prior scores its
+      // half at 90 slightly higher than 180 itself.
+      const octaves = Math.log2(lag / bestLag);
+      if (Math.abs(octaves - Math.round(octaves)) <= 0.14) continue;
       if (this.combScores[lag] > rivalScore) rivalScore = this.combScores[lag];
     }
     const separation = Math.max(0, (bestScore - rivalScore) / bestScore);

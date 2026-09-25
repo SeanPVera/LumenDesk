@@ -68,6 +68,11 @@
 		B20000000000000000000A /* BeatTrackerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000A /* BeatTrackerTests.swift */; };
 		B20000000000000000000B /* RoomPlanningTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000B /* RoomPlanningTests.swift */; };
 		B20000000000000000000C /* LightingThemeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000C /* LightingThemeTests.swift */; };
+		B300000000000000000000 /* NanoleafProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000000 /* NanoleafProtocol.swift */; };
+		B300000000000000000001 /* NanoleafClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000001 /* NanoleafClient.swift */; };
+		B300000000000000000002 /* NanoleafCredentialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000002 /* NanoleafCredentialStore.swift */; };
+		B300000000000000000003 /* NanoleafPairingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000003 /* NanoleafPairingView.swift */; };
+		B300000000000000000004 /* NanoleafTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000004 /* NanoleafTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -146,6 +151,11 @@
 		A20000000000000000000B /* RoomPlanningTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomPlanningTests.swift; sourceTree = "<group>"; };
 		A20000000000000000000C /* LightingThemeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LightingThemeTests.swift; sourceTree = "<group>"; };
 		A200000000000000000099 /* LumenDeskTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LumenDeskTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A300000000000000000000 /* NanoleafProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/Nanoleaf/NanoleafProtocol.swift; sourceTree = "<group>"; };
+		A300000000000000000001 /* NanoleafClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/Nanoleaf/NanoleafClient.swift; sourceTree = "<group>"; };
+		A300000000000000000002 /* NanoleafCredentialStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/Nanoleaf/NanoleafCredentialStore.swift; sourceTree = "<group>"; };
+		A300000000000000000003 /* NanoleafPairingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/NanoleafPairingView.swift; sourceTree = "<group>"; };
+		A300000000000000000004 /* NanoleafTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NanoleafTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -179,6 +189,10 @@
 		C100000000000000000002 /* LumenDesk */ = {
 			isa = PBXGroup;
 			children = (
+				A300000000000000000003 /* NanoleafPairingView.swift */,
+				A300000000000000000002 /* NanoleafCredentialStore.swift */,
+				A300000000000000000001 /* NanoleafClient.swift */,
+				A300000000000000000000 /* NanoleafProtocol.swift */,
 				A100000000000000000001 /* LumenDeskApp.swift */,
 				A100000000000000000002 /* ContentView.swift */,
 				A100000000000000000018 /* Theme.swift */,
@@ -293,6 +307,7 @@
 		C200000000000000000001 /* LumenDeskTests */ = {
 			isa = PBXGroup;
 			children = (
+				A300000000000000000004 /* NanoleafTests.swift */,
 				A200000000000000000001 /* ProtocolTests.swift */,
 				A200000000000000000002 /* DomainTests.swift */,
 				A200000000000000000003 /* NetworkUtilityTests.swift */,
@@ -401,6 +416,10 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B300000000000000000003 /* NanoleafPairingView.swift in Sources */,
+				B300000000000000000002 /* NanoleafCredentialStore.swift in Sources */,
+				B300000000000000000001 /* NanoleafClient.swift in Sources */,
+				B300000000000000000000 /* NanoleafProtocol.swift in Sources */,
 				B100000000000000000001 /* LumenDeskApp.swift in Sources */,
 				B100000000000000000002 /* ContentView.swift in Sources */,
 				B100000000000000000003 /* LightDevice.swift in Sources */,
@@ -455,6 +474,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B300000000000000000004 /* NanoleafTests.swift in Sources */,
 				B200000000000000000001 /* ProtocolTests.swift in Sources */,
 				B200000000000000000002 /* DomainTests.swift in Sources */,
 				B200000000000000000003 /* NetworkUtilityTests.swift in Sources */,

@@ -2,13 +2,13 @@
 
 **One desk for every local light.**
 
-LumenDesk is a native SwiftUI smart-lighting controller for **macOS** and **iOS**. It controls supported **LIFX** and **Govee** bulbs directly on your local network, without cloud accounts, vendor API keys, bridge hardware, or an internet round trip. See [the brand identity](BRAND_IDENTITY.md) for the product strategy, mark, color, typography, and voice.
+LumenDesk is a native SwiftUI smart-lighting controller for **macOS** and **iOS**. It controls supported **LIFX**, **Govee**, and **Nanoleaf Shapes** lights directly on your local network. Shapes uses a one-time physical pairing step and stores its local API credential in Keychain. See [the brand identity](BRAND_IDENTITY.md) for the product strategy, mark, color, typography, and voice.
 
 The app is designed for day-to-day lighting control as well as richer home-lighting workflows: discovery, rooms, favorites, scenes, color themes, animated effects, schedules, command recovery, diagnostics, import/export, and a macOS menu bar controller.
 
 ## What LumenDesk does
 
-- Discovers supported LIFX and Govee lights on the same LAN.
+- Discovers supported LIFX, Govee, and Nanoleaf Shapes lights on the same LAN.
 - Controls individual bulbs, rooms, selected groups, or every light at once.
 - Supports power, brightness, full-color RGB control, and white color temperature control.
 - Detects the LIFX SuperColor Luna (LFXCAP8/RGBW/WH) and paints its 26 matrix zones with individual colors, gradients, and curated Luna looks over the local LAN.
@@ -75,6 +75,26 @@ cd LumenDesk
 The script archives a Release build and writes `dist/LumenDesk-<version>.dmg` alongside its SHA-256. It uses only Xcode and macOS tooling. With a Developer ID certificate and an App Store Connect notary key in the environment, the same command produces a signed, notarized, stapled image that opens with a double-click on any Mac. [`DISTRIBUTION.md`](DISTRIBUTION.md) covers the credential setup, the CI secrets, and why a stable signature matters for the Screen Recording and Local Network grants this app relies on.
 
 ## Supported lighting systems
+
+### Nanoleaf Shapes
+
+The native Mac and iOS app supports Shapes controllers reporting model **NL42**, including installations mixing Shapes panel sizes. Each controller appears as one light. It supports power, brightness, hue/saturation, white temperature from **1,200–6,500 K**, and selection of effects already saved on the controller.
+
+To connect:
+
+1. Set up Shapes in the Nanoleaf app and join the same local network.
+2. Open **Rig → Pair Nanoleaf Shapes** (also available during onboarding). Select a discovered controller, or enter its IP address or local hostname. Manual connections default to port `16021`; discovery uses the port advertised by the controller.
+3. Hold the controller's power button for **5–7 seconds** until its LED flashes, then press **Pair** within **30 seconds**.
+
+Discovery uses Bonjour (`_nanoleafapi._tcp`). Paired controllers reconnect using credentials stored in this device's Keychain; these credentials are excluded from configuration exports. A controller reset or revoked credential requires pairing again. If multicast discovery is blocked, use the manual address entry.
+
+Shapes participates in mixed-brand rooms, scenes, schedules, themes, and whole-controller animations. Scenes capture saved Nanoleaf effect names and white mode. Undo and stopping a LumenDesk effect restore those modes as well. A captured named effect must still exist on the controller when restored. Temporary custom Nanoleaf effects that have not been saved on the controller cannot be reconstructed.
+
+Music Mode sends coalesced whole-controller HTTP updates at up to five updates per second. This integration does not implement per-panel painting, UDP panel streaming, or touch events. Nanoleaf support is currently native-app only; the web bridge continues to support LIFX and Govee.
+
+Protocol references: [Nanoleaf pairing and authentication](https://support.nanoleaf.me/hc/en-us/articles/41108368751892-API-Authentication-Security), [Nanoleaf OpenAPI reference](https://nanoleaf.atlassian.net/wiki/spaces/nlapid/pages/2789310530/Nanoleaf+Light+Panels+Open+API+Documentation).
+
+Automated tests use a simulated HTTP controller. Physical pairing, Bonjour discovery on a real network, and panel output still require hardware verification.
 
 ### LIFX
 

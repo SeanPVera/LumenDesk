@@ -8,6 +8,7 @@ import SwiftUI
 ///
 /// Every step is skippable so no one is ever trapped.
 struct OnboardingView: View {
+    @State private var showingNanoleafPairing = false
     @EnvironmentObject var manager: LightManager
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -88,7 +89,7 @@ struct OnboardingView: View {
         VStack(alignment: .leading, spacing: 22) {
             LumenWordmark(size: 28)
             Text("Connect your lights").font(.title2.weight(.semibold))
-            Text("Find supported LIFX and Govee lights on this network, then give each one a place in a room.")
+            Text("Find supported LIFX, Govee and Nanoleaf lights on this network, then give each one a place in a room.")
                 .font(.body).foregroundStyle(Lumen.meter)
             valueRow("1.circle", Lumen.chalk, "Prepare", "Power the lights and enable local control where required.")
             valueRow("2.circle", Lumen.chalk, "Discover", "Review what responds. Missing fixtures can be added later.")
@@ -176,6 +177,9 @@ struct OnboardingView: View {
                       manager.isScanning ? manager.scanPhase : discoverSubtitle)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
+            Button("Pair Nanoleaf Shapes") { showingNanoleafPairing = true }
+                .buttonStyle(LumenSecondaryButtonStyle())
+
             if manager.isScanning && manager.devices.isEmpty {
                 ScanPulse()
                     .padding(.vertical, 24)
@@ -212,6 +216,7 @@ struct OnboardingView: View {
                 .padding(.vertical, 12)
             }
         }
+        .sheet(isPresented: $showingNanoleafPairing) { NanoleafPairingView().environmentObject(manager) }
         .onAppear { manager.scan() }
     }
 

@@ -945,6 +945,7 @@ private struct AutomationRoomCard: View {
 // MARK: - Devices and recovery
 
 struct DevicesWorkspaceView: View {
+    @State private var showingNanoleafPairing = false
     @EnvironmentObject private var manager: LightManager
     @State private var selectedDevice: LightDevice?
     @State private var showingDiagnostics = false
@@ -962,6 +963,12 @@ struct DevicesWorkspaceView: View {
                     .buttonStyle(LumenPrimaryButtonStyle())
                     .disabled(manager.isScanning)
                 }
+
+                Button { showingNanoleafPairing = true } label: {
+                    Label("Pair Nanoleaf Shapes", systemImage: "hexagon.fill")
+                }
+                .buttonStyle(LumenSecondaryButtonStyle())
+                .disabled(manager.isDemoMode)
 
                 if manager.isScanning {
                     HStack {
@@ -1027,6 +1034,7 @@ struct DevicesWorkspaceView: View {
         }
         .background(LumenBackground(glow: false))
         .navigationTitle("Devices")
+        .sheet(isPresented: $showingNanoleafPairing) { NanoleafPairingView().environmentObject(manager) }
         .sheet(item: $selectedDevice) { device in
             DeviceInspectorView(device: device).environmentObject(manager)
         }

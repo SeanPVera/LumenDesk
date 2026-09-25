@@ -1,8 +1,9 @@
 # LumenDesk bridge
 
 The bridge is the piece that makes the web app control real lights. It runs on
-your machine, owns the UDP sockets that LIFX and Govee lights speak, and
-exposes them to the browser over a loopback HTTP API.
+your machine, owns the UDP sockets that LIFX and Govee lights speak and the
+local HTTP connection to Nanoleaf Shapes controllers, and exposes them to the
+browser over a loopback HTTP API.
 
 It exists because **browsers cannot send raw UDP**. LumenDesk's protocols are
 UDP broadcast to `255.255.255.255:56700` (LIFX) and UDP multicast to
@@ -62,7 +63,8 @@ bridge itself has no dependencies.
 ```
 
 Govee lights only answer the LAN API when **LAN Control** is enabled for each
-device in the Govee Home app. LIFX bulbs need no setup.
+device in the Govee Home app. LIFX bulbs need no setup. Nanoleaf Shapes
+controllers are paired once by address (see below).
 
 ## How the browser is allowed to reach it
 
@@ -117,9 +119,34 @@ and must be URL-encoded in paths.
 | `GET`/`POST` | `/scenes` | `{"name":"Evening"}` | List, or capture current state as a scene |
 | `POST` | `/scenes/{id}/apply` | — | Restore a scene |
 | `POST` | `/devices/{id}/favorite` \| `/rename` \| `/room` | — / `{"name":…}` / `{"roomID":…}` | Organise a light |
+| `POST` | `/nanoleaf/pair` | `{"host":"192.168.1.40","port":16021}` | Pair a Shapes controller whose pairing window is open |
+| `POST` | `/devices/{id}/orientation` | `{"degrees":0-359}` | Write a Shapes wall's global orientation (`202`; confirmed by the next reading) |
+| `POST` | `/devices/{id}/panels` | `{"colors":{"<panelID>":{"r":0,"g":0,"b":0}}}` | Show per-panel colours; panels left out go dark |
+| `POST` | `/devices/{id}/effect` | `{"name":"Evening"}` | Play a scene stored on the controller |
+| `POST` | `/devices/{id}/identify` | `{"panelID":1204}` | Breathe one panel for four seconds (temporary display) |
+| `POST` | `/devices/{id}/forget` | — | Delete a Shapes credential; nothing is sent to the controller |
 
 Commands apply optimistically and are corrected by the next poll, mirroring the
 native app's command lifecycle.
+
+### Nanoleaf Shapes
+
+`src/nanoleaf.js` and `src/nanoleaf-client.js` port the native
+`Services/Nanoleaf/` code. A Shapes device carries a `shapes` object: the
+parsed layout, drawing geometry (panel outlines from shape type, the
+controller as a marker), `orientation` as read back, `orientationPending`,
+`output` (`off`, `solid`, `white`, `design`, `effect` or `external`), the
+controller's scene list, the design LumenDesk last showed while it still owns
+the wall, `problem` for a damaged layout reading and `lastFailure`.
+
+- Pairing needs the controller's window (power button held 5–7 s). The token is
+  kept in `~/.lumendesk/nanoleaf-pairings.json` with mode `0600` and never
+  appears in a response, a log line or an error message.
+- Each controller has one ordered lane that coalesces to the newest command,
+  so a slow controller never replays stale colours. Walls are re-read every
+  five seconds, which is how changes made in the Nanoleaf app show up.
+- Music frames drive a wall as one colour, paced to one update every 200 ms,
+  and a restore puts back the design, scene or white the wall showed first.
 
 ### Stored state and schedules
 
@@ -147,6 +174,11 @@ Two layers, both run in CI:
 - **Integration** — fake LIFX and Govee devices that speak the real protocols
   over UDP on loopback, exercising discovery, commands, state read-back, the
   Govee ≥100 ms pacing rule, and the CORS/Private Network Access headers.
+- **Shapes** — layout parsing, geometry, numbering and encoders asserted against
+  the same vectors as `LumenDeskTests/NanoleafShapesTests.swift` (Nanoleaf's
+  documented animData and v2 stream bytes), and a fake controller over real
+  HTTP on loopback for pairing, orientation readback, painting, scenes,
+  identify, music pacing and restore, and forgetting.
 
 To drive the web app against fake lights with no hardware:
 
@@ -157,7 +189,8 @@ cd ../app && npm run dev
 
 ## Scope
 
-This first version covers discovery, power, brightness, colour and white for
-LIFX and Govee lights. Scenes, schedules, effects, Music Mode, RGBIC segment
-control and LIFX matrix devices remain native-app features; the bridge does not
-implement them yet.
+The bridge covers discovery, power, brightness, colour and white for LIFX and
+Govee lights, rooms, scenes, schedules and browser Music Mode frames, and for
+Nanoleaf Shapes pairing, orientation, per-panel colour, controller scenes and
+identify. LumenDesk's animated effects, RGBIC segment control, LIFX matrix
+devices and Shapes per-panel streaming remain native-app features.

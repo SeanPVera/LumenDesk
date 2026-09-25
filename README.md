@@ -14,6 +14,7 @@ The app is designed for day-to-day lighting control as well as richer home-light
 - Detects the LIFX SuperColor Luna (LFXCAP8/RGBW/WH) and paints its 26 matrix zones with individual colors, gradients, and curated Luna looks over the local LAN.
 - Paints individual segments on Govee RGBIC devices (COB strips, string lights, neon ropes) with per-segment color and brightness, gradient blending, and live preview — the same specificity as the Govee Home app, without the cloud.
 - Groups lights into vendor-agnostic rooms, so LIFX and Govee bulbs can live in the same room.
+- Treats a Nanoleaf Shapes wall as individually addressable panels: sets its orientation, paints panels one by one, stores designs on the controller and streams per-panel effects and Music Mode.
 - Saves and recalls scenes captured from your current lighting state.
 - Applies curated static lighting themes and animated effects.
 - Choreographs local music into beat, frequency, and spatial lighting through a configurable Music Mode.
@@ -36,7 +37,7 @@ The same `LumenDesk` target is multiplatform and can be built for Mac or iPhone 
 
 ### In a browser
 
-There is also a web client at <https://seanpvera.github.io/LumenDesk/> that controls the same LIFX and Govee lights.
+There is also a web client at <https://seanpvera.github.io/LumenDesk/> that controls the same LIFX, Govee and Nanoleaf Shapes lights.
 
 Browsers cannot open the raw UDP sockets these protocols need, so the web client pairs with a small local bridge that does the networking for you. It needs [Node.js](https://nodejs.org/) 20 or newer:
 
@@ -50,7 +51,7 @@ That serves the app from the bridge itself at <http://127.0.0.1:8765> — one or
 
 The web client opens on **Room**, with one selected scope shared by **Light**, **Compositions** and **Music**. Light offers fixture selection and grouped power, brightness, color and white controls; Compositions captures that room and applies saved scenes to their original fixtures. **Schedules**, **Devices** and **Settings** stay separate. Govee RGBIC segment editing and LIFX matrix control remain native-app features. Browser Music sends one color per fixture; it does not invent segment transport. See [the redesign report](REDESIGN_REPORT.md) for implementation and validation evidence.
 
-The published page at <https://seanpvera.github.io/LumenDesk/> can also drive the bridge (`npm start`, API only), but current browsers gate a website's access to your local network behind a permission prompt, so that route may be blocked. Everything still stays on your own network — the page talks only to the bridge on `127.0.0.1`, with no account and no cloud. The web client currently covers discovery, power, brightness, colour and white, scenes, schedules, and Music Mode; segment control remains native. See [`web/README.md`](web/README.md) for details.
+The published page at <https://seanpvera.github.io/LumenDesk/> can also drive the bridge (`npm start`, API only), but current browsers gate a website's access to your local network behind a permission prompt, so that route may be blocked. Everything still stays on your own network — the page talks only to the bridge on `127.0.0.1`, with no account and no cloud. The web client currently covers discovery, power, brightness, colour and white, scenes, schedules, Music Mode, and Shapes pairing, orientation and panel painting; segment control and per-panel streaming remain native. See [`web/README.md`](web/README.md) for details.
 
 ## Installing the Mac app
 
@@ -78,7 +79,7 @@ The script archives a Release build and writes `dist/LumenDesk-<version>.dmg` al
 
 ### Nanoleaf Shapes
 
-The native Mac and iOS app supports Shapes controllers reporting model **NL42**, including installations mixing Shapes panel sizes. Each controller appears as one light. It supports power, brightness, hue/saturation, white temperature from **1,200–6,500 K**, and selection of effects already saved on the controller.
+LumenDesk treats a Shapes wall (controller model **NL42**, hexagons, triangles and mini triangles in any mix) as what it is: one fixture made of individually addressable panels. Power, master brightness, colour and white (**1,200–6,500 K**) still work on the whole wall, and every panel can be selected, painted and animated on its own.
 
 To connect:
 
@@ -86,15 +87,28 @@ To connect:
 2. Open **Rig → Pair Nanoleaf Shapes** (also available during onboarding). Select a discovered controller, or enter its IP address or local hostname. Manual connections default to port `16021`; discovery uses the port advertised by the controller.
 3. Hold the controller's power button for **5–7 seconds** until its LED flashes, then press **Pair** within **30 seconds**.
 
-Discovery uses Bonjour (`_nanoleafapi._tcp`). Paired controllers reconnect using credentials stored in this device's Keychain; these credentials are excluded from configuration exports. A controller reset or revoked credential requires pairing again. If multicast discovery is blocked, use the manual address entry.
+Discovery uses Bonjour (`_nanoleafapi._tcp`). Paired controllers reconnect using credentials stored in this device's Keychain; these credentials are excluded from configuration exports, logs and error messages. A controller reset or revoked credential requires pairing again. If multicast discovery is blocked, use the manual address entry.
 
-Shapes participates in mixed-brand rooms, scenes, schedules, themes, and whole-controller animations. Scenes capture saved Nanoleaf effect names and white mode. Undo and stopping a LumenDesk effect restore those modes as well. A captured named effect must still exist on the controller when restored. Temporary custom Nanoleaf effects that have not been saved on the controller cannot be reconstructed.
+**Where the panel controls are.** In **Room → Light**, select the Shapes wall on its own: its panel studio opens under the room, in working order. The same studio opens as a sheet from the wall's row (**Shapes panels**) or its context menu (**Shapes Panels…**).
 
-Music Mode sends coalesced whole-controller HTTP updates at up to five updates per second. This integration does not implement per-panel painting, UDP panel streaming, or touch events. Nanoleaf support is currently native-app only; the web bridge continues to support LIFX and Govee.
+- **Arrangement.** The wall is drawn from the layout the controller reports, with each panel's true shape and the controller as a dashed marker. Panels are known by controller and panel ID, so a reordered or partly damaged reading never moves a colour to the wrong panel; a damaged reading keeps the last trusted layout and says so.
+- **Orientation.** Turn the drawing with the 90° buttons or type degrees, check it against the **Up on the wall** reference, then **Apply orientation**. LumenDesk writes the controller's global orientation and counts it only once the controller reports it back; **Reset** drops a draft. Orientation changes how the wall is viewed and aimed, never the panels themselves: the drawing, panel numbers, hit testing, selection, spatial effects, themes and Music Mode all use the same transform.
+- **Selecting panels.** Click, drag a marquee, or use the arrow keys (they move across the wall as it hangs). Select all, none, invert, pick a saved group, or turn on **Select by touching the wall** and tap real panels. **Identify on the wall** breathes one panel for four seconds using a temporary display, so the wall's own scene comes back by itself.
+- **Painting.** Painting starts explicitly from what the wall shows, a saved design, or a colour of your choosing when the wall is playing something LumenDesk can't read panel by panel. Then paint swatches, a picker colour or an exact hex, set each panel's intensity, turn panels off (black), run a gradient across the selection or fill with a theme. Undo and redo cover whole gestures. **Preview on the wall as I edit** is optional; nothing reaches the wall until you preview or **Apply to wall**.
+- **Brightness, once.** A panel's intensity lives in its colour. The wall's master brightness applies on top of it once, never twice, and the canvas says which one you are looking at.
+- **Saving.** Keep a design in LumenDesk, or store it on the controller as a static scene. LumenDesk never deletes scenes; storing under a name that already exists asks first, and the result is read back from the controller.
+- **Controller scenes.** Stored scenes can be played, painted from, or opened in the scene editor to change their palette and motion options, preview them on the wall and save the result under a new name.
+- **Live output.** LumenDesk effects and Music Mode stream per-panel frames over Nanoleaf's documented external control (UDP, v2) at up to ten frames a second, newest frame first. Master brightness is held at full while a stream runs (the controller treats it as a multiplier) and restored afterwards. A stream stops when its effect or show stops, when anything else takes the wall (the Nanoleaf app, a button, HomeKit, a scene choice), on disconnect and in Demo Mode. A frame sent over UDP is reported as sent, not as displayed.
+- **Everything else.** Themes land panel by panel along the oriented wall; scenes capture and restore designs, stored scene names and white mode; schedules apply those scenes; undo covers design changes. Designs, groups and last trusted layouts survive relaunch and round-trip through import/export. The controller's event stream tells LumenDesk when something else changes the wall, so stale designs and streams are released rather than reasserted.
+- **Demo Mode** shows a simulated wall and never sends anything to a controller.
+
+The web client pairs with Shapes through the bridge too (see [In a browser](#in-a-browser)): orientation, panel selection, painting with a draft, undo and redo, identify and controller scenes. Browser Music Mode drives a wall as one colour at up to five updates a second; per-panel streaming, saved designs and groups, storing scenes on the controller, scene editing and touch selection are native-app features.
+
+Not implemented: screen mirroring, the controller's own touch-action configuration, schedules stored in the Nanoleaf app, and anything that needs a Nanoleaf account or cloud service. Firmware updates and factory resets are never performed. [`NANOLEAF_SHAPES_PARITY.md`](NANOLEAF_SHAPES_PARITY.md) compares every Nanoleaf workflow with what LumenDesk does, with the evidence and the remaining limits.
 
 Protocol references: [Nanoleaf pairing and authentication](https://support.nanoleaf.me/hc/en-us/articles/41108368751892-API-Authentication-Security), [Nanoleaf OpenAPI reference](https://nanoleaf.atlassian.net/wiki/spaces/nlapid/pages/2789310530/Nanoleaf+Light+Panels+Open+API+Documentation).
 
-Automated tests use a simulated HTTP controller. Physical pairing, Bonjour discovery on a real network, and panel output still require hardware verification.
+Automated tests use a simulated HTTP controller, a recording UDP sender and, for the bridge, a fake controller over real HTTP on loopback. Physical pairing, Bonjour discovery on a real network and what real panels display still require hardware verification.
 
 ### LIFX
 

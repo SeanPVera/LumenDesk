@@ -647,6 +647,115 @@ final class MusicModeTests: XCTestCase {
     /// auto-gain amplifies that ripple, so a confidence measure that only asks
     /// "is this lag better than average" locked a tempo onto it and pulsed the
     /// room. Requiring the onset function to be peaky is what stops it.
+    /// A clean fast pulse must still lock. Confidence measures the gap to the
+    /// nearest *rival* period, and a periodic pulse necessarily correlates at
+    /// every octave of its period — so counting the octave as a rival held a
+    /// 180 BPM track below the lock threshold indefinitely and dropped it back
+    /// to the transient-driven show.
+    ///
+    /// 180 is the worst case: the 120-centred prior scores its half at 90
+    /// slightly *higher* than 180 itself, so the two tie exactly where the
+    /// separation term is most fragile. A bare click train is used rather than
+    /// a full groove because it is the cleanest statement of that ambiguity —
+    /// nothing but the period is present to break the tie.
+    func testFastRegularPulseStillLocks() throws {
+        for bpm in [168.0, 180.0, 190.0] {
+            let analyzer = MusicFeatureAnalyzer(sourceDescription: "Test")
+            let samples = clickTrackSamples(bpm: bpm, seconds: 22)
+            var locked = 0
+            var total = 0
+            var lastTempo = 0.0
+            var index = 0
+            while index < samples.count {
+                let count = min(1_024, samples.count - index)
+                let time = Double(index + count) / 48_000
+                if let snapshot = analyzer.analyze(pcmBuffer(samples, from: index, count: count), hostTime: time),
+                   time > 8 {
+                    total += 1
+                    if snapshot.isTempoLocked {
+                        locked += 1
+                        lastTempo = snapshot.tempo
+                    }
+                }
+                index += count
+            }
+            XCTAssertGreaterThan(total, 100)
+            XCTAssertGreaterThan(
+                Double(locked) / Double(total), 0.9,
+                "a clean \(bpm) BPM pulse should hold a lock, not fall back to the onset-driven show"
+            )
+            // An octave of the pulse is a legitimate reading — a fast track may
+            // reasonably be felt at half — so fold before comparing.
+            var folded = lastTempo
+            while folded > bpm * 1.4 { folded /= 2 }
+            while folded < bpm / 1.4 { folded *= 2 }
+            XCTAssertEqual(folded, bpm, accuracy: bpm * 0.05)
+        }
+    }
+
+    /// A short broadband click on an exact grid, and nothing else.
+    private func clickTrackSamples(bpm: Double, seconds: Double) -> [Float] {
+        let sampleRate = 48_000.0
+        var buffer = [Float](repeating: 0, count: Int(seconds * sampleRate))
+        let beat = 60 / bpm
+        let length = Int(0.006 * sampleRate)
+        var at = 0.5
+        while at < seconds - 0.2 {
+            let origin = Int(at * sampleRate)
+            for offset in 0..<length where origin + offset < buffer.count {
+                let decay = exp(-(Double(offset) / sampleRate) / 0.0012)
+                buffer[origin + offset] += Float(decay * (offset.isMultiple(of: 2) ? 1 : -1))
+            }
+            at += beat
+        }
+        return buffer
+    }
+
+    /// `beatCount` also advances on the analyzer's fallback onset detections
+    /// before a tempo locks, so it carries an arbitrary offset relative to
+    /// `beatInBar`. Bars must be counted from the authoritative bar position,
+    /// or a colour change lands on whichever beat that offset happens to pick.
+    func testBarPositionStepsOnTheDownbeatDespiteAnOffsetBeatCount() {
+        let engine = MusicChoreographyEngine()
+        let fixture = MusicFixtureDescriptor(id: "f", label: "Fixture", transport: .lifxLAN)
+        var config = MusicModeConfiguration.configuration(for: .balanced)
+        config.movementAmount = 0
+        config.colorChangeIntensity = 1     // one bar per colour: a change every bar
+        let interval = 0.5
+        let reference = 100.0
+        // Offset the count by one so `beatCount % 4` never equals `beatInBar`.
+        let offset = 1
+        var changesAtBeatInBar: [Int: Int] = [:]
+        var previousHue: Double?
+        for frame in 0...480 {
+            let timestamp = reference + Double(frame) * MusicModeTests.renderStep
+            let beats = Int(floor((timestamp - reference) / interval))
+            var snapshot = lockedSnapshot(at: timestamp, reference: reference, interval: interval)
+            snapshot.beatCount = beats + offset
+            snapshot.beatInBar = ((beats % 4) + 4) % 4
+            snapshot.metre = 4
+            snapshot.feltInterval = interval
+            guard let hue = engine.makeFrame(
+                snapshot: snapshot, configuration: config, topology: FixtureTopology(),
+                fixtures: [fixture], timestamp: timestamp, sequenceNumber: UInt64(frame)
+            ).states.first?.hue, timestamp - reference > 4 else { continue }
+            if let previousHue, abs(hue - previousHue) > 0.0005 {
+                changesAtBeatInBar[snapshot.beatInBar, default: 0] += 1
+            }
+            previousHue = hue
+        }
+
+        let moved = changesAtBeatInBar.values.reduce(0, +)
+        XCTAssertGreaterThan(moved, 4, "the palette should still move across bars")
+        // The cross-fade runs for one beat from the boundary, so every frame on
+        // which the hue moves belongs to the downbeat or the beat after it.
+        let offDownbeat = changesAtBeatInBar.filter { $0.key > 1 }.values.reduce(0, +)
+        XCTAssertEqual(
+            offDownbeat, 0,
+            "colour moved on beats \(changesAtBeatInBar.keys.sorted()) — the fade should start on the downbeat"
+        )
+    }
+
     func testSustainedChordNeverLocksATempo() throws {
         let analyzer = MusicFeatureAnalyzer(sourceDescription: "Test")
         let sampleRate = 48_000.0

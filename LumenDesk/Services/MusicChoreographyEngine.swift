@@ -424,7 +424,15 @@ final class MusicChoreographyEngine {
             strength: ((snapshot.beatConfidence - 0.25) / 0.45).clamped01,
             barRate: 1 / (gridInterval * Double(metre)),
             metre: metre,
-            barPosition: absoluteBeat / Double(metre)
+            // `beatCount` also advances on the analyzer's fallback onset
+            // detections before a tempo locks, so its modulo is not aligned
+            // with `beatInBar`, which is the authoritative position in the bar.
+            // Deriving the bar straight from the count therefore put the
+            // palette boundary on an arbitrary beat. Counting bars from
+            // (count - beatInBar) — constant inside a bar, and stepping by the
+            // metre exactly on the downbeat — lands it on the downbeat instead.
+            barPosition: (Double(snapshot.beatCount - snapshot.beatInBar) / Double(metre)).rounded(.down)
+                + (Double(snapshot.beatInBar) + gridBeats) / Double(metre)
         )
     }
 

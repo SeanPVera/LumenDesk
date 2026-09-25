@@ -313,7 +313,13 @@ export class MusicChoreographyEngine {
       strength: clamp01((snapshot.beatConfidence - 0.25) / 0.45),
       barRate: 1 / (gridInterval * metre),
       metre,
-      barPosition: absoluteBeat / metre,
+      // `beatCount` also advances on the analyzer's fallback onset detections
+      // before a tempo locks, so its modulo is not aligned with `beatInBar`,
+      // which is the authoritative position in the bar. Counting bars from
+      // (count - beatInBar) steps exactly on the downbeat.
+      barPosition:
+        Math.floor((snapshot.beatCount - snapshot.beatInBar) / metre) +
+        (snapshot.beatInBar + gridBeats) / metre,
     };
   }
 

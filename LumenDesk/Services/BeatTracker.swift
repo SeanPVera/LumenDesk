@@ -373,9 +373,18 @@ final class BeatTracker {
                 challengerInterval = near
                     ? challengerInterval * 0.6 + estimate.interval * 0.4
                     : estimate.interval
-                challengerStreak = near ? challengerStreak + 1 : 1
+                // Only an estimate that would itself justify the move counts
+                // toward the streak. Counting every estimate let a run of
+                // ambiguous ones plus a single marginal win re-anchor the grid,
+                // which is the opposite of what the streak is for.
+                let convincing = estimate.confidence > 0.45
+                if near {
+                    challengerStreak = convincing ? challengerStreak + 1 : challengerStreak
+                } else {
+                    challengerStreak = convincing ? 1 : 0
+                }
                 let required = Self.isSimpleRelative(estimate.interval, of: grid.interval) ? 4 : 2
-                if challengerStreak >= required, estimate.confidence > 0.45 {
+                if challengerStreak >= required, convincing {
                     // A new track or a real tempo change: adopt it and
                     // re-derive the phase.
                     grid.interval = challengerInterval
@@ -512,7 +521,19 @@ final class BeatTracker {
         // lag instead stays high even when a rival is neck and neck.
         var rivalScore = 0.0
         for lag in minimumLag...maximumLag {
-            guard abs(log2(Double(lag) / Double(bestLag))) >= 0.14 else { continue }
+            // A periodic pulse necessarily correlates at every octave of its
+            // period, so half and double are the same pulse counted at another
+            // metrical level rather than a rival reading of the music. Skipping
+            // whole octaves — and, at distance zero, the winner's own peak —
+            // leaves the genuinely different periods, which is where the
+            // flipping actually came from: the dotted relative at 1.5x.
+            //
+            // Counting the octave as a rival kept a clean 180 BPM pulse below
+            // the lock threshold indefinitely, because the 120-centred prior
+            // scores its half at 90 slightly *higher* than 180 itself, so the
+            // two tied and separation collapsed.
+            let octaves = log2(Double(lag) / Double(bestLag))
+            guard abs(octaves - octaves.rounded()) > 0.14 else { continue }
             if combScores[lag] > rivalScore { rivalScore = combScores[lag] }
         }
         let separation = max(0, (bestScore - rivalScore) / bestScore)

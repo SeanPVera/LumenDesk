@@ -165,6 +165,20 @@ try {
   await page.getByRole('button',{name:'Set',exact:true}).click()
   await page.getByRole('slider',{name:'Panel level',exact:true}).fill('50')
   await page.getByRole('button',{name:'Undo',exact:true}).click()
+  // History is now [start] <- Set -> [level 50]. Undo inside a text field
+  // belongs to the field; from the wall it walks the draft's history.
+  const undoButton = page.getByRole('button',{name:'Undo',exact:true})
+  const levelSlider = page.getByRole('slider',{name:'Panel level',exact:true})
+  const firstPanel = page.getByRole('checkbox',{name:/^Panel 1,/})
+  await page.getByRole('spinbutton',{name:'Degrees'}).press('Control+z')
+  assert.equal(await undoButton.isEnabled(),true,'a field’s own undo leaves the draft alone')
+  await firstPanel.press('Control+z')
+  assert.equal(await undoButton.isEnabled(),false,'undo from the wall stepped back past Set')
+  await firstPanel.press('Control+Shift+z')
+  await firstPanel.press('Control+Shift+z')
+  assert.equal(await levelSlider.inputValue(),'50','redo from the wall brings both steps back')
+  await undoButton.click()
+  assert.equal(await levelSlider.inputValue(),'100')
   await capture('web-shapes-draft')
   commands.length=0
   const designBefore = structuredClone(shapesWall.shapes.design)

@@ -173,8 +173,10 @@ export function ShapesEditor({ device, actions }: { device: Device; actions: Sha
 
   const onEditorKey = (event: KeyboardEvent<HTMLElement>) => {
     if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'z' || !draft) return
-    const target = event.target as HTMLElement
-    if (target.tagName === 'INPUT' && (target as HTMLInputElement).type === 'text') return
+    // A field keeps its own undo; only the wall and its buttons undo the draft.
+    const target = event.target
+    if (target instanceof HTMLTextAreaElement) return
+    if (target instanceof HTMLInputElement && !['range', 'checkbox', 'color', 'button'].includes(target.type)) return
     event.preventDefault()
     if (event.shiftKey) redoStep()
     else undoStep()

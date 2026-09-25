@@ -72,6 +72,12 @@ final class LightManager: ObservableObject {
     private var lifx: LIFXClient?
     private var govee: GoveeClient?
     private let nanoleaf: NanoleafClient
+    /// Shapes arrangements, orientation, per-panel designs and live output.
+    /// Views that draw a wall observe it directly, so a streamed frame never
+    /// republishes the whole manager.
+    let shapes: NanoleafShapesController
+    /// Shapes walls a running show feeds panel by panel, keyed by device ID.
+    private var shapesStreams: [String: ShapesStream] = [:]
     @Published private(set) var nanoleafCandidates: [NanoleafCandidate] = []
     @Published private(set) var nanoleafDiscoveryError: String?
     private var refreshTimer: Timer?
@@ -103,10 +109,20 @@ final class LightManager: ObservableObject {
         let segments: GoveeSegmentState?
         let matrix: LIFXMatrixState?
         let nanoleafAppearance: NanoleafAppearance?
+        let nanoleafDesign: NanoleafPanelDesign?
         var task: Task<Void, Never>?
     }
 
     private var identifyHold: IdentifyHold?
+
+    /// One show's per-panel stream to a Shapes wall. Segment `i` of the show's
+    /// fixture is `panelIDs[i]`, fixed when the show starts. Where each panel
+    /// sits comes separately, from the wall's layout and orientation, so
+    /// re-orienting the wall re-aims the show without renumbering its panels.
+    private struct ShapesStream {
+        let owner: String
+        let panelIDs: [Int]
+    }
 
     var isHoldingIdentify: Bool { identifyHold != nil }
     // Devices with a live razer overlay, including both editor previews and
@@ -150,6 +166,22 @@ final class LightManager: ObservableObject {
         // user-excluded fixtures out, so ownership can no longer be derived
         // by re-querying `devices(in: scope)` — it has to be this stored set.
         let animatedDeviceIDs: Set<String>
+        // Lights another app took over mid-run: a Shapes wall switched to a
+        // scene chosen in the Nanoleaf app. The run stops driving them, gives
+        // their controls back, and never "restores" them over that choice.
+        var releasedDeviceIDs: Set<String> = []
+        var ownedDeviceIDs: Set<String> { animatedDeviceIDs.subtracting(releasedDeviceIDs) }
+        /// Names this run's claim on a Shapes wall: its kind, scope and run,
+        /// so a finished run can never end or feed a newer run's stream.
+        var streamOwner: String {
+            let kind = effect.id == "music-pulse" ? "music" : "effect"
+            let place: String
+            switch scope {
+            case .all: place = "all"
+            case .room(let roomID): place = "room:\(roomID.uuidString.lowercased())"
+            }
+            return "\(kind):\(place):\(id.uuidString.prefix(8))"
+        }
         init(effect: LightingEffect, scope: LightScope, snapshot: [LightRuntimeSnapshot], restorePreviousState: Bool = true, reducedMotion: Bool = false) {
             self.effect = effect
             self.scope = scope
@@ -180,7 +212,9 @@ final class LightManager: ObservableObject {
         musicModeController: AudioReactiveSessionController? = nil,
         nanoleafClient: NanoleafClient? = nil
     ) {
-        self.nanoleaf = nanoleafClient ?? NanoleafClient()
+        let nanoleaf = nanoleafClient ?? NanoleafClient()
+        self.nanoleaf = nanoleaf
+        self.shapes = NanoleafShapesController(client: nanoleaf)
         self.demoWorkspaceController = demoWorkspaceController ?? DemoWorkspaceController()
         self.confirmationCoordinator = confirmationCoordinator ?? ConfirmationCoordinator(defaults: defaults)
         self.scheduleEngine = scheduleEngine ?? ScheduleEngine()
@@ -218,6 +252,7 @@ final class LightManager: ObservableObject {
         goveeSegmentPresets = persistedState.goveeSegmentPresets
         musicModeConfiguration = persistedState.musicModeConfiguration
         fixtureTopologies = persistedState.fixtureTopologies
+        shapes.restore(Self.shapesSnapshot(from: persistedState))
         configureNanoleaf()
         self.commandCoordinator.onChange = { [weak self] in
             self?.objectWillChange.send()
@@ -922,6 +957,11 @@ final class LightManager: ObservableObject {
                              gradient: profile.supportsGradient,
                              simultaneousZoneLimit: profile.simultaneousZoneLimit)
         }
+        // A Shapes wall is planned panel by panel only once its controller
+        // has reported a layout; before that it takes one colour, like a bulb.
+        if device.brand == .nanoleaf, let layout = shapes.layout(device.id), !layout.paintablePanels.isEmpty {
+            return .panels(count: layout.paintablePanels.count)
+        }
         return .solid
     }
 
@@ -945,6 +985,19 @@ final class LightManager: ObservableObject {
         if let segments = plan.segments, device.brand == .govee {
             applySegments(device, state: segments, recordUndo: false, turnOn: false, announce: false)
             device.brightness = plan.brightness
+            sendBrightness(device, value: plan.brightness)
+            return
+        }
+
+        if let tones = plan.panels, device.brand == .nanoleaf, let layout = shapes.layout(device.id) {
+            // Tones land left to right along the wall as the user oriented
+            // it. Each tone's level is its panel's intensity; the theme's
+            // brightness is the controller's master brightness, once.
+            let design = NanoleafDesignBuilder.design(
+                tones: tones.map { (hue: $0.hue, saturation: $0.saturation, level: $0.level) },
+                layout: layout, rotationDegrees: Double(shapes.displayOrientation(device.id)))
+            device.brightness = plan.brightness
+            showShapesDesign(design, on: device)
             sendBrightness(device, value: plan.brightness)
             return
         }
@@ -994,6 +1047,7 @@ final class LightManager: ObservableObject {
                 markSegmentsInactive(device)
                 sendBrightness(device, value: 1.0)
             }
+            beginShapesShow(device, owner: run.streamOwner, perPanel: true)
         }
 
         // Effects animate on a fixed timer at the effect's cadence. The timer
@@ -1058,6 +1112,7 @@ final class LightManager: ObservableObject {
         effectRuns[scope] = run
         activeEffects[scope] = effect.id
 
+        let streamedWalls = Set(fixtures.filter { $0.transport == .nanoleafStream }.map(\.id))
         for device in targets {
             device.isOn = true
             sendPower(device, on: true)
@@ -1067,6 +1122,7 @@ final class LightManager: ObservableObject {
                 markSegmentsInactive(device)
                 sendBrightness(device, value: 1)
             }
+            beginShapesShow(device, owner: run.streamOwner, perPanel: streamedWalls.contains(device.id))
         }
 
         musicModeController.start(
@@ -1109,7 +1165,9 @@ final class LightManager: ObservableObject {
             finishMusicStreaming(for: run.snapshot.map(\.deviceID))
         }
         activeEffects[scope] = nil
-        if restore && run.restorePreviousState { restoreDeviceStates(run.snapshot) }
+        let restores = restore && run.restorePreviousState
+        endShapesStreams(ownedBy: run.streamOwner, keepingLastFrame: !restores)
+        if restores { restoreDeviceStates(run.snapshot) }
     }
 
     func stopAllEffects(restore: Bool = true) {
@@ -1125,7 +1183,7 @@ final class LightManager: ObservableObject {
     private func stopEffects(touching deviceIDs: Set<String>) -> [String: LightRuntimeSnapshot] {
         var inherited: [String: LightRuntimeSnapshot] = [:]
         for (scope, run) in effectRuns {
-            let runIDs = run.animatedDeviceIDs
+            let runIDs = run.ownedDeviceIDs
             guard !runIDs.isDisjoint(with: deviceIDs) else { continue }
             run.timer?.invalidate()
             if run.effect.id == "music-pulse" {
@@ -1134,6 +1192,7 @@ final class LightManager: ObservableObject {
             }
             effectRuns[scope] = nil
             activeEffects[scope] = nil
+            endShapesStreams(ownedBy: run.streamOwner, keepingLastFrame: false)
             for snap in run.snapshot where deviceIDs.contains(snap.deviceID) {
                 inherited[snap.deviceID] = snap
             }
@@ -1167,7 +1226,7 @@ final class LightManager: ObservableObject {
 
     /// True when the device belongs to a currently animating effect run.
     private func isEffectAnimating(_ deviceID: String) -> Bool {
-        effectRuns.values.contains { $0.animatedDeviceIDs.contains(deviceID) }
+        effectRuns.values.contains { $0.ownedDeviceIDs.contains(deviceID) }
     }
 
     /// The running effect that owns this light, if one does.
@@ -1178,7 +1237,7 @@ final class LightManager: ObservableObject {
     /// and point at the running show, rather than accept a change and quietly
     /// lose it.
     func animatingEffect(for deviceID: String) -> (scope: LightScope, name: String)? {
-        guard let match = effectRuns.first(where: { $0.value.animatedDeviceIDs.contains(deviceID) })
+        guard let match = effectRuns.first(where: { $0.value.ownedDeviceIDs.contains(deviceID) })
         else { return nil }
         return (match.key, match.value.effect.name)
     }
@@ -1188,63 +1247,102 @@ final class LightManager: ObservableObject {
         run.phase += run.effect.speed
         let effect = run.effect
         let effectPhase = run.phase
-        let palette = effect.colors
         let targets = devices(in: run.scope)
         run.modelUpdateElapsed += effect.frameInterval
         let shouldUpdateModel = run.modelUpdateElapsed >= 0.25
         if shouldUpdateModel { run.modelUpdateElapsed = 0 }
 
         for (index, device) in targets.enumerated() {
-            var color = palette[(index + Int(effectPhase)) % palette.count].color
-            var brightness = 0.72
-
-            switch effect.style {
-            case .colorFlow:
-                let hue = (effectPhase * 0.08 + Double(index) / Double(max(1, targets.count))).truncatingRemainder(dividingBy: 1)
-                color = Color(hue: hue, saturation: 0.86, brightness: 1)
-                brightness = 0.78
-            case .oceanWave:
-                let wave = (sin(effectPhase + Double(index) * 0.85) + 1) / 2
-                color = palette[Int(wave * Double(palette.count - 1))].color
-                brightness = 0.38 + wave * 0.42
-            case .breathe:
-                let breath = (sin(effectPhase) + 1) / 2
-                color = palette[index % palette.count].color
-                brightness = 0.18 + breath * 0.62
-            case .candlelight:
-                color = palette.randomElement()?.color ?? color
-                brightness = Double.random(in: 0.38...0.76)
-            case .musicPulse:
-                // Routed through `startMusicMode`; this restrained fallback is
-                // deliberately flash-free if a future caller bypasses it.
-                let wave = (sin(effectPhase + Double(index) * 0.75) + 1) / 2
-                color = palette[index % palette.count].color
-                brightness = 0.18 + wave * 0.36
-            case .prismShuffle:
-                color = palette.randomElement()?.color ?? color
-                brightness = Double.random(in: 0.62...0.92)
-            case .lightning:
-                let strike = Double.random(in: 0...1) > 0.91
-                color = strike ? palette.last!.color : palette[index % max(1, palette.count - 1)].color
-                brightness = strike ? 1 : Double.random(in: 0.18...0.42)
-            case .sunrise:
-                let progress = min(0.999, effectPhase / 12)
-                color = palette[min(palette.count - 1, Int(progress * Double(palette.count)))].color
-                brightness = 0.08 + progress * 0.82
-            case .sunset:
-                let progress = min(0.999, effectPhase / 12)
-                color = palette[min(palette.count - 1, Int(progress * Double(palette.count)))].color
-                brightness = 0.82 - progress * 0.58
-            }
-
-            let clampedBrightness = max(0.05, min(1, brightness))
+            // A light another app took over mid-run keeps its slot, so the
+            // rest of the room animates exactly as before, but gets nothing.
+            guard !run.releasedDeviceIDs.contains(device.id) else { continue }
+            let (color, clampedBrightness) = effectSample(effect, phase: effectPhase, slot: Double(index),
+                                                          paletteIndex: index, count: targets.count)
             if shouldUpdateModel {
                 if device.color.rgbDistance(to: color) > 0.005 { device.color = color }
                 if abs(device.brightness - clampedBrightness) > 0.005 { device.brightness = clampedBrightness }
             }
-            sendEffectFrame(device, color: color, brightness: clampedBrightness,
-                            duration: effect.frameInterval)
+            if let stream = shapesStreams[device.id], !shapes.streamFailed(device.id, owner: stream.owner) {
+                streamEffectFrame(effect, phase: effectPhase, index: index, count: targets.count,
+                                  to: device, stream: stream)
+            } else {
+                sendEffectFrame(device, color: color, brightness: clampedBrightness,
+                                duration: effect.frameInterval)
+            }
         }
+    }
+
+    /// One light's colour and level in an effect frame. `slot` is the light's
+    /// place in the scope; a Shapes panel adds where it sits along the wall,
+    /// 0 to 1, so an effect moves across the panels instead of flashing the
+    /// wall as one bulb. Whole lights pass their index for both arguments,
+    /// which is exactly the sampling every light had before panels existed.
+    private func effectSample(_ effect: LightingEffect, phase effectPhase: Double, slot: Double,
+                              paletteIndex index: Int, count: Int) -> (Color, Double) {
+        let palette = effect.colors
+        var color = palette[(index + Int(effectPhase)) % palette.count].color
+        var brightness = 0.72
+
+        switch effect.style {
+        case .colorFlow:
+            let hue = (effectPhase * 0.08 + slot / Double(max(1, count))).truncatingRemainder(dividingBy: 1)
+            color = Color(hue: hue, saturation: 0.86, brightness: 1)
+            brightness = 0.78
+        case .oceanWave:
+            let wave = (sin(effectPhase + slot * 0.85) + 1) / 2
+            color = palette[Int(wave * Double(palette.count - 1))].color
+            brightness = 0.38 + wave * 0.42
+        case .breathe:
+            let breath = (sin(effectPhase) + 1) / 2
+            color = palette[index % palette.count].color
+            brightness = 0.18 + breath * 0.62
+        case .candlelight:
+            color = palette.randomElement()?.color ?? color
+            brightness = Double.random(in: 0.38...0.76)
+        case .musicPulse:
+            // Routed through `startMusicMode`; this restrained fallback is
+            // deliberately flash-free if a future caller bypasses it.
+            let wave = (sin(effectPhase + slot * 0.75) + 1) / 2
+            color = palette[index % palette.count].color
+            brightness = 0.18 + wave * 0.36
+        case .prismShuffle:
+            color = palette.randomElement()?.color ?? color
+            brightness = Double.random(in: 0.62...0.92)
+        case .lightning:
+            let strike = Double.random(in: 0...1) > 0.91
+            color = strike ? palette.last!.color : palette[index % max(1, palette.count - 1)].color
+            brightness = strike ? 1 : Double.random(in: 0.18...0.42)
+        case .sunrise:
+            let progress = min(0.999, effectPhase / 12)
+            color = palette[min(palette.count - 1, Int(progress * Double(palette.count)))].color
+            brightness = 0.08 + progress * 0.82
+        case .sunset:
+            let progress = min(0.999, effectPhase / 12)
+            color = palette[min(palette.count - 1, Int(progress * Double(palette.count)))].color
+            brightness = 0.82 - progress * 0.58
+        }
+        return (color, max(0.05, min(1, brightness)))
+    }
+
+    /// An effect frame for a Shapes wall, panel by panel, placed left to
+    /// right as the user oriented the wall. Each panel's level is folded
+    /// into its colour; master brightness was opened to full when the show
+    /// began, so the level is applied once.
+    private func streamEffectFrame(_ effect: LightingEffect, phase: Double, index: Int, count: Int,
+                                   to device: LightDevice, stream: ShapesStream) {
+        guard let layout = shapes.layout(device.id) else { return }
+        let placed = layout.spatialPositions(rotationDegrees: Double(shapes.displayOrientation(device.id)),
+                                             axis: .leftToRight)
+        let transition = max(1, min(10, Int((effect.frameInterval * 10).rounded())))
+        let frames = placed.enumerated().map { ordinal, entry -> NanoleafPanelFrame in
+            let (color, level) = effectSample(effect, phase: phase, slot: Double(index) + entry.position,
+                                              paletteIndex: index + ordinal, count: count)
+            let hsb = color.hsbComponents
+            return NanoleafPanelFrame(panelID: entry.panelID,
+                                      rgb: NanoleafPanelColor(hue: hsb.h, saturation: hsb.s, intensity: level).rgb,
+                                      transition: transition)
+        }
+        shapes.submit(frames, to: device.id, owner: stream.owner)
     }
 
     /// Effect frames are transient and never receive command acknowledgements.
@@ -1292,8 +1390,8 @@ final class LightManager: ObservableObject {
             device.brightness = state.brightness
             device.color = state.color
             device.kelvin = state.kelvin
-            if restoreNanoleafAppearance(state.nanoleafAppearance, to: device) {
-                // Native saved effects and white mode survive a stopped show.
+            if restoreNanoleafOutput(design: state.nanoleafDesign, appearance: state.nanoleafAppearance, to: device) {
+                // Designs, native saved effects and white mode survive a stopped show.
             } else if let matrix = state.matrix, device.isLIFXLuna {
                 applyLIFXMatrix(device, state: matrix, recordUndo: false,
                                 turnOn: false, announce: false)
@@ -1371,6 +1469,7 @@ final class LightManager: ObservableObject {
         if device.brand == .lifx { markLIFXMatrixInactive(device) }
         expectColor(device, color: color)
         expectNanoleafAppearance(device, appearance: .init(colorMode: "hs"))
+        simulateShapesOutput(device, .solid)
         enqueueCommand(for: device, coalescingKey: "color", summary: "Changing color", debounce: debounce) { [weak self, weak device] in
             guard let self, let device else { return }
             switch device.brand {
@@ -1380,6 +1479,7 @@ final class LightManager: ObservableObject {
                 self.lifx?.setColor(macHex: device.backendID, color: lifxColor)
             case .nanoleaf:
                 let hsb = color.hsbComponents
+                self.shapes.outputReplaced(device.id, by: .solid)
                 self.nanoleaf.setState(device.backendID, NanoleafProtocol.color(hue: hsb.h, saturation: hsb.s, brightness: device.brightness))
             case .govee:
                 self.markSegmentsInactive(device)
@@ -1393,6 +1493,7 @@ final class LightManager: ObservableObject {
         let kelvin = device.brand == .nanoleaf ? NanoleafProtocol.kelvin(kelvin) : kelvin
         device.kelvin = kelvin
         expectNanoleafAppearance(device, appearance: .init(colorMode: "ct"))
+        simulateShapesOutput(device, .white)
         if device.brand == .lifx { markLIFXMatrixInactive(device) }
         expectKelvin(device, kelvin: kelvin)
         enqueueCommand(for: device, coalescingKey: device.brand == .nanoleaf ? "color" : "kelvin", summary: "Color temperature \(kelvin) kelvin") { [weak self, weak device] in
@@ -1402,6 +1503,7 @@ final class LightManager: ObservableObject {
                 let hsb = device.color.hsbComponents
                 self.lifx?.setColor(macHex: device.backendID, color: LIFXHSBK(hue: UInt16(hsb.h * 65535), saturation: 0, brightness: UInt16(device.brightness * 65535), kelvin: UInt16(kelvin)))
             case .nanoleaf:
+                self.shapes.outputReplaced(device.id, by: .white)
                 self.nanoleaf.setState(device.backendID, ["ct": ["value": kelvin], "brightness": ["value": NanoleafProtocol.percent(device.brightness)]])
             case .govee:
                 self.markSegmentsInactive(device)
@@ -1417,7 +1519,8 @@ final class LightManager: ObservableObject {
                     brightness: device.brightness, color: device.color, kelvin: device.kelvin,
                     segments: activeSegmentState(for: device.id),
                     matrix: activeLIFXMatrixState(for: device.id),
-                    nanoleafAppearance: device.nanoleafAppearance)
+                    nanoleafAppearance: device.nanoleafAppearance,
+                    nanoleafDesign: device.brand == .nanoleaf ? shapes.showingDesign(for: device.id) : nil)
     }
 
     private func recordChange(_ devices: [LightDevice]) {
@@ -1469,8 +1572,8 @@ final class LightManager: ObservableObject {
             d.brightness = snap.brightness
             d.color = snap.color
             d.kelvin = snap.kelvin
-            if restoreNanoleafAppearance(snap.nanoleafAppearance, to: d) {
-                // Restored the controller mode.
+            if restoreNanoleafOutput(design: snap.nanoleafDesign, appearance: snap.nanoleafAppearance, to: d) {
+                // Restored the wall's design or controller mode.
             } else if let matrix = snap.matrix, d.isLIFXLuna {
                 applyLIFXMatrix(d, state: matrix, recordUndo: false,
                                 turnOn: false, announce: false)
@@ -1554,6 +1657,27 @@ extension LightManager {
                 self.publishError(error.localizedDescription)
             }
         }
+        // Shapes: every live callback is dropped while Demo Mode holds the
+        // workspace, so a real wall can never write into the simulated one.
+        shapes.isLive = { [weak self] in self?.demoWorkspaceController.allowsLiveNetworking ?? false }
+        shapes.persist = { [weak self] in self?.persistApplicationState() }
+        shapes.restoreWholeWall = { [weak self] id in self?.restoreWholeWallAfterPreview(id) }
+        nanoleaf.onOperationFailure = { [weak self] serial, operation, error in
+            guard let self, self.demoWorkspaceController.acceptsLiveNetworkCallbacks else { return }
+            self.shapes.didFail(deviceID: "nanoleaf:\(serial)", operation: operation, error: error)
+        }
+        nanoleaf.onWriteAccepted = { [weak self] serial, operation in
+            guard let self, self.demoWorkspaceController.acceptsLiveNetworkCallbacks else { return }
+            self.shapes.didAccept(deviceID: "nanoleaf:\(serial)", operation: operation)
+        }
+        nanoleaf.onEvent = { [weak self] serial, event in
+            guard let self, self.demoWorkspaceController.acceptsLiveNetworkCallbacks else { return }
+            self.shapes.handle(deviceID: "nanoleaf:\(serial)", event: event)
+        }
+        nanoleaf.onStreamStatus = { [weak self] serial, status in
+            guard let self, self.demoWorkspaceController.acceptsLiveNetworkCallbacks else { return }
+            self.shapes.didChangeStream(deviceID: "nanoleaf:\(serial)", status: status)
+        }
     }
 
     func pairNanoleaf(host: String, port: Int = 16021, serviceID: String? = nil) async throws {
@@ -1574,6 +1698,9 @@ extension LightManager {
         device.name = info.name
         device.needsNanoleafPairing = false
         device.nanoleafEffects = info.effects.effectsList
+        if let owner = shapes.didRead(deviceID: id, info: info) {
+            releaseShapesStream(deviceID: id, owner: owner)
+        }
         let color = Color(hue: Double(info.state.hue.value) / 360,
                           saturation: Double(info.state.sat.value) / 100, brightness: 1)
         let rgb = color.rgbComponents
@@ -1588,7 +1715,10 @@ extension LightManager {
             device.isOn = info.state.on.value
             device.brightness = brightness
             device.kelvin = info.state.ct.value
-            device.color = color
+            // A wall showing LumenDesk's design reports the hue of its last
+            // solid colour, which is not what it shows; its swatch is the
+            // design's own.
+            device.color = shapes.showingDesign(for: id)?.representativeChroma?.swiftUIColor ?? color
             device.nanoleafAppearance = info.appearance
             if info.state.colorMode == "ct" { whiteModeDeviceIDs.insert(id) }
             else { whiteModeDeviceIDs.remove(id) }
@@ -1617,10 +1747,12 @@ extension LightManager {
 
     private func sendNanoleafEffect(_ device: LightDevice, name: String) {
         expectNanoleafAppearance(device, appearance: .init(colorMode: "effect", effect: name))
+        simulateShapesOutput(device, .nativeEffect(name: name))
         // Share the color coalescing key so a queued color cannot overwrite an
         // effect the user selected afterwards (or vice versa).
         enqueueCommand(for: device, coalescingKey: "color", summary: "Selecting Nanoleaf effect") { [weak self, weak device] in
             guard let self, let device else { return }
+            self.shapes.outputReplaced(device.id, by: .nativeEffect(name: name))
             self.nanoleaf.selectEffect(device.backendID, name: name)
         }
     }
@@ -1637,6 +1769,199 @@ extension LightManager {
             return true
         }
         return false
+    }
+
+    // MARK: Shapes panels
+
+    static func shapesSnapshot(from state: PersistedApplicationState) -> NanoleafShapesController.Snapshot {
+        NanoleafShapesController.Snapshot(designs: state.nanoleafDesigns,
+                                          savedDesigns: state.nanoleafSavedDesigns,
+                                          groups: state.nanoleafPanelGroups,
+                                          arrangements: state.nanoleafArrangements)
+    }
+
+    /// Shows a per-panel design on a Shapes wall as LumenDesk's own static
+    /// layout. Each panel's intensity is part of the design; master
+    /// brightness stays on the controller's brightness channel, untouched.
+    func applyShapesDesign(_ design: NanoleafPanelDesign, to device: LightDevice,
+                           recordUndo: Bool = true, turnOn: Bool = true, announce: Bool = true) {
+        guard device.brand == .nanoleaf, let layout = shapes.layout(device.id) else { return }
+        if recordUndo {
+            if device.isStale {
+                publishError("\u{201C}\(device.label)\u{201D} may be offline — command sent anyway.")
+            }
+            stopEffects(touching: [device.id])
+            recordChange([device])
+        }
+        // An all-dark design is a request for nothing to be lit, so it must
+        // not switch the wall on to show it.
+        if turnOn, !device.isOn, design.lightsAnyPanel(of: layout) {
+            device.isOn = true
+            sendPower(device, on: true)
+        }
+        showShapesDesign(design, on: device)
+        if announce {
+            let count = design.reconciliation(against: layout).covered.count
+            logActivity(.command, title: "Shapes design applied", detail: "\(device.label): \(count) panels")
+            lastActionSummary = "Painted \(count) panel\(count == 1 ? "" : "s") on \(device.label)"
+        }
+    }
+
+    /// The one path a design takes to a wall. It shares the colour command's
+    /// coalescing key, so a colour queued a moment earlier can never land on
+    /// top of the design, or the other way round.
+    private func showShapesDesign(_ design: NanoleafPanelDesign, on device: LightDevice, transition: Int = 3) {
+        if let chroma = design.representativeChroma { device.color = chroma.swiftUIColor }
+        // The controller reports a static layout as an effect with a
+        // reserved name, which reads back as effect mode and no scene.
+        expectNanoleafAppearance(device, appearance: .init(colorMode: "effect"))
+        if isDemoMode {
+            // Demo commands are simulated and never sent; the simulated
+            // wall takes the design as it is queued.
+            shapes.show(design, on: device.id, transition: transition)
+        }
+        enqueueCommand(for: device, coalescingKey: "color", summary: "Painting \(design.panelIDs.count) Shapes panels") { [weak self, weak device] in
+            guard let self, let device else { return }
+            self.shapes.show(design, on: device.id, transition: transition)
+        }
+    }
+
+    /// In Demo Mode the solid colour, white or scene that replaces a design
+    /// reaches the simulated wall as the command is queued; live, it does so
+    /// when the command is actually sent.
+    private func simulateShapesOutput(_ device: LightDevice, _ output: NanoleafOutputState) {
+        guard device.brand == .nanoleaf, isDemoMode else { return }
+        shapes.outputReplaced(device.id, by: output)
+    }
+
+    /// Puts a Shapes wall's captured output back: LumenDesk's design when it
+    /// owned the wall, otherwise a stored scene or white. False when neither
+    /// applies, so the caller falls through to the plain colour path.
+    private func restoreNanoleafOutput(design: NanoleafPanelDesign?, appearance: NanoleafAppearance?,
+                                       to device: LightDevice) -> Bool {
+        guard device.brand == .nanoleaf else { return false }
+        if let design, shapes.layout(device.id) != nil {
+            showShapesDesign(design, on: device)
+            sendBrightness(device, value: device.brightness)
+            return true
+        }
+        return restoreNanoleafAppearance(appearance, to: device)
+    }
+
+    /// Ending an editor preview that had replaced a solid colour or white
+    /// puts that colour back.
+    private func restoreWholeWallAfterPreview(_ deviceID: String) {
+        guard let device = device(withID: deviceID) else { return }
+        if whiteModeDeviceIDs.contains(deviceID) {
+            sendColorTemperature(device, kelvin: device.kelvin)
+        } else {
+            sendColor(device, color: device.color)
+        }
+    }
+
+    /// Writes a wall's global orientation and re-aims any running Music Mode
+    /// show at the rotated wall. Effects re-read it on every frame.
+    func requestShapesOrientation(_ degrees: Int, for device: LightDevice) {
+        guard device.brand == .nanoleaf else { return }
+        shapes.requestOrientation(degrees, for: device.id)
+        for scope in musicModeController.activeScopeIDs
+            where effectRuns[scope]?.ownedDeviceIDs.contains(device.id) == true {
+            musicModeController.update(scope: scope, configuration: musicModeConfiguration,
+                                       topology: fixtureTopology(for: scope),
+                                       fixtures: musicFixtureDescriptors(in: scope),
+                                       reducedMotion: effectRuns[scope]?.reducedMotion ?? false)
+        }
+    }
+
+    /// The wall direction a room's music sweep travels.
+    private func shapesAxis(for layout: FixtureTopologyLayout) -> NanoleafSpatialAxis {
+        switch layout {
+        case .leftToRight, .custom: return .leftToRight
+        case .frontToBack: return .topToBottom
+        case .circular: return .clockwise
+        }
+    }
+
+    /// Claims a Shapes wall for a show. With a known layout the show streams
+    /// panel by panel, and master brightness opens to full: each panel's
+    /// level rides in its own colour, and Nanoleaf's master brightness
+    /// multiplies every mode, so leaving it down would dim twice. Without a
+    /// layout the wall takes the show's whole-wall colour, as it always has.
+    private func beginShapesShow(_ device: LightDevice, owner: String, perPanel: Bool) {
+        guard device.brand == .nanoleaf else { return }
+        guard perPanel, shapes.canStream(device.id), let layout = shapes.layout(device.id) else {
+            shapes.outputReplaced(device.id, by: .solid)
+            return
+        }
+        shapesStreams[device.id] = ShapesStream(owner: owner, panelIDs: layout.paintablePanels.map(\.panelID))
+        shapes.beginStream(device.id, owner: owner)
+        sendBrightness(device, value: 1)
+    }
+
+    /// Ends a show's streams. With `keepingLastFrame`, the frame on the wall
+    /// becomes a static LumenDesk design, so a show that ends without
+    /// restoring leaves its final look under a name LumenDesk can account
+    /// for, not an external-control session nothing feeds.
+    private func endShapesStreams(ownedBy owner: String, keepingLastFrame: Bool) {
+        for (deviceID, stream) in shapesStreams where stream.owner == owner {
+            shapesStreams.removeValue(forKey: deviceID)
+            if keepingLastFrame, let device = device(withID: deviceID),
+               let design = shapes.lastStreamedDesign(deviceID, owner: owner) {
+                if let chroma = design.representativeChroma { device.color = chroma.swiftUIColor }
+                shapes.show(design, on: deviceID, transition: 1)
+            } else {
+                shapes.endStream(deviceID, owner: owner)
+            }
+        }
+    }
+
+    /// Another app took a wall a show was streaming to. The show keeps
+    /// running on its other lights but lets this one go: no more frames, its
+    /// controls come back, and stopping the show will not "restore" it over
+    /// the other app's choice.
+    private func releaseShapesStream(deviceID: String, owner: String) {
+        guard shapesStreams[deviceID]?.owner == owner else { return }
+        shapesStreams.removeValue(forKey: deviceID)
+        for run in effectRuns.values where run.streamOwner == owner {
+            run.releasedDeviceIDs.insert(deviceID)
+            run.snapshot.removeAll { $0.deviceID == deviceID }
+        }
+        let label = device(withID: deviceID)?.label ?? "Nanoleaf Shapes"
+        logActivity(.command, title: "Live output released",
+                    detail: "\(label) switched to a scene chosen elsewhere; LumenDesk stopped streaming to it.")
+    }
+
+    /// Diagnostics rows for a Shapes wall: what was read, what is claimed,
+    /// and what the live stream did. None of it is evidence the panels lit.
+    func shapesDiagnostics(for device: LightDevice) -> [ScanDiagnostic] {
+        guard device.brand == .nanoleaf else { return [] }
+        let wall = shapes.wall(device.id)
+        var rows: [ScanDiagnostic] = []
+        if let layout = wall.arrangement?.layout {
+            rows.append(ScanDiagnostic(title: "Shapes layout",
+                                       value: "\(layout.paintablePanels.count) panels · \(layout.shapeSummary)",
+                                       status: wall.topologyProblem == nil ? .good : .warning))
+        } else {
+            rows.append(ScanDiagnostic(title: "Shapes layout", value: "Not read yet", status: .neutral))
+        }
+        if let problem = wall.topologyProblem {
+            rows.append(ScanDiagnostic(title: "Latest layout reading", value: problem.summary, status: .warning))
+        }
+        rows.append(ScanDiagnostic(title: "Orientation", value: wall.orientation.summary,
+                                   status: wall.orientation.isFailed ? .warning : .neutral))
+        rows.append(ScanDiagnostic(title: "Showing", value: wall.output.summary, status: .neutral))
+        if let firmware = wall.firmware {
+            rows.append(ScanDiagnostic(title: "Firmware", value: firmware, status: .neutral))
+        }
+        if let metrics = shapes.streamMetrics(device.id) {
+            rows.append(ScanDiagnostic(title: "Live stream",
+                                       value: "\(metrics.datagramsSent) datagrams sent · \(metrics.framesCoalesced) frames merged · \(metrics.sendFailures) refused (UDP has no receipt)",
+                                       status: metrics.sendFailures > 0 ? .warning : .neutral))
+        }
+        if let failure = wall.lastFailure {
+            rows.append(ScanDiagnostic(title: "Last Shapes failure", value: failure, status: .warning))
+        }
+        return rows
     }
 }
 
@@ -2538,7 +2863,8 @@ extension LightManager {
                 kelvin: d.kelvin,
                 segments: activeSegmentState(for: d.id),
                 matrix: activeLIFXMatrixState(for: d.id),
-                nanoleafAppearance: d.nanoleafAppearance
+                nanoleafAppearance: d.nanoleafAppearance,
+                nanoleafDesign: d.brand == .nanoleaf ? shapes.showingDesign(for: d.id) : nil
             )
         }
         scenes.append(LightingScene(name: trimmed, snapshots: snapshots))
@@ -2633,8 +2959,8 @@ extension LightManager {
         device.isOn = snap.isOn
         device.brightness = snap.brightness
         device.kelvin = snap.kelvin
-        if restoreNanoleafAppearance(snap.nanoleafAppearance, to: device) {
-            // Restored the captured controller mode.
+        if restoreNanoleafOutput(design: snap.nanoleafDesign, appearance: snap.nanoleafAppearance, to: device) {
+            // Restored the captured design or controller mode.
         } else if let matrix = snap.matrix, device.isLIFXLuna {
             applyLIFXMatrix(device, state: matrix, recordUndo: false,
                             turnOn: false, announce: false)
@@ -3010,6 +3336,25 @@ extension LightManager {
                     role: role
                 )
             }
+            if device.brand == .nanoleaf, shapes.canStream(device.id), let layout = shapes.layout(device.id) {
+                // Segment i is the i-th light panel by ID, a numbering that
+                // never moves; where it sits on the wall, as oriented, comes
+                // from the layout along the room's own sweep direction.
+                let placed = Dictionary(
+                    layout.spatialPositions(rotationDegrees: Double(shapes.displayOrientation(device.id)),
+                                            axis: shapesAxis(for: topology.layout))
+                        .map { ($0.panelID, $0.position) },
+                    uniquingKeysWith: { first, _ in first })
+                let panels = layout.paintablePanels
+                return MusicFixtureDescriptor(
+                    id: device.id,
+                    label: device.label,
+                    transport: .nanoleafStream,
+                    segmentCount: panels.count,
+                    role: role,
+                    segmentPositions: panels.map { placed[$0.panelID] ?? 0.5 }
+                )
+            }
             return MusicFixtureDescriptor(
                 id: device.id,
                 label: device.label,
@@ -3029,7 +3374,7 @@ extension LightManager {
     private func renderMusicFrame(_ frame: MusicLightingFrame, scope: LightScope) {
         guard effectRuns[scope]?.effect.id == "music-pulse" else { return }
         let fixtures = musicFixtureDescriptors(in: scope)
-        let ownedIDs = effectRuns[scope]?.animatedDeviceIDs ?? []
+        let ownedIDs = effectRuns[scope]?.ownedDeviceIDs ?? []
         let activeFixtures = fixtures.filter { ownedIDs.contains($0.id) && device(withID: $0.id)?.isStale == false }
         let commands = musicLightingRenderer.enqueue(frame, fixtures: activeFixtures, at: ProcessInfo.processInfo.systemUptime)
         for command in commands {
@@ -3055,6 +3400,22 @@ extension LightManager {
                     brightness: first.brightness,
                     duration: first.transitionDuration, musicTimestamp: frame.timestamp
                 )
+            case .nanoleafStream:
+                guard let stream = shapesStreams[device.id], !shapes.streamFailed(device.id, owner: stream.owner) else {
+                    // The wall's stream never opened: it still follows the
+                    // show, as one colour, rather than going dark.
+                    sendEffectFrame(device, color: color, brightness: first.brightness,
+                                    duration: first.transitionDuration, musicTimestamp: frame.timestamp)
+                    continue
+                }
+                let transition = max(0, min(10, Int((first.transitionDuration * 10).rounded())))
+                let frames = command.states.compactMap { state -> NanoleafPanelFrame? in
+                    guard let segment = state.segmentID, stream.panelIDs.indices.contains(segment) else { return nil }
+                    let rgb = NanoleafPanelColor(hue: state.hue, saturation: state.saturation,
+                                                 intensity: state.brightness).rgb
+                    return NanoleafPanelFrame(panelID: stream.panelIDs[segment], rgb: rgb, transition: transition)
+                }
+                shapes.submit(frames, to: device.id, owner: stream.owner)
             case .goveeRealtimeSegments:
                 let states = musicCapabilityStates(command.states, fixtureID: command.fixtureID)
                 let segments = states.map { GoveeSegmentColor(color: Color(hue: $0.hue, saturation: $0.saturation, brightness: 1), brightness: $0.brightness, isOn: $0.brightness > 0) }
@@ -3131,6 +3492,11 @@ extension LightManager {
         state.goveeSegmentPresets = goveeSegmentPresets
         state.musicModeConfiguration = musicModeConfiguration
         state.fixtureTopologies = fixtureTopologies
+        let shapesState = shapes.snapshot()
+        state.nanoleafDesigns = shapesState.designs
+        state.nanoleafSavedDesigns = shapesState.savedDesigns
+        state.nanoleafPanelGroups = shapesState.groups
+        state.nanoleafArrangements = shapesState.arrangements
         return state
     }
 
@@ -3161,6 +3527,7 @@ extension LightManager {
         goveeSegmentPresets = state.goveeSegmentPresets
         musicModeConfiguration = state.musicModeConfiguration
         fixtureTopologies = state.fixtureTopologies
+        shapes.importSnapshot(Self.shapesSnapshot(from: state))
     }
 
     func logActivity(_ kind: ActivityEvent.Kind, title: String, detail: String = "", isFailure: Bool = false) {
@@ -3224,6 +3591,13 @@ extension LightManager {
     }
 
     func identify(_ device: LightDevice) {
+        if device.brand == .nanoleaf, !isDemoMode {
+            // The controller's own identify flashes every panel and then puts
+            // back whatever was showing by itself, per-panel design included.
+            shapes.identifyWall(device.id)
+            logActivity(.recovery, title: "Identifying light", detail: device.label)
+            return
+        }
         let originalPower = device.isOn
         let originalColor = device.color
         let originalBrightness = device.brightness
@@ -3274,6 +3648,7 @@ extension LightManager {
                                 segments: activeSegmentState(for: device.id),
                                 matrix: activeLIFXMatrixState(for: device.id),
                                 nanoleafAppearance: device.nanoleafAppearance,
+                                nanoleafDesign: device.brand == .nanoleaf ? shapes.showingDesign(for: device.id) : nil,
                                 task: nil)
         logActivity(.recovery, title: "Identifying light", detail: device.label)
         hold.task = Task { @MainActor [weak self, weak device] in
@@ -3304,8 +3679,8 @@ extension LightManager {
         device.color = hold.color
         device.brightness = hold.brightness
         device.isOn = hold.power
-        if restoreNanoleafAppearance(hold.nanoleafAppearance, to: device) {
-            // Restore the effect selected before identification.
+        if restoreNanoleafOutput(design: hold.nanoleafDesign, appearance: hold.nanoleafAppearance, to: device) {
+            // Restore the design or effect shown before identification.
         } else if let matrix = hold.matrix {
             applyLIFXMatrix(device, state: matrix, recordUndo: false, turnOn: false, announce: false)
         } else if let segments = hold.segments {
@@ -3326,6 +3701,10 @@ extension LightManager {
     }
 
     func diagnostics(for device: LightDevice) -> [ScanDiagnostic] {
+        deviceDiagnostics(for: device) + shapesDiagnostics(for: device)
+    }
+
+    private func deviceDiagnostics(for device: LightDevice) -> [ScanDiagnostic] {
         [
             ScanDiagnostic(title: "Vendor", value: device.brand.displayName, status: .neutral),
             ScanDiagnostic(title: "Model", value: device.sku ?? "Not reported", status: .neutral),
@@ -3749,7 +4128,8 @@ extension LightManager {
             razerActiveIDs: razerActiveIDs,
             segmentPreviewIDs: segmentPreviewIDs,
             scanStartingIDs: scanStartingIDs,
-            scanStartingAddresses: scanStartingAddresses
+            scanStartingAddresses: scanStartingAddresses,
+            nanoleafShapes: shapes.workspaceSnapshot()
         )
     }
 
@@ -3812,5 +4192,9 @@ extension LightManager {
         segmentPreviewIDs = workspace.segmentPreviewIDs
         scanStartingIDs = workspace.scanStartingIDs
         scanStartingAddresses = workspace.scanStartingAddresses
+        // Shows were stopped before the swap, so no stream belongs to the
+        // workspace arriving.
+        shapesStreams = [:]
+        shapes.restoreWorkspace(workspace.nanoleafShapes)
     }
 }

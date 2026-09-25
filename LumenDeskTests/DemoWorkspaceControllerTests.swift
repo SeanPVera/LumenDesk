@@ -59,7 +59,8 @@ final class DemoWorkspaceControllerTests: XCTestCase {
 
         manager.enterDemoMode()
         XCTAssertTrue(manager.isDemoMode)
-        XCTAssertEqual(manager.devices.count, 6)
+        // Six lamps and strips plus the simulated Shapes wall.
+        XCTAssertEqual(manager.devices.count, 7)
         XCTAssertTrue(manager.devices.allSatisfy { $0.id.hasPrefix("demo:") })
         XCTAssertEqual(manager.rooms.map(\.name), ["Demo Office", "Demo Lounge"])
         XCTAssertTrue(manager.automationOverrides.isEmpty)
@@ -253,9 +254,10 @@ final class DemoWorkspaceControllerTests: XCTestCase {
         manager.scan()
         await waitUntil { !manager.isScanning }
 
-        XCTAssertEqual(manager.scanResponseCount, 5)
-        XCTAssertEqual(manager.scanPhase, "Demo scan complete: 5 simulated responses")
-        XCTAssertEqual(manager.devices.count, 6)
+        // Every simulated fixture answers except the stale floor lamp.
+        XCTAssertEqual(manager.scanResponseCount, 6)
+        XCTAssertEqual(manager.scanPhase, "Demo scan complete: 6 simulated responses")
+        XCTAssertEqual(manager.devices.count, 7)
         XCTAssertTrue(manager.devices.allSatisfy { $0.address == "Simulation" })
     }
 

@@ -314,12 +314,15 @@ struct MusicModeView: View {
                         Text("–").font(.caption.monospacedDigit()).foregroundStyle(Lumen.textTertiary)
                             .frame(width: 20)
                     }
-                    Image(systemName: fixture.segmentCount > 0 ? "rectangle.split.3x1.fill" : "lightbulb.fill")
+                    Image(systemName: fixture.transport == .nanoleafStream ? "hexagon.fill"
+                          : (fixture.segmentCount > 0 ? "rectangle.split.3x1.fill" : "lightbulb.fill"))
                         .foregroundStyle(isExcluded ? Lumen.textTertiary : (fixture.segmentCount > 0 ? Lumen.coral : Lumen.violetBright))
                     Text(fixture.label)
                         .strikethrough(isExcluded)
                         .foregroundStyle(isExcluded ? Lumen.textTertiary : Lumen.textPrimary)
-                    if fixture.segmentCount > 0 {
+                    if fixture.transport == .nanoleafStream {
+                        Text("+ \(fixture.segmentCount) panels, placed as on the wall").font(.caption).foregroundStyle(Lumen.textTertiary)
+                    } else if fixture.segmentCount > 0 {
                         Text("+ \(fixture.segmentCount) segments").font(.caption).foregroundStyle(Lumen.textTertiary)
                     }
                     }

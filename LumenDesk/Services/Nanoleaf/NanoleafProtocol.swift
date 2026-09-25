@@ -70,8 +70,34 @@ struct NanoleafInfo: Decodable {
     let model: String
     let state: State
     let effects: Effects
+    /// Descriptive only, so an odd value never fails the whole response.
+    let firmwareVersion: String?
+    let hardwareVersion: String?
+    /// The arrangement, parsed strictly from the same response by
+    /// `NanoleafTopologyParser`. A layout problem never costs the rest of
+    /// the controller's state: power, colour and effects stay usable.
+    var topology: Result<NanoleafArrangement, NanoleafTopologyProblem> = .failure(.notReported)
+
+    private enum CodingKeys: String, CodingKey {
+        case name, serialNo, model, state, effects, firmwareVersion, hardwareVersion
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = try container.decode(String.self, forKey: .name)
+        serialNo = try container.decode(String.self, forKey: .serialNo)
+        model = try container.decode(String.self, forKey: .model)
+        state = try container.decode(State.self, forKey: .state)
+        effects = try container.decode(Effects.self, forKey: .effects)
+        firmwareVersion = try? container.decodeIfPresent(String.self, forKey: .firmwareVersion)
+        hardwareVersion = try? container.decodeIfPresent(String.self, forKey: .hardwareVersion)
+    }
 
     var isShapes: Bool { model.uppercased() == "NL42" }
+
+    /// The raw selection, including the controller's reserved mode names
+    /// (`*Static*`, `*Dynamic*`, `*Solid*`) that `appearance` leaves out.
+    var selectedEffectName: String { effects.select }
     var appearance: NanoleafAppearance {
         NanoleafAppearance(colorMode: state.colorMode,
                            effect: state.colorMode == "effect" && effects.effectsList.contains(effects.select)
@@ -82,6 +108,7 @@ struct NanoleafInfo: Decodable {
 enum NanoleafError: LocalizedError, Equatable {
     case invalidAddress, pairingRequired, pairingWindowClosed, unsupportedModel
     case invalidResponse, unavailable, storageFailure, http(Int)
+    case nameConflict, invalidName, streamUnavailable
 
     var errorDescription: String? {
         switch self {
@@ -93,6 +120,9 @@ enum NanoleafError: LocalizedError, Equatable {
         case .unavailable: return "Cannot reach the Nanoleaf controller. Check its power and your local network connection."
         case .storageFailure: return "Could not save Nanoleaf pairing in Keychain. Please try again."
         case .http(let code): return "The Nanoleaf controller rejected the request (HTTP \(code))."
+        case .nameConflict: return "The controller already stores a scene with this name. Choose another name, or confirm replacing it."
+        case .invalidName: return "Use a name of 1 to 64 characters. Names wrapped in asterisks are reserved by the controller."
+        case .streamUnavailable: return "Live output needs the controller’s IPv4 address, and none was found. Pair using the controller’s IP address."
         }
     }
 }

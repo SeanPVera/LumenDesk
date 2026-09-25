@@ -13,6 +13,8 @@ struct LightRuntimeSnapshot {
     let segments: GoveeSegmentState?
     let matrix: LIFXMatrixState?
     var nanoleafAppearance: NanoleafAppearance? = nil
+    /// The Shapes design the wall was showing, when LumenDesk owned it.
+    var nanoleafDesign: NanoleafPanelDesign? = nil
 }
 
 /// Owns the isolated demo workspace and the live workspace held while Demo
@@ -78,6 +80,8 @@ final class DemoWorkspaceController {
         var segmentPreviewIDs: Set<String>
         var scanStartingIDs: Set<String>
         var scanStartingAddresses: [String: String]
+        /// Shapes arrangements, designs, sessions and claims on each wall.
+        var nanoleafShapes: NanoleafShapesController.WorkspaceSnapshot
     }
 
     struct DiscoveryResult {
@@ -185,14 +189,33 @@ final class DemoWorkspaceController {
             return device
         }
 
+        // A simulated Shapes wall, so the arrangement editor, orientation and
+        // per-panel output can be explored without a controller.
+        let shapes = LightDevice(
+            id: "demo:6",
+            brand: .nanoleaf,
+            backendID: "SIM-6",
+            name: NanoleafShapesDemo.deviceName,
+            address: "Simulation",
+            sku: "NL42",
+            isOn: true,
+            brightness: 0.7,
+            color: Color(red: 1, green: 0.42, blue: 0.17),
+            kelvin: 3000
+        )
+        shapes.lastSeen = timestamp
+        shapes.nanoleafEffects = ["Northern Lights", "Forest", "Beatdrop"]
+        let lampsAndStrips = workspace.devices
+        workspace.devices.append(shapes)
+
         let office = Room(
             name: "Demo Office",
-            lightIDs: Array(workspace.devices.prefix(3).map(\.id)),
+            lightIDs: Array(lampsAndStrips.prefix(3).map(\.id)),
             schedules: [ScheduleEntry(hour: 9, minute: 0, action: .turnOn)]
         )
         let lounge = Room(
             name: "Demo Lounge",
-            lightIDs: Array(workspace.devices.suffix(3).map(\.id)),
+            lightIDs: Array(lampsAndStrips.suffix(3).map(\.id)) + [shapes.id],
             schedules: [ScheduleEntry(hour: 22, minute: 30, action: .turnOff)]
         )
         workspace.rooms = [office, lounge]
@@ -205,7 +228,8 @@ final class DemoWorkspaceController {
                 hue: hsb.h,
                 saturation: hsb.s,
                 kelvin: device.kelvin,
-                segments: nil
+                segments: nil,
+                nanoleafDesign: device.brand == .nanoleaf ? NanoleafShapesDemo.design : nil
             ))
         })
         workspace.scenes = [LightingScene(name: "Demo Focus", snapshots: snapshots)]
@@ -229,6 +253,13 @@ final class DemoWorkspaceController {
         workspace.lifxMatrixStates = [
             workspace.devices[0].id: .demoLuna(brightness: workspace.devices[0].brightness)
         ]
+        workspace.nanoleafShapes = NanoleafShapesController.WorkspaceSnapshot(
+            persisted: .init(designs: [shapes.id: NanoleafShapesDemo.design],
+                             arrangements: [shapes.id: NanoleafShapesDemo.arrangement]),
+            walls: [shapes.id: NanoleafShapesController.simulatedWall(
+                NanoleafShapesDemo.arrangement, showing: NanoleafShapesDemo.design,
+                effects: shapes.nanoleafEffects)]
+        )
         workspace.musicModeConfiguration = .configuration(for: .balanced)
         workspace.musicModeConfiguration.usesSyntheticDemoPattern = true
         workspace.fixtureTopologies = [:]

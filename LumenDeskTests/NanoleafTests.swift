@@ -230,7 +230,7 @@ final class NanoleafTests: XCTestCase {
         try await manager.pairNanoleaf(host: fixture.endpoint.host)
         let descriptor = try XCTUnwrap(manager.musicFixtureDescriptors(in: .all).first)
         XCTAssertEqual(descriptor.transport, .nanoleafLAN)
-        XCTAssertEqual(descriptor.segmentCount, 0) // Whole controller; no per-panel stream.
+        XCTAssertEqual(descriptor.segmentCount, 0) // No layout reported, so the whole controller.
         XCTAssertEqual(MusicLightingRenderer.minimumInterval(for: .nanoleafLAN), 0.2)
         client.pause()
     }
@@ -250,7 +250,11 @@ final class NanoleafTests: XCTestCase {
         NanoleafURLProtocol.fixture = fixture
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [NanoleafURLProtocol.self]
-        return NanoleafClient(credentials: store, session: URLSession(configuration: configuration))
+        // No event stream, a recording datagram sender and a fixed resolver:
+        // nothing here may reach the network or a physical controller.
+        return NanoleafClient(credentials: store, session: URLSession(configuration: configuration),
+                              listensForEvents: false, datagrams: RecordingDatagrams(),
+                              resolver: FixedResolver(address: "192.0.2.44"))
     }
 
     @MainActor

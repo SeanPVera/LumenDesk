@@ -561,12 +561,22 @@ struct FixtureTopology: Codable, Equatable {
         for fixture in ordered {
             let segmentCount = max(1, fixture.segmentCount)
             let role = fixture.resolvedRole
+            let start = flatIndex
             for segment in 0..<segmentCount {
+                // A fixture that knows where its segments physically sit (a
+                // Shapes wall's panels) spreads them by that placement inside
+                // its share of the sweep, instead of by list order.
+                let flat: Double
+                if let positions = fixture.segmentPositions, segmentCount > 1 {
+                    flat = Double(start) + positions[segment] * Double(segmentCount - 1)
+                } else {
+                    flat = Double(flatIndex)
+                }
                 let position: Double
                 if layout == .circular {
-                    position = Double(flatIndex) / Double(count)
+                    position = flat / Double(count)
                 } else {
-                    position = count == 1 ? 0.5 : Double(flatIndex) / Double(count - 1)
+                    position = count == 1 ? 0.5 : flat / Double(count - 1)
                 }
                 result.append(MusicSpatialTarget(
                     fixtureID: fixture.id,
@@ -608,8 +618,12 @@ extension FixtureTopology {
 enum MusicTransportKind: String, Codable, Equatable {
     case lifxLAN
     case goveeLAN
+    /// Whole-controller HTTP colour updates, for a Shapes wall whose layout
+    /// or stream is unavailable.
     case nanoleafLAN
     case goveeRealtimeSegments
+    /// Per-panel frames over Nanoleaf external control (UDP, v2).
+    case nanoleafStream
 }
 
 struct MusicFixtureDescriptor: Codable, Equatable, Identifiable {
@@ -618,19 +632,31 @@ struct MusicFixtureDescriptor: Codable, Equatable, Identifiable {
     let transport: MusicTransportKind
     let segmentCount: Int
     let role: FixtureRole
+    /// Where each segment physically sits along the sweep, 0…1, when the
+    /// fixture knows (a Shapes wall's panels, ordered along the wall).
+    let segmentPositions: [Double]?
 
     init(
         id: String,
         label: String,
         transport: MusicTransportKind,
         segmentCount: Int = 0,
-        role: FixtureRole = .auto
+        role: FixtureRole = .auto,
+        segmentPositions: [Double]? = nil
     ) {
         self.id = id
         self.label = label
         self.transport = transport
         self.segmentCount = max(0, segmentCount)
         self.role = role
+        // Only a complete, finite set is usable; anything else falls back
+        // to list order rather than placing segments at invented positions.
+        if let segmentPositions, segmentPositions.count == max(0, segmentCount),
+           segmentPositions.allSatisfy({ $0.isFinite && $0 >= 0 && $0 <= 1 }) {
+            self.segmentPositions = segmentPositions
+        } else {
+            self.segmentPositions = nil
+        }
     }
 
     /// Explicit roles win; `.auto` is assigned from the fixture itself so a

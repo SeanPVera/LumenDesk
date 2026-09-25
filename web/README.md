@@ -3,8 +3,9 @@
 Two pieces that together let a browser control real lights:
 
 - **`bridge/`** — a dependency-free Node service that runs on your machine,
-  speaks the LIFX and Govee LAN protocols over UDP, and exposes them on a
-  loopback HTTP API. See [bridge/README.md](bridge/README.md).
+  speaks the LIFX and Govee LAN protocols over UDP and the Nanoleaf Shapes
+  local HTTP API, and exposes them on a loopback HTTP API. See
+  [bridge/README.md](bridge/README.md).
 - **`app/`** — the React web client, published to GitHub Pages at
   <https://seanpvera.github.io/LumenDesk/>. It holds no protocol logic; it
   talks only to the bridge. **Room** owns a shared room picker and **Light**,
@@ -14,6 +15,38 @@ Two pieces that together let a browser control real lights:
 The split exists because browsers cannot open raw UDP sockets, and GitHub Pages
 has no server to relay through. Keeping the UDP in a local helper preserves
 LumenDesk's local-only promise — no account, no cloud, nothing off your network.
+
+## Nanoleaf Shapes in the browser
+
+Pair a Shapes wall once from **Devices → Pair a Nanoleaf Shapes wall**: enter the
+controller's IP address, hold its power button for 5–7 seconds until the LED
+flashes, then choose **Pair** within 30 seconds. The bridge keeps the access
+token in `~/.lumendesk/nanoleaf-pairings.json`, readable only by your user
+account, and never sends it to the page; **Forget** deletes it. The bridge has
+no Bonjour discovery, so the address is entered by hand; the native app
+discovers controllers.
+
+Select the wall on its own in **Room → Light** and its panels open under the
+room, drawn as the wall hangs:
+
+- **Orientation**: turn the drawing with the 90° buttons or type degrees, then
+  **Apply orientation**. It shows as requested until the controller reports it
+  back.
+- **Panels**: click to select, or tab to the wall once and use the arrow keys
+  and Space. Select all, clear, invert, or pick every panel of one shape.
+  **Identify on the wall** breathes one selected panel for four seconds.
+- **Painting** starts from what the wall shows, or from a colour you choose
+  when a controller scene is playing (its panel colours can't be read). Set a
+  colour, an exact hex, each panel's level, or turn panels off; undo and redo
+  work on the draft. Nothing reaches the wall until **Apply to wall**.
+- **Scenes on the controller** can be played. Scenes saved in **Compositions**
+  capture and restore a wall's panel design.
+
+Browser Music Mode drives a Shapes wall as one colour, at most five updates a
+second, and a restore brings back the design, scene or white the wall showed
+before the show. Per-panel streaming, saved designs and groups, storing scenes
+on the controller, scene editing and touch selection are in the Mac and iPhone
+apps.
 
 ## Using Music Mode in the browser
 
@@ -75,6 +108,10 @@ continuous stereo batches at capture cadence, renders at 20 Hz and sends at most
 
 `node scripts/visual-review.mjs` in `app/` runs production React in Chromium
 against a mocked bridge. It checks room command scope, scene capture IDs, Music
-controls/order/scope locking, overflow and axe accessibility, and saves screenshots.
+controls/order/scope locking, the Shapes editor (keyboard selection, painting
+exactly the selected panels, orientation pending, the unknown state while a
+controller scene plays, pairing errors), overflow and axe accessibility, and
+saves screenshots. The mocked Shapes layout goes through the bridge's own parser
+and geometry.
 CI installs Playwright 1.56.1 and axe Playwright 4.10.2 for this task without adding
 runtime dependencies. These checks do not establish physical light behavior.

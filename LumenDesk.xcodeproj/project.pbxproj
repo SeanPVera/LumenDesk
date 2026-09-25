@@ -73,6 +73,21 @@
 		B300000000000000000002 /* NanoleafCredentialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000002 /* NanoleafCredentialStore.swift */; };
 		B300000000000000000003 /* NanoleafPairingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000003 /* NanoleafPairingView.swift */; };
 		B300000000000000000004 /* NanoleafTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000004 /* NanoleafTests.swift */; };
+		B300000000000000000013 /* NanoleafShapesManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000013 /* NanoleafShapesManagerTests.swift */; };
+		B300000000000000000011 /* NanoleafShapesStudioView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000011 /* NanoleafShapesStudioView.swift */; };
+		B300000000000000000012 /* NanoleafSceneLibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000012 /* NanoleafSceneLibraryView.swift */; };
+		B300000000000000000005 /* LossyCodable.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000005 /* LossyCodable.swift */; };
+		B300000000000000000006 /* NanoleafLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000006 /* NanoleafLayout.swift */; };
+		B300000000000000000007 /* NanoleafGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000007 /* NanoleafGeometry.swift */; };
+		B300000000000000000008 /* NanoleafPanelDesign.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000008 /* NanoleafPanelDesign.swift */; };
+		B300000000000000000009 /* NanoleafEffects.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000009 /* NanoleafEffects.swift */; };
+		B30000000000000000000A /* NanoleafEvents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000A /* NanoleafEvents.swift */; };
+		B30000000000000000000B /* NanoleafShapesModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000B /* NanoleafShapesModels.swift */; };
+		B30000000000000000000C /* NanoleafShapesController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000C /* NanoleafShapesController.swift */; };
+		B30000000000000000000D /* NanoleafShapesCanvas.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000D /* NanoleafShapesCanvas.swift */; };
+		B30000000000000000000E /* NanoleafShapesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000E /* NanoleafShapesTests.swift */; };
+		B30000000000000000000F /* NanoleafShapesClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000F /* NanoleafShapesClientTests.swift */; };
+		B300000000000000000010 /* NanoleafShapesControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000010 /* NanoleafShapesControllerTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -156,6 +171,21 @@
 		A300000000000000000002 /* NanoleafCredentialStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/Nanoleaf/NanoleafCredentialStore.swift; sourceTree = "<group>"; };
 		A300000000000000000003 /* NanoleafPairingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/NanoleafPairingView.swift; sourceTree = "<group>"; };
 		A300000000000000000004 /* NanoleafTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NanoleafTests.swift; sourceTree = "<group>"; };
+		A300000000000000000013 /* NanoleafShapesManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NanoleafShapesManagerTests.swift; sourceTree = "<group>"; };
+		A300000000000000000011 /* NanoleafShapesStudioView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/NanoleafShapesStudioView.swift; sourceTree = "<group>"; };
+		A300000000000000000012 /* NanoleafSceneLibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/NanoleafSceneLibraryView.swift; sourceTree = "<group>"; };
+		A300000000000000000005 /* LossyCodable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/LossyCodable.swift; sourceTree = "<group>"; };
+		A300000000000000000006 /* NanoleafLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/Nanoleaf/NanoleafLayout.swift; sourceTree = "<group>"; };
+		A300000000000000000007 /* NanoleafGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/Nanoleaf/NanoleafGeometry.swift; sourceTree = "<group>"; };
+		A300000000000000000008 /* NanoleafPanelDesign.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/Nanoleaf/NanoleafPanelDesign.swift; sourceTree = "<group>"; };
+		A300000000000000000009 /* NanoleafEffects.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/Nanoleaf/NanoleafEffects.swift; sourceTree = "<group>"; };
+		A30000000000000000000A /* NanoleafEvents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/Nanoleaf/NanoleafEvents.swift; sourceTree = "<group>"; };
+		A30000000000000000000B /* NanoleafShapesModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/Nanoleaf/NanoleafShapesModels.swift; sourceTree = "<group>"; };
+		A30000000000000000000C /* NanoleafShapesController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/Nanoleaf/NanoleafShapesController.swift; sourceTree = "<group>"; };
+		A30000000000000000000D /* NanoleafShapesCanvas.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/NanoleafShapesCanvas.swift; sourceTree = "<group>"; };
+		A30000000000000000000E /* NanoleafShapesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NanoleafShapesTests.swift; sourceTree = "<group>"; };
+		A30000000000000000000F /* NanoleafShapesClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NanoleafShapesClientTests.swift; sourceTree = "<group>"; };
+		A300000000000000000010 /* NanoleafShapesControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NanoleafShapesControllerTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -193,6 +223,17 @@
 				A300000000000000000002 /* NanoleafCredentialStore.swift */,
 				A300000000000000000001 /* NanoleafClient.swift */,
 				A300000000000000000000 /* NanoleafProtocol.swift */,
+				A300000000000000000011 /* NanoleafShapesStudioView.swift */,
+				A300000000000000000012 /* NanoleafSceneLibraryView.swift */,
+				A300000000000000000005 /* LossyCodable.swift */,
+				A300000000000000000006 /* NanoleafLayout.swift */,
+				A300000000000000000007 /* NanoleafGeometry.swift */,
+				A300000000000000000008 /* NanoleafPanelDesign.swift */,
+				A300000000000000000009 /* NanoleafEffects.swift */,
+				A30000000000000000000A /* NanoleafEvents.swift */,
+				A30000000000000000000B /* NanoleafShapesModels.swift */,
+				A30000000000000000000C /* NanoleafShapesController.swift */,
+				A30000000000000000000D /* NanoleafShapesCanvas.swift */,
 				A100000000000000000001 /* LumenDeskApp.swift */,
 				A100000000000000000002 /* ContentView.swift */,
 				A100000000000000000018 /* Theme.swift */,
@@ -308,6 +349,10 @@
 			isa = PBXGroup;
 			children = (
 				A300000000000000000004 /* NanoleafTests.swift */,
+				A300000000000000000013 /* NanoleafShapesManagerTests.swift */,
+				A30000000000000000000E /* NanoleafShapesTests.swift */,
+				A30000000000000000000F /* NanoleafShapesClientTests.swift */,
+				A300000000000000000010 /* NanoleafShapesControllerTests.swift */,
 				A200000000000000000001 /* ProtocolTests.swift */,
 				A200000000000000000002 /* DomainTests.swift */,
 				A200000000000000000003 /* NetworkUtilityTests.swift */,
@@ -420,6 +465,17 @@
 				B300000000000000000002 /* NanoleafCredentialStore.swift in Sources */,
 				B300000000000000000001 /* NanoleafClient.swift in Sources */,
 				B300000000000000000000 /* NanoleafProtocol.swift in Sources */,
+				B300000000000000000011 /* NanoleafShapesStudioView.swift in Sources */,
+				B300000000000000000012 /* NanoleafSceneLibraryView.swift in Sources */,
+				B300000000000000000005 /* LossyCodable.swift in Sources */,
+				B300000000000000000006 /* NanoleafLayout.swift in Sources */,
+				B300000000000000000007 /* NanoleafGeometry.swift in Sources */,
+				B300000000000000000008 /* NanoleafPanelDesign.swift in Sources */,
+				B300000000000000000009 /* NanoleafEffects.swift in Sources */,
+				B30000000000000000000A /* NanoleafEvents.swift in Sources */,
+				B30000000000000000000B /* NanoleafShapesModels.swift in Sources */,
+				B30000000000000000000C /* NanoleafShapesController.swift in Sources */,
+				B30000000000000000000D /* NanoleafShapesCanvas.swift in Sources */,
 				B100000000000000000001 /* LumenDeskApp.swift in Sources */,
 				B100000000000000000002 /* ContentView.swift in Sources */,
 				B100000000000000000003 /* LightDevice.swift in Sources */,
@@ -475,6 +531,10 @@
 			buildActionMask = 2147483647;
 			files = (
 				B300000000000000000004 /* NanoleafTests.swift in Sources */,
+				B300000000000000000013 /* NanoleafShapesManagerTests.swift in Sources */,
+				B30000000000000000000E /* NanoleafShapesTests.swift in Sources */,
+				B30000000000000000000F /* NanoleafShapesClientTests.swift in Sources */,
+				B300000000000000000010 /* NanoleafShapesControllerTests.swift in Sources */,
 				B200000000000000000001 /* ProtocolTests.swift in Sources */,
 				B200000000000000000002 /* DomainTests.swift in Sources */,
 				B200000000000000000003 /* NetworkUtilityTests.swift in Sources */,

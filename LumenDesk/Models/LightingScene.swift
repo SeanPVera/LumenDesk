@@ -30,10 +30,15 @@ struct DeviceSnapshot: Equatable {
     /// captured. Nil for solid-color devices and older scenes.
     var matrix: LIFXMatrixState?
     var nanoleafAppearance: NanoleafAppearance?
+    /// The per-panel design a Nanoleaf Shapes wall was showing, keyed by
+    /// panel ID. Nil when the wall showed anything else, and for scenes
+    /// saved by older versions.
+    var nanoleafDesign: NanoleafPanelDesign?
 
     init(isOn: Bool, brightness: Double, hue: Double, saturation: Double,
          kelvin: Int = 3500, segments: GoveeSegmentState? = nil,
-         matrix: LIFXMatrixState? = nil, nanoleafAppearance: NanoleafAppearance? = nil) {
+         matrix: LIFXMatrixState? = nil, nanoleafAppearance: NanoleafAppearance? = nil,
+         nanoleafDesign: NanoleafPanelDesign? = nil) {
         self.isOn = isOn
         self.brightness = brightness
         self.hue = hue
@@ -42,12 +47,13 @@ struct DeviceSnapshot: Equatable {
         self.segments = segments
         self.matrix = matrix
         self.nanoleafAppearance = nanoleafAppearance
+        self.nanoleafDesign = nanoleafDesign
     }
 }
 
 extension DeviceSnapshot: Codable {
     enum CodingKeys: String, CodingKey {
-        case isOn, brightness, hue, saturation, kelvin, segments, matrix, nanoleafAppearance
+        case isOn, brightness, hue, saturation, kelvin, segments, matrix, nanoleafAppearance, nanoleafDesign
     }
 
     init(from decoder: Decoder) throws {
@@ -59,6 +65,9 @@ extension DeviceSnapshot: Codable {
         kelvin = (try? c.decode(Int.self, forKey: .kelvin)) ?? 3500
         segments = try? c.decodeIfPresent(GoveeSegmentState.self, forKey: .segments)
         matrix = try? c.decodeIfPresent(LIFXMatrixState.self, forKey: .matrix)
-        nanoleafAppearance = try c.decodeIfPresent(NanoleafAppearance.self, forKey: .nanoleafAppearance)
+        // Tolerant like the fields above: one unreadable value must not
+        // fail the scene, and with it every scene in the archive.
+        nanoleafAppearance = try? c.decodeIfPresent(NanoleafAppearance.self, forKey: .nanoleafAppearance)
+        nanoleafDesign = try? c.decodeIfPresent(NanoleafPanelDesign.self, forKey: .nanoleafDesign)
     }
 }

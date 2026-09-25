@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { Registry } from './registry.js'
 import { LifxClient } from './lifx-client.js'
 import { GoveeClient } from './govee-client.js'
+import { NanoleafClient } from './nanoleaf-client.js'
 import { createServer } from './server.js'
 import { isBuiltApp } from './static.js'
 import { Store } from './store.js'
@@ -53,7 +54,8 @@ const options = parseArgs(process.argv.slice(2))
 if (options.help) {
   console.log(`LumenDesk bridge ${VERSION}
 
-Discovers LIFX and Govee lights on this network over UDP and exposes them to
+Discovers LIFX and Govee lights on this network over UDP, talks to paired
+Nanoleaf Shapes controllers over their local HTTP API, and exposes them to
 the LumenDesk web app on a loopback HTTP API.
 
   --port <n>            listen port (default 8765)
@@ -74,9 +76,11 @@ const store = new Store({ log })
 store.load()
 const lifx = new LifxClient({ registry, log })
 const govee = new GoveeClient({ registry, log })
+const nanoleaf = new NanoleafClient({ registry, log })
 
 await lifx.start()
 await govee.start()
+await nanoleaf.start()
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const appDir = options.appDir
@@ -88,6 +92,7 @@ const server = createServer({
   registry,
   lifx,
   govee,
+  nanoleaf,
   allowedOrigins: options.origins,
   version: VERSION,
   staticDir,
@@ -132,6 +137,7 @@ const discoverTimer = setInterval(runDiscovery, options.discoverEvery)
 const refreshTimer = setInterval(() => {
   lifx.refresh()
   govee.refresh()
+  nanoleaf.refresh()
 }, options.refreshEvery)
 
 // Schedules run here rather than in the page, so they fire whether or not a
@@ -142,7 +148,7 @@ const scheduleTimer = setInterval(() => {
   const decisions = due({ rooms: store.listRooms(), previous: lastTick, now })
   lastTick = now
   for (const { room, schedule } of decisions) {
-    const result = runSchedule({ room, schedule, store, registry, lifx, govee, commandsFor })
+    const result = runSchedule({ room, schedule, store, registry, lifx, govee, nanoleaf, commandsFor })
     log(
       result.ran
         ? `schedule ${schedule.action} for ${room.name} ran on ${result.devices} light(s)`
@@ -167,6 +173,7 @@ function shutdown() {
   clearInterval(scheduleTimer)
   lifx.stop()
   govee.stop()
+  nanoleaf.stop()
   server.close(() => process.exit(0))
   setTimeout(() => process.exit(0), 500).unref()
 }

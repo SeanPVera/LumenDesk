@@ -3,13 +3,13 @@
   "private": true,
   "version": "1.0.0",
   "license": "MIT",
-  "description": "LumenDesk web client. Controls real LIFX and Govee lights through the local LumenDesk bridge.",
+  "description": "LumenDesk web client. Controls real LIFX, Govee and Nanoleaf Shapes lights through the local LumenDesk bridge.",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 0.0.0.0",
-    "test": "tsc -p tsconfig.music-tests.json && node test/run.cjs"
+    "test": "tsc -p tsconfig.music-tests.json && tsc -p tsconfig.shapes-tests.json && node test/run.cjs"
   },
   "dependencies": {
     "react": "19.2.7",

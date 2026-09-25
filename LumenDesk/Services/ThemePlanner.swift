@@ -17,6 +17,10 @@ enum ThemeFixtureCapability: Equatable {
     /// firmware reports; which cells are physically lit is decided by
     /// `LIFXMatrixState`.
     case matrix(productID: UInt32, width: Int, height: Int)
+    /// A Nanoleaf Shapes wall: `count` individually addressable panels, which
+    /// the caller orders along the wall as the user oriented it. Only walls
+    /// whose arrangement the controller reported are planned this way.
+    case panels(count: Int)
 }
 
 /// One target for a theme, in the order the room presents it.
@@ -69,6 +73,10 @@ struct ThemeFixturePlan: Equatable {
     let segments: GoveeSegmentState?
     let matrix: LIFXMatrixState?
     let adaptation: ThemeAdaptation
+    /// One tone per Shapes panel, in the spatial order the caller supplied.
+    /// Tone level is that panel's own intensity; `brightness` stays on the
+    /// controller's master brightness, so the level is applied exactly once.
+    var panels: [PaletteTone]? = nil
 }
 
 struct ThemePlan: Equatable {
@@ -163,6 +171,22 @@ enum ThemePlanner {
             return matrixPlan(theme, palette: palette, fixture: fixture,
                               position: position, productID: productID,
                               width: width, height: height)
+
+        case .panels(let count):
+            // Spread like segments: the same distribution rules that place
+            // colours across a room place them across the wall.
+            let tones = spread(theme, palette: palette, over: max(1, count), fixtureIndex: position)
+            let tone = tones.first ?? palette[0]
+            return ThemeFixturePlan(
+                fixtureID: fixture.id,
+                tone: tone,
+                brightness: theme.brightness,
+                kelvin: whitePoint(for: tone, fallback: fixture.kelvin),
+                segments: nil,
+                matrix: nil,
+                adaptation: .spatial,
+                panels: tones
+            )
         }
     }
 

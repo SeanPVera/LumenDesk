@@ -49,7 +49,7 @@ registerProcessor('lumen-tap', LumenTap)
 export interface BridgeDevice {
   id: string
   name: string
-  brand: 'lifx' | 'govee'
+  brand: 'lifx' | 'govee' | 'nanoleaf'
   reachable: boolean
 }
 
@@ -341,7 +341,7 @@ export class WebMusicSession {
 }
 
 export function deviceToFixture(device: BridgeDevice): MusicFixtureDescriptor {
-  const transport: MusicTransportKind = device.brand === 'lifx' ? 'lifxLAN' : 'goveeLAN'
+  const transport: MusicTransportKind = device.brand === 'lifx' ? 'lifxLAN' : device.brand === 'nanoleaf' ? 'nanoleafLAN' : 'goveeLAN'
   return {
     id: device.id,
     label: device.name,

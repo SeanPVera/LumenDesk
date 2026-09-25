@@ -34,6 +34,13 @@ struct PlanWorkspaceView: View {
         let ids = RoomWorkspaceSelection.targets(selected: selectedIDs, available: lights.map(\.id))
         return lights.filter { ids.contains($0.id) }
     }
+    /// The one selected fixture, when it is a Shapes wall: its panels get
+    /// the full editor in the room workspace rather than a sheet.
+    private var selectedShapesWall: LightDevice? {
+        guard selectedIDs.count == 1, let light = targets.first, light.brand == .nanoleaf else { return nil }
+        return light
+    }
+
     private var activeScopes: [LightScope] {
         Array(Set(lights.compactMap { manager.animatingEffect(for: $0.id)?.scope }))
             .sorted { manager.scopeDisplayName($0) < manager.scopeDisplayName($1) }
@@ -53,6 +60,10 @@ struct PlanWorkspaceView: View {
                         sectionPicker
                         switch section {
                         case .control:
+                            if let wall = selectedShapesWall {
+                                NanoleafShapesStudio(device: wall, shapes: manager.shapes,
+                                                     wide: geometry.size.width >= 1000)
+                            }
                             controls(wide: geometry.size.width >= 900)
                         case .compositions:
                             LibraryWorkspaceView(scope: $scope, embedded: true)
@@ -201,7 +212,7 @@ struct PlanWorkspaceView: View {
         VStack(alignment: .leading, spacing: 16) {
             if selectedIDs.count == 1, let light = targets.first {
                 Text("One selected fixture").font(.headline)
-                LightRowView(device: light)
+                LightRowView(device: light, showsShapesStudioEntry: false)
             } else {
                 RoomOutputControls(lights: targets, title: selectedIDs.isEmpty
                                    ? manager.scopeDisplayName(scope)
@@ -390,6 +401,10 @@ struct RoomEmitter: View {
                         }
                         .frame(height: 12).padding(.horizontal, 10)
                         .opacity(light.isOn && !light.isStale ? 1 : 0.2)
+                    } else if light.brand == .nanoleaf, manager.shapes.layout(light.id) != nil {
+                        NanoleafMiniWall(shapes: manager.shapes, deviceID: light.id, fallback: light.color,
+                                         lit: light.isOn && !light.isStale)
+                            .padding(.horizontal, 6)
                     } else if let profile = manager.segmentProfile(for: light) {
                         HStack(spacing: 2) {
                             ForEach(0..<min(16, profile.defaultSegmentCount), id: \.self) { _ in
@@ -456,6 +471,9 @@ struct RoomFixtureLine: View {
     private var detail: String {
         if let run = manager.animatingEffect(for: light.id) { return run.name }
         if light.isLIFXLuna { return "Matrix · 26 zones" }
+        if light.brand == .nanoleaf, let layout = manager.shapes.layout(light.id) {
+            return "Shapes · \(layout.paintablePanels.count) panels"
+        }
         if manager.segmentStudioProfile(for: light) != nil {
             return "\(manager.segmentState(for: light).segmentCount) segments"
         }

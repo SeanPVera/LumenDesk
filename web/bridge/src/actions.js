@@ -3,9 +3,10 @@ import { clampPercent, percentToU16 } from './color.js'
 // One place where a vendor-neutral intent becomes real commands, shared by
 // direct control, scene apply and the scheduler — so all three behave the same.
 
-export function applyCommand({ device, command, registry, lifx, govee }) {
+export function applyCommand({ device, command, registry, lifx, govee, nanoleaf = null }) {
   registry.claimControl?.(device.id)
-  const client = device.brand === 'lifx' ? lifx : govee
+  const client = { lifx, govee, nanoleaf }[device.brand]
+  if (!client) return false
 
   if (command.kind === 'power') {
     const on = Boolean(command.on)
@@ -19,7 +20,7 @@ export function applyCommand({ device, command, registry, lifx, govee }) {
     const ok =
       device.brand === 'lifx'
         ? lifx.setColor(device, { brightnessPercent: value })
-        : govee.setBrightness(device, value)
+        : client.setBrightness(device, value)
     if (!ok) return false
     registry.patch(device.id, { brightness: value })
     return true
@@ -50,6 +51,13 @@ export function applyCommand({ device, command, registry, lifx, govee }) {
           kelvin: color ? 0 : kelvin || 0,
         })
       }
+    } else if (device.brand === 'nanoleaf') {
+      // A Shapes wall's captured design goes back panel by panel; its master
+      // brightness stays a separate channel, applied once.
+      if (command.design) nanoleaf.displayPanels(device, command.design)
+      else if (kelvin) nanoleaf.setColor(device, { kelvin })
+      else if (color) nanoleaf.setColor(device, { rgb: color })
+      nanoleaf.setBrightness(device, brightness)
     } else {
       // Govee needs separate messages; the client paces and coalesces them.
       if (kelvin) govee.setColor(device, { kelvin })
@@ -66,10 +74,7 @@ export function applyCommand({ device, command, registry, lifx, govee }) {
 
   if (command.kind === 'color') {
     const kelvin = Number(command.kelvin) || 0
-    const ok =
-      device.brand === 'lifx'
-        ? lifx.setColor(device, { rgb: command.rgb, kelvin })
-        : govee.setColor(device, { rgb: command.rgb, kelvin })
+    const ok = client.setColor(device, { rgb: command.rgb, kelvin })
     if (!ok) return false
     registry.patch(device.id, { color: command.rgb ?? device.color, kelvin: kelvin || null })
     return true
@@ -91,6 +96,8 @@ export function snapshot(devices) {
       // through RGB. LIFX always reports a kelvin even for a saturated colour,
       // so kelvin alone cannot tell us whether the light was in white mode.
       hsbk: device.hsbk ?? null,
+      // A Shapes wall showing LumenDesk's design keeps every panel.
+      design: device.brand === 'nanoleaf' && device.shapes?.output === 'design' ? device.shapes.design : null,
     }
   }
   return snapshots
@@ -100,7 +107,7 @@ export function snapshot(devices) {
  * Apply a scene. Devices that have since disappeared are skipped rather than
  * failing the whole scene, and the result reports what actually happened.
  */
-export function applyScene({ scene, registry, lifx, govee, onlyDeviceIDs = null }) {
+export function applyScene({ scene, registry, lifx, govee, nanoleaf = null, onlyDeviceIDs = null }) {
   const applied = []
   const skipped = []
 
@@ -118,6 +125,7 @@ export function applyScene({ scene, registry, lifx, govee, onlyDeviceIDs = null 
       registry,
       lifx,
       govee,
+      nanoleaf,
       command: {
         kind: 'state',
         isOn: snap.isOn,
@@ -125,6 +133,7 @@ export function applyScene({ scene, registry, lifx, govee, onlyDeviceIDs = null 
         color: snap.color,
         kelvin: snap.kelvin,
         hsbk: snap.hsbk ?? null,
+        design: snap.design ?? null,
       },
     })
     applied.push(deviceID)
@@ -134,7 +143,7 @@ export function applyScene({ scene, registry, lifx, govee, onlyDeviceIDs = null 
 }
 
 /** Run a schedule's action against the lights of its room. */
-export function runSchedule({ room, schedule, store, registry, lifx, govee, commandsFor }) {
+export function runSchedule({ room, schedule, store, registry, lifx, govee, nanoleaf = null, commandsFor }) {
   const devices = room.lightIDs.map(x => registry.get(x)).filter(Boolean)
 
   if (schedule.action === 'applyScene') {
@@ -142,7 +151,7 @@ export function runSchedule({ room, schedule, store, registry, lifx, govee, comm
     if (!scene) return { ran: false, reason: 'scene missing' }
     // Scenes capture every light, so scope the apply to this room — a room's
     // schedule must not change lights elsewhere.
-    const result = applyScene({ scene, registry, lifx, govee, onlyDeviceIDs: room.lightIDs })
+    const result = applyScene({ scene, registry, lifx, govee, nanoleaf, onlyDeviceIDs: room.lightIDs })
     return { ran: true, devices: result.applied.length }
   }
 
@@ -150,7 +159,7 @@ export function runSchedule({ room, schedule, store, registry, lifx, govee, comm
   if (!commands.length) return { ran: false, reason: 'unknown action' }
   for (const device of devices) {
     for (const command of commands) {
-      applyCommand({ device, command, registry, lifx, govee })
+      applyCommand({ device, command, registry, lifx, govee, nanoleaf })
     }
   }
   return { ran: true, devices: devices.length }

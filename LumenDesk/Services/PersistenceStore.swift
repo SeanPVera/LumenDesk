@@ -29,6 +29,14 @@ struct PersistedApplicationState: Codable, Equatable {
     var goveeSegmentPresets: [GoveeSegmentPreset] = []
     var musicModeConfiguration = MusicModeConfiguration.configuration(for: .soundcheck)
     var fixtureTopologies: [String: FixtureTopology] = [:]
+    /// The per-panel design LumenDesk last applied to each Shapes wall,
+    /// keyed by device ID.
+    var nanoleafDesigns: [String: NanoleafPanelDesign] = [:]
+    var nanoleafSavedDesigns: [NanoleafSavedDesign] = []
+    var nanoleafPanelGroups: [String: [NanoleafPanelGroup]] = [:]
+    /// The last layout each controller reported that could be trusted, so
+    /// the editor can draw a wall before its controller answers.
+    var nanoleafArrangements: [String: NanoleafArrangement] = [:]
 
     struct SolarPreferences: Codable, Equatable {
         var sunriseHour: Int = 6
@@ -62,6 +70,10 @@ struct PersistedApplicationState: Codable, Equatable {
         case goveeSegmentPresets
         case musicModeConfiguration
         case fixtureTopologies
+        case nanoleafDesigns
+        case nanoleafSavedDesigns
+        case nanoleafPanelGroups
+        case nanoleafArrangements
     }
 
     init() {}
@@ -93,6 +105,12 @@ struct PersistedApplicationState: Codable, Equatable {
         musicModeConfiguration = ((try? container.decode(MusicModeConfiguration.self, forKey: .musicModeConfiguration))
             ?? .configuration(for: .soundcheck)).normalized()
         fixtureTopologies = (try? container.decode([String: FixtureTopology].self, forKey: .fixtureTopologies)) ?? [:]
+        // Entry by entry: one damaged design or layout is dropped on its own
+        // instead of taking every other wall's with it.
+        nanoleafDesigns = (try? container.decode(LossyDictionary<NanoleafPanelDesign>.self, forKey: .nanoleafDesigns))?.values ?? [:]
+        nanoleafSavedDesigns = (try? container.decode(LossyArray<NanoleafSavedDesign>.self, forKey: .nanoleafSavedDesigns))?.values ?? []
+        nanoleafPanelGroups = (try? container.decode(LossyDictionary<[NanoleafPanelGroup]>.self, forKey: .nanoleafPanelGroups))?.values ?? [:]
+        nanoleafArrangements = (try? container.decode(LossyDictionary<NanoleafArrangement>.self, forKey: .nanoleafArrangements))?.values ?? [:]
     }
 }
 
@@ -135,6 +153,13 @@ final class PersistenceStore: ApplicationPersistence {
         var goveeSegmentPresets: [GoveeSegmentPreset]?
         var musicModeConfiguration: MusicModeConfiguration?
         var fixtureTopologies: [String: FixtureTopology]?
+        /// Shapes designs, saved designs, panel groups and known layouts.
+        /// Pairing credentials are never part of an export: they live only
+        /// in this device's Keychain.
+        var nanoleafDesigns: [String: NanoleafPanelDesign]?
+        var nanoleafSavedDesigns: [NanoleafSavedDesign]?
+        var nanoleafPanelGroups: [String: [NanoleafPanelGroup]]?
+        var nanoleafArrangements: [String: NanoleafArrangement]?
 
         init(
             schemaVersion: Int = PersistedApplicationState.currentSchemaVersion,
@@ -154,7 +179,11 @@ final class PersistenceStore: ApplicationPersistence {
             goveeSegmentStates: [String: GoveeSegmentState]?,
             goveeSegmentPresets: [GoveeSegmentPreset]?,
             musicModeConfiguration: MusicModeConfiguration?,
-            fixtureTopologies: [String: FixtureTopology]?
+            fixtureTopologies: [String: FixtureTopology]?,
+            nanoleafDesigns: [String: NanoleafPanelDesign]? = nil,
+            nanoleafSavedDesigns: [NanoleafSavedDesign]? = nil,
+            nanoleafPanelGroups: [String: [NanoleafPanelGroup]]? = nil,
+            nanoleafArrangements: [String: NanoleafArrangement]? = nil
         ) {
             self.schemaVersion = schemaVersion
             self.rooms = rooms
@@ -174,6 +203,10 @@ final class PersistenceStore: ApplicationPersistence {
             self.goveeSegmentPresets = goveeSegmentPresets
             self.musicModeConfiguration = musicModeConfiguration
             self.fixtureTopologies = fixtureTopologies
+            self.nanoleafDesigns = nanoleafDesigns
+            self.nanoleafSavedDesigns = nanoleafSavedDesigns
+            self.nanoleafPanelGroups = nanoleafPanelGroups
+            self.nanoleafArrangements = nanoleafArrangements
         }
 
         private enum CodingKeys: String, CodingKey {
@@ -195,6 +228,10 @@ final class PersistenceStore: ApplicationPersistence {
             case goveeSegmentPresets
             case musicModeConfiguration
             case fixtureTopologies
+            case nanoleafDesigns
+            case nanoleafSavedDesigns
+            case nanoleafPanelGroups
+            case nanoleafArrangements
         }
 
         init(from decoder: Decoder) throws {
@@ -217,6 +254,11 @@ final class PersistenceStore: ApplicationPersistence {
             goveeSegmentPresets = try container.decodeIfPresent([GoveeSegmentPreset].self, forKey: .goveeSegmentPresets)
             musicModeConfiguration = try container.decodeIfPresent(MusicModeConfiguration.self, forKey: .musicModeConfiguration)
             fixtureTopologies = try container.decodeIfPresent([String: FixtureTopology].self, forKey: .fixtureTopologies)
+            // Lossy per entry, and absent in exports from older versions.
+            nanoleafDesigns = (try? container.decodeIfPresent(LossyDictionary<NanoleafPanelDesign>.self, forKey: .nanoleafDesigns))?.values
+            nanoleafSavedDesigns = (try? container.decodeIfPresent(LossyArray<NanoleafSavedDesign>.self, forKey: .nanoleafSavedDesigns))?.values
+            nanoleafPanelGroups = (try? container.decodeIfPresent(LossyDictionary<[NanoleafPanelGroup]>.self, forKey: .nanoleafPanelGroups))?.values
+            nanoleafArrangements = (try? container.decodeIfPresent(LossyDictionary<NanoleafArrangement>.self, forKey: .nanoleafArrangements))?.values
         }
     }
 
@@ -341,7 +383,11 @@ final class PersistenceStore: ApplicationPersistence {
             goveeSegmentStates: state.goveeSegmentStates,
             goveeSegmentPresets: state.goveeSegmentPresets,
             musicModeConfiguration: state.musicModeConfiguration,
-            fixtureTopologies: state.fixtureTopologies
+            fixtureTopologies: state.fixtureTopologies,
+            nanoleafDesigns: state.nanoleafDesigns,
+            nanoleafSavedDesigns: state.nanoleafSavedDesigns,
+            nanoleafPanelGroups: state.nanoleafPanelGroups,
+            nanoleafArrangements: state.nanoleafArrangements
         )
         return try encoder.encode(archive)
     }
@@ -386,6 +432,11 @@ final class PersistenceStore: ApplicationPersistence {
             if let topologies = archive.fixtureTopologies {
                 next.fixtureTopologies = topologies
             }
+            // Older exports have no Shapes data; keep what this install knows.
+            if let designs = archive.nanoleafDesigns { next.nanoleafDesigns = designs }
+            if let saved = archive.nanoleafSavedDesigns { next.nanoleafSavedDesigns = saved }
+            if let groups = archive.nanoleafPanelGroups { next.nanoleafPanelGroups = groups }
+            if let arrangements = archive.nanoleafArrangements { next.nanoleafArrangements = arrangements }
             next.favoriteOrder = reconciledFavoriteOrder(in: next)
             return migratedAndNormalized(next)
         }

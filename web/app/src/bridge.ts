@@ -2,7 +2,27 @@
 // machine and owns the UDP sockets; this page only ever speaks HTTP to
 // loopback, which browsers treat as a trustworthy origin even from HTTPS.
 
-export type Brand = 'lifx' | 'govee'
+import type { ShapesGeometry } from './shapes/geometry'
+
+export type Brand = 'lifx' | 'govee' | 'nanoleaf'
+
+/**
+ * What the bridge knows about a Nanoleaf Shapes wall. `output` says what the
+ * wall is showing and so whether its panel colours can be known: only a
+ * LumenDesk design, one colour, white or off can; a scene cannot.
+ */
+export interface ShapesInfo {
+  geometry: ShapesGeometry | null
+  orientation: number | null
+  orientationPending: number | null
+  output: 'off' | 'solid' | 'white' | 'design' | 'effect' | 'external'
+  effect: string | null
+  effects: string[]
+  design: Record<string, RGB> | null
+  firmware: string | null
+  problem: string | null
+  lastFailure: string | null
+}
 
 export interface RGB {
   r: number
@@ -24,6 +44,9 @@ export interface Device {
   favorite?: boolean
   roomID?: string | null
   sku?: string
+  /** Nanoleaf only: the controller revoked this bridge's access. */
+  needsPairing?: boolean
+  shapes?: ShapesInfo
 }
 
 export type ScheduleAction =
@@ -161,6 +184,34 @@ export const setColor = (port: number, id: string, rgb: RGB) =>
 
 export const setKelvin = (port: number, id: string, kelvin: number) =>
   command(port, id, 'color', { kelvin })
+
+// MARK: Nanoleaf Shapes
+
+/** Pairs a controller whose pairing window is open (power button held 5–7 s). */
+export const pairShapes = (port: number, host: string, controllerPort = 16021) =>
+  request<{ device: Device }>(port, '/nanoleaf/pair', {
+    method: 'POST',
+    body: JSON.stringify({ host, port: controllerPort }),
+  }).then(r => r.device)
+
+export const setShapesOrientation = (port: number, id: string, degrees: number) =>
+  command(port, id, 'orientation', { degrees })
+
+/** Every light panel: the colour given, or dark. */
+export const paintShapes = (port: number, id: string, colors: Record<number, RGB>) =>
+  command(port, id, 'panels', { colors })
+
+export const playShapesScene = (port: number, id: string, name: string) =>
+  command(port, id, 'effect', { name })
+
+export const identifyShapesPanel = (port: number, id: string, panelID: number) =>
+  request<{ ok: boolean }>(port, `/devices/${encodeURIComponent(id)}/identify`, {
+    method: 'POST',
+    body: JSON.stringify({ panelID }),
+  })
+
+export const forgetShapes = (port: number, id: string) =>
+  request<{ ok: boolean }>(port, `/devices/${encodeURIComponent(id)}/forget`, { method: 'POST', body: '{}' })
 
 export function hexToRGB(hex: string): RGB {
   const value = hex.replace('#', '')

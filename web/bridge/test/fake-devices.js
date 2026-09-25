@@ -2,6 +2,7 @@
 // loopback. They let the bridge be tested end to end — discovery, commands and
 // state read-back — without physical hardware.
 import dgram from 'node:dgram'
+import http from 'node:http'
 import * as lifx from '../src/lifx.js'
 import * as govee from '../src/govee.js'
 
@@ -161,5 +162,111 @@ export class FakeGoveeDevice {
         },
       })
     }
+  }
+}
+
+/**
+ * A Nanoleaf Shapes controller on loopback HTTP, following the documented
+ * routes closely enough to exercise the bridge: pairing, the full reading
+ * with its layout, state, scene selection, static display and orientation.
+ */
+export class FakeShapesController {
+  static serial = 'SHAPES123'
+  static token = 'fakeShapesToken42'
+
+  constructor() {
+    this.requests = []
+    this.pairingOpen = true
+    this.model = 'NL42'
+    this.state = { on: true, brightness: 80, hue: 20, sat: 80, ct: 3500, colorMode: 'effect' }
+    this.select = 'Northern Lights'
+    this.effects = ['Northern Lights', 'Evening']
+    this.orientation = 240
+    this.animData = null
+    this.server = null
+  }
+
+  info() {
+    return {
+      name: 'Studio Shapes', serialNo: FakeShapesController.serial, model: this.model, firmwareVersion: '9.2.0',
+      state: {
+        on: { value: this.state.on }, brightness: { value: this.state.brightness, max: 100, min: 0 },
+        hue: { value: this.state.hue, max: 360, min: 0 }, sat: { value: this.state.sat, max: 100, min: 0 },
+        ct: { value: this.state.ct, max: 6500, min: 1200 }, colorMode: this.state.colorMode,
+      },
+      effects: { select: this.select, effectsList: this.effects },
+      panelLayout: {
+        globalOrientation: { value: this.orientation, max: 360, min: 0 },
+        layout: { numPanels: 7, sideLength: 0, positionData: [
+          { panelId: 5120, x: 0, y: 0, o: 0, shapeType: 7 },
+          { panelId: 77, x: 100.5, y: 58.02, o: 0, shapeType: 7 },
+          { panelId: 31000, x: -100.5, y: 58.02, o: 120, shapeType: 7 },
+          { panelId: 1204, x: 67, y: -38.68, o: 0, shapeType: 9 },
+          { panelId: 9, x: -67, y: -38.68, o: 0, shapeType: 9 },
+          { panelId: 64001, x: 0, y: -96.7, o: 60, shapeType: 8 },
+          { panelId: 0, x: -45, y: 105, o: 0, shapeType: 12 },
+        ] },
+      },
+    }
+  }
+
+  listen() {
+    return new Promise(resolve => {
+      this.server = http.createServer(async (req, res) => {
+        const chunks = []
+        for await (const chunk of req) chunks.push(chunk)
+        const text = Buffer.concat(chunks).toString('utf8')
+        const body = text ? JSON.parse(text) : null
+        this.requests.push({ method: req.method, path: req.url, body, at: performance.now() })
+        const [status, payload] = this.#respond(req.method, req.url, body)
+        res.writeHead(status, payload ? { 'Content-Type': 'application/json' } : {})
+        res.end(payload ? JSON.stringify(payload) : undefined)
+      })
+      this.server.listen(0, '127.0.0.1', () => resolve(this.server.address().port))
+    })
+  }
+
+  close() {
+    this.server?.close()
+  }
+
+  #respond(method, url, body) {
+    if (method === 'POST' && url === '/api/v1/new') {
+      return this.pairingOpen ? [200, { auth_token: FakeShapesController.token }] : [403, null]
+    }
+    const prefix = `/api/v1/${FakeShapesController.token}`
+    if (!url.startsWith(prefix)) return [401, null]
+    const route = url.slice(prefix.length)
+    if (method === 'GET' && route === '') return [200, this.info()]
+    if (method === 'PUT' && route === '/state') {
+      for (const [key, value] of Object.entries(body ?? {})) this.state[key] = value.value
+      if (body?.hue || body?.sat) { this.state.colorMode = 'hs'; this.select = '*Solid*' }
+      if (body?.ct) { this.state.colorMode = 'ct'; this.select = '*Solid*' }
+      return [204, null]
+    }
+    if (method === 'PUT' && route === '/panelLayout') {
+      const value = body?.globalOrientation?.value
+      if (!Number.isInteger(value)) return [400, null]
+      this.orientation = value
+      return [204, null]
+    }
+    if (method === 'PUT' && route === '/effects') {
+      if (typeof body?.select === 'string') {
+        if (!this.effects.includes(body.select)) return [404, null]
+        this.select = body.select
+        this.state.colorMode = 'effect'
+        return [204, null]
+      }
+      const write = body?.write
+      if (write?.command === 'display' && write.animType === 'static') {
+        this.select = '*Static*'
+        this.state.colorMode = 'effect'
+        this.animData = write.animData
+        return [204, null]
+      }
+      if (write?.command === 'displayTemp') return [204, null]
+      return [400, null]
+    }
+    return [404, null]
   }
 }

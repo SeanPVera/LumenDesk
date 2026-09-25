@@ -78,17 +78,20 @@ export function createServer({
   registry,
   lifx,
   govee,
+  nanoleaf = null,
   allowedOrigins,
   version,
   staticDir = null,
   store = null,
 }) {
   const musicBrightnessOpened = new Set()
+  /** Shapes wall id -> what it showed before a browser music show claimed it. */
+  const shapesBeforeMusic = new Map()
+  const clientFor = device => ({ lifx, govee, nanoleaf })[device.brand] ?? null
   const dispatch = {
     power: (device, body) => {
       const on = Boolean(body.on)
-      const ok =
-        device.brand === 'lifx' ? lifx.setPower(device, on) : govee.setPower(device, on)
+      const ok = clientFor(device)?.setPower(device, on) ?? false
       if (ok) registry.patch(device.id, { power: on }) // optimistic, confirmed on next poll
       return ok
     },
@@ -97,20 +100,43 @@ export function createServer({
       const ok =
         device.brand === 'lifx'
           ? lifx.setColor(device, { brightnessPercent: value })
-          : govee.setBrightness(device, value)
+          : clientFor(device)?.setBrightness(device, value) ?? false
       if (ok) registry.patch(device.id, { brightness: value })
       return ok
     },
     color: (device, body) => {
       const kelvin = Number(body.kelvin) || 0
       if (!kelvin && !isValidRGB(body.rgb)) return { error: 'rgb must be three 0-255 values' }
-      const ok =
-        device.brand === 'lifx'
-          ? lifx.setColor(device, { rgb: body.rgb, kelvin })
-          : govee.setColor(device, { rgb: body.rgb, kelvin })
+      const ok = clientFor(device)?.setColor(device, { rgb: body.rgb, kelvin }) ?? false
       if (ok) registry.patch(device.id, { color: body.rgb ?? device.color, kelvin: kelvin || null })
       return ok
     },
+  }
+
+  /**
+   * Nanoleaf Shapes: panel-resolved commands. Each returns the HTTP status
+   * and body; only paired Shapes walls with a read layout accept them.
+   */
+  const shapes = {
+    orientation: (device, body) => {
+      const degrees = Number(body.degrees)
+      if (!Number.isFinite(degrees)) return [400, { error: 'degrees must be a number' }]
+      return nanoleaf.setOrientation(device, degrees) ? [202, { device: registry.get(device.id) }]
+        : [409, { error: 'the wall has not reported a layout yet' }]
+    },
+    panels: (device, body) => {
+      const colors = body.colors
+      if (!colors || typeof colors !== 'object' || Array.isArray(colors)) return [400, { error: 'colors must map panel IDs to rgb' }]
+      for (const [key, rgb] of Object.entries(colors)) {
+        if (!/^\d+$/.test(key) || !isValidRGB(rgb)) return [400, { error: `panel ${key} needs three 0-255 values` }]
+      }
+      return nanoleaf.displayPanels(device, colors) ? [202, { device: registry.get(device.id) }]
+        : [409, { error: 'the wall has not reported a layout yet' }]
+    },
+    effect: (device, body) => nanoleaf.selectEffect(device, String(body.name ?? ''))
+      ? [202, { device: registry.get(device.id) }] : [404, { error: 'the controller has no scene by that name' }],
+    identify: (device, body) => nanoleaf.identifyPanel(device, Number(body.panelID))
+      ? [202, { ok: true }] : [404, { error: 'no such light panel on this wall' }],
   }
 
   const decorate = devices => {
@@ -202,7 +228,7 @@ export function createServer({
         json(res, 404, { error: 'unknown scene' })
         return true
       }
-      const result = applyScene({ scene, registry, lifx, govee })
+      const result = applyScene({ scene, registry, lifx, govee, nanoleaf })
       json(res, 200, { ...result, devices: decorate(registry.list()) })
       return true
     }
@@ -275,17 +301,51 @@ export function createServer({
         // Awaited so the caller gets the probe reports back. "Nothing found"
         // and "nothing we sent ever left the machine" are different problems,
         // and the client can only tell them apart if it is told.
-        const [lifxProbe, goveeProbe] = await Promise.all([
+        const [lifxProbe, goveeProbe, nanoleafProbe] = await Promise.all([
           lifx.discover().catch(err => ({ error: err.message })),
           govee.discover().catch(err => ({ error: err.message })),
+          nanoleaf ? nanoleaf.discover().catch(err => ({ error: err.message })) : null,
         ])
-        return json(res, 200, { ok: true, probes: { lifx: lifxProbe, govee: goveeProbe } })
+        return json(res, 200, { ok: true, probes: { lifx: lifxProbe, govee: goveeProbe, nanoleaf: nanoleafProbe } })
       }
 
       if (req.method === 'POST' && path === '/refresh') {
         lifx.refresh()
         govee.refresh()
+        nanoleaf?.refresh()
         return json(res, 202, { ok: true })
+      }
+
+      // Pairing needs the controller's window open (power button held 5–7 s).
+      // The credential it returns stays in the bridge; the page never sees it.
+      if (req.method === 'POST' && path === '/nanoleaf/pair') {
+        if (!nanoleaf) return json(res, 404, { error: 'not found' })
+        const body = await readJSON(req)
+        try {
+          const device = await nanoleaf.pair({ host: body.host, port: body.port ?? 16021 })
+          return json(res, 200, { device })
+        } catch (err) {
+          const status = err.code === 'invalidAddress' ? 400 : err.code === 'pairingWindowClosed' ? 403 : 502
+          return json(res, status, { error: err.message })
+        }
+      }
+
+      const shapesMatch = path.match(/^\/devices\/(.+)\/(orientation|panels|effect|identify|forget)$/)
+      if (req.method === 'POST' && shapesMatch && nanoleaf) {
+        const device = registry.get(decodeURIComponent(shapesMatch[1]))
+        if (!device || device.brand !== 'nanoleaf') return json(res, 404, { error: 'unknown Shapes wall' })
+        const body = await readJSON(req)
+        if (shapesMatch[2] === 'forget') {
+          const forgotten = await nanoleaf.forget(device)
+          if (forgotten) registry.devices.delete(device.id)
+          return json(res, forgotten ? 200 : 404, forgotten ? { ok: true } : { error: 'not paired' })
+        }
+        if (shapesMatch[2] !== 'identify') {
+          registry.claimControl(device.id)
+          musicBrightnessOpened.delete(device.id)
+        }
+        const [status, payload] = shapes[shapesMatch[2]](device, body)
+        return json(res, status, payload)
       }
 
       // /devices/<id>/<action> — ids contain colons, so split from the right.
@@ -309,6 +369,13 @@ export function createServer({
       // until that encoder is ported in lockstep with ProtocolTests.
       if (req.method === 'POST' && path === '/music/frame') {
         const body = await readJSON(req)
+        const restoreShapes = (device, before, level) => {
+          if (level !== undefined) nanoleaf.setBrightness(device, level * 100)
+          if (before.output === 'design' && before.design) return nanoleaf.displayPanels(device, before.design)
+          if (before.output === 'effect' && before.effect) return nanoleaf.selectEffect(device, before.effect)
+          if (before.output === 'white' && before.kelvin) return nanoleaf.setColor(device, { kelvin: before.kelvin })
+          return null
+        }
         const states = Array.isArray(body.states) ? body.states : []
         let applied = 0
         const seen = new Set()
@@ -325,9 +392,16 @@ export function createServer({
             if (device.musicOwner && device.musicOwner !== state.owner && performance.now()-(device.musicFrameAt ?? 0)<2000) continue
             if ((state.restoring || state.release) && device.musicOwner !== state.owner) continue
             if (state.release) {
-              registry.patch(id,{musicOwner:null});musicBrightnessOpened.delete(id);continue
+              registry.patch(id,{musicOwner:null});musicBrightnessOpened.delete(id);shapesBeforeMusic.delete(id);continue
             }
             if (!device.musicOwner || device.musicOwner !== state.owner) musicBrightnessOpened.delete(id)
+            // A show starting on a Shapes wall remembers what the wall showed,
+            // so a restore brings back the design or scene, not just a colour.
+            if (device.brand === 'nanoleaf' && !state.restoring && device.musicOwner !== state.owner) {
+              const shapes = device.shapes ?? {}
+              shapesBeforeMusic.set(id, { owner: state.owner, output: shapes.output, design: shapes.design,
+                effect: shapes.effect, kelvin: device.kelvin })
+            }
             registry.patch(id,{musicOwner:state.restoring?null:state.owner,musicFrameAt:performance.now()})
           }
           // RGB is chroma; brightness is independent (legacy RGB-only callers
@@ -347,10 +421,19 @@ export function createServer({
               payload = Object.fromEntries(Object.entries(rgb).map(([k,v])=>[k,Math.round(v*level)]))
             }
           }
-          const ok = device.brand === 'lifx'
-            ? lifx.setColor(device, {rgb,brightnessPercent:level === undefined ? undefined : level*100,
-                durationMS:Number.isFinite(state.transitionDuration)?Math.max(0,Math.min(500,state.transitionDuration*1000)):90})
-            : govee.setColor(device, {rgb:payload})
+          // A Shapes wall follows the show as one colour here, paced by its
+          // client; its per-panel stream is the native app's.
+          const before = device.brand === 'nanoleaf' && restoring && state.owner ? shapesBeforeMusic.get(id) : undefined
+          if (device.brand === 'nanoleaf' && restoring) shapesBeforeMusic.delete(id)
+          const restoredShapes = before?.owner === state.owner && nanoleaf ? restoreShapes(device, before, level) : null
+          const ok = restoredShapes !== null
+            ? restoredShapes
+            : device.brand === 'lifx'
+              ? lifx.setColor(device, {rgb,brightnessPercent:level === undefined ? undefined : level*100,
+                  durationMS:Number.isFinite(state.transitionDuration)?Math.max(0,Math.min(500,state.transitionDuration*1000)):90})
+              : device.brand === 'nanoleaf'
+                ? Boolean(nanoleaf?.setColor(device, {rgb,brightnessPercent:level === undefined ? undefined : level*100,transient:!restoring}))
+                : govee.setColor(device, {rgb:payload})
           if (ok) {
             // Colour only: this path never sends a power command, so it must
             // not record a power state it did not set. The device's own status

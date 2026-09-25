@@ -103,6 +103,7 @@ final class MusicLightingRenderer {
         case .lifxLAN: return 0.06                 // combined HSBK packet
         case .nanoleafLAN: return 0.2             // whole-controller HTTP updates
         case .goveeLAN: return 0.1                 // ordinary LAN JSON ceiling
+        case .nanoleafStream: return NanoleafStreamPacket.minimumFrameInterval // Nanoleaf's 10 Hz limit
         }
     }
 }

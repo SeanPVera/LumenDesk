@@ -26,6 +26,12 @@ import {
   updateSchedule,
   postMusicFrame,
   useSameOrigin,
+  forgetShapes,
+  identifyShapesPanel,
+  pairShapes,
+  paintShapes,
+  playShapesScene,
+  setShapesOrientation,
 } from './bridge'
 import { BridgeSetup, type BridgeState, describeFailure } from './BridgeSetup'
 import {
@@ -183,6 +189,13 @@ export default function App() {
     [poll],
   )
 
+  /** Shapes commands report their own failures, so they rethrow instead. */
+  const adopt = useCallback(async (action: () => Promise<Device>) => {
+    const updated = await action()
+    setDevices(list => list.map(d => (d.id === updated.id ? { ...d, ...updated } : d)))
+    return updated
+  }, [])
+
   const scan = useCallback(async () => {
     setScanning(true)
     try {
@@ -204,6 +217,12 @@ export default function App() {
     favorite: d => mutate(() => toggleFavorite(port, d.id)),
     rename: (d, name) => mutate(() => renameDevice(port, d.id, name), `Renamed to ${name}`),
     assign: (d, roomID) => mutate(() => assignRoom(port, d.id, roomID)),
+    shapes: d => ({
+      orientation: degrees => adopt(() => setShapesOrientation(port, d.id, degrees)),
+      paint: colors => adopt(() => paintShapes(port, d.id, colors)),
+      play: name => adopt(() => playShapesScene(port, d.id, name)),
+      identify: panelID => identifyShapesPanel(port, d.id, panelID),
+    }),
   }
 
   const bulk = useCallback(
@@ -340,6 +359,12 @@ export default function App() {
             controls={controls}
             onAddRoom={name => mutate(() => createRoom(port, name), `Added ${name}`)}
             onDeleteRoom={room => mutate(() => deleteRoom(port, room.id), `Deleted ${room.name}`)}
+            onPairShapes={async (host, controllerPort) => {
+              const device = await pairShapes(port, host, controllerPort)
+              await poll()
+              setToast(`Paired ${device.name}`)
+            }}
+            onForgetShapes={d => mutate(() => forgetShapes(port, d.id), `Forgot ${d.name}`)}
             onScan={scan}
             scanning={scanning}
           />

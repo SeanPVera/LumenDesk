@@ -22,7 +22,9 @@ export type MusicSilenceBehavior = "settle" | "holdPalette" | "fadeOut";
 
 export type FixtureTopologyLayout = "leftToRight" | "frontToBack" | "circular" | "custom";
 
-export type MusicTransportKind = "lifxLAN" | "goveeLAN" | "goveeRealtimeSegments";
+// Mirrors MusicTransportKind in MusicMode.swift. The browser has no per-panel
+// Shapes stream, so a Shapes wall is always "nanoleafLAN" here.
+export type MusicTransportKind = "lifxLAN" | "goveeLAN" | "nanoleafLAN" | "goveeRealtimeSegments";
 
 export type FixtureRole = "auto" | "wash" | "hit" | "accent" | "motion" | "off";
 

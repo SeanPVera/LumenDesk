@@ -198,3 +198,38 @@ meter { width: 100%; height: 12px; accent-color: var(--text); }
 /* Keep shared output reachable in larger installations. */
 .emitters { max-height: 320px; overflow-y: auto; }
 @media (min-width: 900px) { .output-controls { position: sticky; top: 24px; } }
+
+/* Nanoleaf Shapes: the wall drawn as it hangs, panel by panel. */
+.badge.nanoleaf { color: var(--secondary); }
+.attention { color: var(--warning); }
+.shapes-mini { display: block; width: calc(100% - 24px); height: 40px; margin: 8px 12px 4px; }
+.shapes-mini polygon { stroke: var(--canvas); stroke-width: 1; }
+.shapes-editor { margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--soft-rule); display: flex; flex-direction: column; gap: 12px; }
+.shapes-editor .section-line { flex-wrap: wrap; margin: 0; }
+.shapes-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(290px, 360px); gap: 32px; align-items: start; }
+.shapes-stage { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.shapes-canvas { width: 100%; height: auto; background: var(--surface); display: block; }
+.shapes-up { fill: var(--secondary); font-size: 12px; }
+.shapes-reference { fill: none; stroke: var(--muted); stroke-width: 1.5; stroke-dasharray: 3 3; }
+.shapes-panel { cursor: pointer; outline: none; }
+.shapes-panel polygon { stroke: var(--canvas); stroke-width: 2; stroke-linejoin: round; }
+.shapes-panel.off polygon { stroke: var(--muted); stroke-dasharray: 5 4; stroke-width: 1.5; }
+.shapes-panel.selected polygon { stroke: var(--focus); stroke-width: 4; stroke-dasharray: none; }
+.shapes-panel:focus-visible polygon { stroke: var(--warning); stroke-width: 4; stroke-dasharray: none; }
+.shapes-panel text { font-size: 14px; font-weight: 600; pointer-events: none; font-variant-numeric: tabular-nums; }
+.shapes-panel text.light { fill: #ffffff; paint-order: stroke; stroke: #000000; stroke-width: 3px; }
+.shapes-panel text.dark { fill: #000000; paint-order: stroke; stroke: #ffffff; stroke-width: 3px; }
+.shapes-tools { display: flex; flex-direction: column; gap: 20px; }
+.shapes-tools fieldset { border: 0; border-top: 1px solid var(--soft-rule); margin: 0; padding: 14px 0 0; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.shapes-tools legend { font-weight: 600; padding: 0; margin-bottom: 4px; }
+.shapes-tools .rows .row { padding: 6px 0; }
+label.inline { display: flex; align-items: center; gap: 8px; color: var(--secondary); }
+label.inline input[type=number] { width: 84px; }
+.panel-info { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+@media (max-width: 900px) {
+  .shapes-layout { grid-template-columns: 1fr; gap: 20px; }
+}
+@media (forced-colors: active) {
+  .shapes-panel.selected polygon { stroke: Highlight; }
+  .shapes-panel:focus-visible polygon { stroke: CanvasText; }
+}

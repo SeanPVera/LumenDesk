@@ -8,6 +8,7 @@ import {
   hexToRGB,
   rgbToHex,
 } from './bridge'
+import { ShapesEditor, ShapesMiniWall, type ShapesActions } from './ShapesEditor'
 
 export const ACTION_LABELS: Record<ScheduleAction, string> = {
   turnOn: 'Turn on',
@@ -38,6 +39,16 @@ export interface Controls {
   favorite: (d: Device) => void
   rename: (d: Device, name: string) => void
   assign: (d: Device, roomID: string | null) => void
+  /** Panel-resolved commands for a paired Nanoleaf Shapes wall. */
+  shapes: (d: Device) => ShapesActions
+}
+
+/** A Shapes wall whose layout the bridge has read, so its panels can be drawn. */
+export const isShapesWall = (d: Device) => d.brand === 'nanoleaf' && Boolean(d.shapes?.geometry?.panels.length)
+
+function outputKind(d: Device): string {
+  if (isShapesWall(d)) return `Shapes · ${d.shapes!.geometry!.panels.length} panels`
+  return d.brand === 'nanoleaf' ? 'Shapes · layout not read yet' : 'Whole-fixture color'
 }
 
 // MARK: light card
@@ -182,16 +193,16 @@ export function HomeView({ devices, controls, onBulk, onScan, scanning }: {
           {devices.map(d => <button key={d.id} className="emitter"
             title={d.name} aria-pressed={active.includes(d.id)} onClick={() => toggle(d.id)}
             aria-label={`${d.name}, ${!d.reachable ? 'not responding' : d.power ? `${d.brightness}% on` : 'off'}`}>
-            <span className="emission" style={{
+            {isShapesWall(d) ? <ShapesMiniWall device={d} /> : <span className="emission" style={{
               background: d.power && d.reachable ? rgbToHex(d.color ?? {r: 255,g:255,b:255}) : 'var(--surface)',
               opacity: d.power && d.reachable ? 0.25 + d.brightness / 135 : 1,
-            }} aria-hidden="true" />
+            }} aria-hidden="true" />}
             <strong>{d.name}</strong>
             <span>{!d.reachable ? 'Not responding' : d.power ? `${d.brightness}% · On` : 'Off'}</span>
             <span className="selection-mark" aria-hidden="true">{active.includes(d.id) ? '✓' : '+'}</span>
           </button>)}
         </div>
-        <p className="note">Ordered fixtures. The bridge does not report physical positions or segment output.</p>
+        <p className="note">Fixture order, not room positions. Shapes walls are drawn panel by panel; other fixtures show one colour.</p>
       </div>
       <div className="room-editing">
         <div className="fixture-directory">
@@ -200,7 +211,7 @@ export function HomeView({ devices, controls, onBulk, onScan, scanning }: {
           {active.some(id => !visible.some(d => d.id === id)) && <p className="note">Your selection includes fixtures hidden by this search.</p>}
           <ul className="fixture-rows">{visible.map(d => <li key={d.id}>
             <label><input type="checkbox" checked={active.includes(d.id)} onChange={() => toggle(d.id)} />
-              <span><strong>{d.name}</strong><small>{d.brand.toUpperCase()} · Whole-fixture color</small></span>
+              <span><strong>{d.name}</strong><small>{d.brand.toUpperCase()} · {outputKind(d)}</small></span>
             </label>
             <span>{!d.reachable ? 'Offline' : d.power ? `${d.brightness}%` : 'Off'}</span>
           </li>)}</ul>
@@ -214,8 +225,8 @@ export function HomeView({ devices, controls, onBulk, onScan, scanning }: {
             <button className="primary" disabled={!targets.length} onClick={() => onBulk(targets.map(d => d.id), 'on')}>On</button>
             <button disabled={!targets.length} onClick={() => onBulk(targets.map(d => d.id), 'off')}>Off</button>
           </div>
-          <label className="field">Brightness <output>{level}%</output>
-            <input type="range" min="0" max="100" value={level} disabled={!targets.length}
+          <label className="field" htmlFor="room-brightness">Brightness <output>{level}%</output>
+            <input id="room-brightness" type="range" min="0" max="100" value={level} disabled={!targets.length}
               onChange={e => targets.forEach(d => controls.brightness(d, Number(e.target.value)))} />
           </label>
           <label className="color-control">Color
@@ -223,16 +234,21 @@ export function HomeView({ devices, controls, onBulk, onScan, scanning }: {
               onChange={e => targets.forEach(d => controls.color(d, hexToRGB(e.target.value)))} />
             <span>{mixed ? 'Mixed' : color.toUpperCase()}</span>
           </label>
-          <label className="field">White temperature <output>{targets[0]?.kelvin ?? 3500} K</output>
-            <input type="range" min="2500" max="9000" step="100" value={targets[0]?.kelvin ?? 3500} disabled={!targets.length}
+          <label className="field" htmlFor="room-white">White temperature <output>{targets[0]?.kelvin ?? 3500} K</output>
+            <input id="room-white" type="range" min="2500" max="9000" step="100" value={targets[0]?.kelvin ?? 3500} disabled={!targets.length}
               onChange={e => targets.forEach(d => controls.kelvin(d, Number(e.target.value)))} />
           </label>
-          <p className="note">Color and white replace the current whole-fixture output. Hardware limits still apply.</p>
+          <p className="note">Color and white replace the current whole-fixture output, a Shapes design or scene included. Hardware limits still apply.</p>
+          {active.length !== 1 && targets.some(isShapesWall) && <p className="note">Select one Shapes wall on its own to paint its panels.</p>}
           {active.length === 1 && <details><summary>Fixture details</summary>
             <ul className="inspector-list"><LightCard device={devices.find(d => d.id === active[0])!} controls={controls} compact /></ul>
           </details>}
         </section>
       </div>
+      {active.length === 1 && (() => {
+        const wall = devices.find(d => d.id === active[0])
+        return wall && isShapesWall(wall) ? <ShapesEditor key={wall.id} device={wall} actions={controls.shapes(wall)} /> : null
+      })()}
     </>}
   </section>
 }
@@ -255,7 +271,8 @@ function EmptyLights({ scanning, onScan }: { scanning: boolean; onScan: () => vo
       <h2>No lights found yet</h2>
       <p>
         The bridge is running but has not heard from any lights. LIFX bulbs answer automatically;
-        Govee devices must have <strong>LAN Control</strong> enabled in the Govee Home app.
+        Govee devices must have <strong>LAN Control</strong> enabled in the Govee Home app. Nanoleaf
+        Shapes walls are paired once from <strong>Devices</strong>.
       </p>
       <button className="primary" onClick={onScan} disabled={scanning}>
         {scanning ? 'Scanning…' : 'Scan for lights'}
@@ -509,12 +526,61 @@ function ScheduleForm({
 
 // MARK: Devices
 
+function ShapesPairing({ onPair }: { onPair: (host: string, port: number) => Promise<void> }) {
+  const [host, setHost] = useState('')
+  const [port, setPort] = useState('16021')
+  const [busy, setBusy] = useState(false)
+  const [problem, setProblem] = useState<string | null>(null)
+  return (
+    <div className="panel">
+      <h2>Pair a Nanoleaf Shapes wall</h2>
+      <ol className="steps">
+        <li>Find the controller’s IP address in your router’s list of connected devices.</li>
+        <li>Hold the controller’s power button for 5–7 seconds, until its LED flashes.</li>
+        <li>Within 30 seconds, enter the address and choose Pair.</li>
+      </ol>
+      <form
+        className="schedule-form"
+        onSubmit={async e => {
+          e.preventDefault()
+          setBusy(true)
+          setProblem(null)
+          try {
+            await onPair(host.trim(), Number(port) || 16021)
+            setHost('')
+          } catch (err) {
+            setProblem(err instanceof Error ? err.message : String(err))
+          } finally {
+            setBusy(false)
+          }
+        }}
+      >
+        <label>Controller address
+          <input type="text" inputMode="decimal" placeholder="192.168.1.40" value={host}
+            onChange={e => setHost(e.target.value)} autoComplete="off" spellCheck={false} />
+        </label>
+        <label>Port
+          <input type="number" min={1} max={65535} value={port} onChange={e => setPort(e.target.value)} />
+        </label>
+        <button className="primary" type="submit" disabled={busy || !host.trim()}>{busy ? 'Pairing…' : 'Pair'}</button>
+      </form>
+      {problem && <p className="error" role="alert">{problem}</p>}
+      <p className="note">
+        The bridge keeps the controller’s access token in <code>~/.lumendesk/nanoleaf-pairings.json</code>,
+        readable only by your user account. The token never reaches this page.
+      </p>
+    </div>
+  )
+}
+
 export function DevicesView({
   devices,
   rooms,
   controls,
   onAddRoom,
   onDeleteRoom,
+  onPairShapes,
+  onForgetShapes,
   onScan,
   scanning,
 }: {
@@ -523,6 +589,8 @@ export function DevicesView({
   controls: Controls
   onAddRoom: (name: string) => void
   onDeleteRoom: (room: Room) => void
+  onPairShapes: (host: string, port: number) => Promise<void>
+  onForgetShapes: (d: Device) => void
   onScan: () => void
   scanning: boolean
 }) {
@@ -567,6 +635,8 @@ export function DevicesView({
         )}
       </div>
 
+      <ShapesPairing onPair={onPairShapes} />
+
       <div className="group">
         <h2 className="group-title">
           Discovered lights
@@ -604,7 +674,14 @@ export function DevicesView({
                     </option>
                   ))}
                 </select>
-                <span className={d.reachable ? 'ok' : 'warn'}>{d.reachable ? 'Online' : 'Offline'}</span>
+                <span className={d.reachable && !d.needsPairing ? 'ok' : 'warn'}>
+                  {d.needsPairing ? 'Pair again' : d.reachable ? 'Online' : 'Offline'}
+                </span>
+                {d.brand === 'nanoleaf' && (
+                  <button className="ghost" aria-label={`Forget ${d.name}`} onClick={() => {
+                    if (window.confirm(`Forget “${d.name}”? The bridge deletes its access token; pairing again needs the power button.`)) onForgetShapes(d)
+                  }}>Forget</button>
+                )}
               </li>
             ))}
           </ul>
@@ -666,8 +743,9 @@ export function SettingsView({
       <div className="panel">
         <h2>Not here yet</h2>
         <p>
-          Animated effects, Music Mode, Govee RGBIC segment editing and LIFX matrix control are
-          native-app features and are not part of the web client.
+          Animated effects, Govee RGBIC segment editing, LIFX matrix control and panel-by-panel
+          Shapes music are native-app features. In the browser, Music Mode drives every fixture,
+          Shapes walls included, as one colour.
         </p>
       </div>
     </section>

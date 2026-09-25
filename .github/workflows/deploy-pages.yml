@@ -85,6 +85,23 @@ jobs:
           npm test
           npm run build
 
+      - name: Review rendered web interface
+        working-directory: web/app
+        env:
+          LUMENDESK_WEB_QA_DIRECTORY: ${{ runner.temp }}/LumenDesk-Web-QA
+        run: |
+          npm install --no-save --package-lock=false @playwright/test@1.56.1 @axe-core/playwright@4.10.2
+          npx playwright install --with-deps chromium
+          node scripts/visual-review.mjs
+
+      - name: Upload web visual review
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-visual-review
+          path: ${{ runner.temp }}/LumenDesk-Web-QA
+          if-no-files-found: warn
+
       - name: Build design prototype
         working-directory: design-prototype
         env:

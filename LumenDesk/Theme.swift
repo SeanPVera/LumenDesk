@@ -5,29 +5,11 @@ import AppKit
 import UIKit
 #endif
 
-// MARK: - LumenDesk design system — "Plan"
+// MARK: - LumenDesk design system — Light in place
 //
-// The room is the primary object. The screen is a drawing of the home, and
-// every lit fixture pools its own colour onto it, so a dark room reads from
-// across the desk without reading a word.
-//
-//     The plan is not a floor plan. It is a seating chart.
-//
-// It does not have to be architecturally correct, it has to be consistent. A
-// kitchen that stays top-right is learned in about a day and never unlearned,
-// which is why an overlapping drop is refused rather than tidied away and why
-// every default position in `PlanLayout` is deterministic.
-//
-// The ground is cold. An earlier direction argued for warm near-black on the
-// grounds that home light lives at 2200-4000 K, but that reasoning belongs to
-// an interface standing *inside* the lamp's own colour. A plan looks down at a
-// room from outside it, at night, and a cold floor is what makes a 2200 K
-// bedside lamp read as warm when it pools on one.
-//
-// Two colours are authored into the interface and no more. Link cyan means
-// network truth and nothing else. Mark is the drawing's annotation colour, the
-// blue pencil a drafter reaches for, and it is reserved for dimensions and
-// selection. Every other colour on screen is a fixture reporting its own.
+// Achromatic structure contains lighting color. Room state, selection and
+// connectivity also have text or shape. Saved placement is relative, never
+// calibrated architecture. See DESIGN_SYSTEM.md for implemented tokens and limits.
 
 enum Lumen {
 
@@ -38,20 +20,20 @@ enum Lumen {
     // its own and not a property of the surface it lands on.
 
     /// Ground beneath everything, and the well a control recesses into.
-    static let stage        = Color(hex: 0x05080C)
+    static let stage        = Color(hex: 0x101112)
     /// Large working areas: the inspector, sheets, secondary panels.
-    static let deck         = Color(hex: 0x080D13)
+    static let deck         = Color(hex: 0x17191B)
     /// A room's floor, and the standard panel fill everywhere else.
     ///
     /// The whole cool ramp from here up was lifted one step after the first
     /// build rendered: at the original values a room read as a hole in the
     /// page and the walls barely separated from the floor they enclosed. A
     /// drawing needs its sheet to be visibly lighter than the dark around it.
-    static let floor        = Color(hex: 0x0E141D)
+    static let floor        = Color(hex: 0x1D2022)
     /// The selected room's floor, and any hovered or raised surface.
-    static let floorRaised  = Color(hex: 0x151F2B)
+    static let floorRaised  = Color(hex: 0x272B2E)
     /// The loudest surface in the system, used for grouped controls.
-    static let stripLoud    = Color(hex: 0x1D2836)
+    static let stripLoud    = Color(hex: 0x32373A)
 
     // MARK: Walls
     //
@@ -60,43 +42,36 @@ enum Lumen {
     // reads as having thickness rather than as a hairline.
 
     /// The filled band a wall line sits on.
-    static let poche      = Color(hex: 0x1A2734)
+    static let poche      = Color(hex: 0x282D30)
     /// Interior partitions.
-    static let wall       = Color(hex: 0x33475A)
+    static let wall       = Color(hex: 0x50595E)
     /// The exterior envelope, and any structural edge.
-    static let wallOuter  = Color(hex: 0x63839B)
+    static let wallOuter  = Color(hex: 0x879094)
 
     // MARK: Separators
     //
     // Used sparingly. Plan separates surfaces by value and by wall; a rule only
     // appears where two areas share a value and still need a boundary.
 
-    static let ruleSoft = Color(hex: 0x131C26)
-    static let rule     = Color(hex: 0x2B3B4B)
+    static let ruleSoft = Color(hex: 0x303539)
+    static let rule     = Color(hex: 0x50585D)
 
     // MARK: Text
 
-    static let chalk = Color(hex: 0xE4EDF7)
-    static let meter = Color(hex: 0x9DB0C6)
-    static let muted = Color(hex: 0x6A7F96)
-    static let faint = Color(hex: 0x3D4E60)
+    static let chalk = Color(hex: 0xEDF0F1)
+    static let meter = Color(hex: 0xBCC3C7)
+    static let muted = Color(hex: 0xA0A9AE)
+    static let faint = Color(hex: 0x778187)
 
     /// Illumination. A lit key face, a fader cap, a powered legend.
-    static let lit = Color(hex: 0xF4F8FE)
+    static let lit = Color(hex: 0xF8FAFA)
 
-    /// The drawing's annotation colour — the blue pencil a drafter reaches
-    /// for. Dimensions and selection outlines only; it is not an accent and
-    /// nothing decorative may spend it.
-    static let mark = Color(hex: 0xBFD9F5)
+    /// Selection and annotations share the neutral foreground.
+    static let mark = Color(hex: 0xEDF0F1)
 
-    // MARK: The one hue
-    //
-    // Link cyan means the network, and nothing else. Discovery, a confirmed
-    // packet, a round-trip figure, an address. It is deliberately the only
-    // authored hue in the product, so a coloured pixel anywhere else on screen
-    // is a fixture reporting its own colour.
+    // MARK: Network and status
 
-    static let link    = Color(hex: 0x5FE0D8)
+    static let link    = Color(hex: 0xB8C8C5)
     static let linkDim = Color(hex: 0x2C6E6A)
 
     /// Status. Both are rare and both always ship with an icon, because hue
@@ -159,7 +134,7 @@ enum Lumen {
 
     // MARK: Metrics
 
-    static let stripRadius: CGFloat = 10
+    static let stripRadius: CGFloat = 6
     static let controlRadius: CGFloat = 6
     /// No call site may produce a corner sharper than the system allows.
     static let minimumRadius: CGFloat = 6
@@ -197,7 +172,7 @@ enum Lumen {
     static let signal       = chalk
     static let signalBright = lit
     static let cyan         = link
-    static let focus        = link
+    static let focus        = lit
 
     /// A confirmed device is a network fact, so it speaks in link cyan.
     static let success = link
@@ -260,18 +235,17 @@ enum LumenType {
     /// On an obsidian ground they do not read at all, so the floor is applied
     /// here instead of at forty call sites, and it holds for the next one
     /// somebody writes.
-    static let minimumSize: CGFloat = 10.5
+    static let minimumSize: CGFloat = 12
 
     /// Names and titles. Standard-width SF Pro, sentence case at call sites.
     static func display(size: CGFloat, weight: Font.Weight = .semibold) -> Font {
         .system(size: max(size, minimumSize), weight: weight)
     }
 
-    /// Measured values: levels, kelvin, counts, timings, addresses. Monospaced
-    /// and tabular, because the whole point of a strip field is comparing
-    /// numbers down a column.
+    /// Measured values use system text with tabular digits. Technical identifiers
+    /// opt into a monospace face at their call site.
     static func readout(size: CGFloat, weight: Font.Weight = .medium) -> Font {
-        .system(size: max(size, minimumSize), weight: weight, design: .monospaced)
+        .system(size: max(size, minimumSize), weight: weight).monospacedDigit()
     }
 
     /// Control labels. Sentence case in new code; the face is sans so that

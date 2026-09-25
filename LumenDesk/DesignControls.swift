@@ -1,26 +1,8 @@
 import SwiftUI
 
-// MARK: - Wash instrument controls
-//
-// The controls a lighting board needs do not exist in the standard library, so
-// LumenDesk draws its own. They are built on the tokens in `Theme.swift` and
-// follow the same rule: every fixture owns a strip, and the strip is lit by
-// the fixture.
-//
-// What changed from Spectral Bench, and why:
-//
-// - Uppercase and letter-spacing left every label. Uppercase has no
-//   descenders and a flat x-height, so a screen carrying forty tracked-out
-//   legends gives the eye no shape to lock onto and every line ends up
-//   weighing the same. Hierarchy is size and weight now.
-// - Borders left almost everything. A 1 px hairline around each control on a
-//   near-black ground was drawing sixty boxes to say what value already said.
-// - Etched fader graduations left the fader. They read as instrumentation up
-//   close and as noise at a glance, and the number beside the fader was
-//   already exact.
-//
-// Nothing in this file talks to a device: these are presentation only, driven
-// by bindings the views already own.
+// MARK: - Shared light controls
+// Presentation only: bindings retain existing command/commit behavior.
+// Neutral chrome, visible focus, tabular values and keyboard/VoiceOver actions.
 
 // MARK: - Fader
 
@@ -69,6 +51,7 @@ struct LumenFader: View {
 
     @Environment(\.isEnabled) private var isEnabled
     @State private var editing = false
+    @FocusState private var hasKeyboardFocus: Bool
 
     private var span: Double { max(0.000001, range.upperBound - range.lowerBound) }
     private var fraction: Double { min(1, max(0, (value - range.lowerBound) / span)) }
@@ -105,6 +88,8 @@ struct LumenFader: View {
             }
         }
         .focusableCompat()
+        .focused($hasKeyboardFocus)
+        .overlay(RoundedRectangle(cornerRadius: 4).stroke(hasKeyboardFocus ? Lumen.focus : .clear, lineWidth: 2).padding(-3))
         .onHorizontalMoveCompat { nudge($0) }
     }
 
@@ -113,7 +98,7 @@ struct LumenFader: View {
             let width = max(1, proxy.size.width)
             ZStack(alignment: .leading) {
                 Capsule()
-                    .fill(Lumen.stage)
+                    .fill(Lumen.rule)
                     .frame(height: 5)
                 Capsule()
                     .fill(track.gradient)
@@ -124,7 +109,7 @@ struct LumenFader: View {
                 RoundedRectangle(cornerRadius: 2.5, style: .continuous)
                     .fill(Lumen.lit)
                     .frame(width: 5, height: 18)
-                    .shadow(color: Lumen.chalk.opacity(editing ? 0.5 : 0.22), radius: 6)
+
                     .offset(x: min(max(0, width * fraction - 2.5), width - 5))
             }
             .contentShape(Rectangle())
@@ -144,15 +129,17 @@ struct LumenFader: View {
                     }
             )
         }
-        .frame(height: 22)
+        .frame(height: 44)
     }
 
     private func commit(x: CGFloat, width: CGFloat) {
+        guard isEnabled else { return }
         let ratio = min(1, max(0, Double(x / width)))
         value = quantized(range.lowerBound + ratio * span)
     }
 
     private func nudge(_ direction: Int) {
+        guard isEnabled else { return }
         let increment = step ?? (span / 20)
         value = min(range.upperBound,
                     max(range.lowerBound,
@@ -210,7 +197,7 @@ private struct LumenPowerKeyFace: View {
                     .foregroundStyle(configuration.isOn ? Lumen.stage : Lumen.faint)
             }
             .frame(width: size, height: size)
-            .shadow(color: tint.opacity(configuration.isOn ? 0.35 : 0), radius: 12)
+            .lumenInteractiveTarget()
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -344,15 +331,13 @@ struct LumenSelector<Value: Hashable>: View {
             if showsLabel {
                 LumenEyebrow(text: label)
             }
-            HStack(spacing: 2) {
-                ForEach(options) { option in
-                    Button {
-                        selection = option.value
-                    } label: {
-                        segment(for: option)
+            Group {
+                if options.count > 4 {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 4)], spacing: 4) {
+                        choices
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityAddTraits(selection == option.value ? [.isButton, .isSelected] : .isButton)
+                } else {
+                    HStack(spacing: 4) { choices }
                 }
             }
             .padding(2.5)
@@ -362,6 +347,14 @@ struct LumenSelector<Value: Hashable>: View {
         .accessibilityLabel(label)
     }
 
+    private var choices: some View {
+        ForEach(options) { option in
+            Button { selection = option.value } label: { segment(for: option) }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selection == option.value ? [.isButton, .isSelected] : .isButton)
+        }
+    }
+
     private func segment(for option: LumenOption<Value>) -> some View {
         let active = selection == option.value
         return HStack(spacing: 5) {
@@ -369,12 +362,12 @@ struct LumenSelector<Value: Hashable>: View {
                 Image(systemName: symbol).font(.system(size: 10, weight: .medium))
             }
             Text(option.title)
-                .font(.system(size: 11.5, weight: .medium))
+                .font(.system(size: 13, weight: .medium))
                 .lineLimit(1)
         }
         .foregroundStyle(active ? Lumen.chalk : Lumen.muted)
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 5)
+        .frame(minHeight: 44)
         .background(
             RoundedRectangle(cornerRadius: Lumen.controlRadius, style: .continuous)
                 .fill(active ? Lumen.stripLoud : Color.clear)

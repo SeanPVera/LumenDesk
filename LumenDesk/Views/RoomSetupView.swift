@@ -32,6 +32,7 @@ struct RoomSetupView: View {
     @State private var newRoomName = ""
     @State private var showingNewRoomField = false
     @State private var started = false
+    @State private var showingArrangement = false
 
     /// A parser suggestion the user can rename or throw away before it becomes
     /// a real room.
@@ -63,6 +64,7 @@ struct RoomSetupView: View {
         }
         .background(Lumen.stage)
         .sheetFrame(minWidth: 720, idealWidth: 820, minHeight: 540, idealHeight: 600)
+        .sheet(isPresented: $showingArrangement) { RoomArrangementSheet().environmentObject(manager) }
         .onAppear(perform: start)
         // The bulb keeps breathing until something stops it, so every exit
         // from this view has to put it back.
@@ -179,8 +181,8 @@ struct RoomSetupView: View {
         switch entry {
         case .propose:  return "Sort"
         case .identify: return "Identify"
-        case .arrange:  return "Arrange"
-        case .done:     return "Plan"
+        case .arrange:  return "Review"
+        case .done:     return "Ready"
         }
     }
 
@@ -209,12 +211,12 @@ struct RoomSetupView: View {
                 }
                 .buttonStyle(LumenSecondaryButtonStyle(compact: true))
             case .arrange:
-                Button("Reset layout") { manager.resetPlanLayout() }
+                Button("Arrange rooms…") { showingArrangement = true }
                     .buttonStyle(LumenSecondaryButtonStyle(compact: true))
-                Button("Looks right") { step = .done }
+                Button("Continue") { step = .done }
                     .buttonStyle(LumenPrimaryButtonStyle(compact: true))
             case .done:
-                Button("Open the plan") { dismiss() }
+                Button("Open Room") { dismiss() }
                     .buttonStyle(LumenPrimaryButtonStyle(compact: true))
             }
         }
@@ -414,38 +416,37 @@ struct RoomSetupView: View {
     // MARK: Step 3 — arrange
 
     private var arrangeStep: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            stepHeading("Arrange your rooms",
-                        "This does not have to match your floor plan. It has to look like your home to you. Drag a block to move it, drag its corner to resize. Skip it and the auto-layout is what you get, which is a real answer rather than a placeholder.")
-
-            PlanBoardView(arranging: true,
-                          selectedRoomID: .constant(nil),
-                          selectedLightID: .constant(nil))
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                stepHeading("Review your rooms", "Each room becomes a workspace. Relative placement is optional and remains editable from Room actions.")
+                ForEach(manager.rooms) { room in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(room.name).font(.headline)
+                        Text(manager.devices(in: room).map(\.label).joined(separator: " · "))
+                            .font(.callout).foregroundStyle(Lumen.meter)
+                    }
+                    Divider()
+                }
+                if manager.rooms.isEmpty {
+                    Text("No rooms yet. All lights remains available; you can create rooms later.")
+                        .foregroundStyle(Lumen.meter)
+                }
+            }.padding(20)
         }
-        .padding(20)
     }
 
-    // MARK: Step 4 — done
-
     private var doneStep: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            stepHeading("Your plan",
-                        "Fixture dots are placed automatically inside each room. You can drag them from a room's inspector later, and most people never will.")
-
-            PlanBoardView(arranging: false,
-                          selectedRoomID: .constant(nil),
-                          selectedLightID: .constant(nil))
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-
+        VStack(alignment: .leading, spacing: 18) {
+            stepHeading("Ready to control", "Choose a room at the top of the workspace. Light, Compositions and Music all use that scope.")
+            Text("\(manager.rooms.count) rooms · \(manager.devices.count - manager.unplacedDevices.count) assigned fixtures")
+                .font(.headline)
             if !skipped.isEmpty {
-                Label("\(skipped.count) fixture\(skipped.count == 1 ? "" : "s") stayed in the tray. They sit on the plan until you sort them, and nothing was invented to hold them.",
+                Label("\(skipped.count) fixtures are unassigned. They remain available in All lights; use Assign fixtures when you are ready.",
                       systemImage: "tray")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Lumen.warn)
+                    .font(.callout).foregroundStyle(Lumen.meter)
             }
-        }
-        .padding(20)
+            Spacer()
+        }.padding(20)
     }
 
     // MARK: Shared

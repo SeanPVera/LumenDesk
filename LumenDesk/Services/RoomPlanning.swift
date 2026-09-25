@@ -315,3 +315,19 @@ enum RoomNameParser {
         }
     }
 }
+
+
+/// View selection policy, separate from Room membership and fixture topology.
+enum RoomWorkspaceSelection {
+    static func reconciled(selected: Set<String>, available: [String]) -> Set<String> {
+        let remaining = selected.intersection(available)
+        // Retain an empty-target selection until explicitly cleared. Otherwise
+        // removing its last fixture would silently turn the next edit into All.
+        return remaining.isEmpty && !selected.isEmpty ? selected : remaining
+    }
+
+    static func targets(selected: Set<String>, available: [String]) -> Set<String> {
+        // A nonempty stale selection must never expand into a room-wide action.
+        selected.isEmpty ? Set(available) : selected.intersection(available)
+    }
+}

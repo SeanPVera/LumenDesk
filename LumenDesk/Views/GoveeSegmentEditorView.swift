@@ -10,6 +10,7 @@ import SwiftUI
 struct GoveeSegmentEditorView: View {
     @EnvironmentObject var manager: LightManager
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject var device: LightDevice
 
     @State private var draft = GoveeSegmentState(colors: [])
@@ -57,28 +58,51 @@ struct GoveeSegmentEditorView: View {
         VStack(alignment: .leading, spacing: 12) {
             header
             subtitle
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    stripSection
-                    if limitsZones { zonePowerSection }
-                    selectionToolbar
-                    paintSection
-                    brightnessSection
-                    if profile.supportsGradient { gradientSection }
-                    presetSection
-                    setupSection
+            GeometryReader { geometry in
+                ScrollView {
+                    if geometry.size.width >= 820 {
+                        HStack(alignment: .top, spacing: 28) {
+                            spatialTools.frame(maxWidth: .infinity)
+                            paintToolsColumn.frame(width: 310)
+                        }
+                    } else {
+                        VStack(alignment: .leading, spacing: 20) {
+                            spatialTools
+                            paintToolsColumn
+                        }
+                    }
                 }
-                .padding(.vertical, 2)
             }
             footer
         }
         .padding(20)
-        .sheetFrame(minWidth: 600, idealWidth: 700, minHeight: 560, idealHeight: 660)
+        .sheetFrame(minWidth: 620, idealWidth: 1000, minHeight: 560, idealHeight: 740)
         .background(LumenBackground(glow: false))
         .onAppear(perform: load)
         .onDisappear {
             manager.endSegmentPreview(device)
             manager.storeSegmentState(draft, for: device)
+        }
+    }
+
+    private var spatialTools: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Controller → segment order").font(.headline)
+            stripSection
+            if limitsZones { zonePowerSection }
+            selectionToolbar
+            DisclosureGroup("Hardware & live preview") { setupSection.padding(.top, 12) }
+        }
+    }
+
+    private var paintToolsColumn: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text(selection.isEmpty ? "Paint all \(draft.segmentCount) \(unitName)s" : "Paint \(selection.count) selected")
+                .font(.headline)
+            paintSection
+            brightnessSection
+            if profile.supportsGradient { gradientSection }
+            DisclosureGroup("Presets") { presetSection.padding(.top, 12) }
         }
     }
 
@@ -89,7 +113,7 @@ struct GoveeSegmentEditorView: View {
             Label("\(studioName) — \(device.label)", systemImage: layout.icon)
                 .font(LumenType.display(size: 19, weight: .bold))
             Spacer()
-            Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
+            Button("Close preview") { dismiss() }.keyboardShortcut(.cancelAction)
         }
     }
 
@@ -113,7 +137,7 @@ struct GoveeSegmentEditorView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             if manager.isDemoMode {
-                Label("Demo mode: the layout is saved and simulated, no packets are sent.", systemImage: "sparkles")
+                Label("Demo mode: the layout is saved and simulated, no packets are sent.", systemImage: "play.rectangle")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -127,7 +151,7 @@ struct GoveeSegmentEditorView: View {
             stripView
             Text(selectionCaption)
                 .font(.caption2)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(Lumen.meter)
         }
     }
 
@@ -141,7 +165,7 @@ struct GoveeSegmentEditorView: View {
             case .curtain:
                 return "Choose one or more vertical columns. With nothing selected, painting updates the whole curtain."
             default:
-                return "Tap or drag across segments to select them. With nothing selected, painting fills the whole strip."
+                return "Select numbered segments to paint them. With nothing selected, painting fills the whole strip."
             }
         }
         return "\(selection.count) \(unitName)\(selection.count == 1 ? "" : "s") selected — colors and brightness apply to the selection."
@@ -156,22 +180,13 @@ struct GoveeSegmentEditorView: View {
         } else if isCurtain {
             curtainColumnView
         } else {
-            GeometryReader { geo in
-                let count = max(1, draft.segmentCount)
-                let spacing: CGFloat = 2
-                let cellWidth = max(4, (geo.size.width - spacing * CGFloat(count - 1)) / CGFloat(count))
-                ZStack {
-                    HStack(spacing: spacing) {
-                        ForEach(0..<count, id: \.self) { index in
-                            segmentCell(index: index, width: cellWidth)
-                        }
-                    }
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 44), spacing: 4)], spacing: 4) {
+                ForEach(0..<max(1, draft.segmentCount), id: \.self) { index in
+                    segmentCell(index: index, width: 44)
                 }
-                .contentShape(Rectangle())
-                .gesture(dragSelectGesture(width: geo.size.width, count: count))
             }
-            .frame(height: 56)
-            .accessibilityLabel("Segment strip, \(draft.segmentCount) segments")
+            .accessibilityLabel("Segment order from controller, \(draft.segmentCount) segments")
+
         }
     }
 
@@ -184,96 +199,49 @@ struct GoveeSegmentEditorView: View {
     }
 
     private var stringLightView: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            ForEach(Array(stringLightRows.enumerated()), id: \.offset) { _, indexes in
-                let range = indexes.sorted()
-                HStack(spacing: 8) {
-                    Text("\((range.first ?? 0) + 1)–\((range.last ?? 0) + 1)")
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(.tertiary)
-                        .frame(width: 44, alignment: .trailing)
-                    ZStack {
-                        Capsule()
-                            .fill(Lumen.hairlineStrong)
-                            .frame(height: 2)
-                        HStack(spacing: profile.stringLightStyle == .bead ? 4 : 7) {
+        ScrollView(.horizontal) {
+            VStack(alignment: .leading, spacing: 12) {
+                ForEach(Array(stringLightRows.enumerated()), id: \.offset) { row, indexes in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(row.isMultiple(of: 2) ? "Order →" : "← Order")
+                            .font(.caption).foregroundStyle(Lumen.meter)
+                        HStack(spacing: 4) {
                             ForEach(indexes, id: \.self) { index in
-                                stringLightUnit(index)
+                                segmentCell(index: index, width: 44)
                             }
                         }
                     }
-                    .frame(maxWidth: .infinity,
-                           minHeight: profile.stringLightStyle == .bead ? 22 : 32)
                 }
             }
         }
-        .padding(10)
-        .background(Lumen.surfaceRaised, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Lumen.hairline, lineWidth: 0.5))
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("String light with \(draft.segmentCount) \(unitName)s")
-    }
-
-    private func stringLightUnit(_ index: Int) -> some View {
-        let isSelected = selection.contains(index)
-        return Button {
-            toggleSelection(index)
-        } label: {
-            Group {
-                if profile.stringLightStyle == .bead {
-                    Circle()
-                        .fill(color(at: index))
-                        .frame(width: isSelected ? 15 : 11, height: isSelected ? 15 : 11)
-                        .shadow(color: color(at: index).opacity(0.7), radius: 3)
-                } else {
-                    Image(systemName: "lightbulb.fill")
-                        .font(.system(size: isSelected ? 25 : 21, weight: .medium))
-                        .foregroundStyle(color(at: index))
-                        .shadow(color: color(at: index).opacity(0.55), radius: 3)
-                }
-            }
-            .frame(maxWidth: .infinity, minHeight: 28)
-            .overlay(Circle().stroke(isSelected ? Color.accentColor : Color.clear,
-                                     lineWidth: isSelected ? 2 : 0))
-            .animation(.spring(duration: 0.15), value: isSelected)
-        }
-        .buttonStyle(.plain)
-        .help("\(unitName.capitalized) \(index + 1)")
-        .accessibilityLabel("\(unitName.capitalized) \(index + 1)")
-        .accessibilityValue(isSelected ? "selected" : "not selected")
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityLabel("String light with \(draft.segmentCount) \(unitName)s in alternating rows")
     }
 
     private var curtainColumnView: some View {
-        HStack(alignment: .top, spacing: 5) {
-            ForEach(0..<draft.segmentCount, id: \.self) { index in
-                let isSelected = selection.contains(index)
-                Button {
-                    toggleSelection(index)
-                } label: {
-                    VStack(spacing: 3) {
-                        ForEach(0..<10, id: \.self) { _ in
-                            Circle()
-                                .fill(color(at: index))
-                                .frame(width: 8, height: 8)
+        ScrollView(.horizontal) {
+            HStack(alignment: .top, spacing: 6) {
+                ForEach(0..<draft.segmentCount, id: \.self) { index in
+                    let isSelected = selection.contains(index)
+                    Button { toggleSelection(index) } label: {
+                        VStack(spacing: 4) {
+                            Rectangle().fill(color(at: index)).frame(width: 20, height: 90)
+                            Text("\(index + 1)").font(.caption.monospacedDigit())
+                            Image(systemName: isSelected ? "checkmark.square.fill" : "square")
                         }
+                        .foregroundStyle(Lumen.chalk)
+                        .frame(width: 44, height: 142)
+                        .overlay(RoundedRectangle(cornerRadius: 6)
+                            .stroke(isSelected ? Lumen.lit : Lumen.rule, lineWidth: isSelected ? 2 : 1))
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 7)
-                    .background(color(at: index).opacity(0.07), in: Capsule())
-                    .overlay(Capsule().stroke(isSelected ? Color.accentColor : Lumen.hairline,
-                                              lineWidth: isSelected ? 2 : 0.5))
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Curtain column \(index + 1)")
+                    .accessibilityValue(isSelected ? "Selected" : "Not selected")
+                    .accessibilityAddTraits(isSelected ? .isSelected : [])
                 }
-                .buttonStyle(.plain)
-                .help("Curtain column \(index + 1)")
-                .accessibilityLabel("Curtain column \(index + 1)")
-                .accessibilityValue(isSelected ? "selected" : "not selected")
-                .accessibilityAddTraits(isSelected ? .isSelected : [])
             }
+            .padding(2)
         }
-        .padding(10)
-        .background(Lumen.surfaceRaised, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Lumen.hairline, lineWidth: 0.5))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Curtain with \(draft.segmentCount) editable columns")
     }
@@ -330,9 +298,9 @@ struct GoveeSegmentEditorView: View {
         }
         .padding(.horizontal, 12)
         .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
-        .background(heldColor(at: index).opacity(isLit ? 0.08 : 0.02), in: RoundedRectangle(cornerRadius: 12))
+        .background(heldColor(at: index).opacity(isLit ? 0.08 : 0.02), in: RoundedRectangle(cornerRadius: 6))
         .overlay {
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: 6)
                 .stroke(isSelected ? Color.accentColor : Lumen.hairline,
                         lineWidth: isSelected ? 2 : 0.5)
         }
@@ -370,7 +338,7 @@ struct GoveeSegmentEditorView: View {
                 .foregroundStyle(.secondary)
             Text(zoneLimitExplanation)
                 .font(.caption2)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(Lumen.meter)
                 .fixedSize(horizontal: false, vertical: true)
             if !profile.zoneCombinations.isEmpty {
                 HStack(spacing: 6) {
@@ -396,8 +364,8 @@ struct GoveeSegmentEditorView: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Lumen.surfaceRaised, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Lumen.hairline, lineWidth: 0.5))
+        .background(Lumen.surfaceRaised, in: RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Lumen.hairline, lineWidth: 0.5))
         .accessibilityElement(children: .contain)
     }
 
@@ -420,7 +388,8 @@ struct GoveeSegmentEditorView: View {
             applyZoneCombination(zones)
         } label: {
             Text(zones.map { profile.zoneShortName($0) }.joined(separator: " + "))
-                .font(.caption2.weight(isCurrent ? .semibold : .regular))
+                .font(.caption.weight(isCurrent ? .semibold : .regular))
+                .frame(minHeight: 44)
                 .padding(.horizontal, 9)
                 .padding(.vertical, 5)
                 .background(isCurrent ? Color.accentColor.opacity(0.22) : Lumen.surfaceLoud, in: Capsule())
@@ -452,19 +421,24 @@ struct GoveeSegmentEditorView: View {
     @ViewBuilder
     private func segmentCell(index: Int, width: CGFloat) -> some View {
         let isSelected = selection.contains(index)
-        RoundedRectangle(cornerRadius: 3)
-            .fill(cellFill(index))
-            .frame(height: 44)
-            .overlay(RoundedRectangle(cornerRadius: 3)
-                .stroke(isSelected ? Color.accentColor : Lumen.hairline,
-                        lineWidth: isSelected ? 2.5 : 0.5))
-        .scaleEffect(isSelected ? 1.05 : 1)
-        .animation(.spring(duration: 0.15), value: isSelected)
-        .accessibilityElement()
+        return Button { toggleSelection(index) } label: {
+            VStack(spacing: 3) {
+                Rectangle().fill(cellFill(index)).frame(height: 24)
+                HStack(spacing: 2) {
+                    Text("\(index + 1)").font(.caption.monospacedDigit())
+                    if isSelected { Image(systemName: "checkmark").font(.caption2) }
+                }
+                .foregroundStyle(Lumen.lit)
+            }
+            .frame(minWidth: 44, minHeight: 44)
+            .padding(3)
+            .background(Lumen.deck)
+            .overlay(RoundedRectangle(cornerRadius: 4).stroke(isSelected ? Lumen.lit : Lumen.rule, lineWidth: isSelected ? 2 : 1))
+        }
+        .buttonStyle(.plain)
         .accessibilityLabel("\(unitName.capitalized) \(index + 1)")
-        .accessibilityValue(isSelected ? "selected" : "not selected")
-        .accessibilityAddTraits(.isButton)
-        .accessibilityAction { toggleSelection(index) }
+        .accessibilityValue(isSelected ? "Selected" : "Not selected")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     private func color(at index: Int) -> Color {
@@ -526,7 +500,7 @@ struct GoveeSegmentEditorView: View {
                 // painting selection rather than as more on/off controls.
                 Text("Select")
                     .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Lumen.meter)
             }
             Button("All") { selection = Set(0..<draft.segmentCount) }
             Button("None") { selection = [] }
@@ -560,7 +534,7 @@ struct GoveeSegmentEditorView: View {
     private var paintSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Paint").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-            HStack(spacing: 6) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 44), spacing: 6)], spacing: 6) {
                 ForEach(LightRowView.colorSwatches, id: \.label) { swatch in
                     Button {
                         paintColor = swatch.color
@@ -568,7 +542,8 @@ struct GoveeSegmentEditorView: View {
                     } label: {
                         Circle()
                             .fill(swatch.color)
-                            .frame(width: 20, height: 20)
+                            .frame(width: 36, height: 36)
+                            .frame(width: 44, height: 44)
                             .overlay(Circle().stroke(Color.primary.opacity(0.25), lineWidth: 0.5))
                     }
                     .buttonStyle(.plain)
@@ -582,20 +557,20 @@ struct GoveeSegmentEditorView: View {
                     } label: {
                         Circle()
                             .fill(recent.color)
-                            .frame(width: 20, height: 20)
+                            .frame(width: 36, height: 36)
+                            .frame(width: 44, height: 44)
                             .overlay(Circle().stroke(Lumen.hairlineStrong, lineWidth: 0.5))
                     }
                     .buttonStyle(.plain)
                     .help("\(recent.name) · \(recent.hex)")
                     .accessibilityLabel("Paint recent color \(recent.name)")
                 }
-                Spacer(minLength: 0)
                 ColorPicker("", selection: $paintColor, supportsOpacity: false)
                     .labelsHidden()
                     .onChange(of: paintColor) { newValue in paintTargets(with: newValue) }
                     .accessibilityLabel("Paint color")
             }
-            HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 10) {
                 Button("Blend Across Selection", action: blendAcrossSelection)
                     .buttonStyle(LumenSecondaryButtonStyle(compact: true))
                     .disabled(targetIndexes.count < 2)
@@ -603,7 +578,7 @@ struct GoveeSegmentEditorView: View {
                 ColorPicker("", selection: $blendEndColor, supportsOpacity: false)
                     .labelsHidden()
                     .accessibilityLabel("Blend end color")
-                Text("→ end color").font(.caption2).foregroundStyle(.tertiary)
+                Text("→ end color").font(.caption2).foregroundStyle(Lumen.meter)
                 Spacer()
             }
             if paintingOnlyDarkZones {
@@ -643,7 +618,7 @@ struct GoveeSegmentEditorView: View {
                 Text("Blend colors between segments")
                 Text("Melts neighboring segment colors into each other, like the Govee app's gradient switch.")
                     .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Lumen.meter)
             }
         }
         .toggleStyle(LumenRockerStyle())
@@ -696,7 +671,7 @@ struct GoveeSegmentEditorView: View {
                     if custom {
                         Image(systemName: "person.fill")
                             .font(.system(size: 7))
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(Lumen.meter)
                             .accessibilityHidden(true)
                     }
                     Text(preset.name).font(.caption2).lineLimit(1)
@@ -725,7 +700,7 @@ struct GoveeSegmentEditorView: View {
                     .font(.callout.weight(.medium))
                 Text(fixedTopologyDetail)
                     .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Lumen.meter)
             } else {
                 HStack {
                     Stepper("\(unitName.capitalized)s: \(draft.segmentCount)",
@@ -743,7 +718,7 @@ struct GoveeSegmentEditorView: View {
                 }
                 Text("Match the \(unitName) count the Govee Home app shows for this light.")
                     .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Lumen.meter)
             }
             Toggle("Live preview on the light while editing", isOn: $livePreview)
                 .toggleStyle(LumenRockerStyle())
@@ -789,18 +764,20 @@ struct GoveeSegmentEditorView: View {
     private var footer: some View {
         VStack(alignment: .leading, spacing: 8) {
             Divider()
-            HStack {
+            VStack(alignment: .leading, spacing: 12) {
                 Text(profile.appliesViaStream
                      ? "This light family can't store the edited layout in its own firmware, so Apply holds it from LumenDesk and restores it automatically while LumenDesk is running."
                      : "Live preview is temporary. Apply pauses the preview and writes the layout to the light so it survives power cycles; editing again resumes the preview.")
                     .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Lumen.meter)
                     .fixedSize(horizontal: false, vertical: true)
+                HStack {
                 Spacer()
                 Button("Revert") { revert() }
                     .disabled(openingState == nil || openingState == draft)
                 Button("Apply to Light") { applyToLight() }
                     .buttonStyle(LumenPrimaryButtonStyle())
+                }
             }
         }
     }

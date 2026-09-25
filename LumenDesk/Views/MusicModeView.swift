@@ -5,6 +5,7 @@ struct MusicModeView: View {
     @EnvironmentObject private var manager: LightManager
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Binding var scope: LightScope
+    var showsScopePicker = true
     @State private var configuration = MusicModeConfiguration.configuration(for: .soundcheck)
     @State private var topology = FixtureTopology()
     @State private var advancedExpanded = false
@@ -12,9 +13,7 @@ struct MusicModeView: View {
     @State private var showFileImporter = false
     @State private var audioStatus: MusicAudioSourceStatus = .idle
     @State private var inputChannels: Int?
-    /// Lightweight view preferences, stored the way the rest of the app stores
-    /// them. Both start on so a first-time user gets the walkthrough and the
-    /// plain-English captions without going looking for them.
+    /// Existing help preferences survive the workspace redesign.
     @AppStorage("LumenDesk.musicMode.quickStart.v1") private var showsQuickStart = true
     @AppStorage("LumenDesk.musicMode.plainHelp.v1") private var showsPlainHelp = true
 
@@ -32,7 +31,6 @@ struct MusicModeView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             intro
-            quickStart
             sourceAndInput
             presetPicker
             MusicModeVisualizerView(
@@ -41,8 +39,10 @@ struct MusicModeView: View {
                 fixtures: fixtures
             )
             primaryControls
+            paletteAndMovement
             topologyEditor
             advancedControls
+            quickStart
         }
         .onAppear { reloadForScope() }
         .onReceive(manager.musicModeController.$sourceStatus) { audioStatus = $0 }
@@ -72,90 +72,62 @@ struct MusicModeView: View {
     }
 
     private var intro: some View {
-        HStack(alignment: .top, spacing: 16) {
-            ZStack {
-                LumenPanelShape(radius: 3, chamfer: 16).fill(Lumen.surfaceLoud)
-                LumenPanelShape(radius: 3, chamfer: 16).stroke(Lumen.hairlineStrong, lineWidth: 1)
-                Image(systemName: "music.note.list")
-                    .font(.system(size: 22, weight: .medium))
-                    .foregroundStyle(Lumen.beamBright)
-            }
-            .frame(width: 56, height: 56)
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Music Mode")
-                    .font(LumenType.display(size: 22, weight: .bold))
-                    .foregroundStyle(Lumen.textPrimary)
-                SpectrumRule(height: 2, tapered: true).frame(width: 120)
-                #if os(macOS)
-                Text("Your lights follow whatever this Mac is playing. Any app counts, not just a music app. The sound is analyzed on this Mac and never recorded, saved, or sent anywhere.")
-                #else
-                Text("Your lights follow music playing in the room, heard through the microphone. The sound is analyzed on this device and never recorded, saved, or sent anywhere.")
-                #endif
-                Toggle("Explain the controls", isOn: $showsPlainHelp)
-                    .toggleStyle(LumenRockerStyle())
-                    .font(.caption)
-                    .help("Shows a plain-English line under each control. Turn it off once you know your way around.")
-                Text("Soundcheck remains available as a built-in preset, and saved music-pulse effects remain compatible.")
-                    .font(.caption)
-                    .foregroundStyle(Lumen.textTertiary)
-            }
-            .foregroundStyle(Lumen.textSecondary)
-            Spacer()
-
-            VStack(alignment: .trailing, spacing: 8) {
-                Picker("Target scope", selection: $scope) {
-                    Text("All Lights").tag(LightScope.all)
-                    ForEach(manager.rooms) { room in
-                        Text(room.name).tag(LightScope.room(room.id))
-                    }
-                }
-                .fixedSize()
-                if isRunning {
-                    Button("Stop", role: .destructive) { manager.stopEffect(scope: scope) }
-                        .buttonStyle(LumenSecondaryButtonStyle())
-                } else {
-                    VStack(alignment: .trailing, spacing: 8) {
-                        Button("Start Music Mode") {
-                            commitConfiguration()
-                            manager.startMusicMode(
-                                configuration: configuration,
-                                scope: scope,
-                                reducedMotion: reduceMotion
-                            )
-                        }
-                        .buttonStyle(LumenPrimaryButtonStyle())
-                        .disabled(includedFixtures.isEmpty)
-                        .help(MusicModeHelp.systemAudioSource)
-                        Button("Open Audio File…") { showFileImporter = true }
-                            .buttonStyle(LumenSecondaryButtonStyle())
-                            .disabled(includedFixtures.isEmpty)
-                            .help(MusicModeHelp.fileSource)
-                        Button("MIDI Clock") {
-                            commitConfiguration()
-                            manager.startMusicMode(
-                                configuration: configuration,
-                                scope: scope,
-                                reducedMotion: reduceMotion,
-                                capture: .midiClock
-                            )
-                        }
-                        .buttonStyle(LumenSecondaryButtonStyle())
-                        .disabled(includedFixtures.isEmpty)
-                        .help(MusicModeHelp.midiSource)
-                    }
-                    if includedFixtures.isEmpty {
-                        Text("No lights in this show yet. Pick a room with lights in it, or switch a light back on in the list below.")
-                            .font(.caption)
-                            .foregroundStyle(Lumen.warning)
-                            .multilineTextAlignment(.trailing)
-                            .frame(maxWidth: 220)
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Label(isRunning ? "Music is controlling this room" : "Ready for music", systemImage: "music.note")
+                    .font(.headline)
+                Spacer(minLength: 8)
+                if showsScopePicker {
+                    Picker("Target room", selection: $scope) {
+                        Text("All lights").tag(LightScope.all)
+                        ForEach(manager.rooms) { Text($0.name).tag(LightScope.room($0.id)) }
                     }
                 }
             }
+            Text("\(includedFixtures.count) fixtures · \(configuration.preset.displayName) · \(configuration.photosensitivitySafeMode || reduceMotion ? "Flashes blocked" : "Controlled flashes permitted")")
+                .font(.callout).foregroundStyle(Lumen.meter)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) { transportControls }
+                VStack(alignment: .leading, spacing: 10) { transportControls }
+            }
+            if includedFixtures.isEmpty {
+                Text("Include a fixture below, or choose a room with lights.")
+                    .font(.callout).foregroundStyle(Lumen.warn)
+            }
+            Text(configuration.restorePreviousState
+                 ? "Stopping restores the lighting from before the show."
+                 : "Stopping keeps the last lighting output.")
+                .font(.caption).foregroundStyle(Lumen.meter)
+            Toggle("Explain controls", isOn: $showsPlainHelp)
+                .toggleStyle(LumenRockerStyle())
         }
-        .padding(18)
-        .lumenCard(highlighted: isRunning, glowColor: isRunning ? Lumen.pink : nil)
+    }
+
+    @ViewBuilder private var transportControls: some View {
+        if isRunning {
+            Button("Stop Music Mode", role: .destructive) { manager.stopEffect(scope: scope) }
+                .buttonStyle(LumenPrimaryButtonStyle())
+        } else {
+            Button {
+                commitConfiguration()
+                manager.startMusicMode(configuration: configuration, scope: scope, reducedMotion: reduceMotion)
+            } label: {
+                #if os(macOS)
+                Label("Start system audio", systemImage: "play.fill")
+                #else
+                Label("Start microphone", systemImage: "mic")
+                #endif
+            }
+            .buttonStyle(LumenPrimaryButtonStyle()).disabled(includedFixtures.isEmpty)
+            Button("Open audio file…") { showFileImporter = true }
+                .buttonStyle(LumenSecondaryButtonStyle()).disabled(includedFixtures.isEmpty)
+            Button("MIDI clock") {
+                commitConfiguration()
+                manager.startMusicMode(configuration: configuration, scope: scope,
+                                       reducedMotion: reduceMotion, capture: .midiClock)
+            }
+            .buttonStyle(LumenSecondaryButtonStyle()).disabled(includedFixtures.isEmpty)
+        }
     }
 
     /// A first-run walkthrough, collapsible and remembered, so the desk does
@@ -269,7 +241,7 @@ struct MusicModeView: View {
 
     private var topologyEditor: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
+            VStack(alignment: .leading, spacing: 12) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Which light does what")
                         .font(LumenType.display(size: 15, weight: .semibold))
@@ -277,8 +249,7 @@ struct MusicModeView: View {
                         .font(.caption).foregroundStyle(Lumen.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 3) {
+                VStack(alignment: .leading, spacing: 3) {
                     Picker("Layout", selection: Binding(
                         get: { topology.layout },
                         set: { topology.layout = $0; commitTopology() }
@@ -291,15 +262,15 @@ struct MusicModeView: View {
                         Text(topology.layout.plainSummary)
                             .font(.caption)
                             .foregroundStyle(Lumen.textTertiary)
-                            .multilineTextAlignment(.trailing)
-                            .frame(maxWidth: 260)
+                            .multilineTextAlignment(.leading)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }
 
             if showsPlainHelp {
-                VStack(alignment: .leading, spacing: 6) {
+                DisclosureGroup("Role & ordering guide") {
+                    VStack(alignment: .leading, spacing: 6) {
                     Text(MusicModeHelp.roles)
                         .font(.caption)
                         .foregroundStyle(Lumen.textSecondary)
@@ -327,13 +298,15 @@ struct MusicModeView: View {
                     LumenPanelShape(radius: 3, chamfer: 10)
                         .fill(Lumen.surfaceRaised)
                 )
+                }
             }
 
             let ordered = topology.orderedFixtures(fixtures)
             let includedOrdered = topology.includedFixtures(fixtures)
             ForEach(Array(ordered.enumerated()), id: \.element.id) { index, fixture in
                 let isExcluded = topology.excludedFixtureIDs.contains(fixture.id)
-                HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 10) {
                     if let position = includedOrdered.firstIndex(where: { $0.id == fixture.id }) {
                         Text("\(position + 1)").font(.caption.monospacedDigit()).foregroundStyle(Lumen.textTertiary)
                             .frame(width: 20)
@@ -349,7 +322,9 @@ struct MusicModeView: View {
                     if fixture.segmentCount > 0 {
                         Text("+ \(fixture.segmentCount) segments").font(.caption).foregroundStyle(Lumen.textTertiary)
                     }
-                    Picker("Role", selection: roleBinding(fixture.id)) {
+                    }
+                    HStack(spacing: 10) {
+                    Picker("Role for \(fixture.label)", selection: roleBinding(fixture.id)) {
                         ForEach(FixtureRole.allCases.filter { !isRunning || $0 != .off || fixture.role == .off }) {
                             Text($0.displayName).tag($0)
                         }
@@ -357,6 +332,7 @@ struct MusicModeView: View {
                     .labelsHidden()
                     .fixedSize()
                     .disabled(isExcluded || (isRunning && fixture.role == .off))
+                    .accessibilityLabel("Role for \(fixture.label)")
                     .help(fixture.resolvedRole.plainSummary)
                     .accessibilityHint(fixture.resolvedRole.plainSummary)
                     Spacer()
@@ -364,6 +340,7 @@ struct MusicModeView: View {
                         Image(systemName: isExcluded ? "eye.slash" : "eye")
                     }
                     .buttonStyle(.borderless)
+                    .lumenInteractiveTarget()
                     .foregroundStyle(isExcluded ? Lumen.textTertiary : Lumen.success)
                     .disabled(isRunning)
                     .help(isRunning ? "Stop the show to change which lights are included." : "")
@@ -375,22 +352,58 @@ struct MusicModeView: View {
                         Image(systemName: "chevron.up")
                     }
                     .buttonStyle(.borderless).disabled(index == 0 || isExcluded)
+                    .accessibilityLabel("Move \(fixture.label) earlier")
+                    .lumenInteractiveTarget()
                     Button { moveFixture(from: index, offset: 1, ordered: ordered) } label: {
                         Image(systemName: "chevron.down")
                     }
                     .buttonStyle(.borderless).disabled(index == ordered.count - 1 || isExcluded)
+                    .accessibilityLabel("Move \(fixture.label) later")
+                    .lumenInteractiveTarget()
+                    }
                 }
-                .padding(.vertical, 4)
-                .opacity(isExcluded ? 0.55 : 1)
+                .padding(.vertical, 8)
+                .opacity(isExcluded ? 0.7 : 1)
             }
         }
         .padding(16)
         .lumenCard()
     }
 
-    private var advancedControls: some View {
-        DisclosureGroup(isExpanded: $advancedExpanded) {
-            VStack(alignment: .leading, spacing: 14) {
+    private var paletteAndMovement: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Color & movement").font(.headline)
+                Picker("Color palette", selection: paletteBinding) {
+                    ForEach(MusicModeConfiguration.builtInPalettes) { entry in
+                        Text(entry.name).tag(entry.id)
+                    }
+                    if configuration.paletteIdentity == "custom" {
+                        Text("Custom").tag("custom")
+                    }
+                    // Every catalog theme is selectable here, grouped by mood.
+                    // Only the colours cross over; timing, intensity and
+                    // movement stay with the preset and the sliders.
+                    ForEach(LightingTheme.Category.allCases, id: \.self) { category in
+                        let themes = LightingCatalog.themes.filter { $0.category == category }
+                        if !themes.isEmpty {
+                            Section(category.rawValue) {
+                                ForEach(themes) { theme in
+                                    Text(theme.name).tag(theme.id)
+                                }
+                            }
+                        }
+                    }
+                }
+                .help(MusicModeHelp.palette)
+                helpCaption(MusicModeHelp.palette)
+                if let theme = LightingCatalog.theme(withID: configuration.paletteIdentity) {
+                    HStack(spacing: 8) {
+                        ThemeSwatchStrip(theme: theme, height: 14)
+                            .frame(width: 96)
+                        Text(theme.summary)
+                            .font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+                    }
+                }
                 musicSlider("Color-change intensity", value: binding(\.colorChangeIntensity), icon: "paintpalette.fill",
                             help: MusicModeHelp.colorChangeIntensity)
                 musicSlider("Movement amount", value: binding(\.movementAmount), icon: "arrow.left.and.right",
@@ -402,6 +415,13 @@ struct MusicModeView: View {
                 }
                 .help(configuration.movementDirection.plainSummary)
                 helpCaption(configuration.movementDirection.plainSummary)
+        }
+        .padding(.vertical, 12)
+    }
+
+    private var advancedControls: some View {
+        DisclosureGroup(isExpanded: $advancedExpanded) {
+            VStack(alignment: .leading, spacing: 14) {
                 musicSlider("Minimum brightness", value: binding(\.minimumBrightness), icon: "sun.min",
                             help: MusicModeHelp.minimumBrightness)
                 musicSlider("Maximum brightness", value: binding(\.maximumBrightness), icon: "sun.max",
@@ -447,37 +467,6 @@ struct MusicModeView: View {
                     .font(.caption).foregroundStyle(configuration.photosensitivitySafeMode ? Lumen.success : Lumen.warning)
 
                 Divider().overlay(Lumen.hairline)
-                Picker("Color palette", selection: paletteBinding) {
-                    ForEach(MusicModeConfiguration.builtInPalettes) { entry in
-                        Text(entry.name).tag(entry.id)
-                    }
-                    if configuration.paletteIdentity == "custom" {
-                        Text("Custom").tag("custom")
-                    }
-                    // Every catalog theme is selectable here, grouped by mood.
-                    // Only the colours cross over; timing, intensity and
-                    // movement stay with the preset and the sliders.
-                    ForEach(LightingTheme.Category.allCases, id: \.self) { category in
-                        let themes = LightingCatalog.themes.filter { $0.category == category }
-                        if !themes.isEmpty {
-                            Section(category.rawValue) {
-                                ForEach(themes) { theme in
-                                    Text(theme.name).tag(theme.id)
-                                }
-                            }
-                        }
-                    }
-                }
-                .help(MusicModeHelp.palette)
-                helpCaption(MusicModeHelp.palette)
-                if let theme = LightingCatalog.theme(withID: configuration.paletteIdentity) {
-                    HStack(spacing: 8) {
-                        ThemeSwatchStrip(theme: theme, height: 14)
-                            .frame(width: 96)
-                        Text(theme.summary)
-                            .font(.caption2).foregroundStyle(.secondary).lineLimit(2)
-                    }
-                }
                 Picker("Silence behavior", selection: binding(\.silenceBehavior)) {
                     ForEach(MusicSilenceBehavior.allCases) { Text($0.displayName).tag($0) }
                 }
@@ -705,24 +694,28 @@ private struct MusicModeInputStatusView: View {
                 }
             }
             meter("Input", value: controller.latestSnapshot.level, color: Lumen.beamBright, segments: 32)
-            HStack(alignment: .bottom, spacing: 12) {
-                meter("Bass", value: controller.latestSnapshot.bass, color: Lumen.chalk, segments: 12)
-                meter("Mids", value: controller.latestSnapshot.mids, color: Lumen.meter, segments: 12)
-                meter("Highs", value: controller.latestSnapshot.highs, color: Lumen.muted, segments: 12)
-                VStack(spacing: 5) {
-                    LumenStatusDot(color: Lumen.beamBright,
-                                   size: 18,
-                                   lit: controller.latestSnapshot.beat > 0.25)
-                    LumenEyebrow(
-                        text: tempoLabel,
-                        tint: controller.latestSnapshot.isTempoLocked ? Lumen.textSecondary : Lumen.textTertiary
-                    )
+            HStack(alignment: .top, spacing: 20) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Musical pulse").font(.caption).foregroundStyle(Lumen.meter)
+                    Text(tempoLabel).font(.headline.monospacedDigit())
+                    Text(controller.latestSnapshot.isTempoLocked
+                         ? "Confidence \(Int(controller.latestSnapshot.beatConfidence * 100))%"
+                         : "No reliable tempo yet")
+                        .font(.caption).foregroundStyle(Lumen.meter)
                 }
-                .frame(width: 58)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(controller.latestSnapshot.isTempoLocked
-                    ? "Tempo locked at \(tempoLabel)"
-                    : "Beat indicator, no tempo detected")
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Energy").font(.caption).foregroundStyle(Lumen.meter)
+                    LumenMeter(value: controller.latestSnapshot.energy, tint: Lumen.chalk, segments: 12, height: 9)
+                    Text("Interpretation, not measured fixture output")
+                        .font(.caption).foregroundStyle(Lumen.meter)
+                }
+            }
+            DisclosureGroup("Audio diagnostics") {
+                HStack(spacing: 12) {
+                    meter("Bass", value: controller.latestSnapshot.bass, color: Lumen.chalk, segments: 12)
+                    meter("Mids", value: controller.latestSnapshot.mids, color: Lumen.meter, segments: 12)
+                    meter("Highs", value: controller.latestSnapshot.highs, color: Lumen.muted, segments: 12)
+                }.padding(.top, 12)
             }
             if controller.sourceStatus == .permissionDenied {
                 Text(permissionMessage)
@@ -732,7 +725,7 @@ private struct MusicModeInputStatusView: View {
                     .font(.caption).foregroundStyle(Lumen.warning)
             }
             if showsPlainHelp {
-                Text(MusicModeHelp.readout)
+                Text("Input shows received audio level. Energy describes the music, not measured light output. A tempo appears only when the analyzer has a reliable pulse; generated lighting is shown separately below.")
                     .font(.caption)
                     .foregroundStyle(Lumen.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)

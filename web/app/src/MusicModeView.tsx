@@ -4,7 +4,7 @@ import { MUSIC_HELP, PRESET_COPY, ROLE_COPY, SOURCE_COPY, configurationFor } fro
 import { GROOVES } from './music/grooves'
 import { hsvToRgb } from './music/fixtures'
 import { WebMusicSession, LatestMusicFrameSender, setFixtureRole, type MusicFrameCommand } from './music/session'
-import type { FixtureRole, MusicModePreset } from './music/types'
+import { AURORA_PALETTE, SUNSET_PALETTE, OCEAN_PALETTE, CLUB_PALETTE, type FixtureRole, type MusicModePreset, type MusicModeConfiguration } from './music/types'
 
 const PRESETS: Exclude<MusicModePreset, 'custom'>[] = [
   'ambient',
@@ -23,8 +23,10 @@ export function MusicModeView({
   devices,
   port,
   postFrame,
+  onRunningChange,
 }: {
   devices: Device[]
+  onRunningChange?: (running: boolean) => void
   port: number
   postFrame: (
     port: number,
@@ -40,6 +42,31 @@ export function MusicModeView({
     () => session.version,
   )
   const state = session.state
+  const [reduceMotion, setReduceMotion] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+  useEffect(() => {
+    const query = window.matchMedia('(prefers-reduced-motion: reduce)')
+    const update = () => setReduceMotion(query.matches)
+    query.addEventListener('change', update)
+    return () => query.removeEventListener('change', update)
+  }, [])
+  const configure = (configuration: MusicModeConfiguration) => session.patch({
+    configuration: reduceMotion ? { ...configuration, allowsFlashes: false, movementAmount: Math.min(.2, configuration.movementAmount) } : configuration,
+  })
+  useEffect(() => { if (reduceMotion) configure(state.configuration) }, [reduceMotion])
+  const adjust = (key: 'masterBrightness' | 'effectIntensity' | 'beatSensitivity' | 'movementAmount' | 'movementSpeed' | 'colorChangeIntensity', value: number) =>
+    configure({ ...state.configuration, [key]: value, preset: 'custom' })
+  const orderedFixtures = [...state.fixtures].sort((a, b) => {
+    const index = (id: string) => { const i = state.topology.fixtureOrder.indexOf(id); return i < 0 ? Number.MAX_SAFE_INTEGER : i }
+    return index(a.id) - index(b.id)
+  })
+  const moveFixture = (id: string, offset: number) => {
+    const ids = orderedFixtures.map(f => f.id)
+    const from = ids.indexOf(id), to = from + offset
+    if (from < 0 || to < 0 || to >= ids.length) return
+    ;[ids[from], ids[to]] = [ids[to], ids[from]]
+    session.patch({ topology: { ...state.topology, fixtureOrder: ids } })
+  }
+  useEffect(() => { onRunningChange?.(state.running); return () => onRunningChange?.(false) }, [state.running, onRunningChange])
   void version
   const [file, setFile] = useState<File | null>(null)
   const reachable = devices.filter(d => d.reachable)
@@ -110,26 +137,21 @@ export function MusicModeView({
   const snapshot = state.snapshot
   const presetCopyKey = state.configuration.preset === 'custom' ? 'balanced' : state.configuration.preset
   const tempo =
-    snapshot.isTempoLocked && snapshot.tempo > 0
+    snapshot.isTempoLocked && snapshot.tempo > 0 && snapshot.beatConfidence >= .4
       ? `${Math.round(snapshot.feltTempo || snapshot.tempo)} · ${snapshot.metre}/${snapshot.metre === 6 ? 8 : 4}`
       : 'Beat'
 
   return (
     <section className="music-desk">
-      <div className="panel">
+      <div className="panel music-transport">
         <p className="eyebrow">Music Mode</p>
-        <h2>Your lights follow the music.</h2>
-        <p>
-          Pick a preset, then pick where the sound comes from. The music is analysed in this
-          browser tab and never uploaded anywhere; only the resulting colours go to the bridge
-          running on your own machine.
-        </p>
-        <ol className="steps">
-          {MUSIC_HELP.steps.map(step => (
-            <li key={step}>{step}</li>
-          ))}
-        </ol>
-        <p className="note">{MUSIC_HELP.safety}</p>
+        <h2>{state.running ? 'Music is controlling this room' : 'Ready for music'}</h2>
+        <details><summary>Sources, getting started, and flash limits</summary>
+          <p>Audio is analyzed locally in this tab. Only lighting commands go to your bridge.</p>
+          <ol className="steps">{MUSIC_HELP.steps.map(step => <li key={step}>{step}</li>)}</ol>
+          <p>{MUSIC_HELP.safety}</p>
+        </details>
+        <p className="note">{reduceMotion ? "Reduced Motion: flashes blocked; movement limited." : state.configuration.photosensitivitySafeMode ? "No-flash mode: explicit flashes blocked." : "Controlled flashes enabled."} Brightness changes can still be uncomfortable. Stop restores the captured output.</p>
         <div className="music-toolbar">
           <button
             className="primary"
@@ -191,16 +213,14 @@ export function MusicModeView({
             <button
               key={id}
               className={state.configuration.preset === id ? 'chip on' : 'chip'}
-              onClick={() => session.patch({ configuration: configurationFor(id) })}
+              aria-pressed={state.configuration.preset === id}
+              onClick={() => configure(configurationFor(id))}
             >
               {PRESET_COPY[id].name}
             </button>
           ))}
         </div>
-        <p>{PRESET_COPY[presetCopyKey].plain}</p>
-        <p className="meta">
-          Good for: {PRESET_COPY[presetCopyKey].bestFor} · {PRESET_COPY[presetCopyKey].summary}
-        </p>
+        <p>{state.configuration.preset === 'custom' ? 'Custom balance. Choosing a preset replaces these adjustments.' : PRESET_COPY[presetCopyKey].plain}</p>
         {state.source === 'demo' && (
           <label className="field">
             Demo groove
@@ -218,34 +238,28 @@ export function MusicModeView({
         )}
       </div>
 
-      <details className="panel">
-        <summary>Music diagnostics</summary>
-        <p>Source: {state.source} · snapshot age {session.diagnostics.snapshotAge.toFixed(3)} s · samples analyzed {session.diagnostics.analyzedSamples} · capture buffers dropped {session.diagnostics.droppedBuffers}</p>
-        <p>Onset {(snapshot.onset ?? 0).toFixed(2)} · beat count {snapshot.beatCount} · confidence {snapshot.beatConfidence.toFixed(2)} · preset {state.configuration.preset}</p>
-        <p>Grid phase now {snapshot.beatInterval > 0 ? (((performance.now()/1000-snapshot.beatReferenceTime)/snapshot.beatInterval)%1).toFixed(2) : "unlocked"} · last render interval {session.diagnostics.renderInterval.toFixed(3)} s (target 0.050 s) · effective brightness {state.configuration.masterBrightness.toFixed(2)} · intensity {state.configuration.effectIntensity.toFixed(2)}</p>
-        <p>Generated {session.diagnostics.framesGenerated} · HTTP submitted {sender.diagnostics.submitted} · accepted {sender.diagnostics.accepted} · coalesced {sender.diagnostics.coalesced} · expired {sender.diagnostics.expired} · errors {sender.diagnostics.failures}</p>
-        <p>Preview shows generated frames. HTTP acceptance does not establish device receipt or visible timing. Brightness modulation can still be uncomfortable with flashes disabled.</p>
-      </details>
+      <div className="music-performance">
+        <div className="music-output">
       <div className="panel meters">
         <Meter label="Input" value={snapshot.level} />
-        <Meter label="Bass" value={snapshot.bass} />
-        <Meter label="Mids" value={snapshot.mids} />
-        <Meter label="Highs" value={snapshot.highs} />
+        <Meter label="Energy" value={snapshot.energy} />
         <div className="beat-readout">
-          <span className={`beat-dot${snapshot.beat > 0.25 ? ' lit' : ''}`} />
-          <span>{tempo}</span>
+
+          <strong>{!state.running ? 'Stopped' : tempo === 'Beat' ? 'Finding a pulse' : tempo}</strong>
+          <span>{state.source === 'midi' ? 'Measured MIDI clock · ' : ''}Confidence {Math.round(snapshot.beatConfidence * 100)}%</span>
         </div>
-        <p className="note">{MUSIC_HELP.readout}</p>
+        <p className="note">Audio input and musical interpretation. Generated colors below are not device confirmations.</p>
+        <details><summary>Audio diagnostics</summary><Meter label="Bass" value={snapshot.bass}/><Meter label="Mids" value={snapshot.mids}/><Meter label="Highs" value={snapshot.highs}/></details>
       </div>
 
       <div className="panel">
         <p className="eyebrow">Which light does what</p>
-        <p>{MUSIC_HELP.roles}</p>
+        <p className="note">Generated output in fixture order. Assign roles and move fixtures with the arrow buttons.</p>
         {state.fixtures.length === 0 ? (
-          <p>No lights yet. Scan from Home, or run a demo groove to watch the lights move without any hardware.</p>
+          <p>No lights yet. Use Find lights in Room, or run a demo groove to watch the lights move without any hardware.</p>
         ) : (
           <ul className="fixture-list">
-            {state.fixtures.map(fixture => {
+            {orderedFixtures.map((fixture, index) => {
               const stateFor = state.frame?.states.find(s => s.fixtureID === fixture.id)
               const rgb = stateFor ? hsvToRgb(stateFor.hue, stateFor.saturation, stateFor.brightness) : null
               return (
@@ -254,8 +268,9 @@ export function MusicModeView({
                     className="fixture-swatch"
                     style={rgb ? { background: `rgb(${rgb.r} ${rgb.g} ${rgb.b})` } : undefined}
                   />
-                  <strong>{fixture.label}</strong>
+                  <strong>{index + 1}. {fixture.label}</strong>
                   <select
+                    aria-label={`Role for ${fixture.label}`}
                     value={fixture.role}
                     disabled={state.running && fixture.role === 'off'}
                     title={ROLE_COPY[fixture.role].plain}
@@ -270,20 +285,58 @@ export function MusicModeView({
                       </option>
                     ))}
                   </select>
+                  <div className="fixture-order">
+                    <button disabled={index === 0} aria-label={`Move ${fixture.label} earlier`} onClick={() => moveFixture(fixture.id,-1)}>↑</button>
+                    <button disabled={index === orderedFixtures.length - 1} aria-label={`Move ${fixture.label} later`} onClick={() => moveFixture(fixture.id,1)}>↓</button>
+                  </div>
                 </li>
               )
             })}
           </ul>
         )}
-        <dl className="role-legend">
+        <details><summary>What the roles mean</summary><dl className="role-legend">
           {ROLES.map(role => (
             <div key={role}>
               <dt>{ROLE_COPY[role].name}</dt>
               <dd>{ROLE_COPY[role].plain}</dd>
             </div>
           ))}
-        </dl>
+        </dl></details>
       </div>
+        </div>
+      <div className="panel">
+        <h2>Show balance</h2>
+        <div className="music-adjustments">
+          {([
+            ['masterBrightness', 'Master brightness'], ['effectIntensity', 'Intensity'],
+            ['beatSensitivity', 'Beat sensitivity'], ['movementAmount', 'Movement'],
+            ['movementSpeed', 'Movement speed'], ['colorChangeIntensity', 'Color variation'],
+          ] as const).map(([key, label]) => <label key={key} className="field">
+            {label} <output>{Math.round(state.configuration[key] * 100)}%</output>
+            <input aria-label={label} type="range" min="0" max={key === 'movementAmount' && reduceMotion ? '.2' : '1'} step=".01"
+              value={state.configuration[key]} onChange={e => adjust(key, Number(e.target.value))}/>
+          </label>)}
+        </div>
+        <h3>Color palette</h3>
+        <div className="palette-choices">{[
+          {name:'Aurora', colors:AURORA_PALETTE}, {name:'Sunset', colors:SUNSET_PALETTE},
+          {name:'Ocean', colors:OCEAN_PALETTE}, {name:'Club', colors:CLUB_PALETTE},
+        ].map(p => <button key={p.name} onClick={() => configure({...state.configuration, palette:p.colors, preset:'custom'})}
+          aria-pressed={p.colors.map(c=>c.hex).join() === state.configuration.palette.map(c=>c.hex).join()}>
+          <span className="palette-strip" aria-hidden="true">{p.colors.map((c,i)=><span key={i} style={{background:'#'+c.hex.toString(16).padStart(6,'0')}}/>)}</span>
+          {p.name}
+        </button>)}</div>
+      </div>
+
+      </div>
+      <details className="panel">
+        <summary>Music diagnostics</summary>
+        <p>Source: {state.source} · snapshot age {session.diagnostics.snapshotAge.toFixed(3)} s · samples analyzed {session.diagnostics.analyzedSamples} · capture buffers dropped {session.diagnostics.droppedBuffers}</p>
+        <p>Onset {(snapshot.onset ?? 0).toFixed(2)} · beat count {snapshot.beatCount} · confidence {snapshot.beatConfidence.toFixed(2)} · preset {state.configuration.preset}</p>
+        <p>Grid phase now {snapshot.beatInterval > 0 ? (((performance.now()/1000-snapshot.beatReferenceTime)/snapshot.beatInterval)%1).toFixed(2) : "unlocked"} · last render interval {session.diagnostics.renderInterval.toFixed(3)} s (target 0.050 s) · effective brightness {state.configuration.masterBrightness.toFixed(2)} · intensity {state.configuration.effectIntensity.toFixed(2)}</p>
+        <p>Generated {session.diagnostics.framesGenerated} · HTTP submitted {sender.diagnostics.submitted} · accepted {sender.diagnostics.accepted} · coalesced {sender.diagnostics.coalesced} · expired {sender.diagnostics.expired} · errors {sender.diagnostics.failures}</p>
+        <p>Preview shows generated frames. HTTP acceptance does not establish device receipt or visible timing. Brightness modulation can still be uncomfortable with flashes disabled.</p>
+      </details>
       <p className="meta">
         {MUSIC_HELP.strips} Colours go to the bridge on port {port}.
       </p>

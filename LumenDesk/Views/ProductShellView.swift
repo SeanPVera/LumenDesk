@@ -2,17 +2,13 @@ import SwiftUI
 
 // MARK: - Product navigation
 //
-// Five destinations, named in the vocabulary of the thing the app controls.
-// "Home", "Library", "Automation", and "Devices" described the software; Desk,
-// Looks, Cues, and Rig describe the lighting, and every one of them is shorter
-// than the word it replaced. The case names are unchanged so nothing that
-// switches on a destination had to move.
+// One room scope owns Light, Compositions and Music. Schedules and device
+// administration remain separate destinations; preferences keep native access.
 
 enum LumenDeskDestination: String, CaseIterable, Identifiable {
-    case home = "Plan"
-    case library = "Looks"
-    case automation = "Cues"
-    case devices = "Rig"
+    case home = "Room"
+    case automation = "Schedules"
+    case devices = "Devices"
     case settings = "Settings"
 
     var id: String { rawValue }
@@ -20,7 +16,6 @@ enum LumenDeskDestination: String, CaseIterable, Identifiable {
     var symbol: String {
         switch self {
         case .home: return "square.grid.3x3.topleft.filled"
-        case .library: return "square.grid.2x2"
         case .automation: return "clock"
         case .devices: return "lightbulb.2"
         case .settings: return "gearshape"
@@ -30,16 +25,12 @@ enum LumenDeskDestination: String, CaseIterable, Identifiable {
 
 // MARK: - Shell
 
-/// The window. On macOS a fixed icon rail beside the working area, with the
-/// inspector living inside the Desk itself; on iPhone a four-item tab bar.
-///
-/// The rail replaced a 228 pt sidebar that spent its top on a three-line
-/// wordmark and gave each destination a channel number. A list of five things
-/// does not need addressing, and the space it cost belonged to the fixtures.
+/// Named horizontal workspace navigation on Mac; native tabs on iPhone.
 struct LumenDeskShellView: View {
     @EnvironmentObject private var manager: LightManager
     @State private var destination: LumenDeskDestination = .home
     @State private var showingSettings = false
+    @State private var scope: LightScope = .all
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -65,9 +56,12 @@ struct LumenDeskShellView: View {
     #if os(macOS)
     private var desktopShell: some View {
         HStack(spacing: 0) {
-            WashRail(destination: $destination)
-            Divider().overlay(Lumen.ruleSoft)
-            NavigationStack { destinationView(destination) }
+            NavigationStack {
+                destinationView(destination)
+                    .safeAreaInset(edge: .top, spacing: 0) {
+                        WorkspaceNavigation(destination: $destination)
+                    }
+            }
         }
         .background(Lumen.stage)
         .toolbar {
@@ -93,16 +87,13 @@ struct LumenDeskShellView: View {
     private var mobileShell: some View {
         TabView(selection: $destination) {
             mobileTab(.home)
-                .tabItem { Label("Plan", systemImage: LumenDeskDestination.home.symbol) }
+                .tabItem { Label("Room", systemImage: LumenDeskDestination.home.symbol) }
                 .tag(LumenDeskDestination.home)
-            mobileTab(.library)
-                .tabItem { Label("Looks", systemImage: LumenDeskDestination.library.symbol) }
-                .tag(LumenDeskDestination.library)
             mobileTab(.automation)
-                .tabItem { Label("Cues", systemImage: LumenDeskDestination.automation.symbol) }
+                .tabItem { Label("Schedules", systemImage: LumenDeskDestination.automation.symbol) }
                 .tag(LumenDeskDestination.automation)
             mobileTab(.devices)
-                .tabItem { Label("Rig", systemImage: LumenDeskDestination.devices.symbol) }
+                .tabItem { Label("Devices", systemImage: LumenDeskDestination.devices.symbol) }
                 .tag(LumenDeskDestination.devices)
         }
     }
@@ -125,8 +116,7 @@ struct LumenDeskShellView: View {
     @ViewBuilder
     private func destinationView(_ item: LumenDeskDestination) -> some View {
         switch item {
-        case .home: PlanWorkspaceView()
-        case .library: LibraryWorkspaceView()
+        case .home: PlanWorkspaceView(scope: $scope)
         case .automation: AutomationWorkspaceView()
         case .devices: DevicesWorkspaceView()
         case .settings: SettingsWorkspaceView()
@@ -168,51 +158,30 @@ struct LumenDeskShellView: View {
 }
 
 #if os(macOS)
-/// The icon rail. Fifty-eight points of chrome for the whole navigation model.
-private struct WashRail: View {
-    @EnvironmentObject private var manager: LightManager
+/// Named navigation takes one horizontal line; the room keeps the window.
+private struct WorkspaceNavigation: View {
     @Binding var destination: LumenDeskDestination
-
-    private var reachableCount: Int {
-        manager.devices.filter { !$0.isStale }.count
-    }
-
     var body: some View {
-        VStack(spacing: 4) {
-            LumenMark(size: 22)
-                .padding(.top, 14)
-                .padding(.bottom, 16)
-
+        HStack(spacing: 24) {
+            LumenMark(size: 20).accessibilityHidden(true)
             ForEach(LumenDeskDestination.allCases) { item in
                 Button { destination = item } label: {
-                    Image(systemName: item.symbol)
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundStyle(destination == item ? Lumen.chalk : Lumen.muted)
-                        .frame(width: 38, height: 38)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .fill(destination == item ? Lumen.stripRaised : Color.clear)
-                        )
-                        .contentShape(Rectangle())
+                    Text(item.rawValue)
+                        .font(.callout.weight(destination == item ? .semibold : .regular))
+                        .foregroundStyle(destination == item ? Lumen.lit : Lumen.meter)
+                        .padding(.vertical, 12)
+                        .overlay(alignment: .bottom) {
+                            if destination == item { Rectangle().fill(Lumen.lit).frame(height: 2) }
+                        }
                 }
                 .buttonStyle(.plain)
-                .help(item.rawValue)
-                .accessibilityLabel(item.rawValue)
-                .accessibilityAddTraits(destination == item ? [.isButton, .isSelected] : .isButton)
-
-                if item == .devices { Spacer(minLength: 12) }
+                .accessibilityAddTraits(destination == item ? .isSelected : [])
             }
-
-            // The one authored hue, spent on the one thing that is about the
-            // network rather than about the lights.
-            LumenStatusDot(color: reachableCount > 0 ? Lumen.link : Lumen.faint,
-                           size: 7,
-                           lit: reachableCount > 0)
-                .padding(.bottom, 14)
-                .help("\(reachableCount) of \(manager.devices.count) fixtures linked")
+            Spacer(minLength: 0)
         }
-        .frame(width: 58)
+        .padding(.horizontal, 24)
         .background(Lumen.stage)
+        .overlay(alignment: .bottom) { Rectangle().fill(Lumen.ruleSoft).frame(height: 1) }
     }
 }
 #endif
@@ -313,8 +282,7 @@ private struct DeviceCompactRow: View {
         }
         .padding(13)
         .lumenCard(radius: 8, fill: selected ? Lumen.stripLoud : Lumen.strip, highlighted: selected)
-        .washed(color: device.color, level: device.brightness,
-                isOn: device.isOn && !device.isStale, radius: 8)
+        .background(Lumen.deck)
         .opacity(device.isStale ? 0.8 : 1)
     }
 }
@@ -327,7 +295,7 @@ private struct DeviceStateBadge: View {
         switch command.phase {
         case .queued: return ("Queued", Lumen.warn)
         case .sending: return ("Sending", Lumen.link)
-        case .applied: return ("Confirmed", Lumen.link)
+        case .applied: return ("Applied", Lumen.chalk)
         case .failed: return ("Failed", Lumen.fail)
         case .idle:
             return device.isStale ? ("Unreachable", Lumen.faint) : ("Linked", Lumen.link)
@@ -480,10 +448,9 @@ struct NewRoomSheet: View {
 
 // MARK: - Library
 
-private enum ProductLibrarySection: String, CaseIterable, Identifiable {
+enum ProductLibrarySection: String, CaseIterable, Identifiable {
     case scenes = "Scenes"
     case themes = "Themes"
-    case music = "Music Mode"
     case effects = "Effects"
     var id: String { rawValue }
 }
@@ -492,74 +459,22 @@ struct LibraryWorkspaceView: View {
     @EnvironmentObject private var manager: LightManager
     @State private var section: ProductLibrarySection = .scenes
     @State private var searchText = ""
-    @State private var scope: LightScope = .all
+    @Binding var scope: LightScope
+    var embedded = false
     @State private var newSceneName = ""
     @State private var previewScene: LightingScene?
     @State private var editingScene: LightingScene?
     @State private var pendingAudioEffect: LightingEffect?
     @State private var themeCategory: LightingTheme.Category?
-    @State private var hasRestoredRunningShow = false
 
-    private let columns = [GridItem(.adaptive(minimum: 220), spacing: 12)]
+    private let columns = [GridItem(.flexible())]
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                PageHeader(eyebrow: "Scenes, colour, motion", title: "Looks",
-                           subtitle: "Recall a room, build a mood, or put motion on cue.")
-
-                if !manager.activeEffects.isEmpty { runningEffects }
-
-                LumenSelector(
-                    label: "Library section",
-                    selection: $section,
-                    options: ProductLibrarySection.allCases.map {
-                        LumenOption(value: $0, title: $0.rawValue)
-                    }
-                )
-
-                HStack(spacing: 10) {
-                    if section != .scenes && section != .music {
-                        LumenEyebrow(text: "Apply to")
-                        Picker("Apply to", selection: $scope) {
-                            Text("All Lights").tag(LightScope.all)
-                            ForEach(manager.rooms) { room in
-                                Text(room.name).tag(LightScope.room(room.id))
-                            }
-                        }
-                        .labelsHidden()
-                        .fixedSize()
-                    }
-                    if section == .themes {
-                        LumenEyebrow(text: "Mood")
-                        Picker("Mood", selection: $themeCategory) {
-                            Text("All (\(LightingCatalog.themes.count))").tag(LightingTheme.Category?.none)
-                            ForEach(LightingTheme.Category.allCases, id: \.self) { category in
-                                let count = LightingCatalog.themes.filter { $0.category == category }.count
-                                Text("\(category.rawValue) (\(count))").tag(LightingTheme.Category?.some(category))
-                            }
-                        }
-                        .labelsHidden()
-                        .fixedSize()
-                    }
-                    Spacer()
-                }
-
-                switch section {
-                case .scenes: scenesSection
-                case .themes: themesSection
-                case .music: MusicModeView(scope: $scope)
-                case .effects: effectsSection
-                }
-            }
-            .frame(maxWidth: 1120)
-            .padding(24)
-            .frame(maxWidth: .infinity)
+        Group {
+            if embedded { libraryContent }
+            else { ScrollView { libraryContent } }
         }
         .background(LumenBackground(glow: false))
-        .navigationTitle("Looks")
-        .searchable(text: $searchText, prompt: "Search library")
-        .onAppear { restoreRunningShowIfNeeded() }
         .sheet(item: $previewScene) { scene in
             ScenePreviewView(scene: scene).environmentObject(manager)
         }
@@ -579,6 +494,65 @@ struct LibraryWorkspaceView: View {
         } message: {
             Text("Audio is analyzed locally and is never recorded or retained. The running effect stays visible with a one-click Stop action.")
         }
+    }
+
+    private var libraryContent: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            if !embedded {
+                PageHeader(eyebrow: "Lighting compositions", title: "Compositions",
+                           subtitle: "Saved scenes recall their fixtures. Themes and effects use the selected room.")
+            }
+
+            if !embedded && !manager.activeEffects.isEmpty { runningEffects }
+
+            TextField("Find a composition", text: $searchText)
+                .textFieldStyle(.roundedBorder)
+                .accessibilityLabel("Find a composition")
+
+            LumenSelector(
+                label: "Library section",
+                selection: $section,
+                options: ProductLibrarySection.allCases.map {
+                    LumenOption(value: $0, title: $0.rawValue)
+                }
+            )
+
+            HStack(spacing: 10) {
+                if section != .scenes && !embedded {
+                    LumenEyebrow(text: "Apply to")
+                    Picker("Apply to", selection: $scope) {
+                        Text("All Lights").tag(LightScope.all)
+                        ForEach(manager.rooms) { room in
+                            Text(room.name).tag(LightScope.room(room.id))
+                        }
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                }
+                if section == .themes {
+                    LumenEyebrow(text: "Mood")
+                    Picker("Mood", selection: $themeCategory) {
+                        Text("All (\(LightingCatalog.themes.count))").tag(LightingTheme.Category?.none)
+                        ForEach(LightingTheme.Category.allCases, id: \.self) { category in
+                            let count = LightingCatalog.themes.filter { $0.category == category }.count
+                            Text("\(category.rawValue) (\(count))").tag(LightingTheme.Category?.some(category))
+                        }
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                }
+                Spacer()
+            }
+
+            switch section {
+            case .scenes: scenesSection
+            case .themes: themesSection
+            case .effects: effectsSection
+            }
+        }
+        .frame(maxWidth: 1120)
+        .padding(embedded ? 0 : 24)
+        .frame(maxWidth: .infinity)
     }
 
     private var runningEffects: some View {
@@ -618,14 +592,17 @@ struct LibraryWorkspaceView: View {
                     .textFieldStyle(.roundedBorder)
                     .onSubmit(captureScene)
                 Button { captureScene() } label: {
-                    Label("Save Current Lighting", systemImage: "plus")
+                    Label("Save room lighting", systemImage: "plus")
                 }
                 .buttonStyle(LumenPrimaryButtonStyle())
-                .disabled(newSceneName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || manager.devices.isEmpty)
+                .disabled(newSceneName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || manager.devices(in: scope).isEmpty)
             }
 
+            Text("Saving captures \(manager.scopeDisplayName(scope)). Existing scenes always recall their saved fixtures.")
+                .font(.caption).foregroundStyle(Lumen.meter)
+
             if filteredScenes.isEmpty {
-                EmptyInlineView(icon: "sparkles", title: manager.scenes.isEmpty ? "No saved scenes" : "No matching scenes",
+                EmptyInlineView(icon: "rectangle.stack", title: manager.scenes.isEmpty ? "No saved scenes" : "No matching scenes",
                                 message: manager.scenes.isEmpty ? "Set your lights, name the moment, and save it here." : "Try a different search.")
             } else {
                 LazyVGrid(columns: columns, spacing: 12) {
@@ -636,32 +613,25 @@ struct LibraryWorkspaceView: View {
     }
 
     private var themesSection: some View {
-        LazyVGrid(columns: columns, spacing: 12) {
+        LazyVStack(spacing: 0) {
             ForEach(filteredThemes) { theme in
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        Image(systemName: theme.icon).font(LumenType.display(size: 21, weight: .semibold)).foregroundStyle(theme.colors.first?.color ?? Lumen.violetBright)
-                        Spacer()
-                        Text(theme.category.rawValue)
-                            .font(.caption2.weight(.semibold)).foregroundStyle(Lumen.textTertiary)
-                    }
-                    Text(theme.name).font(LumenType.display(size: 15, weight: .semibold))
-                    Text(theme.summary).font(.caption).foregroundStyle(Lumen.textSecondary).lineLimit(3)
-                    ThemeSwatchStrip(theme: theme, height: 26)
-                        .help(theme.distribution.summary)
-                    HStack {
-                        Label("\(Int(theme.brightness * 100))%", systemImage: "sun.max")
-                            .font(.caption).foregroundStyle(Lumen.textSecondary)
-                        Text(theme.distribution.displayName)
-                            .font(.caption).foregroundStyle(Lumen.textTertiary)
-                        Spacer()
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(alignment: .top, spacing: 16) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(theme.name).font(.headline)
+                            Text(theme.summary).font(.callout).foregroundStyle(Lumen.meter)
+                        }
+                        Spacer(minLength: 8)
                         Button("Apply") { manager.applyTheme(theme, scope: scope) }
                             .buttonStyle(LumenPrimaryButtonStyle(compact: true))
                             .disabled(manager.devices(in: scope).isEmpty)
                     }
+                    ThemeSwatchStrip(theme: theme, height: 18)
+                    Text("\(Int(theme.brightness * 100))% · \(theme.distribution.displayName) · \(manager.scopeDisplayName(scope))")
+                        .font(.caption).foregroundStyle(Lumen.meter)
                 }
-                .padding(16)
-                .lumenCard()
+                .padding(.vertical, 16)
+                .overlay(alignment: .bottom) { Rectangle().fill(Lumen.ruleSoft).frame(height: 1) }
             }
         }
     }
@@ -682,60 +652,65 @@ struct LibraryWorkspaceView: View {
 
     private func sceneCard(_ scene: LightingScene) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Button { manager.toggleFavoriteScene(scene.id) } label: {
-                    Image(systemName: manager.isFavoriteScene(scene.id) ? "star.fill" : "star")
-                        .foregroundStyle(manager.isFavoriteScene(scene.id) ? Lumen.gold : Lumen.textTertiary)
+            HStack(alignment: .top, spacing: 16) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(scene.name).font(.headline)
+                    Text("\(scene.snapshots.count) saved fixtures · \(manager.availableDeviceIDs(for: scene).count) available")
+                        .font(.caption).foregroundStyle(Lumen.meter)
                 }
-                .buttonStyle(.plain)
-                Spacer()
+                Spacer(minLength: 8)
+                Button("Apply") { manager.applyScene(scene) }
+                    .buttonStyle(LumenPrimaryButtonStyle(compact: true))
+                    .disabled(manager.availableDeviceIDs(for: scene).isEmpty)
                 Menu {
-                    Button("Edit Draft") { editingScene = scene }
-                    Button("Duplicate Name…") { newSceneName = "\(scene.name) Copy" }
+                    Button("Preview & review…") { previewScene = scene }
+                    Button("Edit scene…") { editingScene = scene }
+                    Button("Version history…") { editingScene = scene }
+                        .disabled(manager.revisions(for: scene.id).isEmpty)
+                    Button("Certify scene") { _ = manager.certify(scene) }
+                    Button(manager.isFavoriteScene(scene.id) ? "Remove favorite" : "Favorite") {
+                        manager.toggleFavoriteScene(scene.id)
+                    }
                     Button("Delete", role: .destructive) { manager.deleteScene(scene.id) }
-                } label: { Image(systemName: "ellipsis") }
+                } label: { Image(systemName: "ellipsis.circle") }
                 .menuStyle(.borderlessButton)
-                .lumenInteractiveTarget()
+                .fixedSize()
+                .accessibilityLabel("Actions for \(scene.name)")
             }
-            Text(scene.name).font(LumenType.display(size: 15, weight: .semibold))
-            Text("\(scene.snapshots.count) lights · saved \(scene.createdAt.formatted(.relative(presentation: .named)))")
-                .font(.caption).foregroundStyle(Lumen.textSecondary)
-            PaletteStrip(colors: scene.snapshots.values.prefix(8).map {
-                Color(hue: $0.hue, saturation: $0.saturation, brightness: max(0.45, $0.brightness))
-            })
-            Button("Preview & Apply") { previewScene = scene }
-                .buttonStyle(LumenPrimaryButtonStyle(compact: true))
-                .disabled(manager.availableDeviceIDs(for: scene).isEmpty)
-            if manager.availableDeviceIDs(for: scene).isEmpty {
-                Label("No scene lights are currently available", systemImage: "wifi.slash")
-                    .font(.caption2).foregroundStyle(Lumen.warning)
+            // Sort IDs: dictionary iteration must not shuffle a composition.
+            HStack(alignment: .bottom, spacing: 3) {
+                ForEach(scene.snapshots.keys.sorted(), id: \.self) { id in
+                    if let snapshot = scene.snapshots[id] {
+                        Rectangle()
+                            .fill(Color(hue: snapshot.hue, saturation: snapshot.saturation, brightness: 1)
+                                .opacity(snapshot.isOn ? 0.25 + snapshot.brightness * 0.75 : 0.12))
+                            .frame(height: snapshot.isOn ? 8 + 30 * snapshot.brightness : 3)
+                    }
+                }
+            }
+            .frame(height: 38, alignment: .bottom)
+            .accessibilityHidden(true)
+            if manager.availableDeviceIDs(for: scene).count < scene.snapshots.count {
+                Label("Some saved fixtures are unavailable. Review before applying.", systemImage: "wifi.slash")
+                    .font(.caption).foregroundStyle(Lumen.meter)
             }
         }
-        .padding(16)
-        .lumenCard()
+        .padding(.vertical, 16)
+        .overlay(alignment: .bottom) { Rectangle().fill(Lumen.ruleSoft).frame(height: 1) }
     }
 
     private func effectCard(_ effect: LightingEffect) -> some View {
         let isActive = manager.activeEffects[scope] == effect.id
-        return VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Image(systemName: effect.icon).font(LumenType.display(size: 21, weight: .semibold))
-                    .foregroundStyle(isActive ? Lumen.pinkBright : Lumen.violetBright)
-                Spacer()
-                if effect.isAudioReactive {
-                    Label("Audio", systemImage: "waveform").font(.caption2).foregroundStyle(Lumen.pinkBright)
-                } else if effect.isHighEnergy {
-                    Label("Energy", systemImage: "bolt.fill").font(.caption2).foregroundStyle(Lumen.warning)
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 16) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label(effect.name, systemImage: isActive ? "waveform" : "play")
+                        .font(.headline)
+                    Text(effect.summary).font(.callout).foregroundStyle(Lumen.meter)
                 }
-            }
-            Text(effect.name).font(LumenType.display(size: 15, weight: .semibold))
-            Text(effect.summary).font(.caption).foregroundStyle(Lumen.textSecondary).lineLimit(3)
-            PaletteStrip(colors: effect.colors.map(\.color))
-            HStack {
-                Text(manager.scopeDisplayName(scope)).font(.caption).foregroundStyle(Lumen.textTertiary)
-                Spacer()
+                Spacer(minLength: 8)
                 if isActive {
-                    Button("Stop") { manager.stopEffect(scope: scope) }
+                    Button("Stop & restore") { manager.stopEffect(scope: scope) }
                         .buttonStyle(LumenSecondaryButtonStyle(compact: true))
                 } else {
                     Button("Start") { start(effect) }
@@ -743,31 +718,16 @@ struct LibraryWorkspaceView: View {
                         .disabled(manager.devices(in: scope).isEmpty)
                 }
             }
+            PaletteStrip(colors: effect.colors.map(\.color))
+            Text("\(isActive ? "Running" : "Dynamic effect") · \(manager.scopeDisplayName(scope))\(effect.isHighEnergy ? " · High energy" : "")")
+                .font(.caption).foregroundStyle(Lumen.meter)
         }
-        .padding(16)
-        .lumenCard(fill: isActive ? Lumen.surfaceRaised : Lumen.surface, highlighted: isActive)
+        .padding(.vertical, 16)
+        .overlay(alignment: .bottom) { Rectangle().fill(Lumen.ruleSoft).frame(height: 1) }
     }
 
     private var filteredScenes: [LightingScene] {
         searchText.isEmpty ? manager.scenes : manager.scenes.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
-    }
-
-    /// This view (and its `section`/`scope` selection) is torn down and
-    /// rebuilt whenever the sidebar/tab moves to a different top-level
-    /// destination and back, since it lives behind a `switch` case in
-    /// `LumenDeskShellView.destinationView`. Without this, leaving Music
-    /// Mode running in a room and returning to Library always lands back on
-    /// Scenes / All Lights, hiding the running show's controls behind a
-    /// picker the user has to reselect by hand. Restore straight to it once,
-    /// on the freshly created instance, without overriding a section the
-    /// user then deliberately navigates away from within this instance.
-    private func restoreRunningShowIfNeeded() {
-        guard !hasRestoredRunningShow else { return }
-        hasRestoredRunningShow = true
-        if let runningScope = manager.activeEffects.first(where: { $0.value == "music-pulse" })?.key {
-            section = .music
-            scope = runningScope
-        }
     }
 
     private func start(_ effect: LightingEffect) {
@@ -798,7 +758,7 @@ struct LibraryWorkspaceView: View {
     private func captureScene() {
         let trimmed = newSceneName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        manager.captureScene(name: trimmed)
+        manager.captureScene(name: trimmed, scope: scope)
         if let scene = manager.scenes.last { manager.toggleFavoriteScene(scene.id) }
         newSceneName = ""
     }
@@ -833,7 +793,7 @@ struct AutomationWorkspaceView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                PageHeader(eyebrow: "Cues and timing", title: "Cues",
+                PageHeader(eyebrow: "Cues and timing", title: "Schedules",
                            subtitle: "Let the house keep time. Pauses and missed cues stay visible until you decide.") {
                     Button { showingSolarSettings = true } label: {
                         Label("Solar Times", systemImage: "sunrise")
@@ -870,7 +830,7 @@ struct AutomationWorkspaceView: View {
 
                 if manager.rooms.isEmpty {
                     EmptyInlineView(icon: "clock.badge.questionmark", title: "No rooms to automate",
-                                    message: "Create and organize a room on Home before adding a schedule.")
+                                    message: "Create and organize a room in Room actions before adding a schedule.")
                 } else {
                     LazyVStack(spacing: 12) {
                         ForEach(manager.rooms) { room in
@@ -884,7 +844,7 @@ struct AutomationWorkspaceView: View {
             .frame(maxWidth: .infinity)
         }
         .background(LumenBackground(glow: false))
-        .navigationTitle("Cues")
+        .navigationTitle("Schedules")
         .sheet(item: $scheduleRoom) { room in
             ScheduleEditorView(room: room).environmentObject(manager)
         }
@@ -994,7 +954,7 @@ struct DevicesWorkspaceView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                PageHeader(eyebrow: "Local link", title: "Rig",
+                PageHeader(eyebrow: "Local link", title: "Devices",
                            subtitle: "Discovery, command response, and recovery from this network in one place.") {
                     Button { manager.scan() } label: {
                         Label(manager.isScanning ? "Scanning" : "Scan", systemImage: "arrow.clockwise")
@@ -1003,10 +963,20 @@ struct DevicesWorkspaceView: View {
                     .disabled(manager.isScanning)
                 }
 
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), spacing: 12)], spacing: 12) {
-                    ForEach(manager.scanDiagnostics) { diagnostic in
-                        DiagnosticSummaryCard(diagnostic: diagnostic)
+                if manager.isScanning {
+                    HStack {
+                        ProgressView().controlSize(.small)
+                        Text(manager.scanPhase).font(.callout)
                     }
+                }
+                Text("\(manager.devices.filter { !$0.isStale }.count) connected · \(manager.devices.filter(\.isStale).count) not responding")
+                    .font(.callout).foregroundStyle(Lumen.meter)
+                DisclosureGroup("Connection diagnostics") {
+                    VStack(spacing: 8) {
+                        ForEach(manager.scanDiagnostics) { diagnostic in
+                            DiagnosticSummaryCard(diagnostic: diagnostic)
+                        }
+                    }.padding(.top, 12)
                 }
 
                 HStack(spacing: 10) {
@@ -1056,7 +1026,7 @@ struct DevicesWorkspaceView: View {
             .frame(maxWidth: .infinity)
         }
         .background(LumenBackground(glow: false))
-        .navigationTitle("Rig")
+        .navigationTitle("Devices")
         .sheet(item: $selectedDevice) { device in
             DeviceInspectorView(device: device).environmentObject(manager)
         }
@@ -1260,7 +1230,7 @@ private struct PageHeader<Trailing: View>: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 16) {
-            LumenTitleBlock(eyebrow: eyebrow, title: title, subtitle: subtitle, size: 38)
+            LumenTitleBlock(eyebrow: eyebrow, title: title, subtitle: subtitle, size: 24)
             Spacer(minLength: 12)
             trailing
         }

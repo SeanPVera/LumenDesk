@@ -811,6 +811,32 @@ final class LightManager: ObservableObject {
         for d in lights { d.brightness = value; sendBrightness(d, value: value) }
     }
 
+    /// One undo entry for a deliberate multi-fixture color edit.
+    func setColor(deviceIDs: Set<String>, color: Color) {
+        let lights = devices.filter { deviceIDs.contains($0.id) }
+        guard !lights.isEmpty else { return }
+        stopEffects(touching: deviceIDs)
+        recordChange(lights)
+        rememberColor(color, name: "Custom")
+        for light in lights {
+            setWhiteMode(light.id, white: false)
+            light.color = color
+            sendColor(light, color: color)
+        }
+    }
+
+    func setKelvin(deviceIDs: Set<String>, kelvin: Int) {
+        let lights = devices.filter { deviceIDs.contains($0.id) }
+        guard !lights.isEmpty else { return }
+        stopEffects(touching: deviceIDs)
+        recordChange(lights)
+        for light in lights {
+            setWhiteMode(light.id, white: true)
+            light.kelvin = min(9000, max(2500, kelvin))
+            sendColorTemperature(light, kelvin: light.kelvin)
+        }
+    }
+
     // MARK: - Theme & effect catalog
 
     func devices(in scope: LightScope) -> [LightDevice] {
@@ -2351,11 +2377,11 @@ extension LightManager {
 // MARK: - Scenes
 
 extension LightManager {
-    func captureScene(name: String) {
+    func captureScene(name: String, scope: LightScope = .all) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         var snapshots: [String: DeviceSnapshot] = [:]
-        for d in devices {
+        for d in devices(in: scope) {
             let hsb = d.color.hsbComponents
             snapshots[d.id] = DeviceSnapshot(
                 isOn: d.isOn,

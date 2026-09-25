@@ -2,6 +2,7 @@ import SwiftUI
 
 struct LightRowView: View {
     @EnvironmentObject var manager: LightManager
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject var device: LightDevice
 
     var selectionMode: Bool = false
@@ -57,7 +58,7 @@ struct LightRowView: View {
     // brightness and white-balance instruments cannot hold a value. They are
     // disabled while the show owns the fixture instead of taking a change and
     // silently losing it a frame later.
-    private var controlsDisabled: Bool { selectionMode || !device.isOn || runningEffect != nil }
+    private var controlsDisabled: Bool { selectionMode || device.isStale || !device.isOn || runningEffect != nil }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -71,39 +72,20 @@ struct LightRowView: View {
         .accessibilityAddTraits(selectionMode ? .isButton : [])
         .accessibilityHint(selectionMode ? "Double-tap to toggle selection" : "")
         .accessibilityAction(.default) { if selectionMode { onToggleSelection?() } }
-        .accessibilityAction(named: "Toggle Power") { if !selectionMode { manager.setPower(device, on: !device.isOn) } }
+        .accessibilityAction(named: "Toggle Power") { if !selectionMode && !device.isStale && runningEffect == nil { manager.setPower(device, on: !device.isOn) } }
         .accessibilityAction(named: "Open Inspector") { if !selectionMode { showingInspector = true } }
         .focusableCompat()
         .padding(16)
-        .background {
-            ZStack {
-                panelShape.fill(device.isOn ? Lumen.surfaceRaised : Lumen.surface)
-                panelShape.fill(
-                    LinearGradient(colors: [Lumen.edgeHighlight, .clear],
-                                   startPoint: .top, endPoint: .bottom)
-                )
-            }
-        }
-        .clipShape(panelShape)
-        .overlay(panelShape.stroke(borderColor, lineWidth: borderWidth))
-        .overlay(alignment: .leading) {
-            // The fixture's own light, run down the leading edge of its panel.
-            Rectangle()
-                .fill(device.isOn ? device.color : Lumen.textTertiary.opacity(0.3))
-                .frame(width: 3)
-                .padding(.vertical, 10)
-                .shadow(color: device.color.opacity(device.isOn ? 0.8 : 0), radius: 10)
-        }
-        .shadow(color: device.isOn ? device.color.opacity(0.22) : .black.opacity(0.35), radius: device.isOn ? 16 : 8, y: 6)
+        .background(Lumen.deck)
         .overlay {
             if manager.newlyDiscoveredIDs.contains(device.id) {
                 panelShape
                     .stroke(Lumen.beamBright, lineWidth: 2)
-                    .transition(.opacity.animation(.easeOut(duration: 1.5)))
+                    .transition(.opacity)
             }
         }
-        .animation(.easeOut(duration: 0.8), value: manager.newlyDiscoveredIDs.contains(device.id))
-        .opacity(device.isStale ? 0.6 : 1)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: manager.newlyDiscoveredIDs.contains(device.id))
+        .opacity(1)
         .help(device.isStale
               ? "Not responding \u{2014} last seen \(device.lastSeen.formatted(.relative(presentation: .named))). Check the bulb\u{2019}s power and network."
               : "")
@@ -170,7 +152,7 @@ struct LightRowView: View {
             if let recent = manager.recentActivitySummary(for: device) {
                 Label(recent, systemImage: "clock.arrow.circlepath")
                     .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Lumen.meter)
                     .lineLimit(1)
             }
             if device.isStale {
@@ -193,7 +175,7 @@ struct LightRowView: View {
                 renameField
             } else {
                 Text(device.label)
-                    .font(LumenType.display(size: 20, weight: .bold))
+                    .font(LumenType.display(size: 16, weight: .semibold))
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .help(device.label)
@@ -284,7 +266,7 @@ struct LightRowView: View {
                 size: 38,
                 spokenLabel: device.isOn ? "Turn off \(device.label)" : "Turn on \(device.label)"
             ))
-            .disabled(selectionMode)
+            .disabled(selectionMode || device.isStale || runningEffect != nil)
     }
 
     // MARK: - Controls
@@ -454,18 +436,23 @@ struct LightRowView: View {
     }
 
     private var colorRow: some View {
-        HStack(spacing: 6) {
-            ForEach(Self.colorSwatches, id: \.label) { swatch in
-                swatchButton(swatch)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                ColorPicker("Color", selection: colorBinding, supportsOpacity: false)
+                    .disabled(controlsDisabled)
+                    .accessibilityLabel("\(device.label) color")
+                Spacer()
+                Button("Precise values…") { showingPreciseColor = true }
+                    .buttonStyle(.plain).disabled(controlsDisabled)
             }
-            Spacer(minLength: 0)
-            Text(colorDescription)
-                .font(LumenType.instrumentLabel(size: 9))
-                .foregroundStyle(Lumen.textTertiary)
-            ColorPicker("", selection: colorBinding, supportsOpacity: false)
-                .labelsHidden()
-                .disabled(controlsDisabled)
-                .accessibilityLabel("\(device.label) color")
+            Text(colorDescription).font(.caption).foregroundStyle(Lumen.meter)
+            DisclosureGroup("Quick colors") {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 44), spacing: 6)], spacing: 6) {
+                    ForEach(Self.colorSwatches, id: \.label) { swatch in
+                        swatchButton(swatch).frame(minWidth: 44, minHeight: 44)
+                    }
+                }
+            }
         }
     }
 

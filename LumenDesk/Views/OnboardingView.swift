@@ -9,6 +9,7 @@ import SwiftUI
 /// Every step is skippable so no one is ever trapped.
 struct OnboardingView: View {
     @EnvironmentObject var manager: LightManager
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// Called when the user finishes or skips. The caller flips the persisted
     /// "has onboarded" flag.
@@ -45,10 +46,7 @@ struct OnboardingView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 8)
                     .id(step)
-                    .transition(.asymmetric(
-                        insertion: .move(edge: .trailing).combined(with: .opacity),
-                        removal:   .move(edge: .leading).combined(with: .opacity)
-                    ))
+                    .transition(.opacity)
                 }
                 .scrollIndicators(.hidden)
 
@@ -70,7 +68,7 @@ struct OnboardingView: View {
                           ? AnyShapeStyle(Lumen.beamBright)
                           : AnyShapeStyle(Lumen.hairlineStrong))
                     .frame(width: s == step ? 30 : 16, height: 3)
-                    .animation(.easeOut(duration: 0.25), value: step)
+                    .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: step)
             }
             Spacer()
             if step != .done {
@@ -87,35 +85,18 @@ struct OnboardingView: View {
     // MARK: - Step 1: Welcome
 
     private var welcomeStep: some View {
-        VStack(spacing: 22) {
-            Spacer(minLength: 12)
-            LumenWordmark(size: 44)
-            Text("One desk for every local light.")
-                .font(LumenType.display(size: 18, weight: .semibold))
-                .foregroundStyle(Lumen.textSecondary)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-
-            VStack(spacing: 14) {
-                valueRow("network", Lumen.cyan,
-                         "Stays on this network", "LIFX and Govee commands travel directly from this device to your lights.")
-                valueRow("rectangle.3.group.fill", Lumen.signal,
-                         "Mixed lights, one desk", "Build rooms and scenes across brands without adding a bridge or an account.")
-                valueRow("clock.badge.checkmark.fill", Lumen.success,
-                         "Cues keep time", "Set local schedules for the routines your rooms already follow.")
-            }
-            .padding(.top, 4)
-
-            VStack(alignment: .leading, spacing: 10) {
-                Toggle("Quiet interface", isOn: $quietInterface)
-                    .toggleStyle(LumenRockerStyle())
-                Text("Keeps the work surface flat and removes the faint brand beam. You can change it later in Settings.")
-                    .font(.caption)
-                    .foregroundStyle(Lumen.textSecondary)
-            }
-            .padding(14)
-            .lumenCard(fill: Lumen.surfaceRaised)
-            Spacer(minLength: 12)
+        VStack(alignment: .leading, spacing: 22) {
+            LumenWordmark(size: 28)
+            Text("Connect your lights").font(.title2.weight(.semibold))
+            Text("Find supported LIFX and Govee lights on this network, then give each one a place in a room.")
+                .font(.body).foregroundStyle(Lumen.meter)
+            valueRow("1.circle", Lumen.chalk, "Prepare", "Power the lights and enable local control where required.")
+            valueRow("2.circle", Lumen.chalk, "Discover", "Review what responds. Missing fixtures can be added later.")
+            valueRow("3.circle", Lumen.chalk, "Assign", "Choose the room each fixture belongs to.")
+            Button("Explore Demo Mode") { manager.enterDemoMode(); onFinish() }
+                .buttonStyle(LumenSecondaryButtonStyle())
+            Text("Demo Mode uses simulated fixtures and sends no lighting commands.")
+                .font(.caption).foregroundStyle(Lumen.meter)
         }
     }
 
@@ -133,8 +114,8 @@ struct OnboardingView: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(14)
-        .lumenCard()
+        .padding(.vertical, 12)
+        .overlay(alignment: .bottom) { Rectangle().fill(Lumen.ruleSoft).frame(height: 1) }
     }
 
     // MARK: - Step 2: Prepare
@@ -210,7 +191,7 @@ struct OnboardingView: View {
                         DiscoverChip(device: device)
                     }
                 }
-                .animation(.spring(duration: 0.45), value: manager.devices.count)
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: manager.devices.count)
             } else if !manager.isScanning {
                 VStack(spacing: 14) {
                     Image(systemName: "lightbulb.slash")
@@ -396,7 +377,7 @@ struct OnboardingView: View {
 
     private var primaryTitle: String {
         switch step {
-        case .welcome: return "Set Up My Desk"
+        case .welcome: return "Prepare lights"
         case .done:    return "Open My Desk"
         default:       return "Continue"
         }

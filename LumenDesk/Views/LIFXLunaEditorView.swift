@@ -24,15 +24,22 @@ struct LIFXLunaEditorView: View {
             header
             subtitle
             if let draft {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 18) {
-                        matrixSection(draft)
-                        selectionTools(draft)
-                        paintTools
-                        gradientTools
-                        presetTools
+                GeometryReader { geometry in
+                    ScrollView {
+                        if geometry.size.width >= 800 {
+                            HStack(alignment: .top, spacing: 28) {
+                                VStack(spacing: 18) { matrixSection(draft); selectionTools(draft) }
+                                    .frame(maxWidth: .infinity)
+                                editingTools.frame(width: 320)
+                            }.padding(.vertical, 2)
+                        } else {
+                            VStack(alignment: .leading, spacing: 20) {
+                                matrixSection(draft)
+                                selectionTools(draft)
+                                editingTools
+                            }.padding(.vertical, 2)
+                        }
                     }
-                    .padding(.vertical, 2)
                 }
                 footer(draft)
             } else {
@@ -40,7 +47,7 @@ struct LIFXLunaEditorView: View {
             }
         }
         .padding(20)
-        .sheetFrame(minWidth: 520, idealWidth: 620, minHeight: 560, idealHeight: 680)
+        .sheetFrame(minWidth: 520, idealWidth: 960, minHeight: 560, idealHeight: 740)
         .background(LumenBackground(glow: false))
         .onAppear {
             if let state = manager.lifxMatrixState(for: device) { draft = state }
@@ -53,12 +60,23 @@ struct LIFXLunaEditorView: View {
         }
     }
 
+    private var editingTools: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text(selection.isEmpty ? "Paint the lamp" : "Paint \(selection.count) selected zones").font(.headline)
+            paintTools
+            gradientTools
+            DisclosureGroup("Luna looks") { presetTools.padding(.top, 12) }
+            Text("These are draft colors. Apply writes them to Luna; closing leaves the lamp unchanged.")
+                .font(.caption).foregroundStyle(Lumen.meter)
+        }
+    }
+
     private var header: some View {
         HStack {
             Label("Luna Color Studio — \(device.label)", systemImage: "circle.grid.3x3.fill")
                 .font(LumenType.display(size: 19, weight: .bold))
             Spacer()
-            Button("Done") { dismiss() }
+            Button("Close draft") { dismiss() }.keyboardShortcut(.cancelAction)
         }
     }
 
@@ -71,7 +89,7 @@ struct LIFXLunaEditorView: View {
                 .font(.caption)
                 .foregroundStyle(.tertiary)
             if manager.isDemoMode {
-                Label("Demo mode: changes are simulated; no LAN packets are sent.", systemImage: "sparkles")
+                Label("Demo mode: changes are simulated; no LAN packets are sent.", systemImage: "play.rectangle")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -119,9 +137,9 @@ struct LIFXLunaEditorView: View {
             }
             .padding(14)
             .background(
-                RoundedRectangle(cornerRadius: 28, style: .continuous)
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
                     .fill(Lumen.surfaceRaised)
-                    .overlay(RoundedRectangle(cornerRadius: 28, style: .continuous)
+                    .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
                         .stroke(Lumen.hairline, lineWidth: 0.5))
             )
             .frame(maxWidth: 440)
@@ -135,11 +153,11 @@ struct LIFXLunaEditorView: View {
         return Button {
             if selected { selection.remove(index) } else { selection.insert(index) }
         } label: {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
                 .fill(color)
                 .frame(maxWidth: .infinity, minHeight: 52)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    RoundedRectangle(cornerRadius: 4, style: .continuous)
                         .stroke(selected ? Color.white : Lumen.hairlineStrong,
                                 lineWidth: selected ? 3 : 0.5)
                 )
@@ -147,16 +165,17 @@ struct LIFXLunaEditorView: View {
                     if selected {
                         Image(systemName: "checkmark.circle.fill")
                             .font(.caption.weight(.bold))
-                            .foregroundStyle(.white)
-                            .shadow(radius: 2)
+                            .foregroundStyle(Lumen.stage)
+                            .background(Lumen.lit, in: Circle())
                             .padding(5)
                     }
                 }
-                .shadow(color: color.opacity(0.5), radius: selected ? 8 : 3)
+
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Luna zone \(state.activeZoneIndices.firstIndex(of: index).map { $0 + 1 } ?? index + 1)")
         .accessibilityValue(selected ? "selected" : "not selected")
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     // MARK: - Tools
@@ -179,7 +198,7 @@ struct LIFXLunaEditorView: View {
     private var paintTools: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Paint").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-            HStack(spacing: 7) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 44), spacing: 7)], spacing: 7) {
                 ForEach(LightRowView.colorSwatches, id: \.label) { swatch in
                     Button {
                         paintColor = swatch.color
@@ -187,7 +206,7 @@ struct LIFXLunaEditorView: View {
                     } label: {
                         RoundedRectangle(cornerRadius: 2, style: .continuous)
                             .fill(swatch.color)
-                            .frame(width: 30, height: 24)
+                            .frame(width: 44, height: 44)
                             .overlay(
                                 RoundedRectangle(cornerRadius: 2, style: .continuous)
                                     .stroke(Lumen.hairlineStrong, lineWidth: 1)
@@ -197,7 +216,6 @@ struct LIFXLunaEditorView: View {
                     .help(swatch.label)
                     .accessibilityLabel("Paint \(swatch.label)")
                 }
-                Spacer(minLength: 4)
                 ColorPicker("Custom", selection: Binding(
                     get: { paintColor },
                     set: { value in paintColor = value; paintTargets(value) }
@@ -211,7 +229,7 @@ struct LIFXLunaEditorView: View {
     private var gradientTools: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Gradient").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-            HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 12) {
                 ColorPicker("Start", selection: $paintColor, supportsOpacity: false)
                 Image(systemName: "arrow.right")
                     .foregroundStyle(.secondary)
@@ -227,7 +245,7 @@ struct LIFXLunaEditorView: View {
     private var presetTools: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Luna looks").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-            HStack(spacing: 8) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 104))], spacing: 8) {
                 ForEach(LunaLook.allCases) { look in
                     Button(look.title) { apply(look) }
                         .buttonStyle(LumenSecondaryButtonStyle())

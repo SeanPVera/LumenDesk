@@ -56,7 +56,7 @@ jobs:
           mkdir -p "$ASSET_OUTPUT"
           xcrun actool \
             LumenDesk/Assets.xcassets \
-            "LumenDesk/Preview Content/Preview Assets.xcassets" \
+            "LumenDesk/Views/Preview Content/Preview Assets.xcassets" \
             --compile "$ASSET_OUTPUT" \
             --output-partial-info-plist "$RUNNER_TEMP/LumenDeskAssetInfo.plist" \
             --output-format human-readable-text \
@@ -70,9 +70,17 @@ jobs:
             --minimum-deployment-target 13.0 \
             --platform macosx
 
+      - name: Configure rendered review environment
+        env:
+          LUMENDESK_RENDER_DIRECTORY: ${{ runner.temp }}
+        run: |
+          python3 scripts/configure_visual_review.py
+
       - name: Test macOS Debug
         env:
           TEST_RUNNER_MUSIC_TRACE_PATH: ${{ runner.temp }}/music-production.csv
+          LUMENDESK_RENDER_QA: "1"
+          LUMENDESK_RENDER_DIRECTORY: ${{ runner.temp }}
         run: |
           xcodebuild \
             -project "$PROJECT" \
@@ -95,6 +103,15 @@ jobs:
       - name: Prove control regressions fail on the audited baseline
         run: scripts/check_music_controls_baseline.sh
 
+      - name: Inspect rendered review output
+        run: python3 scripts/print_visual_review.py "$RUNNER_TEMP/LumenDesk-Visual-QA"
+
+      - name: Analyze macOS
+        run: |
+          xcodebuild -project "$PROJECT" -scheme "$SCHEME" -configuration "$CONFIGURATION" \
+            -destination "platform=macOS" -derivedDataPath "$RUNNER_TEMP/DerivedData/macOS" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO analyze
+
       - name: Build generic iOS device
         run: |
           xcodebuild \
@@ -106,3 +123,11 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             build
+
+      - name: Preserve rendered review states
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-visual-review
+          path: ${{ runner.temp }}/LumenDesk-Visual-QA
+          if-no-files-found: warn

@@ -77,8 +77,11 @@ export class RealFFT {
 
     const bins = n / 2;
     const scale = 2 / n;
+    // Bolt: Use Math.sqrt(r*r + i*i) instead of Math.hypot for faster magnitude calculation on audio samples
     for (let i = 0; i < bins; i += 1) {
-      output[i] = Math.hypot(real[i], imag[i]) * scale;
+      const r = real[i];
+      const im = imag[i];
+      output[i] = Math.sqrt(r * r + im * im) * scale;
     }
     output[0] *= 0.5;
   }

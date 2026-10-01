@@ -1,0 +1,3 @@
+## 2025-05-18 - Precomputing Pitch Class Table for Real-Time DSP Hops
+**Learning:** In audio feature extraction loops running at 90+ Hz, calculating `Math.log2`, `Math.round`, and exponentiations for FFT spectrum bins and chroma pitch classes on every hop is a major bottleneck. Since sample rate and FFT size are constant during a session, bin-to-pitch-class mapping and spectrum bin ranges can be precomputed once on configuration.
+**Action:** Always precompute static index mappings and bin limits in audio/signal analysis loops upon sample rate configuration rather than re-evaluating transcendental math per frame.

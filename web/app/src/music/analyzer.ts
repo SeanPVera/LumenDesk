@@ -29,6 +29,28 @@ export class MusicFeatureAnalyzer {
   private readonly previousLog = new Float64Array(WINDOW / 2);
   private readonly chroma = new Float64Array(12);
   private readonly spectrum = new Float64Array(SPECTRUM_BINS);
+  private readonly chromaBins = new Int8Array(WINDOW / 2);
+
+  // Precomputed spectrum bin range lookup tables for updateSpectrum()
+  private static readonly specA = (() => {
+    const n = WINDOW / 2;
+    const arr = new Int32Array(SPECTRUM_BINS);
+    for (let i = 0; i < SPECTRUM_BINS; i += 1) {
+      arr[i] = Math.floor(((i / SPECTRUM_BINS) ** 2) * (n - 2)) + 1;
+    }
+    return arr;
+  })();
+
+  private static readonly specLast = (() => {
+    const n = WINDOW / 2;
+    const arr = new Int32Array(SPECTRUM_BINS);
+    for (let i = 0; i < SPECTRUM_BINS; i += 1) {
+      const a = Math.floor(((i / SPECTRUM_BINS) ** 2) * (n - 2)) + 1;
+      const b = Math.floor((((i + 1) / SPECTRUM_BINS) ** 2) * (n - 2)) + 1;
+      arr[i] = Math.max(a + 1, b);
+    }
+    return arr;
+  })();
   private ringWrite = 0;
   private samplesUntilHop = HOP;
   private processedSamples = 0;
@@ -194,13 +216,14 @@ export class MusicFeatureAnalyzer {
   private updateSpectrum(): void {
     const n = this.magnitudes.length;
     const peak = Math.max(this.bandPeak, 1e-6);
+    const specA = MusicFeatureAnalyzer.specA;
+    const specLast = MusicFeatureAnalyzer.specLast;
     for (let i = 0; i < SPECTRUM_BINS; i += 1) {
-      const a = Math.floor(((i / SPECTRUM_BINS) ** 2) * (n - 2)) + 1;
-      const b = Math.floor((((i + 1) / SPECTRUM_BINS) ** 2) * (n - 2)) + 1;
+      const a = specA[i];
+      const last = specLast[i];
       let sum = 0;
-      const last = Math.max(a + 1, b);
       for (let k = a; k < last && k < n; k += 1) sum += this.magnitudes[k];
-      const mean = sum / Math.max(1, last - a);
+      const mean = sum / (last - a);
       const target = Math.min(1, mean / peak);
       this.spectrum[i] = this.spectrum[i] * 0.55 + target * 0.45;
     }
@@ -208,18 +231,21 @@ export class MusicFeatureAnalyzer {
 
   private updateChroma(): void {
     this.chroma.fill(0);
-    const sr = this.sampleRate;
-    for (let bin = 2; bin < this.magnitudes.length; bin += 1) {
-      const freq = (bin * sr) / WINDOW;
-      if (freq < 55 || freq > 2000) continue;
-      const midi = 69 + 12 * Math.log2(freq / 440);
-      const pc = ((Math.round(midi) % 12) + 12) % 12;
-      this.chroma[pc] += this.magnitudes[bin];
+    const bins = this.magnitudes.length;
+    const chromaBins = this.chromaBins;
+    for (let bin = 2; bin < bins; bin += 1) {
+      const pc = chromaBins[bin];
+      if (pc >= 0) {
+        this.chroma[pc] += this.magnitudes[bin];
+      }
     }
     let max = 0;
-    for (let i = 0; i < 12; i += 1) max = Math.max(max, this.chroma[i]);
+    for (let i = 0; i < 12; i += 1) {
+      if (this.chroma[i] > max) max = this.chroma[i];
+    }
     if (max > 0) {
-      for (let i = 0; i < 12; i += 1) this.chroma[i] /= max;
+      const invMax = 1 / max;
+      for (let i = 0; i < 12; i += 1) this.chroma[i] *= invMax;
     }
   }
 
@@ -234,6 +260,17 @@ export class MusicFeatureAnalyzer {
     this.snareBins = binsFor(sampleRate, 200, 2000);
     this.hatBins = binsFor(sampleRate, 3000, 12000);
     this.fluxBands = logBands(sampleRate, 24);
+
+    // Precalculate pitch class mapping per bin for active sample rate
+    this.chromaBins.fill(-1);
+    const numBins = WINDOW / 2;
+    for (let bin = 2; bin < numBins; bin += 1) {
+      const freq = (bin * sampleRate) / WINDOW;
+      if (freq >= 55 && freq <= 2000) {
+        const midi = 69 + 12 * Math.log2(freq / 440);
+        this.chromaBins[bin] = ((Math.round(midi) % 12) + 12) % 12;
+      }
+    }
   }
 }
 

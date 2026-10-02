@@ -15,6 +15,7 @@ export class RealFFT {
   private readonly sin: Float64Array;
   private readonly real: Float64Array;
   private readonly imag: Float64Array;
+  private readonly bitRev: Uint32Array; // Precomputed bit-reversal lookup table
 
   constructor(n: number) {
     if (n < 2 || (n & (n - 1)) !== 0) {
@@ -26,10 +27,24 @@ export class RealFFT {
     this.sin = new Float64Array(n / 2);
     this.real = new Float64Array(n);
     this.imag = new Float64Array(n);
+    this.bitRev = new Uint32Array(n);
+
     for (let i = 0; i < n / 2; i += 1) {
       const angle = (-2 * Math.PI * i) / n;
       this.cos[i] = Math.cos(angle);
       this.sin[i] = Math.sin(angle);
+    }
+
+    // Precalculate bit-reversal permutation map once per FFT instance
+    let j = 0;
+    for (let i = 0; i < n; i += 1) {
+      this.bitRev[i] = j;
+      let bit = n >> 1;
+      while (j & bit) {
+        j ^= bit;
+        bit >>= 1;
+      }
+      j ^= bit;
     }
   }
 
@@ -37,24 +52,12 @@ export class RealFFT {
     const n = this.n;
     const real = this.real;
     const imag = this.imag;
-    for (let i = 0; i < n; i += 1) {
-      real[i] = input[i] ?? 0;
-      imag[i] = 0;
-    }
+    const bitRev = this.bitRev;
 
-    let j = 0;
-    for (let i = 1; i < n; i += 1) {
-      let bit = n >> 1;
-      while (j & bit) {
-        j ^= bit;
-        bit >>= 1;
-      }
-      j ^= bit;
-      if (i < j) {
-        const tr = real[i];
-        real[i] = real[j];
-        real[j] = tr;
-      }
+    // Fast clear imaginary array and copy input directly in bit-reversed order
+    imag.fill(0);
+    for (let i = 0; i < n; i += 1) {
+      real[bitRev[i]] = input[i] ?? 0;
     }
 
     for (let len = 2; len <= n; len <<= 1) {

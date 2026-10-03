@@ -1,8 +1,8 @@
 // These assertions mirror LumenDeskTests/NanoleafShapesTests.swift so the
 // bridge and the native app parse the same walls and put identical bytes on
 // the wire. The expected values come from Nanoleaf's OpenAPI examples,
-// Hyperion's driver and layouts real controllers reported, never from the
-// encoders under test.
+// Hyperion's and OpenRGB's drivers and layouts real controllers reported,
+// never from the encoders under test.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import * as nanoleaf from '../src/nanoleaf.js'
@@ -45,6 +45,28 @@ function mixedWall(reversed = false) {
     layout: { numPanels: 7, sideLength: 0, positionData: entries } } }
 }
 
+// The NL22 "all panel info" example in Nanoleaf's OpenAPI, layout part.
+const auroraDocumentedInfo = {
+  name: 'Light Panels Name', serialNo: 'S16331A0217', model: 'NL22', firmwareVersion: '1.5.0',
+  panelLayout: {
+    layout: { numPanels: 2, sideLength: 150, positionData: [
+      { panelId: 107, x: -74, y: 43, o: 180, shapeType: 0 },
+      { panelId: 114, x: -149, y: 0, o: 360, shapeType: 0 },
+    ] },
+    globalOrientation: { value: 120, max: 360, min: 0 },
+  },
+}
+
+// The OpenAPI's "Light Panels (Ten Panels)" example, which the page lists
+// under `positionLayout`; copied unchanged under `positionData`.
+const auroraTenPanelLayout = { panelLayout: { layout: { numPanels: 10, sideLength: 150, positionData: [
+  { panelId: 1, x: 100, y: 100, o: 60, shapeType: 0 }, { panelId: 2, x: 324, y: 56, o: 0, shapeType: 0 },
+  { panelId: 3, x: 249, y: -159, o: 60, shapeType: 0 }, { panelId: 4, x: 174, y: 56, o: 240, shapeType: 0 },
+  { panelId: 5, x: 324, y: -29, o: 60, shapeType: 0 }, { panelId: 6, x: -49, y: 100, o: 60, shapeType: 0 },
+  { panelId: 7, x: 399, y: 99, o: 300, shapeType: 0 }, { panelId: 8, x: 174, y: -29, o: 60, shapeType: 0 },
+  { panelId: 9, x: 25, y: 56, o: 120, shapeType: 0 }, { panelId: 10, x: 249, y: -73, o: 240, shapeType: 0 },
+] } } }
+
 const layoutJSON = (entries, extra = {}) => ({ panelLayout: { ...extra, layout: { numPanels: 2, positionData: entries } } })
 
 const problem = value => {
@@ -62,11 +84,37 @@ test('shape codes follow Nanoleaf’s table and only Shapes panels are paintable
   assert.equal(nanoleaf.shapeKind(8), 'triangle')
   assert.equal(nanoleaf.shapeKind(9), 'miniTriangle')
   assert.equal(nanoleaf.shapeKind(12), 'controller')
+  assert.equal(nanoleaf.shapeKind(0), 'lightPanelTriangle')
+  assert.equal(nanoleaf.isPaintable({ shapeCode: 0 }), true)
+  assert.equal(nanoleaf.SIDE_LENGTH.lightPanelTriangle, 150)
   assert.equal(nanoleaf.shapeKind(1), 'accessory')
   assert.equal(nanoleaf.shapeKind(2), 'otherFamily')
   assert.equal(nanoleaf.shapeKind(99), 'unknown')
   assert.equal(nanoleaf.shapeKind(null), 'unspecified')
   assert.equal(nanoleaf.isPaintable({ shapeCode: 12 }), false)
+  for (const code of [1, 2, 3, 4, 5, 12, 14, 16, 17, 99]) assert.equal(nanoleaf.isPaintable({ shapeCode: code }), false, `type ${code}`)
+})
+
+test('product families pick their stream protocol, as NanoleafProductFamily does', () => {
+  assert.equal(nanoleaf.productFamily('NL42'), 'shapes')
+  assert.equal(nanoleaf.productFamily(' nl22 '), 'lightPanels')
+  assert.equal(nanoleaf.productFamily('NL29'), null)
+  assert.equal(nanoleaf.productFamily(undefined), null)
+  assert.equal(nanoleaf.streamProtocol('shapes'), 'v2')
+  assert.equal(nanoleaf.streamProtocol('lightPanels'), 'v1')
+  assert.equal(nanoleaf.familyName('lightPanels'), 'Aurora')
+})
+
+test('the documented Aurora layout is two paintable triangles and no controller', () => {
+  const { layout, orientation } = nanoleaf.parseTopology(auroraDocumentedInfo)
+  assert.deepEqual(nanoleaf.paintablePanels(layout).map(p => p.panelID), [107, 114])
+  assert.ok(layout.panels.every(p => nanoleaf.shapeKind(p.shapeCode) === 'lightPanelTriangle'))
+  assert.equal(layout.reportedPanelCount, 2)
+  assert.equal(nanoleaf.orientationDegrees(orientation), 120)
+  const geometry = nanoleaf.drawingGeometry(layout)
+  assert.deepEqual(geometry.references, [])
+  assert.deepEqual(geometry.panels.map(p => [p.kind, p.name, p.outline.length]),
+    [['lightPanelTriangle', 'Triangle', 3], ['lightPanelTriangle', 'Triangle', 3]])
 })
 
 test('a firmware 9.2 layout parses by identity, controller included but never paintable', () => {
@@ -140,6 +188,35 @@ test('outlines follow the SDK vertex convention that real walls tile with', () =
   assert.equal(nanoleaf.outline({ panelID: 0, x: 0, y: 0, orientation: 0, shapeCode: 12 }), null)
 })
 
+test('Aurora triangles tile under the same vertex convention', () => {
+  const radius = 150 / Math.sqrt(3)
+  const up = nanoleaf.outline({ panelID: 1, x: 0, y: 0, orientation: 0, shapeCode: 0 })
+  const expected = [[0, radius], [-75, -radius / 2], [75, -radius / 2]]
+  up.forEach(([x, y], i) => assert.ok(Math.hypot(x - expected[i][0], y - expected[i][1]) < 0.01))
+
+  const pair = nanoleaf.parseTopology(auroraDocumentedInfo).layout
+  assert.ok(sharesEdge(nanoleaf.outline(pair.panels[0]), nanoleaf.outline(pair.panels[1])),
+    'the documented NL22 neighbours share an edge')
+
+  // Whole-unit centroids of 150-unit triangles put shared vertices up to
+  // about two units apart, hence the wider tolerance.
+  const ten = nanoleaf.parseTopology(auroraTenPanelLayout).layout
+  const outlines = new Map(ten.panels.map(p => [p.panelID, nanoleaf.outline(p)]))
+  const reached = new Set([1])
+  const frontier = [1]
+  while (frontier.length) {
+    const from = outlines.get(frontier.pop())
+    for (const [id, other] of outlines) {
+      if (!reached.has(id) && sharesEdge(from, other, 2)) { reached.add(id); frontier.push(id) }
+    }
+  }
+  assert.deepEqual([...reached].sort((a, b) => a - b), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+  const sideways = ten.panels.map(p => nanoleaf.polygon(p.x, p.y, radius, p.orientation + 30, 3))
+  for (let i = 0; i < sideways.length; i += 1) {
+    for (let j = i + 1; j < sideways.length; j += 1) assert.ok(!sharesEdge(sideways[i], sideways[j], 2))
+  }
+})
+
 test('the wall view turns clockwise like Nanoleaf’s SDK', () => {
   const transform = nanoleaf.wallTransform(90, [10, 20])
   // rotateAuroraPanels(layout, 90) moves (100, 0) to (0, -100).
@@ -191,12 +268,41 @@ test('stream packets match Nanoleaf’s documented v2 bytes', () => {
   assert.equal(nanoleaf.MINIMUM_FRAME_INTERVAL_MS, 100)
 })
 
+test('v1 stream packets match Nanoleaf’s documented Light Panels bytes', () => {
+  // OpenAPI 3.2.6.2: panels 123, 223 and 67 as a v1 message.
+  const frames = [
+    { panelID: 123, r: 255, g: 0, b: 0, transition: 9 },
+    { panelID: 223, r: 0, g: 255, b: 0, transition: 24 },
+    { panelID: 67, r: 0, g: 0, b: 255, transition: 32 },
+  ]
+  assert.deepEqual([...nanoleaf.streamPacketV1(frames)], [3, 123, 1, 255, 0, 0, 0, 9, 223, 1, 0, 255, 0, 0, 24, 67, 1, 0, 0, 255, 0, 32])
+  assert.deepEqual([...nanoleaf.streamPacketV1([])], [0])
+  // Panel 300 cannot be named in one byte, so it is left out; a long fade is clamped.
+  assert.deepEqual([...nanoleaf.streamPacketV1([
+    { panelID: 300, r: 9, g: 9, b: 9, transition: 1 },
+    { panelID: 5, r: 1, g: 2, b: 3, transition: 451 },
+  ])], [1, 5, 1, 1, 2, 3, 0, 255])
+})
+
+test('the v1 activation reply names the port and nothing else is trusted', () => {
+  assert.equal(nanoleaf.v1StreamPort({ streamControlIpAddr: '192.168.2.231', streamControlPort: 60221, streamControlProtocol: 'udp' }), 60221)
+  assert.equal(nanoleaf.v1StreamPort({ streamControlPort: 61234 }), 61234)
+  for (const reply of [{ streamControlIpAddr: '192.168.2.231', streamControlProtocol: 'udp' }, { streamControlPort: 0 },
+    { streamControlPort: 70000 }, { streamControlPort: 60221.5 }, { streamControlPort: '60221' },
+    { streamControlPort: 60221, streamControlProtocol: 'tcp' }, null, 'not json']) {
+    assert.equal(nanoleaf.v1StreamPort(reply), null, JSON.stringify(reply))
+  }
+})
+
 test('request bodies match the documented contracts', () => {
   assert.deepEqual(nanoleaf.orientationBody(120), { globalOrientation: { value: 120 } })
   assert.deepEqual(nanoleaf.selectBody('Northern Lights'), { select: 'Northern Lights' })
   // Hyperion's driver sends exactly this to start v2 streaming.
   assert.deepEqual(nanoleaf.EXTERNAL_CONTROL_BODY,
     JSON.parse('{"write" : {"command" : "display", "animType" : "extControl", "extControlVersion" : "v2"}}'))
+  // OpenRGB's driver starts a Light Panels stream with exactly this.
+  assert.deepEqual(nanoleaf.externalControlBody('v1'),
+    { write: { command: 'display', animType: 'extControl', extControlVersion: 'v1' } })
   const display = nanoleaf.displayStaticBody([{ panelID: 9, r: 1, g: 2, b: 3, transition: 1 }]).write
   assert.equal(display.command, 'display')
   assert.equal(display.animType, 'static')

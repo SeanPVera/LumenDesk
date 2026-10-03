@@ -13,6 +13,7 @@ enum GoveeSegmentLayout: String, Codable {
     case curtain       // vertical curtain strands edited as LAN-addressable columns
     case neonRope      // flexible neon tube; behaves like a fine-grained strip
     case lamp          // independently addressable lighting zones in a lamp
+    case wallLight     // modular wall bars chained from one controller (Glide)
     case generic       // unrecognized RGBIC device
 
     var displayName: String {
@@ -23,6 +24,7 @@ enum GoveeSegmentLayout: String, Codable {
         case .curtain: return "Curtain lights"
         case .neonRope: return "Neon rope"
         case .lamp: return "Segmented lamp"
+        case .wallLight: return "Glide wall light"
         case .generic: return "RGBIC light"
         }
     }
@@ -35,6 +37,7 @@ enum GoveeSegmentLayout: String, Codable {
         case .curtain: return "rectangle.grid.3x2.fill"
         case .neonRope: return "scribble.variable"
         case .lamp: return "lamp.floor.fill"
+        case .wallLight: return "line.3.horizontal"
         case .generic: return "lightbulb.led.fill"
         }
     }
@@ -186,6 +189,14 @@ struct GoveeSegmentProfile {
         add("H61A3", .neonRope, 20, true)
         add("H61A5", .neonRope, 20, true)
         add("H61D0", .neonRope, 20, true)
+        // Glide Wall Light: straight bars and corner pieces chained from one
+        // controller. Segments are the controller's addressable zones, not
+        // pieces: Govee's platform API reported 28 segment indices (0–27)
+        // for two separate H6062 units in govee2mqtt's captured device
+        // output, and commands to every one of them succeeded. The count
+        // stays adjustable in case a kit reports differently. The bars are
+        // separate pieces, so there is no blend toggle.
+        add("H6062", .wallLight, 28, false)
         // Uplighter floor lamp: upper ripple, middle ambient, and lower daily
         // zones are independently addressable and held through streaming.
         // The lamp only drives two of the three at once, so the studio treats

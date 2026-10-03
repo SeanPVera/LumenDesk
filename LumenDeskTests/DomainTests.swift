@@ -152,6 +152,24 @@ final class DomainTests: XCTestCase {
         XCTAssertFalse(profile.hasFixedSegmentCount)
     }
 
+    func testH6062GlideWallLightIsAnAdjustableDurableWallLight() throws {
+        let profile = try XCTUnwrap(GoveeSegmentProfile.detect(sku: "h6062"))
+
+        XCTAssertEqual(profile.layout, .wallLight)
+        XCTAssertEqual(profile.layout.displayName, "Glide wall light")
+        XCTAssertEqual(profile.defaultSegmentCount, 28, "the controller's addressable zones, not its pieces")
+        XCTAssertEqual(profile.editorUnitName, "segment")
+        XCTAssertFalse(profile.supportsGradient)
+        XCTAssertTrue(profile.recognized)
+        XCTAssertFalse(profile.appliesViaStream)
+        XCTAssertFalse(profile.hasFixedSegmentCount, "kits ship with different piece counts")
+        XCTAssertNil(profile.simultaneousZoneLimit)
+        XCTAssertNil(profile.stringLightStyle)
+        // Neighbouring Glide SKUs are different products and stay unrecognized.
+        XCTAssertNil(GoveeSegmentProfile.detect(sku: "H6061"))
+        XCTAssertNil(GoveeSegmentProfile.detect(sku: "H6063"))
+    }
+
     func testStringLightProfilesUsePhysicalBulbAndBeadCounts() throws {
         let h70c1 = try XCTUnwrap(GoveeSegmentProfile.detect(sku: "H70C1"))
         XCTAssertEqual(h70c1.layout, .stringLights)

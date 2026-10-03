@@ -31,6 +31,7 @@ targets:
           - _lifx._udp
           - _hap._tcp
           - _nanoleafapi._tcp
+          - _nanoleafms._tcp
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
         UILaunchScreen: {}

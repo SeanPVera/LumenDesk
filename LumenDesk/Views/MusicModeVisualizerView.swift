@@ -106,7 +106,7 @@ struct MusicModeVisualizerView: View {
     private func roleCaption(_ fixture: MusicFixtureDescriptor) -> String {
         let role = fixture.resolvedRole
         if fixture.transport == .nanoleafStream {
-            return "\(role.displayName) · \(fixture.segmentCount) Shapes panels"
+            return "\(role.displayName) · \(fixture.segmentCount) Nanoleaf panels"
         }
         if fixture.segmentCount > 0 {
             return "\(role.displayName) · \(fixture.segmentCount) RGBIC segments"
@@ -118,8 +118,8 @@ struct MusicModeVisualizerView: View {
         switch transport {
         case .lifxLAN: return "LIFX LAN"
         case .goveeLAN: return "Govee LAN"
-        case .nanoleafLAN: return "Nanoleaf Shapes"
-        case .nanoleafStream: return "Nanoleaf Shapes panels"
+        case .nanoleafLAN: return "Nanoleaf"
+        case .nanoleafStream: return "Nanoleaf panels"
         case .goveeRealtimeSegments: return "Govee real-time segments"
         }
     }

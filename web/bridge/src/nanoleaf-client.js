@@ -5,7 +5,7 @@ import path from 'node:path'
 import * as nanoleaf from './nanoleaf.js'
 import { clampPercent, hsvToRgb, rgbToHsv } from './color.js'
 
-// Nanoleaf Shapes over the documented local HTTP API, ported from
+// Nanoleaf Shapes and Aurora over the documented local HTTP API, ported from
 // LumenDesk/Services/Nanoleaf/NanoleafClient.swift. Unlike LIFX and Govee
 // there is no UDP discovery to join: a controller is paired once by address
 // (hold its power button 5–7 s first), and the credential it returns is kept
@@ -29,11 +29,11 @@ export class NanoleafError extends Error {
 }
 
 const ERRORS = {
-  pairingWindowClosed: 'Hold the Shapes power button for 5–7 seconds until its LED flashes, then pair within 30 seconds.',
+  pairingWindowClosed: 'Hold the controller’s power button for 5–7 seconds until its LED flashes, then pair within 30 seconds.',
   pairingRequired: 'Nanoleaf access expired. Pair this controller again.',
   unavailable: 'Cannot reach the Nanoleaf controller. Check its power and your local network connection.',
   invalidResponse: 'The Nanoleaf controller returned an unreadable response.',
-  unsupportedModel: 'This integration supports Nanoleaf Shapes (NL42).',
+  unsupportedModel: 'This integration supports Nanoleaf Shapes (NL42) and Aurora Light Panels (NL22).',
   invalidAddress: 'Enter the controller’s IP address or local hostname and a port from 1 to 65535.',
 }
 
@@ -134,8 +134,8 @@ export class NanoleafClient {
     if (typeof token !== 'string' || !/^[A-Za-z0-9]+$/.test(token)) throw fail('invalidResponse')
     const info = await this.#request(endpoint, `/api/v1/${token}`)
     if (!info || typeof info.serialNo !== 'string' || !info.serialNo) throw fail('invalidResponse')
-    if (String(info.model).toUpperCase() !== 'NL42') throw fail('unsupportedModel')
-    const pairing = { serial: info.serialNo, name: String(info.name ?? 'Nanoleaf Shapes'), ...endpoint, token }
+    if (!nanoleaf.productFamily(info.model)) throw fail('unsupportedModel')
+    const pairing = { serial: info.serialNo, name: String(info.name ?? 'Nanoleaf'), ...endpoint, token }
     this.pairings.set(pairing.serial, pairing)
     await this.#save()
     this.#absorb(pairing, info)
@@ -362,13 +362,14 @@ export class NanoleafClient {
       brand: 'nanoleaf',
       name: String(info.name ?? pairing.name),
       ip: pairing.host,
-      model: 'NL42',
+      model: String(info.model ?? '').trim().toUpperCase() || null,
       power: on,
       brightness: clampPercent(state.brightness?.value),
       color: hsvToRgb({ h: Math.min(359, hue), s: Math.min(100, sat) / 100, v: 1 }),
       kelvin: colorMode === 'ct' ? Number(state.ct?.value) || null : null,
       needsPairing: false,
       shapes: {
+        family: nanoleaf.productFamily(info.model),
         layout,
         geometry: layout ? nanoleaf.drawingGeometry(layout) : null,
         orientation: nanoleaf.orientationDegrees(orientationReport),

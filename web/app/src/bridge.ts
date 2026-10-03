@@ -7,11 +7,13 @@ import type { ShapesGeometry } from './shapes/geometry'
 export type Brand = 'lifx' | 'govee' | 'nanoleaf'
 
 /**
- * What the bridge knows about a Nanoleaf Shapes wall. `output` says what the
- * wall is showing and so whether its panel colours can be known: only a
- * LumenDesk design, one colour, white or off can; a scene cannot.
+ * What the bridge knows about a Nanoleaf Shapes or Aurora wall. `output` says
+ * what the wall is showing and so whether its panel colours can be known:
+ * only a LumenDesk design, one colour, white or off can; a scene cannot.
  */
 export interface ShapesInfo {
+  /** Which product the controller reported: Shapes (NL42) or Aurora (NL22). */
+  family?: 'shapes' | 'lightPanels' | null
   geometry: ShapesGeometry | null
   orientation: number | null
   orientationPending: number | null

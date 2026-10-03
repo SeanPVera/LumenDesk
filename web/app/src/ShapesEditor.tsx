@@ -67,7 +67,13 @@ function describeOutput(device: Device): string {
   }
 }
 
-const SHAPE_NAMES: Record<string, string> = { hexagon: 'hexagons', triangle: 'triangles', miniTriangle: 'mini triangles' }
+const SHAPE_NAMES: Record<string, string> = {
+  hexagon: 'hexagons', triangle: 'triangles', miniTriangle: 'mini triangles', lightPanelTriangle: 'triangles',
+}
+
+/** "Shapes" or "Aurora", from the model the controller reported. */
+export const wallProductName = (device: Device) =>
+  device.shapes?.family === 'lightPanels' ? 'Aurora' : device.shapes?.family === 'shapes' ? 'Shapes' : 'Nanoleaf'
 
 export function ShapesEditor({ device, actions }: { device: Device; actions: ShapesActions }) {
   const shapes = device.shapes!
@@ -198,7 +204,7 @@ export function ShapesEditor({ device, actions }: { device: Device; actions: Sha
   return (
     <section className="shapes-editor" aria-labelledby={`${key}-title`} onKeyDown={onEditorKey}>
       <div className="section-line">
-        <h2 id={`${key}-title`}>Shapes panels · {device.name}</h2>
+        <h2 id={`${key}-title`}>{wallProductName(device)} panels · {device.name}</h2>
         <span className="meta">{geometry.panels.length} panels · {describeOutput(device)}</span>
       </div>
       {shapes.problem && <p className="note attention">The latest layout reading was damaged, so the last good layout is shown. {shapes.problem}</p>}
@@ -383,7 +389,7 @@ export function ShapesEditor({ device, actions }: { device: Device; actions: Sha
                 ))}
               </ul>
             ) : <p className="note">The controller reports no stored scenes.</p>}
-            <p className="note">In the browser, Music Mode drives a Shapes wall as one colour. The native app streams music panel by panel.</p>
+            <p className="note">In the browser, Music Mode drives a Nanoleaf wall as one colour. The native app streams music panel by panel.</p>
           </fieldset>
           {message && <p className="note" role="status">{message}</p>}
         </div>

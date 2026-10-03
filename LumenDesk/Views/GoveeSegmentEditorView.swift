@@ -164,6 +164,8 @@ struct GoveeSegmentEditorView: View {
                 return "Choose individual \(unitName)s along the strand. With nothing selected, painting updates the whole string."
             case .curtain:
                 return "Choose one or more vertical columns. With nothing selected, painting updates the whole curtain."
+            case .wallLight:
+                return "Select numbered segments to paint them, counted from the controller along the chain of bars. With nothing selected, painting fills every bar."
             default:
                 return "Select numbered segments to paint them. With nothing selected, painting fills the whole strip."
             }

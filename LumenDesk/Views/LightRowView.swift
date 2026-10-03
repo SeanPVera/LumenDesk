@@ -311,7 +311,7 @@ struct LightRowView: View {
                                  lit: device.isOn && !device.isStale)
                     .frame(width: 44, height: 30)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("Shapes panels")
+                    Text("\(device.nanoleafProductName) panels")
                         .font(.caption.weight(.semibold))
                     Text(shapesRowTitle)
                         .font(.caption2)
@@ -327,7 +327,7 @@ struct LightRowView: View {
         .buttonStyle(.plain)
         .disabled(selectionMode)
         .help("Orient the wall, select panels and paint them")
-        .accessibilityLabel("Shapes panels for \(device.label)")
+        .accessibilityLabel("\(device.nanoleafProductName) panels for \(device.label)")
     }
 
     private var shapesRowTitle: String {
@@ -431,6 +431,8 @@ struct LightRowView: View {
             return "Open String Light Studio — paint each physical bulb or bead individually"
         case .curtain:
             return "Open Curtain Column Studio — paint the locally addressable vertical columns"
+        case .wallLight:
+            return "Open Segment Studio — paint the wall light's bars segment by segment"
         default:
             return "Open Segment Studio — paint each strip segment individually"
         }
@@ -645,7 +647,7 @@ struct LightRowView: View {
             Button("Luna Color Studio\u{2026}") { showingLunaStudio = true }
         }
         if device.brand == .nanoleaf {
-            Button("Shapes Panels\u{2026}") { showingShapesStudio = true }
+            Button("\(device.nanoleafProductName) Panels\u{2026}") { showingShapesStudio = true }
         }
         if device.isStale { Button("Retry Connection") { manager.retry(device) } }
         if manager.commandState(for: device.id).phase == .failed { Button("Keep Trying") { manager.retryCommand(for: device) } }

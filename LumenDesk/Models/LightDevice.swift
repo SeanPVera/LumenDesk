@@ -58,6 +58,15 @@ final class LightDevice: ObservableObject, Identifiable {
             && (LIFXProductCatalog.isLuna(productID)
                 || sku?.uppercased() == LIFXProductCatalog.lunaSKU)
     }
+
+    /// Shapes or Aurora, from the model the controller reported.
+    var nanoleafFamily: NanoleafProductFamily? {
+        brand == .nanoleaf ? NanoleafProductFamily(model: sku) : nil
+    }
+
+    /// "Shapes" or "Aurora" for a Nanoleaf wall's headings, "Nanoleaf" when
+    /// the model is not known yet.
+    var nanoleafProductName: String { nanoleafFamily?.displayName ?? "Nanoleaf" }
 }
 
 extension LightDevice.Brand {

@@ -965,7 +965,7 @@ struct DevicesWorkspaceView: View {
                 }
 
                 Button { showingNanoleafPairing = true } label: {
-                    Label("Pair Nanoleaf Shapes", systemImage: "hexagon.fill")
+                    Label("Pair Nanoleaf Shapes or Aurora", systemImage: "hexagon.fill")
                 }
                 .buttonStyle(LumenSecondaryButtonStyle())
                 .disabled(manager.isDemoMode)

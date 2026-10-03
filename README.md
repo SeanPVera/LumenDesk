@@ -2,19 +2,19 @@
 
 **One desk for every local light.**
 
-LumenDesk is a native SwiftUI smart-lighting controller for **macOS** and **iOS**. It controls supported **LIFX**, **Govee**, and **Nanoleaf Shapes** lights directly on your local network. Shapes uses a one-time physical pairing step and stores its local API credential in Keychain. See [the brand identity](BRAND_IDENTITY.md) for the product strategy, mark, color, typography, and voice.
+LumenDesk is a native SwiftUI smart-lighting controller for **macOS** and **iOS**. It controls supported **LIFX**, **Govee**, and **Nanoleaf Shapes and Aurora** lights directly on your local network. Nanoleaf uses a one-time physical pairing step and stores its local API credential in Keychain. See [the brand identity](BRAND_IDENTITY.md) for the product strategy, mark, color, typography, and voice.
 
 The app is designed for day-to-day lighting control as well as richer home-lighting workflows: discovery, rooms, favorites, scenes, color themes, animated effects, schedules, command recovery, diagnostics, import/export, and a macOS menu bar controller.
 
 ## What LumenDesk does
 
-- Discovers supported LIFX, Govee, and Nanoleaf Shapes lights on the same LAN.
+- Discovers supported LIFX, Govee, and Nanoleaf Shapes and Aurora lights on the same LAN.
 - Controls individual bulbs, rooms, selected groups, or every light at once.
 - Supports power, brightness, full-color RGB control, and white color temperature control.
 - Detects the LIFX SuperColor Luna (LFXCAP8/RGBW/WH) and paints its 26 matrix zones with individual colors, gradients, and curated Luna looks over the local LAN.
 - Paints individual segments on Govee RGBIC devices (COB strips, string lights, neon ropes) with per-segment color and brightness, gradient blending, and live preview — the same specificity as the Govee Home app, without the cloud.
 - Groups lights into vendor-agnostic rooms, so LIFX and Govee bulbs can live in the same room.
-- Treats a Nanoleaf Shapes wall as individually addressable panels: sets its orientation, paints panels one by one, stores designs on the controller and streams per-panel effects and Music Mode.
+- Treats a Nanoleaf Shapes or Aurora wall as individually addressable panels: sets its orientation, paints panels one by one, stores designs on the controller and streams per-panel effects and Music Mode.
 - Saves and recalls scenes captured from your current lighting state.
 - Applies curated static lighting themes and animated effects.
 - Choreographs local music into beat, frequency, and spatial lighting through a configurable Music Mode.
@@ -37,7 +37,7 @@ The same `LumenDesk` target is multiplatform and can be built for Mac or iPhone 
 
 ### In a browser
 
-There is also a web client at <https://seanpvera.github.io/LumenDesk/> that controls the same LIFX, Govee and Nanoleaf Shapes lights.
+There is also a web client at <https://seanpvera.github.io/LumenDesk/> that controls the same LIFX, Govee and Nanoleaf Shapes and Aurora lights.
 
 Browsers cannot open the raw UDP sockets these protocols need, so the web client pairs with a small local bridge that does the networking for you. It needs [Node.js](https://nodejs.org/) 20 or newer:
 
@@ -51,7 +51,7 @@ That serves the app from the bridge itself at <http://127.0.0.1:8765> — one or
 
 The web client opens on **Room**, with one selected scope shared by **Light**, **Compositions** and **Music**. Light offers fixture selection and grouped power, brightness, color and white controls; Compositions captures that room and applies saved scenes to their original fixtures. **Schedules**, **Devices** and **Settings** stay separate. Govee RGBIC segment editing and LIFX matrix control remain native-app features. Browser Music sends one color per fixture; it does not invent segment transport. See [the redesign report](REDESIGN_REPORT.md) for implementation and validation evidence.
 
-The published page at <https://seanpvera.github.io/LumenDesk/> can also drive the bridge (`npm start`, API only), but current browsers gate a website's access to your local network behind a permission prompt, so that route may be blocked. Everything still stays on your own network — the page talks only to the bridge on `127.0.0.1`, with no account and no cloud. The web client currently covers discovery, power, brightness, colour and white, scenes, schedules, Music Mode, and Shapes pairing, orientation and panel painting; segment control and per-panel streaming remain native. See [`web/README.md`](web/README.md) for details.
+The published page at <https://seanpvera.github.io/LumenDesk/> can also drive the bridge (`npm start`, API only), but current browsers gate a website's access to your local network behind a permission prompt, so that route may be blocked. Everything still stays on your own network — the page talks only to the bridge on `127.0.0.1`, with no account and no cloud. The web client currently covers discovery, power, brightness, colour and white, scenes, schedules, Music Mode, and Nanoleaf pairing, orientation and panel painting; segment control and per-panel streaming remain native. See [`web/README.md`](web/README.md) for details.
 
 ## Installing the Mac app
 
@@ -77,32 +77,32 @@ The script archives a Release build and writes `dist/LumenDesk-<version>.dmg` al
 
 ## Supported lighting systems
 
-### Nanoleaf Shapes
+### Nanoleaf Shapes and Aurora
 
-LumenDesk treats a Shapes wall (controller model **NL42**, hexagons, triangles and mini triangles in any mix) as what it is: one fixture made of individually addressable panels. Power, master brightness, colour and white (**1,200–6,500 K**) still work on the whole wall, and every panel can be selected, painted and animated on its own.
+LumenDesk treats a Shapes wall (controller model **NL42**, hexagons, triangles and mini triangles in any mix) and an original Aurora wall (Light Panels, controller model **NL22**, the large triangles) as what they are: one fixture made of individually addressable panels. Power, master brightness, colour and white (**1,200–6,500 K**) still work on the whole wall, and every panel can be selected, painted and animated on its own.
 
 To connect:
 
-1. Set up Shapes in the Nanoleaf app and join the same local network.
-2. Open **Rig → Pair Nanoleaf Shapes** (also available during onboarding). Select a discovered controller, or enter its IP address or local hostname. Manual connections default to port `16021`; discovery uses the port advertised by the controller.
+1. Set up the wall in the Nanoleaf app and join the same local network.
+2. Open **Rig → Pair Nanoleaf Shapes or Aurora** (also available during onboarding). Select a discovered controller, or enter its IP address or local hostname. Manual connections default to port `16021`; discovery uses the port advertised by the controller.
 3. Hold the controller's power button for **5–7 seconds** until its LED flashes, then press **Pair** within **30 seconds**.
 
-Discovery uses Bonjour (`_nanoleafapi._tcp`). Paired controllers reconnect using credentials stored in this device's Keychain; these credentials are excluded from configuration exports, logs and error messages. A controller reset or revoked credential requires pairing again. If multicast discovery is blocked, use the manual address entry.
+Discovery uses Bonjour (`_nanoleafapi._tcp`, plus `_nanoleafms._tcp`, which Aurora controllers on older firmware advertise). Paired controllers reconnect using credentials stored in this device's Keychain; these credentials are excluded from configuration exports, logs and error messages. A controller reset or revoked credential requires pairing again. If multicast discovery is blocked, use the manual address entry.
 
-**Where the panel controls are.** In **Room → Light**, select the Shapes wall on its own: its panel studio opens under the room, in working order. The same studio opens as a sheet from the wall's row (**Shapes panels**) or its context menu (**Shapes Panels…**).
+**Where the panel controls are.** In **Room → Light**, select the wall on its own: its panel studio opens under the room, in working order. The same studio opens as a sheet from the wall's row (**Shapes panels** or **Aurora panels**) or its context menu (**Shapes Panels…** or **Aurora Panels…**).
 
-- **Arrangement.** The wall is drawn from the layout the controller reports, with each panel's true shape and the controller as a dashed marker. Panels are known by controller and panel ID, so a reordered or partly damaged reading never moves a colour to the wrong panel; a damaged reading keeps the last trusted layout and says so.
+- **Arrangement.** The wall is drawn from the layout the controller reports, with each panel's true shape and, on Shapes, the controller as a dashed marker (an Aurora never reports its controller). Panels are known by controller and panel ID, so a reordered or partly damaged reading never moves a colour to the wrong panel; a damaged reading keeps the last trusted layout and says so.
 - **Orientation.** Turn the drawing with the 90° buttons or type degrees, check it against the **Up on the wall** reference, then **Apply orientation**. LumenDesk writes the controller's global orientation and counts it only once the controller reports it back; **Reset** drops a draft. Orientation changes how the wall is viewed and aimed, never the panels themselves: the drawing, panel numbers, hit testing, selection, spatial effects, themes and Music Mode all use the same transform.
-- **Selecting panels.** Click, drag a marquee, or use the arrow keys (they move across the wall as it hangs). Select all, none, invert, pick a saved group, or turn on **Select by touching the wall** and tap real panels. **Identify on the wall** breathes one panel for four seconds using a temporary display, so the wall's own scene comes back by itself.
+- **Selecting panels.** Click, drag a marquee, or use the arrow keys (they move across the wall as it hangs). Select all, none, invert, pick a saved group, or, on Shapes, turn on **Select by touching the wall** and tap real panels (Aurora panels have no touch sensing, so the option is hidden for them). **Identify on the wall** breathes one panel for four seconds using a temporary display, so the wall's own scene comes back by itself.
 - **Painting.** Painting starts explicitly from what the wall shows, a saved design, or a colour of your choosing when the wall is playing something LumenDesk can't read panel by panel. Then paint swatches, a picker colour or an exact hex, set each panel's intensity, turn panels off (black), run a gradient across the selection or fill with a theme. Undo and redo cover whole gestures. **Preview on the wall as I edit** is optional; nothing reaches the wall until you preview or **Apply to wall**.
 - **Brightness, once.** A panel's intensity lives in its colour. The wall's master brightness applies on top of it once, never twice, and the canvas says which one you are looking at.
 - **Saving.** Keep a design in LumenDesk, or store it on the controller as a static scene. LumenDesk never deletes scenes; storing under a name that already exists asks first, and the result is read back from the controller.
 - **Controller scenes.** Stored scenes can be played, painted from, or opened in the scene editor to change their palette and motion options, preview them on the wall and save the result under a new name.
-- **Live output.** LumenDesk effects and Music Mode stream per-panel frames over Nanoleaf's documented external control (UDP, v2) at up to ten frames a second, newest frame first. Master brightness is held at full while a stream runs (the controller treats it as a multiplier) and restored afterwards. A stream stops when its effect or show stops, when anything else takes the wall (the Nanoleaf app, a button, HomeKit, a scene choice), on disconnect and in Demo Mode. A frame sent over UDP is reported as sent, not as displayed.
+- **Live output.** LumenDesk effects and Music Mode stream per-panel frames over Nanoleaf's documented external control at up to ten frames a second, newest frame first. Shapes take version 2 on UDP port 60222. An Aurora takes version 1, with one-byte panel IDs, on the UDP port its controller names when the stream starts; frames still go only to the controller's own address. Master brightness is held at full while a stream runs (the controller treats it as a multiplier) and restored afterwards. A stream stops when its effect or show stops, when anything else takes the wall (the Nanoleaf app, a button, HomeKit, a scene choice), on disconnect and in Demo Mode. A frame sent over UDP is reported as sent, not as displayed.
 - **Everything else.** Themes land panel by panel along the oriented wall; scenes capture and restore designs, stored scene names and white mode; schedules apply those scenes; undo covers design changes. Designs, groups and last trusted layouts survive relaunch and round-trip through import/export. The controller's event stream tells LumenDesk when something else changes the wall, so stale designs and streams are released rather than reasserted.
 - **Demo Mode** shows a simulated wall and never sends anything to a controller.
 
-The web client pairs with Shapes through the bridge too (see [In a browser](#in-a-browser)): orientation, panel selection, painting with a draft, undo and redo, identify and controller scenes. Browser Music Mode drives a wall as one colour at up to five updates a second; per-panel streaming, saved designs and groups, storing scenes on the controller, scene editing and touch selection are native-app features.
+The web client pairs with Shapes and Aurora walls through the bridge too (see [In a browser](#in-a-browser)): orientation, panel selection, painting with a draft, undo and redo, identify and controller scenes. Browser Music Mode drives a wall as one colour at up to five updates a second; per-panel streaming, saved designs and groups, storing scenes on the controller, scene editing and touch selection are native-app features.
 
 Not implemented: screen mirroring, the controller's own touch-action configuration, schedules stored in the Nanoleaf app, and anything that needs a Nanoleaf account or cloud service. Firmware updates and factory resets are never performed. [`NANOLEAF_SHAPES_PARITY.md`](NANOLEAF_SHAPES_PARITY.md) compares every Nanoleaf workflow with what LumenDesk does, with the evidence and the remaining limits.
 
@@ -216,7 +216,7 @@ The demo workspace includes a simulated Luna, so the editor can be explored with
 
 Govee RGBIC devices are individually addressable in zones, and the Govee Home app lets you color each zone separately. LumenDesk's **Segment Studio** brings that same specificity to the LAN:
 
-- A hardware-aware editor: continuous segmented tape for Strip Light S and COB models, numbered bead or bulb strands for string lights, curtain columns, and named physical-zone cards for the H60B0 uplighter.
+- A hardware-aware editor: continuous segmented tape for Strip Light S and COB models, numbered bead or bulb strands for string lights, curtain columns, numbered segments along the chain of bars for the H6062 Glide Wall Light, and named physical-zone cards for the H60B0 uplighter.
 - **Uplighter Color Studio** knows the H60B0 lights only two of its three zones at a time. Each zone card has its own switch, one-tap combinations (Upper + Middle, Upper + Lower, Middle + Lower) pick a pair outright, and switching a third zone on hands the slot over from whichever has been lit longest and says so. A switched-off zone keeps the color it is holding, so turning it back on restores it. Scenes, undo, Music Mode, and the held-layout re-apply all follow the same choice, and no LumenDesk path asks the lamp for three lit zones.
 - **String Light Studio** follows the physical strand from the controller in numbered rows. H70C1 exposes all 100 Uni-IC beads; H70C2 and H70C4 expose all 200. Outdoor bulb strings use their actual bulb counts, including 30 for H7021 and 15 for H7020/H7028, with expandable models remaining adjustable.
 - H70B1 is treated as a curtain instead of a one-dimensional string. LumenDesk edits its 20 locally addressable vertical column groups; per-bead pixel artwork remains in Govee Home.
@@ -226,11 +226,12 @@ Govee RGBIC devices are individually addressable in zones, and the Govee Home ap
 - **Blend Across Selection** — fade from one color to another across the selected segments.
 - **Gradient blending** on supported RGBIC and RGBICW strips, matching the Govee app's gradient switch.
 - **Live preview** streams edits to the light in real time (razer mode). The preview is volatile, so closing the studio without applying is a true cancel.
+- **Glide Wall Light (H6062)** is recognised as a wall light of straight bars and corner pieces chained from one controller. It has 28 segments, the controller's addressable zones as Govee's own platform API reports them, numbered from the controller along the chain; a segment is not one physical piece. The count stays adjustable in case your kit differs. Its layout is applied with the same durable write as COB strips; that has not yet been confirmed on a physical H6062.
 - **Apply to Light** makes the layout durable. Supported COB strips and neon ropes store it in their own firmware through app-native commands relayed over the LAN. H612B Strip Light S, multi-zone lamps such as H60B0, string lights, curtain lights, and permanent-outdoor lights expose their editable layouts through the live streaming channel, so LumenDesk holds and restores those layouts while it runs.
 - 12 built-in segment presets (Rainbow Flow, Sunset Glow, Candy Cane, Fairy Dust, …) plus your own saved presets, automatically re-rendered to each device's segment count.
 - An adjustable unit count for expandable and unrecognized models. Fixed hardware such as H60B0 and H70C Christmas strings stays locked to its real physical topology, including how many zones can be lit together.
 
-Known SKU families (H612B Strip Light S, H619x/H61Cx COB strips, H61Ax/H61Dx neon ropes, H60B0 three-zone uplighter lamps, H70Cx Christmas strings, H702x outdoor bulb strings, H70Bx curtains, and more) are detected from discovery and get the right layout and defaults automatically. Any other Govee light can still open the studio from its context menu.
+Known SKU families (H612B Strip Light S, H619x/H61Cx COB strips, H61Ax/H61Dx neon ropes, H6062 Glide Wall Light, H60B0 three-zone uplighter lamps, H70Cx Christmas strings, H702x outdoor bulb strings, H70Bx curtains, and more) are detected from discovery and get the right layout and defaults automatically. Any other Govee light can still open the studio from its context menu.
 
 Segment layouts are captured into scenes, restored by undo/redo, re-applied after Identify flashes, and survive stopping an animated effect. The demo workspace includes a simulated COB strip, string lights, and an H60B0 uplighter so the studio — zone limit included — can be explored without hardware.
 

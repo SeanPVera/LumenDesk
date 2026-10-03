@@ -294,6 +294,46 @@ final class NanoleafShapesClientTests: XCTestCase {
                        "the controller is not switched into a mode nothing can feed")
     }
 
+    private func auroraClient() async throws -> NanoleafClient {
+        controller.model = "NL22"
+        FakeShapesURLProtocol.controller = controller
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [FakeShapesURLProtocol.self]
+        let aurora = NanoleafClient(credentials: InMemoryShapesCredentials(), session: URLSession(configuration: configuration),
+                                    listensForEvents: false, datagrams: datagrams, resolver: FixedResolver(address: "192.0.2.44"))
+        try await aurora.pair(endpoint: controller.endpoint)
+        return aurora
+    }
+
+    func testAnAuroraStreamsV1FramesToThePortItNames() async throws {
+        let aurora = try await auroraClient()
+        defer { aurora.pause() }
+        XCTAssertEqual(aurora.family(serial), .lightPanels)
+        aurora.startStream(serial, owner: "music")
+        aurora.submitStreamFrame(serial, owner: "music", frames: [frame(107, 40), frame(114, 90)])
+        await waitUntil { self.datagrams.sent.count >= 1 }
+        let activation = try XCTUnwrap(controller.requests.compactMap(\.write).last { $0["animType"] as? String == "extControl" })
+        XCTAssertEqual(activation["extControlVersion"] as? String, "v1")
+        XCTAssertEqual(aurora.streamStatus(serial), .streaming(owner: "music"))
+        let sent = try XCTUnwrap(datagrams.sent.first)
+        XCTAssertEqual(sent.host, "192.0.2.44", "frames go to the paired controller, never to an address in the reply")
+        XCTAssertEqual(sent.port, 61234, "the port is the one the controller named")
+        XCTAssertEqual(IndependentV1StreamDecoder.decode(sent.data),
+                       [107: [1, 40, 40, 40, 0, 1], 114: [1, 90, 90, 90, 0, 1]])
+    }
+
+    func testAnAuroraThatNamesNoPortFailsTheStreamAndSendsNothing() async throws {
+        controller.v1ReplyPort = nil
+        let aurora = try await auroraClient()
+        defer { aurora.pause() }
+        aurora.startStream(serial, owner: "music")
+        aurora.submitStreamFrame(serial, owner: "music", frames: [frame(107, 1)])
+        await waitUntil { if case .failed = aurora.streamStatus(self.serial) { return true }; return false }
+        XCTAssertEqual(aurora.streamStatus(serial), .failed(owner: "music", .invalidResponse))
+        try await Task.sleep(nanoseconds: 150_000_000)
+        XCTAssertTrue(datagrams.sent.isEmpty)
+    }
+
     func testPausingAbandonsAwaitedRequestsAndEndsStreams() async throws {
         client.startStream(serial, owner: "music")
         await waitUntil { self.client.streamStatus(self.serial) == .streaming(owner: "music") }
@@ -405,6 +445,23 @@ enum IndependentStreamDecoder {
     }
 }
 
+/// Reads a v1 external-control datagram without using the encoder under
+/// test: `[panel: [nFrames, R, G, B, W, transition]]`.
+enum IndependentV1StreamDecoder {
+    static func decode(_ data: Data) -> [Int: [Int]] {
+        let bytes = [UInt8](data)
+        guard let count = bytes.first else { return [:] }
+        var result: [Int: [Int]] = [:]
+        var index = 1
+        for _ in 0..<Int(count) {
+            guard index + 7 <= bytes.count else { return [:] }
+            result[Int(bytes[index])] = bytes[(index + 1)..<(index + 7)].map { Int($0) }
+            index += 7
+        }
+        return index == bytes.count ? result : [:]
+    }
+}
+
 /// A Shapes controller that follows the documented routes closely enough to
 /// exercise the client: state, layout, orientation, effects and the write
 /// commands, with injectable delays and failures.
@@ -430,6 +487,8 @@ final class FakeShapesController {
     private var _delay: TimeInterval = 0
     private var _corruptLayout = false
     private var _corruptStored = false
+    private var _model = "NL42"
+    private var _v1Port: Int? = 61234
 
     private func locked<T>(_ body: () -> T) -> T { lock.lock(); defer { lock.unlock() }; return body() }
 
@@ -453,6 +512,17 @@ final class FakeShapesController {
         get { locked { _corruptStored } }
         set { locked { _corruptStored = newValue } }
     }
+    /// "NL22" turns this into an Aurora: Light Panels triangles, no
+    /// controller entry, and a v1 activation answered with a port.
+    var model: String {
+        get { locked { _model } }
+        set { locked { _model = newValue } }
+    }
+    /// The port an Aurora names when v1 streaming starts; nil leaves it out.
+    var v1ReplyPort: Int? {
+        get { locked { _v1Port } }
+        set { locked { _v1Port = newValue } }
+    }
 
     /// Someone chose a scene in the Nanoleaf app.
     func simulateExternalSelection(_ name: String) {
@@ -471,7 +541,7 @@ final class FakeShapesController {
 
     private func infoJSON() -> Data {
         let x: Any = _corruptLayout ? ("wide" as Any) : (100.5 as Any)
-        let positions: [[String: Any]] = [
+        let shapes: [[String: Any]] = [
             ["panelId": 5120, "x": 0, "y": 0, "o": 0, "shapeType": 7],
             ["panelId": 77, "x": x, "y": 58.02, "o": 0, "shapeType": 7],
             ["panelId": 31000, "x": -100.5, "y": 58.02, "o": 120, "shapeType": 7],
@@ -480,8 +550,14 @@ final class FakeShapesController {
             ["panelId": 64001, "x": 0, "y": -96.7, "o": 60, "shapeType": 8],
             ["panelId": 0, "x": -45, "y": 105, "o": 0, "shapeType": 12]
         ]
+        // The OpenAPI's NL22 example pair.
+        let aurora: [[String: Any]] = [
+            ["panelId": 107, "x": -74, "y": 43, "o": 180, "shapeType": 0],
+            ["panelId": 114, "x": -149, "y": 0, "o": 360, "shapeType": 0]
+        ]
+        let positions = _model == "NL22" ? aurora : shapes
         let object: [String: Any] = [
-            "name": "Studio Shapes", "serialNo": Self.serial, "model": "NL42", "firmwareVersion": "9.2.0",
+            "name": "Studio Shapes", "serialNo": Self.serial, "model": _model, "firmwareVersion": "9.2.0",
             "state": ["on": ["value": true], "brightness": ["value": 80, "max": 100, "min": 0],
                       "hue": ["value": 20, "max": 360, "min": 0], "sat": ["value": 80, "max": 100, "min": 0],
                       "ct": ["value": 3500, "max": 6500, "min": 1200], "colorMode": "effect"],
@@ -531,6 +607,11 @@ final class FakeShapesController {
                 if write["animType"] as? String == "extControl" {
                     if let code = fail("extControl") { return (code, Data(), delay) }
                     _select = "*ExtControl*"
+                    if write["extControlVersion"] as? String == "v1" {
+                        var reply: [String: Any] = ["streamControlIpAddr": "198.51.100.9", "streamControlProtocol": "udp"]
+                        if let port = _v1Port { reply["streamControlPort"] = port }
+                        return (200, try! JSONSerialization.data(withJSONObject: reply), delay)
+                    }
                 } else {
                     if let code = fail("display") { return (code, Data(), delay) }
                     _select = write["animType"] as? String == "static" ? "*Static*" : "*Dynamic*"

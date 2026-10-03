@@ -1,9 +1,11 @@
-// Nanoleaf Shapes LAN API, ported from LumenDesk/Services/Nanoleaf/.
+// Nanoleaf Shapes and Aurora (Light Panels) LAN API, ported from
+// LumenDesk/Services/Nanoleaf/.
 //
 // Layout parsing mirrors NanoleafTopologyParser, geometry mirrors
-// NanoleafGeometry / NanoleafWallTransform / spatialPositions, and the
-// encoders mirror NanoleafAnimData.staticString, NanoleafStreamPacket.encode
-// and NanoleafCommand. Change them in lockstep with the Swift files and with
+// NanoleafGeometry / NanoleafWallTransform / spatialPositions, product
+// families mirror NanoleafProductFamily, and the encoders mirror
+// NanoleafAnimData.staticString, NanoleafStreamPacket (v1 and v2) and
+// NanoleafCommand. Change them in lockstep with the Swift files and with
 // test/nanoleaf.test.js, or the bridge and the native app will address
 // different panels.
 //
@@ -15,14 +17,35 @@ export const STREAM_PORT = 60222
 export const MINIMUM_FRAME_INTERVAL_MS = 100
 export const MAX_COORDINATE = 100_000
 
+// MARK: Product families
+
+/**
+ * 'shapes' (NL42) or 'lightPanels' (NL22, the original Aurora triangles), or
+ * null for a model LumenDesk does not drive panel by panel.
+ */
+export function productFamily(model) {
+  switch (String(model ?? '').trim().toUpperCase()) {
+    case 'NL42': return 'shapes'
+    case 'NL22': return 'lightPanels'
+    default: return null
+  }
+}
+
+/** Short product name for headings: "Shapes" or "Aurora". */
+export const familyName = family => (family === 'lightPanels' ? 'Aurora' : family === 'shapes' ? 'Shapes' : 'Nanoleaf')
+
+/** Shapes accept only external control v2; Light Panels are driven with v1. */
+export const streamProtocol = family => (family === 'lightPanels' ? 'v1' : 'v2')
+
 // MARK: Shape types (OpenAPI layout table, section 3.3)
 
 const ACCESSORY_CODES = new Set([1, 5, 16, 19, 20])
-const OTHER_FAMILY_CODES = new Set([0, 2, 3, 4, 14, 15, 17, 18, 29, 30, 31, 32])
+const OTHER_FAMILY_CODES = new Set([2, 3, 4, 14, 15, 17, 18, 29, 30, 31, 32])
 
 export function shapeKind(code) {
   if (code === null || code === undefined) return 'unspecified'
   switch (code) {
+    case 0: return 'lightPanelTriangle'
     case 7: return 'hexagon'
     case 8: return 'triangle'
     case 9: return 'miniTriangle'
@@ -35,7 +58,7 @@ export function shapeKind(code) {
 }
 
 /** Edge length in layout units. Never read from the deprecated sideLength. */
-export const SIDE_LENGTH = { hexagon: 67, triangle: 134, miniTriangle: 67 }
+export const SIDE_LENGTH = { hexagon: 67, triangle: 134, miniTriangle: 67, lightPanelTriangle: 150 }
 
 export function isPaintable(panel) {
   return Object.hasOwn(SIDE_LENGTH, shapeKind(panel.shapeCode))
@@ -46,6 +69,8 @@ export function displayName(kind) {
     hexagon: 'Hexagon',
     triangle: 'Triangle',
     miniTriangle: 'Mini triangle',
+    // Never on one wall with a Shapes triangle, so the names cannot clash.
+    lightPanelTriangle: 'Triangle',
     controller: 'Controller',
   }[kind] ?? 'Other part'
 }
@@ -193,7 +218,8 @@ export function polygon(cx, cy, circumradius, firstVertexDegrees, count) {
 /**
  * A light panel's outline in layout space (y up), counter-clockwise, in the
  * vertex convention Nanoleaf's own plugin SDK draws with: triangles point up
- * at orientation 0, hexagons put vertices on the ±x axis.
+ * at orientation 0, hexagons put vertices on the ±x axis. Aurora triangles
+ * follow the same convention at a 150-unit side.
  */
 export function outline(panel) {
   const kind = shapeKind(panel.shapeCode)
@@ -349,6 +375,41 @@ export function streamPacket(frames) {
   return buffer
 }
 
+/**
+ * External control v1, the Light Panels format: one-byte count, then per
+ * panel `id 1 R G B W transition`, every field one byte. A panel whose ID does
+ * not fit in a byte cannot be addressed, so it is left out.
+ */
+export function streamPacketV1(frames) {
+  const limited = frames.filter(frame => frame.panelID >= 0 && frame.panelID <= 0xff).slice(0, 0xff)
+  const buffer = Buffer.alloc(1 + limited.length * 7)
+  buffer.writeUInt8(limited.length, 0)
+  limited.forEach((frame, index) => {
+    const offset = 1 + index * 7
+    buffer.writeUInt8(frame.panelID, offset)
+    buffer.writeUInt8(1, offset + 1)
+    buffer.writeUInt8(byte(frame.r), offset + 2)
+    buffer.writeUInt8(byte(frame.g), offset + 3)
+    buffer.writeUInt8(byte(frame.b), offset + 4)
+    buffer.writeUInt8(0, offset + 5)
+    buffer.writeUInt8(byte(frame.transition ?? 0), offset + 6)
+  })
+  return buffer
+}
+
+/**
+ * The UDP port in a Light Panels reply to v1 activation, or null. Only the
+ * port is taken; frames still go to the paired address.
+ */
+export function v1StreamPort(reply) {
+  if (!isObject(reply)) return null
+  const port = reply.streamControlPort
+  if (!isNumber(port) || port !== Math.round(port) || port < 1 || port > 65535) return null
+  if ('streamControlProtocol' in reply &&
+      (typeof reply.streamControlProtocol !== 'string' || reply.streamControlProtocol.toLowerCase() !== 'udp')) return null
+  return port
+}
+
 export const orientationBody = degrees => ({ globalOrientation: { value: degrees } })
 export const selectBody = name => ({ select: name })
 export const displayStaticBody = frames => ({
@@ -362,12 +423,13 @@ export const displayStaticBody = frames => ({
     colorType: 'HSB',
   },
 })
-export const EXTERNAL_CONTROL_BODY = { write: { command: 'display', animType: 'extControl', extControlVersion: 'v2' } }
+export const externalControlBody = version => ({ write: { command: 'display', animType: 'extControl', extControlVersion: version } })
+export const EXTERNAL_CONTROL_BODY = externalControlBody('v2')
 
 /**
  * Frames for every light panel: the design's colour where it has one, black
- * where it does not, in ascending ID order. Nothing that is not a Shapes
- * light panel is ever addressed.
+ * where it does not, in ascending ID order. Nothing that is not a light
+ * panel is ever addressed.
  */
 export function designFrames(layout, colors, transition = 3) {
   return paintablePanels(layout).map(panel => {

@@ -18,6 +18,17 @@ interface BinRange {
   last: number;
 }
 
+interface SpectrumBinRange {
+  a: number;
+  last: number;
+  invLen: number;
+}
+
+interface ChromaBin {
+  bin: number;
+  pitchClass: number;
+}
+
 export class MusicFeatureAnalyzer {
   sourceDescription: string;
   private readonly fft = new RealFFT(WINDOW);
@@ -29,6 +40,8 @@ export class MusicFeatureAnalyzer {
   private readonly previousLog = new Float64Array(WINDOW / 2);
   private readonly chroma = new Float64Array(12);
   private readonly spectrum = new Float64Array(SPECTRUM_BINS);
+  private readonly spectrumRanges: SpectrumBinRange[] = [];
+  private chromaBins: ChromaBin[] = [];
   private ringWrite = 0;
   private samplesUntilHop = HOP;
   private processedSamples = 0;
@@ -60,6 +73,16 @@ export class MusicFeatureAnalyzer {
 
   constructor(sourceDescription = "Microphone input") {
     this.sourceDescription = sourceDescription;
+
+    // Pre-compute constant spectrum bin mapping
+    const n = WINDOW / 2;
+    for (let i = 0; i < SPECTRUM_BINS; i += 1) {
+      const a = Math.floor(((i / SPECTRUM_BINS) ** 2) * (n - 2)) + 1;
+      const b = Math.floor((((i + 1) / SPECTRUM_BINS) ** 2) * (n - 2)) + 1;
+      const last = Math.min(n, Math.max(a + 1, b));
+      const count = Math.max(1, last - a);
+      this.spectrumRanges.push({ a, last, invLen: 1 / count });
+    }
   }
 
   setPolicy(metre: Metre | "auto", feel: TimeFeel): void {
@@ -106,23 +129,54 @@ export class MusicFeatureAnalyzer {
     let latest: AudioReactiveSnapshot | null = null;
     let strongestBeat = 0;
     let left = 0, right = 0;
-    for (let i = 0; i < samples.length; i++) {
-      const l = stereo?.left[i] ?? samples[i] ?? 0;
-      const r = stereo?.right[i] ?? l;
-      left += l * l; right += r * r;
+    const len = samples.length;
+
+    if (stereo) {
+      const sLeft = stereo.left;
+      const sRight = stereo.right;
+      for (let i = 0; i < len; i++) {
+        const l = sLeft[i] ?? 0;
+        const r = sRight[i] ?? l;
+        left += l * l;
+        right += r * r;
+      }
+    } else {
+      for (let i = 0; i < len; i++) {
+        const l = samples[i] ?? 0;
+        left += l * l;
+      }
+      right = left;
     }
-    left = Math.sqrt(left / samples.length); right = Math.sqrt(right / samples.length);
+    left = Math.sqrt(left / len);
+    right = Math.sqrt(right / len);
     const image = left + right < 1e-8 ? .5 : right / (left + right);
-    for (let i = 0; i < samples.length; i++) {
-      this.ring[this.ringWrite] = stereo ? ((stereo.left[i] ?? 0) + (stereo.right[i] ?? 0)) / 2 : samples[i] ?? 0;
-      this.ringWrite = (this.ringWrite + 1) % WINDOW;
-      this.processedSamples++;
-      if (--this.samplesUntilHop <= 0) {
-        this.samplesUntilHop = HOP;
-        latest = this.hop(image);
-        strongestBeat = Math.max(strongestBeat, latest.beat);
+
+    if (stereo) {
+      const sLeft = stereo.left;
+      const sRight = stereo.right;
+      for (let i = 0; i < len; i++) {
+        this.ring[this.ringWrite] = ((sLeft[i] ?? 0) + (sRight[i] ?? 0)) * 0.5;
+        this.ringWrite = (this.ringWrite + 1) % WINDOW;
+        this.processedSamples++;
+        if (--this.samplesUntilHop <= 0) {
+          this.samplesUntilHop = HOP;
+          latest = this.hop(image);
+          strongestBeat = Math.max(strongestBeat, latest.beat);
+        }
+      }
+    } else {
+      for (let i = 0; i < len; i++) {
+        this.ring[this.ringWrite] = samples[i] ?? 0;
+        this.ringWrite = (this.ringWrite + 1) % WINDOW;
+        this.processedSamples++;
+        if (--this.samplesUntilHop <= 0) {
+          this.samplesUntilHop = HOP;
+          latest = this.hop(image);
+          strongestBeat = Math.max(strongestBeat, latest.beat);
+        }
       }
     }
+
     if (latest) { latest.beat = strongestBeat; this.lastSnapshot = latest; }
     return latest;
   }
@@ -192,34 +246,36 @@ export class MusicFeatureAnalyzer {
   latest(): AudioReactiveSnapshot { return this.lastSnapshot; }
 
   private updateSpectrum(): void {
-    const n = this.magnitudes.length;
     const peak = Math.max(this.bandPeak, 1e-6);
+    const mags = this.magnitudes;
+    const spec = this.spectrum;
+    const ranges = this.spectrumRanges;
     for (let i = 0; i < SPECTRUM_BINS; i += 1) {
-      const a = Math.floor(((i / SPECTRUM_BINS) ** 2) * (n - 2)) + 1;
-      const b = Math.floor((((i + 1) / SPECTRUM_BINS) ** 2) * (n - 2)) + 1;
+      const range = ranges[i];
       let sum = 0;
-      const last = Math.max(a + 1, b);
-      for (let k = a; k < last && k < n; k += 1) sum += this.magnitudes[k];
-      const mean = sum / Math.max(1, last - a);
+      for (let k = range.a; k < range.last; k += 1) sum += mags[k];
+      const mean = sum * range.invLen;
       const target = Math.min(1, mean / peak);
-      this.spectrum[i] = this.spectrum[i] * 0.55 + target * 0.45;
+      spec[i] = spec[i] * 0.55 + target * 0.45;
     }
   }
 
   private updateChroma(): void {
     this.chroma.fill(0);
-    const sr = this.sampleRate;
-    for (let bin = 2; bin < this.magnitudes.length; bin += 1) {
-      const freq = (bin * sr) / WINDOW;
-      if (freq < 55 || freq > 2000) continue;
-      const midi = 69 + 12 * Math.log2(freq / 440);
-      const pc = ((Math.round(midi) % 12) + 12) % 12;
-      this.chroma[pc] += this.magnitudes[bin];
+    const bins = this.chromaBins;
+    const mags = this.magnitudes;
+    const chroma = this.chroma;
+    for (let i = 0; i < bins.length; i += 1) {
+      const b = bins[i];
+      chroma[b.pitchClass] += mags[b.bin];
     }
     let max = 0;
-    for (let i = 0; i < 12; i += 1) max = Math.max(max, this.chroma[i]);
+    for (let i = 0; i < 12; i += 1) {
+      if (chroma[i] > max) max = chroma[i];
+    }
     if (max > 0) {
-      for (let i = 0; i < 12; i += 1) this.chroma[i] /= max;
+      const invMax = 1 / max;
+      for (let i = 0; i < 12; i += 1) chroma[i] *= invMax;
     }
   }
 
@@ -234,6 +290,19 @@ export class MusicFeatureAnalyzer {
     this.snareBins = binsFor(sampleRate, 200, 2000);
     this.hatBins = binsFor(sampleRate, 3000, 12000);
     this.fluxBands = logBands(sampleRate, 24);
+
+    // Pre-compute chroma bin pitch class mappings for this sample rate
+    this.chromaBins = [];
+    const sr = sampleRate;
+    const maxBin = WINDOW / 2;
+    for (let bin = 2; bin < maxBin; bin += 1) {
+      const freq = (bin * sr) / WINDOW;
+      if (freq >= 55 && freq <= 2000) {
+        const midi = 69 + 12 * Math.log2(freq / 440);
+        const pitchClass = ((Math.round(midi) % 12) + 12) % 12;
+        this.chromaBins.push({ bin, pitchClass });
+      }
+    }
   }
 }
 

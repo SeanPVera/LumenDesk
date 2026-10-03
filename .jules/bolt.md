@@ -1,0 +1,3 @@
+## 2025-05-20 - Pre-compute FFT Bin Ranges and Pitch Classes for Real-Time Music Analysis
+**Learning:** In `MusicFeatureAnalyzer`, real-time feature extraction runs 94 times per second (every 512-sample hop at 48kHz). Calculating logarithmic pitch classes (`Math.log2`) and spectrum bin bounds (`a`, `last`, `invLen`) inside `updateChroma()` and `updateSpectrum()` on every hop wastes thousands of trig/log calls and loops per second over static frequency bins.
+**Action:** Pre-calculate spectrum bin bounds in the constructor and pitch class mappings in `configureIfNeeded()` whenever the sample rate changes.

@@ -18,6 +18,18 @@ interface BinRange {
   last: number;
 }
 
+/** Half-open magnitude-bin span behind each display bar; squared so low frequencies get more bars. */
+const SPECTRUM_RANGES: { first: number; end: number }[] = (() => {
+  const n = WINDOW / 2;
+  const ranges: { first: number; end: number }[] = [];
+  for (let i = 0; i < SPECTRUM_BINS; i += 1) {
+    const first = Math.floor(((i / SPECTRUM_BINS) ** 2) * (n - 2)) + 1;
+    const next = Math.floor((((i + 1) / SPECTRUM_BINS) ** 2) * (n - 2)) + 1;
+    ranges.push({ first, end: Math.max(first + 1, next) });
+  }
+  return ranges;
+})();
+
 export class MusicFeatureAnalyzer {
   sourceDescription: string;
   private readonly fft = new RealFFT(WINDOW);
@@ -40,6 +52,8 @@ export class MusicFeatureAnalyzer {
   private snareBins: BinRange = { first: 1, last: 1 };
   private hatBins: BinRange = { first: 1, last: 1 };
   private fluxBands: BinRange[] = [];
+  private chromaBins: BinRange = { first: 1, last: 0 };
+  private readonly chromaPitchClass = new Uint8Array(WINDOW / 2);
   private beatCount = 0;
   private cooldown = 0;
   private lastBufferEnd: number | null = null;
@@ -146,7 +160,9 @@ export class MusicFeatureAnalyzer {
     this.bandPeak = loudest > this.bandPeak ? this.bandPeak + (loudest - this.bandPeak) * .3 : Math.max(.00002, this.bandPeak * Math.exp(-dt / 8));
     const scale = .9 / this.bandPeak * Math.sqrt(level);
     const bass = clamp(bassRaw * scale), mids = clamp(midsRaw * scale), highs = clamp(highsRaw * scale);
-    const flux = this.fluxBands.reduce((n,b)=>n+rectifiedBandFlux(this.logMagnitudes,this.previousLog,b),0) / Math.max(1,this.fluxBands.length);
+    let fluxSum = 0;
+    for (const band of this.fluxBands) fluxSum += rectifiedBandFlux(this.logMagnitudes,this.previousLog,band);
+    const flux = fluxSum / Math.max(1,this.fluxBands.length);
     const rawKick = rectifiedBandFlux(this.logMagnitudes,this.previousLog,this.kickBins);
     const rawSnare = rectifiedBandFlux(this.logMagnitudes,this.previousLog,this.snareBins);
     const rawHat = rectifiedBandFlux(this.logMagnitudes,this.previousLog,this.hatBins);
@@ -195,12 +211,10 @@ export class MusicFeatureAnalyzer {
     const n = this.magnitudes.length;
     const peak = Math.max(this.bandPeak, 1e-6);
     for (let i = 0; i < SPECTRUM_BINS; i += 1) {
-      const a = Math.floor(((i / SPECTRUM_BINS) ** 2) * (n - 2)) + 1;
-      const b = Math.floor((((i + 1) / SPECTRUM_BINS) ** 2) * (n - 2)) + 1;
+      const { first, end } = SPECTRUM_RANGES[i];
       let sum = 0;
-      const last = Math.max(a + 1, b);
-      for (let k = a; k < last && k < n; k += 1) sum += this.magnitudes[k];
-      const mean = sum / Math.max(1, last - a);
+      for (let k = first; k < end && k < n; k += 1) sum += this.magnitudes[k];
+      const mean = sum / (end - first);
       const target = Math.min(1, mean / peak);
       this.spectrum[i] = this.spectrum[i] * 0.55 + target * 0.45;
     }
@@ -208,13 +222,9 @@ export class MusicFeatureAnalyzer {
 
   private updateChroma(): void {
     this.chroma.fill(0);
-    const sr = this.sampleRate;
-    for (let bin = 2; bin < this.magnitudes.length; bin += 1) {
-      const freq = (bin * sr) / WINDOW;
-      if (freq < 55 || freq > 2000) continue;
-      const midi = 69 + 12 * Math.log2(freq / 440);
-      const pc = ((Math.round(midi) % 12) + 12) % 12;
-      this.chroma[pc] += this.magnitudes[bin];
+    const { first, last } = this.chromaBins;
+    for (let bin = first; bin <= last; bin += 1) {
+      this.chroma[this.chromaPitchClass[bin]] += this.magnitudes[bin];
     }
     let max = 0;
     for (let i = 0; i < 12; i += 1) max = Math.max(max, this.chroma[i]);
@@ -234,6 +244,17 @@ export class MusicFeatureAnalyzer {
     this.snareBins = binsFor(sampleRate, 200, 2000);
     this.hatBins = binsFor(sampleRate, 3000, 12000);
     this.fluxBands = logBands(sampleRate, 24);
+    // Bin frequency rises with the index, so the 55 Hz–2 kHz chroma bins are one run.
+    let first = 0, last = -1;
+    for (let bin = 2; bin < WINDOW / 2; bin += 1) {
+      const freq = (bin * sampleRate) / WINDOW;
+      if (freq < 55 || freq > 2000) continue;
+      if (last < 0) first = bin;
+      last = bin;
+      const midi = 69 + 12 * Math.log2(freq / 440);
+      this.chromaPitchClass[bin] = ((Math.round(midi) % 12) + 12) % 12;
+    }
+    this.chromaBins = { first, last };
   }
 }
 

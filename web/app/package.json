@@ -1,7 +1,7 @@
 {
   "name": "lumendesk-web",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "license": "MIT",
   "description": "LumenDesk web client. Controls real LIFX, Govee and Nanoleaf Shapes lights through the local LumenDesk bridge.",
   "type": "module",

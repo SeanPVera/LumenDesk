@@ -55,7 +55,7 @@ The published page at <https://seanpvera.github.io/LumenDesk/> can also drive th
 
 ## Installing the Mac app
 
-Grab the disk image from the [latest release](https://github.com/SeanPVera/LumenDesk/releases/latest), open it, and drag **LumenDesk** into Applications. It needs macOS 13 Ventura or later. On first launch, allow the **Local Network** prompt so discovery can reach your bulbs.
+Grab the disk image from the [latest release](https://github.com/SeanPVera/LumenDesk/releases/latest), open it, and drag **LumenDesk** into Applications. It needs macOS 13 Ventura or later. On first launch, allow the **Local Network** prompt so discovery can reach your bulbs. [`CHANGELOG.md`](CHANGELOG.md) lists what changed in each release.
 
 Releases are not notarized, so macOS blocks the app the first time you open it. Clear the download quarantine once and it stops:
 
@@ -84,7 +84,7 @@ LumenDesk treats a Shapes wall (controller model **NL42**, hexagons, triangles a
 To connect:
 
 1. Set up the wall in the Nanoleaf app and join the same local network.
-2. Open **Rig → Pair Nanoleaf Shapes or Aurora** (also available during onboarding). Select a discovered controller, or enter its IP address or local hostname. Manual connections default to port `16021`; discovery uses the port advertised by the controller.
+2. Open **Devices → Pair Nanoleaf Shapes or Aurora** (also available during onboarding). Select a discovered controller, or enter its IP address or local hostname. Manual connections default to port `16021`; discovery uses the port advertised by the controller.
 3. Hold the controller's power button for **5–7 seconds** until its LED flashes, then press **Pair** within **30 seconds**.
 
 Discovery uses Bonjour (`_nanoleafapi._tcp`, plus `_nanoleafms._tcp`, which Aurora controllers on older firmware advertise). Paired controllers reconnect using credentials stored in this device's Keychain; these credentials are excluded from configuration exports, logs and error messages. A controller reset or revoked credential requires pairing again. If multicast discovery is blocked, use the manual address entry.

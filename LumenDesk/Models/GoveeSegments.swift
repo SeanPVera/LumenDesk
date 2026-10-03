@@ -190,13 +190,13 @@ struct GoveeSegmentProfile {
         add("H61A5", .neonRope, 20, true)
         add("H61D0", .neonRope, 20, true)
         // Glide Wall Light: straight bars and corner pieces chained from one
-        // controller, and kits ship in several sizes (5, 7 and 10 pieces).
-        // The default is the 6+1 kit with one segment per piece; the
-        // count stays adjustable for larger kits. Govee does not publish this
-        // model's segment map, so the default is a starting point to match
-        // against Govee Home, not a measured value. The bars are separate
-        // pieces, so there is no blend toggle.
-        add("H6062", .wallLight, 7, false)
+        // controller. Segments are the controller's addressable zones, not
+        // pieces: Govee's platform API reported 28 segment indices (0–27)
+        // for two separate H6062 units in govee2mqtt's captured device
+        // output, and commands to every one of them succeeded. The count
+        // stays adjustable in case a kit reports differently. The bars are
+        // separate pieces, so there is no blend toggle.
+        add("H6062", .wallLight, 28, false)
         // Uplighter floor lamp: upper ripple, middle ambient, and lower daily
         // zones are independently addressable and held through streaming.
         // The lamp only drives two of the three at once, so the studio treats

@@ -157,7 +157,7 @@ final class DomainTests: XCTestCase {
 
         XCTAssertEqual(profile.layout, .wallLight)
         XCTAssertEqual(profile.layout.displayName, "Glide wall light")
-        XCTAssertEqual(profile.defaultSegmentCount, 7)
+        XCTAssertEqual(profile.defaultSegmentCount, 28, "the controller's addressable zones, not its pieces")
         XCTAssertEqual(profile.editorUnitName, "segment")
         XCTAssertFalse(profile.supportsGradient)
         XCTAssertTrue(profile.recognized)

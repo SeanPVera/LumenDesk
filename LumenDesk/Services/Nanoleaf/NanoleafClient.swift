@@ -877,8 +877,13 @@ extension NanoleafClient: NetServiceBrowserDelegate, NetServiceDelegate {
 
     func netServiceBrowser(_ browser: NetServiceBrowser, didRemove service: NetService, moreComing: Bool) {
         guard browsers.contains(where: { $0 === browser }) else { return }
-        services.removeAll { $0 == service }
-        candidates = candidates.filter { $0.value.name != service.name }
+        // Matched by what identifies an advertisement, not object identity.
+        services.removeAll { $0.name == service.name && $0.type == service.type && $0.domain == service.domain }
+        // An Aurora can advertise one name under both service types. Its
+        // candidate stays while either advertisement does.
+        if !services.contains(where: { $0.name == service.name }) {
+            candidates = candidates.filter { $0.value.name != service.name }
+        }
         publishCandidates()
     }
 }

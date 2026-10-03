@@ -157,16 +157,22 @@ Apple anything.
 | `NOTARY_KEY_ID` | Key ID from App Store Connect |
 | `NOTARY_ISSUER_ID` | Issuer ID from App Store Connect |
 
-Then cut a release:
+Then cut a release. Bump `MARKETING_VERSION` in `project.yml` and in both app
+configurations in `project.pbxproj`, add a `## <version> - <date>` section to
+`CHANGELOG.md`, merge, and tag the merge commit:
 
 ```sh
-git tag v1.0.0
-git push origin v1.0.0
+git tag v1.1.0
+git push origin v1.1.0
 ```
 
-The workflow runs the test suite, imports the certificate into a throwaway
-keychain, packages, publishes a GitHub Release with the DMG and its checksum
-attached, and deletes the keychain whether or not the run succeeded.
+The workflow reads that version's changelog section first and stops if there
+isn't one, so a release never goes out without notes. It then runs the test
+suite, imports the certificate into a throwaway keychain, packages, publishes
+a GitHub Release with the changelog section, the install steps, and the DMG
+and its checksum attached, and deletes the keychain whether or not the run
+succeeded. A manual run with a `version` input writes the same notes into its
+run summary without publishing anything.
 
 ## Route 4: the Mac App Store
 
@@ -221,8 +227,10 @@ keeping the two apart when deciding what you need:
 `Info.plist` reads `CFBundleShortVersionString` and `CFBundleVersion` from
 `$(MARKETING_VERSION)` and `$(CURRENT_PROJECT_VERSION)`, both declared in
 `project.yml`. The packaging script overrides them on the `xcodebuild` command
-line, so a release never requires editing a tracked file. Version comes from
-the git tag, build number from the commit count.
+line, so a packaged build always carries its tag's version and the commit count
+as its build number. Bumping `MARKETING_VERSION` with each release still
+matters for everything else: a build run straight from Xcode reports whatever
+the project says.
 
 If you regenerate the project with `xcodegen generate`, those two settings
 have to stay in `project.yml` or the plist substitutions resolve to empty

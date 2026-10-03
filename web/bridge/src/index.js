@@ -12,7 +12,7 @@ import { describeReport } from './net.js'
 import { due, commandsFor } from './schedules.js'
 import { runSchedule } from './actions.js'
 
-const VERSION = '1.0.0'
+const VERSION = '1.1.0'
 
 // Only the published web app and local development origins may talk to the
 // bridge by default; --allow-origin adds more, --allow-any-origin opens it up.

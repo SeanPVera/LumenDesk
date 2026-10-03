@@ -3745,7 +3745,7 @@ extension LightManager {
         guard !isDemoMode, !isScanning, lastScanDate != nil, devices.isEmpty else { return nil }
 
         if !nanoleafCandidates.isEmpty {
-            return "Nanoleaf controller found. Open Pair Nanoleaf in Rig to connect it."
+            return "Nanoleaf controller found. Open Pair Nanoleaf in Devices to connect it."
         }
         if govee == nil && lifx == nil {
             return "Neither protocol could open a socket. Another app may hold UDP 4002, or the app was denied network access."

@@ -15,15 +15,19 @@ enum NanoleafShapeKind: Equatable, Hashable {
     case hexagon
     case triangle
     case miniTriangle
+    /// A Light Panels (Aurora) triangle, `shapeType` 0. Larger than the
+    /// Shapes triangle, and only ever found on an NL22 controller.
+    case lightPanelTriangle
     /// The Shapes controller module. It appears in the layout (usually as
     /// panel ID 0) but has no addressable light.
     case controller
     /// Hardware Nanoleaf lists that never emits light: the Rhythm module,
     /// power supplies, Lines connectors, controller caps, power connectors.
     case accessory(code: Int)
-    /// A light-emitting panel from another product family (Light Panels,
-    /// Canvas, Elements, Lines, 4D, Skylight). It is real, but it is not a
-    /// Shapes panel, so it is shown for reference and never sent colour.
+    /// A light-emitting panel from a product family LumenDesk does not drive
+    /// (Canvas, Elements, Lines, 4D, Skylight). It is real, but LumenDesk
+    /// has no geometry for it, so it is shown for reference and never sent
+    /// colour.
     case otherFamily(code: Int)
     /// A code Nanoleaf's table does not list.
     case unknown(code: Int)
@@ -38,16 +42,18 @@ enum NanoleafShapeKind: Equatable, Hashable {
         case 9: self = .miniTriangle
         case 12: self = .controller
         case 1, 5, 16, 19, 20: self = .accessory(code: code)
-        case 0, 2, 3, 4, 14, 15, 17, 18, 29, 30, 31, 32: self = .otherFamily(code: code)
+        case 0: self = .lightPanelTriangle
+        case 2, 3, 4, 14, 15, 17, 18, 29, 30, 31, 32: self = .otherFamily(code: code)
         default: self = .unknown(code: code)
         }
     }
 
-    /// Only these three are Shapes light panels, and only they are ever
-    /// addressed by panel-resolved commands.
+    /// Only the Shapes panels and Aurora triangles are light panels
+    /// LumenDesk draws, and only they are ever addressed by panel-resolved
+    /// commands.
     var isPaintable: Bool {
         switch self {
-        case .hexagon, .triangle, .miniTriangle: return true
+        case .hexagon, .triangle, .miniTriangle, .lightPanelTriangle: return true
         default: return false
         }
     }
@@ -58,6 +64,7 @@ enum NanoleafShapeKind: Equatable, Hashable {
         case .hexagon: return 67
         case .triangle: return 134
         case .miniTriangle: return 67
+        case .lightPanelTriangle: return 150
         default: return nil
         }
     }
@@ -67,6 +74,8 @@ enum NanoleafShapeKind: Equatable, Hashable {
         case .hexagon: return "Hexagon"
         case .triangle: return "Triangle"
         case .miniTriangle: return "Mini triangle"
+        // Never on one wall with a Shapes triangle, so the names cannot clash.
+        case .lightPanelTriangle: return "Triangle"
         case .controller: return "Controller"
         case .accessory(let code):
             switch code {
@@ -77,7 +86,7 @@ enum NanoleafShapeKind: Equatable, Hashable {
             case 20: return "Power connector"
             default: return "Accessory \(code)"
             }
-        case .otherFamily(let code): return "Non-Shapes panel (type \(code))"
+        case .otherFamily(let code): return "Unsupported panel (type \(code))"
         case .unknown(let code): return "Unknown part (type \(code))"
         case .unspecified: return "Unidentified part"
         }
@@ -113,7 +122,8 @@ struct NanoleafPanel: Equatable, Hashable, Codable, Identifiable {
 struct NanoleafLayout: Equatable, Codable {
     /// Every entry, in the order the controller listed it.
     let panels: [NanoleafPanel]
-    /// `numPanels`. For Shapes it counts the controller entry too.
+    /// `numPanels`. For Shapes it counts the controller entry too; Light
+    /// Panels never list their controller, so for them it does not.
     let reportedPanelCount: Int?
     /// The deprecated `sideLength` field, kept only for diagnostics.
     let legacySideLength: Int?
@@ -137,7 +147,7 @@ struct NanoleafLayout: Equatable, Codable {
 
     func panel(withID id: Int) -> NanoleafPanel? { panels.first { $0.panelID == id } }
 
-    /// Parts the integration will not draw as Shapes panels, excluding the
+    /// Parts the integration will not draw as light panels, excluding the
     /// controller, which is expected on every Shapes wall.
     var unsupportedEntries: [NanoleafPanel] {
         panels.filter { entry in

@@ -29,6 +29,48 @@ struct NanoleafEndpoint: Codable, Equatable {
     }
 }
 
+/// The Nanoleaf products LumenDesk drives panel by panel, read from the
+/// controller's `model`. Both speak the same local OpenAPI and the same
+/// static `animData`; they differ in panel shape, live-stream protocol and
+/// touch.
+enum NanoleafProductFamily: String, Codable, Equatable {
+    /// NL42.
+    case shapes
+    /// NL22: the original Aurora triangles, sold as Light Panels since 2018.
+    case lightPanels
+
+    init?(model: String?) {
+        guard let model else { return nil }
+        switch model.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() {
+        case "NL42": self = .shapes
+        case "NL22": self = .lightPanels
+        default: return nil
+        }
+    }
+
+    /// Short product name for headings and device rows.
+    var displayName: String {
+        switch self {
+        case .shapes: return "Shapes"
+        case .lightPanels: return "Aurora"
+        }
+    }
+
+    /// External control version. Shapes accept only v2. Light Panels are
+    /// documented with v1, the version they assume when none is named, and
+    /// v1 is what OpenRGB drives them with, so LumenDesk uses it there.
+    var streamProtocol: NanoleafStreamProtocol {
+        switch self {
+        case .shapes: return .v2
+        case .lightPanels: return .v1
+        }
+    }
+
+    /// Whether the panels sense touch. The OpenAPI's touch events come from
+    /// Canvas and Shapes; Light Panels have no touch hardware.
+    var sensesTouch: Bool { self == .shapes }
+}
+
 struct NanoleafCandidate: Identifiable, Equatable {
     let id: String
     let name: String
@@ -93,7 +135,9 @@ struct NanoleafInfo: Decodable {
         hardwareVersion = try? container.decodeIfPresent(String.self, forKey: .hardwareVersion)
     }
 
-    var isShapes: Bool { model.uppercased() == "NL42" }
+    var isShapes: Bool { family == .shapes }
+    /// Nil for any model LumenDesk does not drive panel by panel.
+    var family: NanoleafProductFamily? { NanoleafProductFamily(model: model) }
 
     /// The raw selection, including the controller's reserved mode names
     /// (`*Static*`, `*Dynamic*`, `*Solid*`) that `appearance` leaves out.
@@ -114,8 +158,8 @@ enum NanoleafError: LocalizedError, Equatable {
         switch self {
         case .invalidAddress: return "Enter a device IP address or local hostname and a port from 1 to 65535."
         case .pairingRequired: return "Nanoleaf access expired. Pair this controller again."
-        case .pairingWindowClosed: return "Hold the Shapes power button for 5–7 seconds until its LED flashes, then press Pair within 30 seconds."
-        case .unsupportedModel: return "This integration supports Nanoleaf Shapes (NL42)."
+        case .pairingWindowClosed: return "Hold the controller’s power button for 5–7 seconds until its LED flashes, then press Pair within 30 seconds."
+        case .unsupportedModel: return "This integration supports Nanoleaf Shapes (NL42) and Aurora Light Panels (NL22)."
         case .invalidResponse: return "The Nanoleaf controller returned an unreadable response."
         case .unavailable: return "Cannot reach the Nanoleaf controller. Check its power and your local network connection."
         case .storageFailure: return "Could not save Nanoleaf pairing in Keychain. Please try again."
@@ -129,6 +173,9 @@ enum NanoleafError: LocalizedError, Equatable {
 
 enum NanoleafProtocol {
     static let serviceType = "_nanoleafapi._tcp."
+    /// What Aurora controllers on older firmware advertise instead. Home
+    /// Assistant's Nanoleaf integration browses for both.
+    static let legacyServiceType = "_nanoleafms._tcp."
     static let kelvinRange = 1200...6500
 
     static func color(hue: Double, saturation: Double, brightness: Double? = nil) -> [String: Any] {

@@ -191,3 +191,30 @@ test('forgetting a wall removes the credential and the device', async () => {
   const saved = JSON.parse(fs.readFileSync(path.join(directory, 'pairings.json'), 'utf8'))
   assert.deepEqual(saved, [])
 })
+
+test('an Aurora pairs, draws its triangles and is painted panel by panel', async () => {
+  const aurora = new FakeShapesController()
+  aurora.model = 'NL22'
+  const port = await aurora.listen()
+  const auroraRegistry = new Registry()
+  const client = new NanoleafClient({ registry: auroraRegistry, credentialsFile: path.join(directory, 'aurora.json') })
+  try {
+    await client.start()
+    const device = await client.pair({ host: '127.0.0.1', port })
+    assert.equal(device.model, 'NL22')
+    assert.equal(device.shapes.family, 'lightPanels')
+    assert.deepEqual(device.shapes.geometry.panels.map(p => [p.panelID, p.kind]),
+      [[107, 'lightPanelTriangle'], [114, 'lightPanelTriangle']])
+    assert.deepEqual(device.shapes.geometry.references, [], 'Light Panels never list their controller')
+
+    assert.ok(client.displayPanels(device, { 107: { r: 255, g: 64, b: 0 } }))
+    await waitFor(() => aurora.animData && auroraRegistry.get(device.id).shapes.output === 'design')
+    const sent = decodeStatic(aurora.animData)
+    assert.deepEqual(Object.keys(sent).map(Number), [107, 114])
+    assert.deepEqual(sent[107].slice(0, 3), [255, 64, 0])
+    assert.deepEqual(sent[114].slice(0, 3), [0, 0, 0], 'an uncovered panel goes dark')
+  } finally {
+    client.stop()
+    aurora.close()
+  }
+})

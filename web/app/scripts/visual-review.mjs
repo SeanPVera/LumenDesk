@@ -71,7 +71,7 @@ await page.route('**/*', async route => {
       if (shapes[2] === 'effect') Object.assign(wall.shapes, {output:'effect',effect:data.name,design:null})
       body = shapes[2] === 'identify' ? {ok:true} : {device:wall}
     }
-    if (path === '/nanoleaf/pair') { await route.fulfill({status:403,json:{error:'Hold the Shapes power button for 5–7 seconds until its LED flashes, then pair within 30 seconds.'}}); return }
+    if (path === '/nanoleaf/pair') { await route.fulfill({status:403,json:{error:'Hold the controller’s power button for 5–7 seconds until its LED flashes, then pair within 30 seconds.'}}); return }
   }
   await route.fulfill({json:body})
 })

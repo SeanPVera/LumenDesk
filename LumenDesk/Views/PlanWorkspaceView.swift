@@ -472,7 +472,7 @@ struct RoomFixtureLine: View {
         if let run = manager.animatingEffect(for: light.id) { return run.name }
         if light.isLIFXLuna { return "Matrix · 26 zones" }
         if light.brand == .nanoleaf, let layout = manager.shapes.layout(light.id) {
-            return "Shapes · \(layout.paintablePanels.count) panels"
+            return "\(light.nanoleafProductName) · \(layout.paintablePanels.count) panels"
         }
         if manager.segmentStudioProfile(for: light) != nil {
             return "\(manager.segmentState(for: light).segmentCount) segments"

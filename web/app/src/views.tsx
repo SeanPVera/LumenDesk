@@ -8,7 +8,7 @@ import {
   hexToRGB,
   rgbToHex,
 } from './bridge'
-import { ShapesEditor, ShapesMiniWall, type ShapesActions } from './ShapesEditor'
+import { ShapesEditor, ShapesMiniWall, wallProductName, type ShapesActions } from './ShapesEditor'
 
 export const ACTION_LABELS: Record<ScheduleAction, string> = {
   turnOn: 'Turn on',
@@ -39,16 +39,16 @@ export interface Controls {
   favorite: (d: Device) => void
   rename: (d: Device, name: string) => void
   assign: (d: Device, roomID: string | null) => void
-  /** Panel-resolved commands for a paired Nanoleaf Shapes wall. */
+  /** Panel-resolved commands for a paired Nanoleaf Shapes or Aurora wall. */
   shapes: (d: Device) => ShapesActions
 }
 
-/** A Shapes wall whose layout the bridge has read, so its panels can be drawn. */
+/** A Nanoleaf wall whose layout the bridge has read, so its panels can be drawn. */
 export const isShapesWall = (d: Device) => d.brand === 'nanoleaf' && Boolean(d.shapes?.geometry?.panels.length)
 
 function outputKind(d: Device): string {
-  if (isShapesWall(d)) return `Shapes · ${d.shapes!.geometry!.panels.length} panels`
-  return d.brand === 'nanoleaf' ? 'Shapes · layout not read yet' : 'Whole-fixture color'
+  if (isShapesWall(d)) return `${wallProductName(d)} · ${d.shapes!.geometry!.panels.length} panels`
+  return d.brand === 'nanoleaf' ? `${wallProductName(d)} · layout not read yet` : 'Whole-fixture color'
 }
 
 // MARK: light card
@@ -202,7 +202,7 @@ export function HomeView({ devices, controls, onBulk, onScan, scanning }: {
             <span className="selection-mark" aria-hidden="true">{active.includes(d.id) ? '✓' : '+'}</span>
           </button>)}
         </div>
-        <p className="note">Fixture order, not room positions. Shapes walls are drawn panel by panel; other fixtures show one colour.</p>
+        <p className="note">Fixture order, not room positions. Nanoleaf walls are drawn panel by panel; other fixtures show one colour.</p>
       </div>
       <div className="room-editing">
         <div className="fixture-directory">
@@ -238,8 +238,8 @@ export function HomeView({ devices, controls, onBulk, onScan, scanning }: {
             <input id="room-white" type="range" min="2500" max="9000" step="100" value={targets[0]?.kelvin ?? 3500} disabled={!targets.length}
               onChange={e => targets.forEach(d => controls.kelvin(d, Number(e.target.value)))} />
           </label>
-          <p className="note">Color and white replace the current whole-fixture output, a Shapes design or scene included. Hardware limits still apply.</p>
-          {active.length !== 1 && targets.some(isShapesWall) && <p className="note">Select one Shapes wall on its own to paint its panels.</p>}
+          <p className="note">Color and white replace the current whole-fixture output, a Nanoleaf design or scene included. Hardware limits still apply.</p>
+          {active.length !== 1 && targets.some(isShapesWall) && <p className="note">Select one Nanoleaf wall on its own to paint its panels.</p>}
           {active.length === 1 && <details><summary>Fixture details</summary>
             <ul className="inspector-list"><LightCard device={devices.find(d => d.id === active[0])!} controls={controls} compact /></ul>
           </details>}
@@ -272,7 +272,7 @@ function EmptyLights({ scanning, onScan }: { scanning: boolean; onScan: () => vo
       <p>
         The bridge is running but has not heard from any lights. LIFX bulbs answer automatically;
         Govee devices must have <strong>LAN Control</strong> enabled in the Govee Home app. Nanoleaf
-        Shapes walls are paired once from <strong>Devices</strong>.
+        Shapes and Aurora walls are paired once from <strong>Devices</strong>.
       </p>
       <button className="primary" onClick={onScan} disabled={scanning}>
         {scanning ? 'Scanning…' : 'Scan for lights'}
@@ -533,7 +533,7 @@ function ShapesPairing({ onPair }: { onPair: (host: string, port: number) => Pro
   const [problem, setProblem] = useState<string | null>(null)
   return (
     <div className="panel">
-      <h2>Pair a Nanoleaf Shapes wall</h2>
+      <h2>Pair a Nanoleaf Shapes or Aurora wall</h2>
       <ol className="steps">
         <li>Find the controller’s IP address in your router’s list of connected devices.</li>
         <li>Hold the controller’s power button for 5–7 seconds, until its LED flashes.</li>
@@ -744,8 +744,8 @@ export function SettingsView({
         <h2>Not here yet</h2>
         <p>
           Animated effects, Govee RGBIC segment editing, LIFX matrix control and panel-by-panel
-          Shapes music are native-app features. In the browser, Music Mode drives every fixture,
-          Shapes walls included, as one colour.
+          Nanoleaf music are native-app features. In the browser, Music Mode drives every fixture,
+          Nanoleaf walls included, as one colour.
         </p>
       </div>
     </section>

@@ -2,10 +2,11 @@ import Foundation
 import XCTest
 @testable import LumenDesk
 
-/// Foundation-only coverage for the Shapes topology, geometry, design and
-/// wire formats. Expected bytes and layouts come from sources independent of
-/// the code under test: Nanoleaf's OpenAPI examples, Hyperion's driver, and
-/// layouts reported by real NL42 controllers.
+/// Foundation-only coverage for the Shapes and Aurora topology, geometry,
+/// design and wire formats. Expected bytes and layouts come from sources
+/// independent of the code under test: Nanoleaf's OpenAPI examples,
+/// Hyperion's and OpenRGB's drivers, and layouts reported by real NL42
+/// controllers.
 final class NanoleafShapesTests: XCTestCase {
 
     // MARK: Fixtures
@@ -55,6 +56,35 @@ final class NanoleafShapesTests: XCTestCase {
         return Data(#"{"panelLayout":{"globalOrientation":{"value":30,"max":360,"min":0},"layout":{"numPanels":7,"sideLength":0,"positionData":[\#(entries.joined(separator: ","))]}}}"#.utf8)
     }
 
+    /// The NL22 "all panel info" example in Nanoleaf's OpenAPI: two Aurora
+    /// triangles side by side, orientation 120, and the Rhythm module
+    /// reported on its own rather than in the layout. Light Panels never
+    /// list their controller.
+    static let auroraDocumentedInfo = """
+    {"name":"Light Panels Name","serialNo":"S16331A0217","manufacturer":"Nanoleaf","firmwareVersion":"1.5.0","model":"NL22",
+     "state":{"on":{"value":false},"brightness":{"value":100,"max":100,"min":0},"hue":{"value":0,"max":360,"min":0},
+              "sat":{"value":0,"max":100,"min":0},"ct":{"value":4000,"max":100,"min":0},"colorMode":"effect"},
+     "effects":{"select":"Flames","effectsList":["Color Burst","Flames","Forest"]},
+     "panelLayout":{"layout":{"numPanels":2,"sideLength":150,"positionData":[
+         {"panelId":107,"x":-74,"y":43,"o":180,"shapeType":0},
+         {"panelId":114,"x":-149,"y":0,"o":360,"shapeType":0}]},
+       "globalOrientation":{"value":120,"max":360,"min":0}},
+     "rhythm":{"rhythmConnected":true,"rhythmActive":true,"rhythmId":309,"hardwareVersion":"1.4","firmwareVersion":"1.7-R",
+               "auxAvailable":true,"rhythmMode":1,"rhythmPos":{"x":299,"y":-86,"o":300}}}
+    """
+
+    /// The OpenAPI's "Light Panels (Ten Panels)" layout example. The page
+    /// spells the list `positionLayout`; the entries are copied unchanged
+    /// under the `positionData` key real controllers send.
+    static let auroraTenPanelLayout = """
+    {"panelLayout":{"layout":{"numPanels":10,"sideLength":150,"positionData":[
+      {"panelId":1,"x":100,"y":100,"o":60,"shapeType":0},{"panelId":2,"x":324,"y":56,"o":0,"shapeType":0},
+      {"panelId":3,"x":249,"y":-159,"o":60,"shapeType":0},{"panelId":4,"x":174,"y":56,"o":240,"shapeType":0},
+      {"panelId":5,"x":324,"y":-29,"o":60,"shapeType":0},{"panelId":6,"x":-49,"y":100,"o":60,"shapeType":0},
+      {"panelId":7,"x":399,"y":99,"o":300,"shapeType":0},{"panelId":8,"x":174,"y":-29,"o":60,"shapeType":0},
+      {"panelId":9,"x":25,"y":56,"o":120,"shapeType":0},{"panelId":10,"x":249,"y":-73,"o":240,"shapeType":0}]}}}
+    """
+
     private func arrangement(_ json: String) throws -> NanoleafArrangement {
         try arrangement(Data(json.utf8))
     }
@@ -82,6 +112,9 @@ final class NanoleafShapesTests: XCTestCase {
         XCTAssertEqual(NanoleafShapeKind(code: 8), .triangle)
         XCTAssertEqual(NanoleafShapeKind(code: 9), .miniTriangle)
         XCTAssertEqual(NanoleafShapeKind(code: 12), .controller)
+        XCTAssertEqual(NanoleafShapeKind(code: 0), .lightPanelTriangle)
+        XCTAssertTrue(NanoleafShapeKind(code: 0).isPaintable)
+        XCTAssertEqual(NanoleafShapeKind.lightPanelTriangle.sideLength, 150)
         XCTAssertEqual(NanoleafShapeKind(code: 5), .accessory(code: 5))
         XCTAssertEqual(NanoleafShapeKind(code: 2), .otherFamily(code: 2))
         XCTAssertEqual(NanoleafShapeKind(code: 99), .unknown(code: 99))
@@ -89,7 +122,7 @@ final class NanoleafShapesTests: XCTestCase {
         XCTAssertEqual(NanoleafShapeKind.hexagon.sideLength, 67)
         XCTAssertEqual(NanoleafShapeKind.triangle.sideLength, 134)
         XCTAssertEqual(NanoleafShapeKind.miniTriangle.sideLength, 67)
-        for code in [0, 1, 2, 3, 4, 5, 12, 14, 16, 17, 99] {
+        for code in [1, 2, 3, 4, 5, 12, 14, 16, 17, 99] {
             XCTAssertFalse(NanoleafShapeKind(code: code).isPaintable, "type \(code) must never be painted")
             XCTAssertNil(NanoleafShapeKind(code: code).sideLength)
         }
@@ -110,6 +143,22 @@ final class NanoleafShapesTests: XCTestCase {
         XCTAssertFalse(value.layout.isPossiblyIncomplete)
         XCTAssertTrue(value.layout.unsupportedEntries.isEmpty)
         XCTAssertEqual(value.layout.shapeSummary, "2 mini triangles")
+    }
+
+    func testAuroraLayoutFromNanoleafsExampleIsTwoPaintableTriangles() throws {
+        let data = Data(Self.auroraDocumentedInfo.utf8)
+        let info = try JSONDecoder().decode(NanoleafInfo.self, from: data)
+        XCTAssertEqual(info.family, .lightPanels)
+        XCTAssertFalse(info.isShapes)
+        let value = try arrangement(data)
+        XCTAssertEqual(value.layout.paintablePanels.map(\.panelID), [107, 114])
+        XCTAssertTrue(value.layout.paintablePanels.allSatisfy { $0.kind == .lightPanelTriangle })
+        XCTAssertTrue(value.layout.referenceEntries.isEmpty, "Light Panels never list their controller")
+        XCTAssertTrue(value.layout.unsupportedEntries.isEmpty)
+        XCTAssertFalse(value.layout.isPossiblyIncomplete)
+        XCTAssertEqual(value.layout.legacySideLength, 150)
+        XCTAssertEqual(value.globalOrientation, 120)
+        XCTAssertEqual(value.layout.shapeSummary, "2 triangles")
     }
 
     func testReorderedResponsesProduceTheSamePanelsByIdentity() throws {
@@ -246,6 +295,57 @@ final class NanoleafShapesTests: XCTestCase {
         XCTAssertFalse(sharedEdgeExists(pointyHexagon, mini))
         let flippedMini = NanoleafGeometry.polygon(center: NanoleafPoint(173, 0), circumradius: 67 / 3.0.squareRoot(), firstVertexDegrees: 30, count: 3)
         XCTAssertFalse(sharedEdgeExists(hexagon, flippedMini))
+    }
+
+    func testAuroraTrianglesTileUnderTheSameVertexConvention() throws {
+        let up = try XCTUnwrap(NanoleafGeometry.outline(of: NanoleafPanel(panelID: 1, x: 0, y: 0, orientation: 0, shapeCode: 0)))
+        let radius = 150 / 3.0.squareRoot()
+        assertPoint(up[0], 0, radius)
+        assertPoint(up[1], -75, -radius / 2)
+        assertPoint(up[2], 75, -radius / 2)
+        XCTAssertEqual(NanoleafGeometry.inradius(of: .lightPanelTriangle) ?? 0, 43.30, accuracy: 0.01)
+
+        let pair = try arrangement(Self.auroraDocumentedInfo).layout
+        let a = try XCTUnwrap(NanoleafGeometry.outline(of: try XCTUnwrap(pair.panel(withID: 107))))
+        let b = try XCTUnwrap(NanoleafGeometry.outline(of: try XCTUnwrap(pair.panel(withID: 114))))
+        XCTAssertTrue(sharedEdgeExists(a, b), "The documented NL22 neighbours must share an edge")
+
+        // Every panel of the ten-panel example joins the wall through a
+        // shared edge. Whole-unit centroids of 150-unit triangles put shared
+        // vertices up to about two units apart, hence the wider tolerance.
+        let ten = try arrangement(Self.auroraTenPanelLayout).layout
+        var outlines: [Int: [NanoleafPoint]] = [:]
+        for panel in ten.paintablePanels {
+            outlines[panel.panelID] = try XCTUnwrap(NanoleafGeometry.outline(of: panel))
+        }
+        var reached: Set<Int> = [1]
+        var frontier = [1]
+        while let next = frontier.popLast(), let from = outlines[next] {
+            for (id, outline) in outlines where !reached.contains(id) && sharedEdgeExists(from, outline, tolerance: 2) {
+                reached.insert(id)
+                frontier.append(id)
+            }
+        }
+        XCTAssertEqual(reached, ten.paintableIDs)
+        // Under a convention with triangles pointing sideways at o = 0, no
+        // two of them would share an edge, which is what pins this one.
+        let sideways = ten.paintablePanels.map {
+            NanoleafGeometry.polygon(center: NanoleafPoint($0.x, $0.y), circumradius: radius,
+                                     firstVertexDegrees: $0.orientation + 30, count: 3)
+        }
+        for i in sideways.indices {
+            for j in sideways.indices where j > i {
+                XCTAssertFalse(sharedEdgeExists(sideways[i], sideways[j], tolerance: 2))
+            }
+        }
+
+        for degrees in [0.0, 60, 120, 270] {
+            let mapping = NanoleafCanvasMapping(layout: ten, rotationDegrees: degrees, width: 640, height: 420)
+            for panel in ten.paintablePanels {
+                XCTAssertEqual(mapping.panelID(atScreen: mapping.screenCenter(of: panel), in: ten), panel.panelID,
+                               "Aurora panel \(panel.panelID) at \(degrees)°")
+            }
+        }
     }
 
     func testWallViewRotatesClockwiseLikeNanoleafsSDK() {
@@ -562,6 +662,46 @@ final class NanoleafShapesTests: XCTestCase {
         XCTAssertEqual(NanoleafStreamPacket.minimumFrameInterval, 0.1)
     }
 
+    func testStreamPacketMatchesNanoleafsDocumentedV1Bytes() {
+        // OpenAPI 3.2.6.2: panels 123, 223 and 67 as a Light Panels v1 message.
+        let frames = [
+            NanoleafPanelFrame(panelID: 123, rgb: NanoleafRGB(red: 255, green: 0, blue: 0), transition: 9),
+            NanoleafPanelFrame(panelID: 223, rgb: NanoleafRGB(red: 0, green: 255, blue: 0), transition: 24),
+            NanoleafPanelFrame(panelID: 67, rgb: NanoleafRGB(red: 0, green: 0, blue: 255), transition: 32)
+        ]
+        let documented: [UInt8] = [3,
+                                   123, 1, 255, 0, 0, 0, 9,
+                                   223, 1, 0, 255, 0, 0, 24,
+                                   67, 1, 0, 0, 255, 0, 32]
+        XCTAssertEqual([UInt8](NanoleafStreamPacket.encodeV1(frames)), documented)
+        XCTAssertEqual([UInt8](NanoleafStreamPacket.encode(frames, as: .v1)), documented)
+        XCTAssertEqual(NanoleafStreamPacket.encode(frames, as: .v2), NanoleafStreamPacket.encode(frames))
+        XCTAssertEqual([UInt8](NanoleafStreamPacket.encodeV1([])), [0])
+
+        // A one-byte ID cannot name panel 300, so it is left out rather than
+        // sent to panel 44; transitions longer than a byte are clamped.
+        let wide = [
+            NanoleafPanelFrame(panelID: 300, rgb: NanoleafRGB(red: 9, green: 9, blue: 9), transition: 1),
+            NanoleafPanelFrame(panelID: 5, rgb: NanoleafRGB(red: 1, green: 2, blue: 3), transition: 451)
+        ]
+        XCTAssertEqual([UInt8](NanoleafStreamPacket.encodeV1(wide)), [1, 5, 1, 1, 2, 3, 0, 255])
+    }
+
+    func testTheV1ActivationReplyNamesThePortAndNothingElseIsTrusted() {
+        func port(_ json: String) -> UInt16? { NanoleafStreamPacket.v1Port(fromActivationReply: Data(json.utf8)) }
+        // The documented reply shape, with a port filled in.
+        XCTAssertEqual(port(#"{"streamControlIpAddr":"192.168.2.231","streamControlPort":60221,"streamControlProtocol":"udp"}"#), 60221)
+        XCTAssertEqual(port(#"{"streamControlPort":61234}"#), 61234)
+        XCTAssertNil(port(#"{"streamControlIpAddr":"192.168.2.231","streamControlProtocol":"udp"}"#))
+        XCTAssertNil(port(#"{"streamControlPort":0}"#))
+        XCTAssertNil(port(#"{"streamControlPort":70000}"#))
+        XCTAssertNil(port(#"{"streamControlPort":60221.5}"#))
+        XCTAssertNil(port(#"{"streamControlPort":"60221"}"#))
+        XCTAssertNil(port(#"{"streamControlPort":60221,"streamControlProtocol":"tcp"}"#))
+        XCTAssertNil(port(""))
+        XCTAssertNil(port("not json"))
+    }
+
     private func object(_ body: [String: Any]) throws -> [String: Any] {
         let data = try JSONSerialization.data(withJSONObject: body)
         return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
@@ -574,6 +714,9 @@ final class NanoleafShapesTests: XCTestCase {
         // Hyperion's driver sends exactly this string to start v2 streaming.
         let hyperion = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(#"{"write" : {"command" : "display", "animType" : "extControl", "extControlVersion" : "v2"}}"#.utf8)) as? [String: Any])
         XCTAssertEqual(try object(NanoleafCommand.externalControl) as NSDictionary, hyperion as NSDictionary)
+        // OpenRGB's driver starts a Light Panels stream with exactly this.
+        let openRGB: NSDictionary = ["write": ["command": "display", "animType": "extControl", "extControlVersion": "v1"]]
+        XCTAssertEqual(try object(NanoleafCommand.activateExternalControl(.v1)) as NSDictionary, openRGB)
 
         let frames = [NanoleafPanelFrame(panelID: 9, rgb: NanoleafRGB(red: 1, green: 2, blue: 3), transition: 1)]
         let display = try XCTUnwrap(try object(NanoleafCommand.displayStatic(frames))["write"] as? [String: Any])

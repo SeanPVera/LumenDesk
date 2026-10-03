@@ -51,11 +51,18 @@ enum NanoleafCommand {
 
     /// Turns on external control, protocol v2. For Shapes the controller
     /// answers with no body and listens on UDP 60222 at its own address.
-    static let externalControl: [String: Any] = write([
-        "command": "display",
-        "animType": "extControl",
-        "extControlVersion": "v2"
-    ])
+    static let externalControl: [String: Any] = activateExternalControl(.v2)
+
+    /// Turns on external control in the given wire version. Light Panels
+    /// answer v1 with the UDP port to stream to; v1 is also what they assume
+    /// when no version is named, but naming it costs nothing.
+    static func activateExternalControl(_ version: NanoleafStreamProtocol) -> [String: Any] {
+        write([
+            "command": "display",
+            "animType": "extControl",
+            "extControlVersion": version.rawValue
+        ])
+    }
 
     static let requestAll: [String: Any] = write(["command": "requestAll"])
     static let requestPlugins: [String: Any] = write(["command": "requestPlugins", "version": "2.0"])

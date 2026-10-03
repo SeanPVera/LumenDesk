@@ -169,6 +169,8 @@ export class FakeGoveeDevice {
  * A Nanoleaf Shapes controller on loopback HTTP, following the documented
  * routes closely enough to exercise the bridge: pairing, the full reading
  * with its layout, state, scene selection, static display and orientation.
+ * With `model` set to 'NL22' it reports the OpenAPI's two-triangle Aurora
+ * layout instead, with no controller entry, as Light Panels do.
  */
 export class FakeShapesController {
   static serial = 'SHAPES123'
@@ -197,7 +199,10 @@ export class FakeShapesController {
       effects: { select: this.select, effectsList: this.effects },
       panelLayout: {
         globalOrientation: { value: this.orientation, max: 360, min: 0 },
-        layout: { numPanels: 7, sideLength: 0, positionData: [
+        layout: this.model === 'NL22' ? { numPanels: 2, sideLength: 150, positionData: [
+          { panelId: 107, x: -74, y: 43, o: 180, shapeType: 0 },
+          { panelId: 114, x: -149, y: 0, o: 360, shapeType: 0 },
+        ] } : { numPanels: 7, sideLength: 0, positionData: [
           { panelId: 5120, x: 0, y: 0, o: 0, shapeType: 7 },
           { panelId: 77, x: 100.5, y: 58.02, o: 0, shapeType: 7 },
           { panelId: 31000, x: -100.5, y: 58.02, o: 120, shapeType: 7 },

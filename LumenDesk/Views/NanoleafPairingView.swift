@@ -13,11 +13,11 @@ struct NanoleafPairingView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 HStack {
-                    Text("Pair Nanoleaf Shapes").font(.title2.bold())
+                    Text("Pair Nanoleaf Shapes or Aurora").font(.title2.bold())
                     Spacer()
                     Button("Done") { dismiss() }.disabled(isPairing)
                 }
-                Text("Set up your Shapes in the Nanoleaf app first, then join the same Wi-Fi network.")
+                Text("Set up your Shapes or Aurora Light Panels in the Nanoleaf app first, then join the same Wi-Fi network.")
                     .foregroundStyle(.secondary)
                 if manager.isDemoMode {
                     Text("Leave Demo Mode to pair your controller.").foregroundStyle(Lumen.warning)
@@ -50,7 +50,7 @@ struct NanoleafPairingView: View {
                         .disabled(isPairing)
                     }
                     if manager.nanoleafCandidates.isEmpty {
-                        Text(manager.nanoleafDiscoveryError ?? "Scanning for Shapes. You can also enter the controller’s address from the Nanoleaf app or your router.")
+                        Text(manager.nanoleafDiscoveryError ?? "Scanning for Shapes and Aurora controllers. You can also enter the controller’s address from the Nanoleaf app or your router.")
                             .font(.callout).foregroundStyle(.secondary)
                     }
                     VStack(alignment: .leading, spacing: 8) {
@@ -73,7 +73,7 @@ struct NanoleafPairingView: View {
                             .buttonStyle(LumenPrimaryButtonStyle())
                             .disabled(isPairing || host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
-                    Text("Pairing stays on this device in Keychain. Each Shapes controller appears as one light in your rooms.")
+                    Text("Pairing stays on this device in Keychain. Each controller appears as one light in your rooms.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
@@ -121,7 +121,7 @@ struct NanoleafEffectsControl: View {
                     Label(device.nanoleafAppearance?.effect ?? "Nanoleaf Effects", systemImage: "hexagon.fill")
                 }
                 .disabled(device.nanoleafEffects.isEmpty || manager.animatingEffect(for: device.id) != nil)
-                Text("Effects saved on your Shapes controller").font(.caption).foregroundStyle(.secondary)
+                Text("Effects saved on your \(device.nanoleafProductName) controller").font(.caption).foregroundStyle(.secondary)
             }
         }
         .sheet(isPresented: $showingPairing) { NanoleafPairingView().environmentObject(manager) }

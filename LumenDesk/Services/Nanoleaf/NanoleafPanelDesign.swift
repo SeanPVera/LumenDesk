@@ -364,15 +364,73 @@ enum NanoleafAnimData {
     }
 }
 
-/// External control ("extControl") version 2, the only version Shapes
-/// accept: `nPanels`, then per panel `panelId R G B W transition`, with the
-/// count, ID and transition as big-endian UInt16. Frames go by UDP to port
-/// 60222 on the controller once the mode is activated over HTTP.
+/// The two external-control ("extControl") wire versions in the OpenAPI.
+enum NanoleafStreamProtocol: String, Equatable, Codable {
+    /// Light Panels: one byte each for the count, panel ID and transition,
+    /// and a frame count that is always 1. The controller names the UDP
+    /// port in its reply to the activation request.
+    case v1
+    /// Canvas and later, including Shapes: big-endian UInt16 count, ID and
+    /// transition, no frame count, UDP port 60222.
+    case v2
+}
+
+/// External control frames. Version 2, the only version Shapes accept:
+/// `nPanels`, then per panel `panelId R G B W transition`, with the count, ID
+/// and transition as big-endian UInt16, sent by UDP to port 60222 on the
+/// controller once the mode is activated over HTTP. Version 1 is the Light
+/// Panels format; see `encodeV1`.
 enum NanoleafStreamPacket {
     static let defaultPort: UInt16 = 60222
     /// Nanoleaf asks external controllers never to stream faster than 10 Hz;
     /// fades of 100 ms or more are smoothed by the panels themselves.
     static let minimumFrameInterval: TimeInterval = 0.1
+
+    static func encode(_ frames: [NanoleafPanelFrame], as version: NanoleafStreamProtocol) -> Data {
+        switch version {
+        case .v1: return encodeV1(frames)
+        case .v2: return encode(frames)
+        }
+    }
+
+    /// Version 1: `nPanels`, then per panel `panelId nFrames R G B W
+    /// transition`, every field one byte and `nFrames` always 1. A panel
+    /// whose ID does not fit in a byte cannot be addressed in this format,
+    /// so it is left out rather than sent to whichever panel the truncated
+    /// ID would name.
+    static func encodeV1(_ frames: [NanoleafPanelFrame]) -> Data {
+        let frames = frames.filter { (0...Int(UInt8.max)).contains($0.panelID) }.prefix(Int(UInt8.max))
+        var data = Data()
+        data.reserveCapacity(1 + frames.count * 7)
+        data.append(UInt8(frames.count))
+        for frame in frames {
+            data.append(UInt8(frame.panelID))
+            data.append(1)
+            data.append(frame.rgb.red)
+            data.append(frame.rgb.green)
+            data.append(frame.rgb.blue)
+            data.append(0)
+            data.append(UInt8(clamping: max(0, frame.transition)))
+        }
+        return data
+    }
+
+    /// The UDP port in a Light Panels controller's reply to v1 activation:
+    /// `{"streamControlIpAddr", "streamControlPort", "streamControlProtocol"}`.
+    /// Only the port is taken. Frames still go to the address LumenDesk
+    /// paired with, so a reply cannot redirect them to another host. Nil
+    /// when the reply names no usable UDP port.
+    static func v1Port(fromActivationReply data: Data) -> UInt16? {
+        struct Reply: Decodable {
+            let streamControlPort: Double?
+            let streamControlProtocol: String?
+        }
+        guard let reply = try? JSONDecoder().decode(Reply.self, from: data),
+              let port = reply.streamControlPort,
+              port.isFinite, port == port.rounded(), (1...65535).contains(port) else { return nil }
+        if let transport = reply.streamControlProtocol, transport.lowercased() != "udp" { return nil }
+        return UInt16(port)
+    }
 
     static func encode(_ frames: [NanoleafPanelFrame]) -> Data {
         let frames = frames.prefix(Int(UInt16.max))

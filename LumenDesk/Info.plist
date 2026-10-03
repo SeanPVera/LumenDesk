@@ -42,6 +42,7 @@
         <string>_lifx._udp</string>
         <string>_hap._tcp</string>
         <string>_nanoleafapi._tcp</string>
+        <string>_nanoleafms._tcp</string>
     </array>
     <key>UILaunchScreen</key>
     <dict/>

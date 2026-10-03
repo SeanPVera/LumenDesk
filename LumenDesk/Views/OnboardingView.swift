@@ -177,7 +177,7 @@ struct OnboardingView: View {
                       manager.isScanning ? manager.scanPhase : discoverSubtitle)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            Button("Pair Nanoleaf Shapes") { showingNanoleafPairing = true }
+            Button("Pair Nanoleaf Shapes or Aurora") { showingNanoleafPairing = true }
                 .buttonStyle(LumenSecondaryButtonStyle())
 
             if manager.isScanning && manager.devices.isEmpty {

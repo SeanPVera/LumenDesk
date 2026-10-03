@@ -316,7 +316,7 @@ final class LightManager: ObservableObject {
             }
             return
         }
-        logActivity(.scan, title: "Discovery scan started", detail: "Broadcasting and probing every host on the local subnet for LIFX, Govee, and Nanoleaf Shapes devices.")
+        logActivity(.scan, title: "Discovery scan started", detail: "Broadcasting and probing every host on the local subnet for LIFX, Govee, and Nanoleaf Shapes or Aurora devices.")
         isScanning = true
         discoveryChanges = []
         scanStartingIDs = Set(devices.map(\.id))
@@ -1683,11 +1683,11 @@ extension LightManager {
     func pairNanoleaf(host: String, port: Int = 16021, serviceID: String? = nil) async throws {
         guard demoWorkspaceController.allowsLiveNetworking else { throw NanoleafError.unavailable }
         try await nanoleaf.pair(endpoint: NanoleafEndpoint(host: host, port: port), serviceID: serviceID)
-        logActivity(.system, title: "Nanoleaf Shapes paired", detail: "Local control is ready.")
+        logActivity(.system, title: "Nanoleaf controller paired", detail: "Local control is ready.")
     }
 
     func nanoleafDidUpdate(pairing: NanoleafPairing, info: NanoleafInfo) {
-        guard demoWorkspaceController.acceptsLiveNetworkCallbacks, info.isShapes else { return }
+        guard demoWorkspaceController.acceptsLiveNetworkCallbacks, info.family != nil else { return }
         let id = "nanoleaf:\(pairing.serial)"
         if device(withID: id) == nil {
             upsert(LightDevice(id: id, brand: .nanoleaf, backendID: pairing.serial,
@@ -1809,7 +1809,7 @@ extension LightManager {
         showShapesDesign(design, on: device)
         if announce {
             let count = design.reconciliation(against: layout).covered.count
-            logActivity(.command, title: "Shapes design applied", detail: "\(device.label): \(count) panels")
+            logActivity(.command, title: "Panel design applied", detail: "\(device.label): \(count) panels")
             lastActionSummary = "Painted \(count) panel\(count == 1 ? "" : "s") on \(device.label)"
         }
     }
@@ -1827,7 +1827,7 @@ extension LightManager {
             // wall takes the design as it is queued.
             shapes.show(design, on: device.id, transition: transition)
         }
-        enqueueCommand(for: device, coalescingKey: "color", summary: "Painting \(design.panelIDs.count) Shapes panels") { [weak self, weak device] in
+        enqueueCommand(for: device, coalescingKey: "color", summary: "Painting \(design.panelIDs.count) Nanoleaf panels") { [weak self, weak device] in
             guard let self, let device else { return }
             self.shapes.show(design, on: device.id, transition: transition)
         }
@@ -1933,23 +1933,23 @@ extension LightManager {
             run.releasedDeviceIDs.insert(deviceID)
             run.snapshot.removeAll { $0.deviceID == deviceID }
         }
-        let label = device(withID: deviceID)?.label ?? "Nanoleaf Shapes"
+        let label = device(withID: deviceID)?.label ?? "Nanoleaf panels"
         logActivity(.command, title: "Live output released",
                     detail: "\(label) switched to a scene chosen elsewhere; LumenDesk stopped streaming to it.")
     }
 
-    /// Diagnostics rows for a Shapes wall: what was read, what is claimed,
+    /// Diagnostics rows for a Shapes or Aurora wall: what was read, what is claimed,
     /// and what the live stream did. None of it is evidence the panels lit.
     func shapesDiagnostics(for device: LightDevice) -> [ScanDiagnostic] {
         guard device.brand == .nanoleaf else { return [] }
         let wall = shapes.wall(device.id)
         var rows: [ScanDiagnostic] = []
         if let layout = wall.arrangement?.layout {
-            rows.append(ScanDiagnostic(title: "Shapes layout",
+            rows.append(ScanDiagnostic(title: "Panel layout",
                                        value: "\(layout.paintablePanels.count) panels · \(layout.shapeSummary)",
                                        status: wall.topologyProblem == nil ? .good : .warning))
         } else {
-            rows.append(ScanDiagnostic(title: "Shapes layout", value: "Not read yet", status: .neutral))
+            rows.append(ScanDiagnostic(title: "Panel layout", value: "Not read yet", status: .neutral))
         }
         if let problem = wall.topologyProblem {
             rows.append(ScanDiagnostic(title: "Latest layout reading", value: problem.summary, status: .warning))
@@ -1957,6 +1957,11 @@ extension LightManager {
         rows.append(ScanDiagnostic(title: "Orientation", value: wall.orientation.summary,
                                    status: wall.orientation.isFailed ? .warning : .neutral))
         rows.append(ScanDiagnostic(title: "Showing", value: wall.output.summary, status: .neutral))
+        if let family = device.nanoleafFamily {
+            rows.append(ScanDiagnostic(title: "Product",
+                                       value: "\(family.displayName) · live output over external control \(family.streamProtocol.rawValue)",
+                                       status: .neutral))
+        }
         if let firmware = wall.firmware {
             rows.append(ScanDiagnostic(title: "Firmware", value: firmware, status: .neutral))
         }
@@ -1966,7 +1971,7 @@ extension LightManager {
                                        status: metrics.sendFailures > 0 ? .warning : .neutral))
         }
         if let failure = wall.lastFailure {
-            rows.append(ScanDiagnostic(title: "Last Shapes failure", value: failure, status: .warning))
+            rows.append(ScanDiagnostic(title: "Last panel failure", value: failure, status: .warning))
         }
         return rows
     }
@@ -3740,7 +3745,7 @@ extension LightManager {
         guard !isDemoMode, !isScanning, lastScanDate != nil, devices.isEmpty else { return nil }
 
         if !nanoleafCandidates.isEmpty {
-            return "Nanoleaf Shapes found. Open Pair Nanoleaf in Rig to connect the controller."
+            return "Nanoleaf controller found. Open Pair Nanoleaf in Rig to connect it."
         }
         if govee == nil && lifx == nil {
             return "Neither protocol could open a socket. Another app may hold UDP 4002, or the app was denied network access."
@@ -3779,7 +3784,7 @@ extension LightManager {
             ScanDiagnostic(title: "LIFX protocol", value: lifx == nil ? "Unavailable" : "Ready on UDP 56700", status: lifx == nil ? .warning : .good),
             ScanDiagnostic(title: "Govee protocol", value: govee == nil ? "Unavailable" : "Ready on UDP 4001–4003", status: govee == nil ? .warning : .good)
         ]
-        rows.append(ScanDiagnostic(title: "Nanoleaf Shapes", value: nanoleafDiscoveryError ?? "Bonjour discovery · local pairing", status: nanoleafDiscoveryError == nil ? .good : .warning))
+        rows.append(ScanDiagnostic(title: "Nanoleaf Shapes and Aurora", value: nanoleafDiscoveryError ?? "Bonjour discovery · local pairing", status: nanoleafDiscoveryError == nil ? .good : .warning))
         // The probe rows are the difference between "your network has no
         // lights" and "nothing we sent ever left the machine". Without them a
         // wrong interface, a refused route, and a denied Local Network grant

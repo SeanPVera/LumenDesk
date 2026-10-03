@@ -39,6 +39,28 @@ final class NanoleafTests: XCTestCase {
         XCTAssertNil(try fixture.info().appearance.effect)
         fixture.model = "NL29"
         XCTAssertFalse(try fixture.info().isShapes)
+        XCTAssertNil(try fixture.info().family)
+        fixture.model = "NL22"
+        XCTAssertFalse(try fixture.info().isShapes)
+        XCTAssertEqual(try fixture.info().family, .lightPanels)
+    }
+
+    func testProductFamiliesPickTheirStreamProtocolAndTouch() {
+        XCTAssertEqual(NanoleafProductFamily(model: "NL42"), .shapes)
+        XCTAssertEqual(NanoleafProductFamily(model: " nl22 "), .lightPanels)
+        XCTAssertNil(NanoleafProductFamily(model: "NL29"))
+        XCTAssertNil(NanoleafProductFamily(model: nil))
+        XCTAssertEqual(NanoleafProductFamily.shapes.streamProtocol, .v2)
+        XCTAssertEqual(NanoleafProductFamily.lightPanels.streamProtocol, .v1)
+        XCTAssertTrue(NanoleafProductFamily.shapes.sensesTouch)
+        XCTAssertFalse(NanoleafProductFamily.lightPanels.sensesTouch)
+        XCTAssertEqual(NanoleafProductFamily.lightPanels.displayName, "Aurora")
+        let wall = LightDevice(id: "nanoleaf:S1", brand: .nanoleaf, backendID: "S1", name: "Hall",
+                               address: "192.0.2.5", sku: "NL22")
+        XCTAssertEqual(wall.nanoleafFamily, .lightPanels)
+        XCTAssertEqual(wall.nanoleafProductName, "Aurora")
+        let bulb = LightDevice(id: "govee:x", brand: .govee, backendID: "x", name: "Strip", address: "192.0.2.6", sku: "NL22")
+        XCTAssertNil(bulb.nanoleafFamily, "only a Nanoleaf device has a Nanoleaf family")
     }
 
     @MainActor
@@ -56,6 +78,17 @@ final class NanoleafTests: XCTestCase {
         XCTAssertEqual(fixture.requests.map(\.httpMethod), ["POST", "GET"])
         XCTAssertEqual(fixture.requests.first?.url?.port, 16021)
         XCTAssertEqual(fixture.requests.last?.url?.path, "/api/v1/testToken123")
+    }
+
+    @MainActor
+    func testAuroraLightPanelsPair() async throws {
+        let fixture = NanoleafFixture()
+        fixture.model = "NL22"
+        let store = MemoryNanoleafCredentials()
+        let client = makeClient(fixture, store: store)
+        try await client.pair(endpoint: fixture.endpoint)
+        XCTAssertEqual(store.pairings.first?.serial, "SHAPES123")
+        XCTAssertEqual(client.family("SHAPES123"), .lightPanels)
     }
 
     @MainActor

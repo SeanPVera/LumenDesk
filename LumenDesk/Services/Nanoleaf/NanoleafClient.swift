@@ -123,7 +123,12 @@ final class NanoleafClient: NSObject {
     private var pairings: [String: NanoleafPairing] = [:]
     private var candidates: [String: NanoleafCandidate] = [:]
     private var services: [NetService] = []
-    private var browser: NetServiceBrowser?
+    /// One browser per advertised service type.
+    private var browsers: [NetServiceBrowser] = []
+    /// Which product each paired controller is, from its latest reading.
+    /// Decides the live-stream protocol, so it is read again before a stream
+    /// if the controller has not been heard from since launch.
+    private var families: [String: NanoleafProductFamily] = [:]
     private var tasks: [String: Task<Void, Never>] = [:]
     private var pending: [String: Pending] = [:]
     private var operations: [String: [Operation]] = [:]
@@ -169,6 +174,8 @@ final class NanoleafClient: NSObject {
         let owner: String
         let token = UUID()
         var host: String?
+        var port: UInt16?
+        var wireVersion = NanoleafStreamProtocol.v2
         var status: NanoleafStreamStatus
         var pending: [Int: NanoleafPanelFrame] = [:]
         var lastSentAt = -Double.greatestFiniteMagnitude
@@ -224,15 +231,18 @@ final class NanoleafClient: NSObject {
 
     func discover() {
         reconnect()
-        browser?.stop()
+        browsers.forEach { $0.stop() }
+        browsers.removeAll()
         services.forEach { $0.stop() }
         services.removeAll()
         candidates.removeAll()
         publishCandidates()
-        let browser = NetServiceBrowser()
-        browser.delegate = self
-        self.browser = browser
-        browser.searchForServices(ofType: NanoleafProtocol.serviceType, inDomain: "local.")
+        for type in [NanoleafProtocol.serviceType, NanoleafProtocol.legacyServiceType] {
+            let browser = NetServiceBrowser()
+            browser.delegate = self
+            browsers.append(browser)
+            browser.searchForServices(ofType: type, inDomain: "local.")
+        }
     }
 
     func reconnect() {
@@ -256,7 +266,8 @@ final class NanoleafClient: NSObject {
     func pause() {
         paused = true
         generation += 1
-        browser?.stop()
+        browsers.forEach { $0.stop() }
+        browsers.removeAll()
         services.forEach { $0.stop() }
         services.removeAll()
         tasks.values.forEach { $0.cancel() }
@@ -283,7 +294,7 @@ final class NanoleafClient: NSObject {
             throw NanoleafError.invalidResponse
         }
         let info = try await readInfo(endpoint: endpoint, token: token)
-        guard info.isShapes else { throw NanoleafError.unsupportedModel }
+        guard let family = info.family else { throw NanoleafError.unsupportedModel }
         guard !info.serialNo.isEmpty, generation == self.generation, !paused else {
             throw NanoleafError.unavailable
         }
@@ -296,12 +307,16 @@ final class NanoleafClient: NSObject {
         next[info.serialNo] = pairing
         try credentials.save(Array(next.values))
         pairings = next
+        families[info.serialNo] = family
         publishCandidates()
         onUpdate?(pairing, info)
         startEvents(info.serialNo)
     }
 
     func isPaired(_ serial: String) -> Bool { pairings[serial] != nil }
+
+    /// The product a paired controller last reported itself as.
+    func family(_ serial: String) -> NanoleafProductFamily? { families[serial] }
 
     /// Whether a write for this controller would be sent now, rather than
     /// dropped because the client is paused or the controller is unpaired.
@@ -583,7 +598,8 @@ final class NanoleafClient: NSObject {
                 kind = .state
                 let info = try await readInfo(endpoint: pairing.endpoint, token: pairing.token)
                 guard generation == self.generation, !Task.isCancelled else { return }
-                guard info.serialNo == serial, info.isShapes else { throw NanoleafError.invalidResponse }
+                guard info.serialNo == serial, let family = info.family else { throw NanoleafError.invalidResponse }
+                families[serial] = family
                 onUpdate?(pairing, info)
             }
         } catch {
@@ -634,10 +650,27 @@ final class NanoleafClient: NSObject {
                     throw NanoleafError.streamUnavailable
                 }
                 guard self.streams[serial]?.token == token else { return }
-                _ = try await self.request(endpoint: pairing.endpoint, path: "/api/v1/\(pairing.token)/effects",
-                                           method: "PUT", body: NanoleafCommand.externalControl)
+                let version = try await self.family(for: pairing).streamProtocol
+                guard self.streams[serial]?.token == token else { return }
+                let reply = try await self.request(endpoint: pairing.endpoint, path: "/api/v1/\(pairing.token)/effects",
+                                                   method: "PUT", body: NanoleafCommand.activateExternalControl(version))
+                let port: UInt16
+                switch version {
+                case .v2:
+                    port = self.streamPort
+                case .v1:
+                    // Light Panels name the port in their reply. Without
+                    // one there is nowhere to send frames, and guessing a
+                    // port would report a stream that reaches nothing.
+                    guard let named = NanoleafStreamPacket.v1Port(fromActivationReply: reply) else {
+                        throw NanoleafError.invalidResponse
+                    }
+                    port = named
+                }
                 guard let live = self.streams[serial], live.token == token else { return }
                 live.host = host
+                live.port = port
+                live.wireVersion = version
                 live.status = .streaming(owner: owner)
                 self.onStreamStatus?(serial, live.status)
                 self.flush(serial, token: token)
@@ -675,6 +708,16 @@ final class NanoleafClient: NSObject {
         endStream(serial, notify: true)
     }
 
+    /// The family from the last reading, or a fresh reading when there has
+    /// been none since launch.
+    private func family(for pairing: NanoleafPairing) async throws -> NanoleafProductFamily {
+        if let known = families[pairing.serial] { return known }
+        let info = try await readInfo(endpoint: pairing.endpoint, token: pairing.token)
+        guard info.serialNo == pairing.serial, let family = info.family else { throw NanoleafError.invalidResponse }
+        families[pairing.serial] = family
+        return family
+    }
+
     private func endStream(_ serial: String, notify: Bool) {
         guard let session = streams.removeValue(forKey: serial) else { return }
         session.flushTask?.cancel()
@@ -684,7 +727,7 @@ final class NanoleafClient: NSObject {
 
     private func flush(_ serial: String, token: UUID) {
         guard let session = streams[serial], session.token == token,
-              case .streaming = session.status, let host = session.host,
+              case .streaming = session.status, let host = session.host, let port = session.port,
               !session.pending.isEmpty, session.flushTask == nil else { return }
         let wait = session.lastSentAt + NanoleafStreamPacket.minimumFrameInterval - uptime()
         if wait > 0 {
@@ -700,7 +743,7 @@ final class NanoleafClient: NSObject {
         session.pending.removeAll()
         session.lastSentAt = uptime()
         do {
-            try datagrams.send(NanoleafStreamPacket.encode(frames), to: host, port: streamPort)
+            try datagrams.send(NanoleafStreamPacket.encode(frames, as: session.wireVersion), to: host, port: port)
             session.metrics.datagramsSent += 1
         } catch {
             session.metrics.sendFailures += 1
@@ -721,7 +764,11 @@ final class NanoleafClient: NSObject {
                     request = URLRequest(url: try pairing.endpoint.url(path: "/api/v1/\(pairing.token)/events"))
                 } catch { return }
                 var components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)
-                components?.queryItems = [URLQueryItem(name: "id", value: "1,2,3,4")]
+                // Touch (4) only where there is touch hardware. Read on every
+                // attempt, so a controller first heard of after this loop
+                // started is asked the right way on the next reconnect.
+                let events = self.families[serial] == .lightPanels ? "1,2,3" : "1,2,3,4"
+                components?.queryItems = [URLQueryItem(name: "id", value: events)]
                 if let url = components?.url { request.url = url }
                 request.cachePolicy = .reloadIgnoringLocalCacheData
                 do {
@@ -786,7 +833,7 @@ final class NanoleafClient: NSObject {
 
 extension NanoleafClient: NetServiceBrowserDelegate, NetServiceDelegate {
     func netServiceBrowser(_ browser: NetServiceBrowser, didFind service: NetService, moreComing: Bool) {
-        guard !paused, browser === self.browser else { return }
+        guard !paused, browsers.contains(where: { $0 === browser }) else { return }
         services.append(service)
         service.delegate = self
         service.resolve(withTimeout: 5)
@@ -797,8 +844,10 @@ extension NanoleafClient: NetServiceBrowserDelegate, NetServiceDelegate {
               let endpoint = try? NanoleafEndpoint(host: host, port: sender.port) else { return }
         let txt = sender.txtRecordData().map(NetService.dictionary(fromTXTRecord:)) ?? [:]
         let model = txt["md"].flatMap { String(data: $0, encoding: .utf8) }
-        guard model == nil || model?.uppercased() == "NL42" else { return }
+        guard model == nil || NanoleafProductFamily(model: model) != nil else { return }
         let id = txt["id"].flatMap { String(data: $0, encoding: .utf8) } ?? sender.name
+        // An Aurora can advertise under both service types; list it once.
+        candidates = candidates.filter { $0.key == id || $0.value.endpoint != endpoint }
         candidates[id] = NanoleafCandidate(id: id, name: sender.name, endpoint: endpoint, model: model)
         for serial in Array(pairings.keys) {
             guard var pairing = pairings[serial],
@@ -822,12 +871,12 @@ extension NanoleafClient: NetServiceBrowserDelegate, NetServiceDelegate {
     }
 
     func netServiceBrowser(_ browser: NetServiceBrowser, didNotSearch errorDict: [String: NSNumber]) {
-        guard !paused, browser === self.browser else { return }
+        guard !paused, browsers.contains(where: { $0 === browser }) else { return }
         onDiscoveryError?("Nanoleaf discovery could not start. Allow Local Network access, or pair using the controller’s IP address.")
     }
 
     func netServiceBrowser(_ browser: NetServiceBrowser, didRemove service: NetService, moreComing: Bool) {
-        guard browser === self.browser else { return }
+        guard browsers.contains(where: { $0 === browser }) else { return }
         services.removeAll { $0 == service }
         candidates = candidates.filter { $0.value.name != service.name }
         publishCandidates()

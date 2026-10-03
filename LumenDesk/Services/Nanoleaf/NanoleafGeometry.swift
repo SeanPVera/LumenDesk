@@ -30,6 +30,12 @@ enum NanoleafGeometry {
     /// 67-unit triangle is 38.7), and a hexagon beside a mini triangle sat
     /// 77.0 apart along −30° (apothem 58.0 plus inradius 19.3). Under any other
     /// vertex convention those shared edges do not line up.
+    ///
+    /// Aurora triangles follow the same convention at a 150-unit side: the
+    /// SDK was written for Light Panels in the first place, and the NL22
+    /// layout in Nanoleaf's OpenAPI example (panel 114 at o = 360 beside
+    /// panel 107 at o = 180, 86.5 units apart along 30°) shares an edge
+    /// under it.
     static func outline(of panel: NanoleafPanel) -> [NanoleafPoint]? {
         guard let side = panel.kind.sideLength else { return nil }
         let center = NanoleafPoint(panel.x, panel.y)
@@ -37,7 +43,7 @@ enum NanoleafGeometry {
         case .hexagon:
             return polygon(center: center, circumradius: side,
                            firstVertexDegrees: panel.orientation, count: 6)
-        case .triangle, .miniTriangle:
+        case .triangle, .miniTriangle, .lightPanelTriangle:
             return polygon(center: center, circumradius: side / 3.0.squareRoot(),
                            firstVertexDegrees: panel.orientation + 90, count: 3)
         default:
@@ -50,7 +56,7 @@ enum NanoleafGeometry {
         guard let side = kind.sideLength else { return nil }
         switch kind {
         case .hexagon: return side * 3.0.squareRoot() / 2
-        case .triangle, .miniTriangle: return side / (2 * 3.0.squareRoot())
+        case .triangle, .miniTriangle, .lightPanelTriangle: return side / (2 * 3.0.squareRoot())
         default: return nil
         }
     }

@@ -50,6 +50,9 @@ struct NanoleafShapesStudio: View {
     private var runningShow: (scope: LightScope, name: String)? { manager.animatingEffect(for: deviceID) }
     private var rotation: Double { Double(orientationDraft ?? shapes.displayOrientation(deviceID)) }
     private var isPreviewing: Bool { shapes.previewing.contains(deviceID) }
+    /// Aurora panels have no touch hardware, so nothing on them can be
+    /// selected by touch. An unknown model keeps the Shapes behaviour.
+    private var sensesTouch: Bool { device.nanoleafFamily?.sensesTouch ?? true }
 
     var body: some View {
         Group {
@@ -113,7 +116,8 @@ struct NanoleafShapesStudio: View {
     private var header: some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
-                Label("Shapes panels \u{2014} \(device.label)", systemImage: "hexagon")
+                Label("\(device.nanoleafProductName) panels \u{2014} \(device.label)",
+                      systemImage: device.nanoleafFamily == .lightPanels ? "triangle" : "hexagon")
                     .font(LumenType.display(size: 17, weight: .semibold))
                 Text(statusLine).font(.callout).foregroundStyle(Lumen.meter)
                     .fixedSize(horizontal: false, vertical: true)
@@ -174,7 +178,7 @@ struct NanoleafShapesStudio: View {
                 .onMoveCompat { direction in moveCursor(direction, in: layout) }
                 .onExitCommandCompat { selection = [] }
                 .accessibilityElement(children: .contain)
-                .accessibilityLabel("Shapes wall, \(layout.paintablePanels.count) panels, drawn as it hangs")
+                .accessibilityLabel("\(device.nanoleafProductName) wall, \(layout.paintablePanels.count) panels, drawn as it hangs")
             if let orientationDraft {
                 Label("Previewing \(orientationDraft)\u{00B0} here. The wall and its effects change when you apply it.",
                       systemImage: "rotate.right")
@@ -260,9 +264,11 @@ struct NanoleafShapesStudio: View {
                     .buttonStyle(LumenSecondaryButtonStyle(compact: true))
                     .disabled(manager.isDemoMode)
                     .help("Breathes one selected panel for four seconds so you can find it on the wall")
-                Toggle("Select by touching the wall", isOn: $selectsByTouch)
-                    .toggleStyle(LumenChipStyle())
-                    .disabled(manager.isDemoMode)
+                if sensesTouch {
+                    Toggle("Select by touching the wall", isOn: $selectsByTouch)
+                        .toggleStyle(LumenChipStyle())
+                        .disabled(manager.isDemoMode)
+                }
             }
         }
         .alert("Save selection as group", isPresented: $namingGroup) {
@@ -353,7 +359,9 @@ struct NanoleafShapesStudio: View {
                         .buttonStyle(LumenSecondaryButtonStyle(compact: true))
                 }
             }
-            Text("Turn the drawing until it matches the wall: identify a panel, find it, then rotate. Orientation aims LumenDesk\u{2019}s spatial effects and the controller\u{2019}s touch gestures; the panels themselves never move.")
+            Text(sensesTouch
+                 ? "Turn the drawing until it matches the wall: identify a panel, find it, then rotate. Orientation aims LumenDesk\u{2019}s spatial effects and the controller\u{2019}s touch gestures; the panels themselves never move."
+                 : "Turn the drawing until it matches the wall: identify a panel, find it, then rotate. Orientation aims LumenDesk\u{2019}s spatial effects; the panels themselves never move.")
                 .font(.caption).foregroundStyle(Lumen.meter)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -674,7 +682,7 @@ struct NanoleafShapesStudio: View {
             Button("Store") { store(storable, overwrite: false) }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Saves this design as a static scene on the Shapes controller.")
+            Text("Saves this design as a static scene on the controller.")
         }
         .confirmationDialog("A scene called \u{201C}\(storeName)\u{201D} is already on the controller.",
                             isPresented: $storeConflict, titleVisibility: .visible) {

@@ -149,16 +149,9 @@ struct PlanWorkspaceView: View {
     private func studioWorkspace(width: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 20) {
             scopeHeader
-            HStack(spacing: 16) {
-                Picker("Workspace view", selection: $studioMode) {
-                    Text("Room overview").tag(SpectrumWorkspaceMode.overview)
-                    Text("Device detail").tag(SpectrumWorkspaceMode.detail)
-                }
-                .pickerStyle(.segmented).frame(maxWidth: 310)
-                Spacer(minLength: 0)
-                Button("Save room scene…") { sceneName = ""; savingScene = true }
-                    .buttonStyle(LumenSecondaryButtonStyle(compact: true))
-                    .disabled(lights.isEmpty)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 16) { studioViewPicker; Spacer(minLength: 0); saveRoomSceneButton }
+                VStack(alignment: .leading, spacing: 12) { studioViewPicker; saveRoomSceneButton }
             }
             runningOutput
             if lights.isEmpty {
@@ -187,6 +180,20 @@ struct PlanWorkspaceView: View {
         .padding(width < 600 ? 16 : 24)
         .frame(maxWidth: 1500)
         .frame(maxWidth: .infinity, alignment: .top)
+    }
+
+    private var studioViewPicker: some View {
+        Picker("Workspace view", selection: $studioMode) {
+            Text("Room overview").tag(SpectrumWorkspaceMode.overview)
+            Text("Device detail").tag(SpectrumWorkspaceMode.detail)
+        }
+        .labelsHidden().pickerStyle(.segmented).frame(width: 270)
+    }
+
+    private var saveRoomSceneButton: some View {
+        Button("Save room scene…") { sceneName = ""; savingScene = true }
+            .buttonStyle(LumenSecondaryButtonStyle(compact: true))
+            .fixedSize().disabled(lights.isEmpty)
     }
 
     @ViewBuilder private func studioOverview(wide: Bool) -> some View {
@@ -310,6 +317,20 @@ struct PlanWorkspaceView: View {
 
     private var scopeTitle: some View {
         VStack(alignment: .leading, spacing: 6) {
+            #if os(macOS)
+            Menu {
+                Picker("Control room", selection: $scope) {
+                    Text("All lights").tag(LightScope.all)
+                    ForEach(manager.rooms) { Text($0.name).tag(LightScope.room($0.id)) }
+                }
+            } label: {
+                Text(manager.scopeDisplayName(scope)).font(.title2.weight(.semibold)).lineLimit(1)
+                    .frame(maxWidth: 320, alignment: .leading)
+            }
+            .menuStyle(.borderlessButton).fixedSize(horizontal: true, vertical: false)
+            .accessibilityLabel("Control room: \(manager.scopeDisplayName(scope))")
+            .accessibilityIdentifier("workspace.scope")
+            #else
             Picker("Control room", selection: $scope) {
                 Text("All lights").tag(LightScope.all)
                 ForEach(manager.rooms) { Text($0.name).tag(LightScope.room($0.id)) }
@@ -317,6 +338,7 @@ struct PlanWorkspaceView: View {
             .font(.title3.weight(.semibold))
             .fixedSize(horizontal: false, vertical: true)
             .accessibilityIdentifier("workspace.scope")
+            #endif
             Text("\(lights.filter { $0.isOn && !$0.isStale }.count) lit · \(lights.count) fixtures · \(lights.filter(\.isStale).count) not responding")
                 .font(.callout).foregroundStyle(Lumen.meter)
         }
@@ -598,13 +620,15 @@ struct SpectrumFixtureLane: View {
             .opacity(light.isOn && !light.isStale ? 1 : 0.25)
             .accessibilityLabel("\(state.zoneCount) matrix zones")
         } else if let state = manager.activeSegmentState(for: light.id) {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 12), spacing: 3)], spacing: 3) {
-                ForEach(Array(state.colors.enumerated()), id: \.offset) { index, color in
-                    RoundedRectangle(cornerRadius: 2).fill(color.litColor).frame(height: 28)
-                        .accessibilityLabel("Segment \(index + 1)")
-                }
-            }
+            SpectrumSegmentPreview(colors: state.colors.map(\.litColor))
+                .accessibilityLabel("\(state.segmentCount) segments in controller order")
             .opacity(light.isOn && !light.isStale ? 1 : 0.25)
+        } else if let profile = manager.segmentStudioProfile(for: light), profile.recognized {
+            VStack(spacing: 8) {
+                SpectrumSegmentPreview(colors: Array(repeating: Lumen.floorRaised,
+                                                      count: manager.segmentState(for: light).segmentCount))
+                Text("Applied colors unavailable").font(.caption).foregroundStyle(Lumen.meter)
+            }
         } else if light.isLIFXLuna || manager.segmentStudioProfile(for: light) != nil {
             VStack(spacing: 8) {
                 Image(systemName: light.isLIFXLuna ? "circle.grid.3x3" : "rectangle.split.3x1")
@@ -620,6 +644,26 @@ struct SpectrumFixtureLane: View {
                     .font(.caption).foregroundStyle(Lumen.meter)
             }
         }
+    }
+}
+
+/// Dense strings stay inside their room lane at every available width.
+private struct SpectrumSegmentPreview: View {
+    let colors: [Color]
+    var body: some View {
+        GeometryReader { geometry in
+            let columns = max(1, min(colors.count, Int(geometry.size.width / 14)))
+            let rows = max(1, (colors.count + columns - 1) / columns)
+            let gap = min(2, geometry.size.height / CGFloat(rows * 3))
+            let height = min(28, max(0, (geometry.size.height - CGFloat(rows - 1) * gap) / CGFloat(rows)))
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(minimum: 0), spacing: 2), count: columns), spacing: gap) {
+                ForEach(colors.indices, id: \.self) { index in
+                    RoundedRectangle(cornerRadius: 2).fill(colors[index]).frame(height: height)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .accessibilityHidden(true)
     }
 }
 

@@ -7,6 +7,7 @@ struct SpectrumValueRow: View {
     let name: String
     let color: Color
     @Binding var intensity: Double
+    var intensityRange: ClosedRange<Double> = 0...1
     let state: String
     let commitColor: (Color) -> Void
     @State private var hex = ""
@@ -22,7 +23,7 @@ struct SpectrumValueRow: View {
     private var percent: Binding<Double> {
         Binding(get: { intensity * 100 }, set: { value in
             guard isEnabled, value.isFinite else { return }
-            intensity = min(1, max(0, value / 100))
+            intensity = min(intensityRange.upperBound, max(intensityRange.lowerBound, value / 100))
         })
     }
 

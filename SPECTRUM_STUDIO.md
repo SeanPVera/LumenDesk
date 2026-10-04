@@ -15,7 +15,7 @@ It is designed for enthusiasts building detailed scenes and panel layouts.
   controller-owned editing sessions. Leaving an editor restores temporary preview
   output through its existing cleanup path. No new persistence schema is added.
 - Nanoleaf RGB includes panel intensity; master wall brightness is separate.
-  Govee RGB and power remain independent of region intensity. Luna displays chroma
+  Govee RGB and power remain independent of its 1–100% region intensity. Luna displays chroma
   separately from HSBK brightness. Existing vendor transport handles Apply.
 - Running shows retain ownership. Saved scenes retain their original fixture IDs.
   Scene capture uses applied output, excluding presentation drafts.

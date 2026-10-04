@@ -354,6 +354,7 @@ final class RoomWorkspaceRenderTests: XCTestCase {
         let room = try XCTUnwrap(manager.rooms.first)
         let scope = LightScope.room(room.id)
         try await capture("shell-demo", LumenDeskShellView(), manager, width: 1100, height: 1000)
+        try await capture("shell-620", LumenDeskShellView(), manager, width: 620, height: 1000)
         try await capture("room-all-offline", PlanWorkspaceView(scope: .constant(.all)), manager, width: 1440, height: 1100)
         try await capture("room-620", PlanWorkspaceView(scope: .constant(scope)), manager, width: 620, height: 850)
         try await capture("room-1100", PlanWorkspaceView(scope: .constant(scope)), manager, width: 1100, height: 900)
@@ -388,6 +389,11 @@ final class RoomWorkspaceRenderTests: XCTestCase {
         try await capture("spectrum-segment-detail", PlanWorkspaceView(scope: .constant(.all), initialSelection: [strip.id]),
                           manager, width: 1200, height: 1200)
         try await capture("segment-compact", GoveeSegmentEditorView(device: strip), manager, width: 620, height: 850)
+        let string = try XCTUnwrap(manager.devices.first { manager.segmentProfile(for: $0)?.layout == .stringLights })
+        manager.applySegments(string, state: manager.segmentState(for: string))
+        try await capture("dense-room-lane", SpectrumFixtureLane(light: string, selected: false,
+                                                                  hasDraft: false, select: {}, edit: {}).padding(24),
+                          manager, width: 400, height: 280)
         try await capture("discovery-partial", DevicesWorkspaceView(), manager, width: 850, height: 900)
         try await captureShapes(manager)
         try await capture("onboarding", OnboardingView(onFinish: {}), manager, width: 760, height: 720)

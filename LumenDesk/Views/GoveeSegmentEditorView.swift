@@ -128,7 +128,7 @@ struct GoveeSegmentEditorView: View {
             if indices.isEmpty {
                 Text("Select \(unitName)s to inspect their exact values.").font(.caption).foregroundStyle(Lumen.meter)
             } else {
-                Text("RGB is the held color. Region intensity and power apply separately.")
+                Text("RGB is the held color. Intensity is 1–100%; power applies separately.")
                     .font(.caption).foregroundStyle(Lumen.meter)
                 ScrollView([.horizontal, .vertical]) {
                     VStack(spacing: 0) {
@@ -136,7 +136,7 @@ struct GoveeSegmentEditorView: View {
                             SpectrumValueRow(name: "\(unitName.capitalized) \(index + 1)", color: draft.colors[index].color,
                                              intensity: Binding(get: { draft.colors[index].brightness }, set: { value in
                                 updateDraft { $0.colors[index].brightness = value }
-                            }), state: draft.colors[index].isOn ? "Draft" : "Off") { color in
+                            }), intensityRange: 0.01...1, state: draft.colors[index].isOn ? "Draft" : "Off") { color in
                                 updateDraft { state in
                                     let old = state.colors[index]
                                     state.colors[index] = GoveeSegmentColor(color: color, brightness: old.brightness, isOn: old.isOn)

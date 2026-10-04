@@ -591,11 +591,17 @@ struct NanoleafShapesStudio: View {
                                              intensity: Binding(get: { shapes.session(deviceID)?.draft[id]?.intensity ?? 0 },
                                                                 set: { value in
                                 shapes.edit(deviceID) { $0.edit { $0.setIntensity(value, panels: [id]) } }
-                            }), state: session.hasUnappliedChanges ? "Draft" : "Applied") { value in
+                            }), state: session.hasUnappliedChanges ? "Draft" : "Loaded") { value in
                                 let color = panelColor(value)
                                 shapes.edit(deviceID) { $0.edit { $0.paint(color, panels: [id]) } }
                             }
                             .disabled(runningShow != nil)
+                        } else {
+                            HStack {
+                                Text("Panel \(numbers[id] ?? 0)").font(.caption.monospacedDigit())
+                                Spacer()
+                                Text("No draft value — paint to set").font(.caption).foregroundStyle(Lumen.meter)
+                            }.padding(.vertical, 12)
                         }
                     }
                 }.frame(minWidth: 460)

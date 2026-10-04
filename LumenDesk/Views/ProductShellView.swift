@@ -39,22 +39,21 @@ struct LumenDeskShellView: View {
     @StateObject private var studioDrafts = SpectrumDraftStore()
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            #if os(macOS)
-            desktopShell
-            #else
-            mobileShell
-            #endif
-
-            statusOverlays
+        VStack(spacing: 0) {
+            if manager.isDemoMode { DemoModeBanner() }
+            ZStack(alignment: .bottom) {
+                #if os(macOS)
+                desktopShell
+                #else
+                mobileShell
+                #endif
+                statusOverlays
+            }
         }
         .onChange(of: scope) { _ in requestedDeviceID = nil }
         .onChange(of: manager.isDemoMode) { _ in studioDrafts.retainDevices([]) }
         .tint(Lumen.studioAccent)
         .background(Lumen.stage)
-        .safeAreaInset(edge: .top, spacing: 0) {
-            if manager.isDemoMode { DemoModeBanner() }
-        }
         .sheet(isPresented: $showingSettings) {
             NavigationStack { SettingsWorkspaceView() }
                 .environmentObject(manager)

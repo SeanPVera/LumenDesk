@@ -104,7 +104,7 @@ struct LIFXLunaEditorView: View {
             Text("\(device.sku ?? LIFXProductCatalog.lunaSKU) · 26 individually controlled color zones")
                 .font(.callout)
                 .foregroundStyle(.secondary)
-            Text("Select zones, then paint them. With no selection, color tools affect the entire lamp.")
+            Text("Select zones to paint, or choose All for the whole lamp. None disables painting.")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
             if manager.isDemoMode {
@@ -168,6 +168,7 @@ struct LIFXLunaEditorView: View {
 
     private func zoneButton(_ index: Int, state: LIFXMatrixState) -> some View {
         let selected = selection.contains(index)
+        let number = (state.activeZoneIndices.firstIndex(of: index) ?? index) + 1
         let color = state.colors.indices.contains(index) ? state.colors[index].color : Color.black
         return Button {
             if selected { selection.remove(index) } else { selection.insert(index) }
@@ -180,6 +181,12 @@ struct LIFXLunaEditorView: View {
                         .stroke(selected ? Color.white : Lumen.hairlineStrong,
                                 lineWidth: selected ? 3 : 0.5)
                 )
+                .overlay(alignment: .bottomLeading) {
+                    Text("\(number)").font(.caption2.monospacedDigit())
+                        .foregroundStyle(Lumen.chalk).padding(.horizontal, 5).padding(.vertical, 2)
+                        .background(Lumen.stage.opacity(0.85), in: RoundedRectangle(cornerRadius: 3))
+                        .padding(5)
+                }
                 .overlay(alignment: .topTrailing) {
                     if selected {
                         Image(systemName: "checkmark.circle.fill")
@@ -287,7 +294,6 @@ struct LIFXLunaEditorView: View {
                     .foregroundStyle(.secondary)
                     .accessibilityHidden(true)
                 ColorPicker("End", selection: $gradientEndColor, supportsOpacity: false)
-                Spacer()
                 Button("Blend Across Zones") { blendTargets() }
             }
             .controlSize(.small)

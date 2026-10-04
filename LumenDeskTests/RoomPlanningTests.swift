@@ -315,6 +315,18 @@ final class SpectrumRegionSelectionTests: XCTestCase {
         XCTAssertEqual(SpectrumRegionSelection.targets(selected: available, available: available), available)
     }
 
+    func testExactLunaChromaKeepsDarkZonesDarkAndPreservesTheirWhitePoint() {
+        let dark = LIFXMatrixColor(hue: 100, saturation: 200, brightness: 0, kelvin: 2800)
+        let changed = dark.settingChroma(.blue)
+        XCTAssertEqual(changed.brightness, 0)
+        XCTAssertEqual(changed.kelvin, 2800)
+        XCTAssertGreaterThan(changed.saturation, 65000)
+        XCTAssertNotEqual(changed.hue, dark.hue)
+        let lit = dark.settingBrightness(0.42)
+        XCTAssertEqual(lit.settingChroma(.red).brightness, lit.brightness)
+        XCTAssertEqual(lit.settingChroma(.red).kelvin, lit.kelvin)
+    }
+
     func testLunaSelectionExcludesTheFourNonexistentCorners() {
         let corners: Set<Int> = [0, 4, 25, 29]
         let face = Set(0..<30).subtracting(corners)

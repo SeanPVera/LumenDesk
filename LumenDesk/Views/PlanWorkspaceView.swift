@@ -171,7 +171,7 @@ struct PlanWorkspaceView: View {
                 if studioMode == .overview {
                     studioOverview(wide: width >= 850)
                 } else if selectedIDs.count == 1, let light = targets.first {
-                    studioDeviceEditor(light, width: width - 40)
+                    studioDeviceEditor(light, width: width - (width < 600 ? 32 : 48))
                 } else {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Choose a light to work on").font(.title3.weight(.semibold))
@@ -246,13 +246,13 @@ struct PlanWorkspaceView: View {
             NanoleafShapesStudio(device: light, shapes: manager.shapes, wide: width >= 850)
                 .id(light.id)
         } else if light.isLIFXLuna {
-            LIFXLunaEditorView(device: light, embedded: true, initialDraft: studioDrafts.luna[light.id],
+            LIFXLunaEditorView(device: light, embedded: true, embeddedWidth: width - 40, initialDraft: studioDrafts.luna[light.id],
                               onDraftChange: { studioDrafts.luna[light.id] = $0 })
-                .id(light.id).frame(height: width >= 850 ? 820 : 1080)
+                .id(light.id)
         } else if manager.segmentStudioProfile(for: light) != nil {
-            GoveeSegmentEditorView(device: light, embedded: true, initialDraft: studioDrafts.govee[light.id],
+            GoveeSegmentEditorView(device: light, embedded: true, embeddedWidth: width - 40, initialDraft: studioDrafts.govee[light.id],
                                    onDraftChange: { studioDrafts.govee[light.id] = $0 })
-                .id(light.id).frame(height: width >= 850 ? 820 : 1100)
+                .id(light.id)
         } else {
             LightRowView(device: light).padding(20).background(Lumen.deck)
         }

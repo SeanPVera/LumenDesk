@@ -48,6 +48,7 @@ struct LumenDeskShellView: View {
 
             statusOverlays
         }
+        .onChange(of: scope) { _ in requestedDeviceID = nil }
         .onChange(of: manager.isDemoMode) { _ in studioDrafts.retainDevices([]) }
         .tint(Lumen.studioAccent)
         .background(Lumen.stage)

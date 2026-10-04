@@ -13,6 +13,7 @@ struct GoveeSegmentEditorView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject var device: LightDevice
     var embedded = false
+    var embeddedWidth: CGFloat = 900
     var initialSelection: Set<Int> = []
     var initialDraft: GoveeSegmentState? = nil
     var onDraftChange: ((GoveeSegmentState?) -> Void)? = nil
@@ -61,19 +62,11 @@ struct GoveeSegmentEditorView: View {
         VStack(alignment: .leading, spacing: 12) {
             header
             subtitle
-            GeometryReader { geometry in
-                ScrollView {
-                    if geometry.size.width >= 820 {
-                        HStack(alignment: .top, spacing: 28) {
-                            spatialTools.frame(maxWidth: .infinity)
-                            paintToolsColumn.frame(width: 310)
-                        }
-                    } else {
-                        VStack(alignment: .leading, spacing: 20) {
-                            spatialTools
-                            paintToolsColumn
-                        }
-                    }
+            if embedded {
+                editorContent(wide: embeddedWidth >= 820)
+            } else {
+                GeometryReader { geometry in
+                    ScrollView { editorContent(wide: geometry.size.width >= 820) }
                 }
             }
             footer
@@ -84,9 +77,25 @@ struct GoveeSegmentEditorView: View {
         .background(LumenBackground(glow: false))
         .onAppear(perform: load)
         .onDisappear {
+            // A workspace switch may already have replaced the device objects.
+            guard loaded, manager.devices.contains(where: { $0 === device }) else { return }
             manager.endSegmentPreview(device)
             manager.storeSegmentState(draft, for: device)
             onDraftChange?(draft == openingState ? nil : draft)
+        }
+    }
+
+    @ViewBuilder private func editorContent(wide: Bool) -> some View {
+        if wide {
+            HStack(alignment: .top, spacing: 28) {
+                spatialTools.frame(maxWidth: .infinity)
+                paintToolsColumn.frame(width: 310)
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 20) {
+                spatialTools
+                paintToolsColumn
+            }
         }
     }
 

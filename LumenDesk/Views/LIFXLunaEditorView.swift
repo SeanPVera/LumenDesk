@@ -8,6 +8,7 @@ struct LIFXLunaEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var device: LightDevice
     var embedded = false
+    var embeddedWidth: CGFloat = 900
     var initialSelection: Set<Int> = []
     var initialDraft: LIFXMatrixState? = nil
     var onDraftChange: ((LIFXMatrixState?) -> Void)? = nil
@@ -28,22 +29,11 @@ struct LIFXLunaEditorView: View {
             header
             subtitle
             if let draft {
-                GeometryReader { geometry in
-                    ScrollView {
-                        if geometry.size.width >= 800 {
-                            HStack(alignment: .top, spacing: 28) {
-                                VStack(spacing: 18) { matrixSection(draft); selectionTools(draft); exactZoneValues(draft) }
-                                    .frame(maxWidth: .infinity)
-                                editingTools.frame(width: 320)
-                            }.padding(.vertical, 2)
-                        } else {
-                            VStack(alignment: .leading, spacing: 20) {
-                                matrixSection(draft)
-                                selectionTools(draft)
-                                exactZoneValues(draft)
-                                editingTools
-                            }.padding(.vertical, 2)
-                        }
+                if embedded {
+                    editorContent(draft, wide: embeddedWidth >= 800)
+                } else {
+                    GeometryReader { geometry in
+                        ScrollView { editorContent(draft, wide: geometry.size.width >= 800) }
                     }
                 }
                 footer(draft)
@@ -61,11 +51,31 @@ struct LIFXLunaEditorView: View {
             selection = SpectrumRegionSelection.targets(selected: initialSelection, available: Set(draft?.activeZoneIndices ?? []))
             manager.refreshLIFXMatrix(device)
         }
-        .onDisappear { onDraftChange?(hasEdits ? draft : nil) }
+        .onDisappear {
+            guard manager.devices.contains(where: { $0 === device }) else { return }
+            onDraftChange?(hasEdits ? draft : nil)
+        }
         .onReceive(manager.$lifxMatrixStates) { states in
             guard let state = states[device.id], !hasEdits else { return }
             draft = state
             selection = selection.intersection(Set(state.activeZoneIndices))
+        }
+    }
+
+    @ViewBuilder private func editorContent(_ state: LIFXMatrixState, wide: Bool) -> some View {
+        if wide {
+            HStack(alignment: .top, spacing: 28) {
+                VStack(spacing: 18) { matrixSection(state); selectionTools(state); exactZoneValues(state) }
+                    .frame(maxWidth: .infinity)
+                editingTools.frame(width: 320)
+            }.padding(.vertical, 2)
+        } else {
+            VStack(alignment: .leading, spacing: 20) {
+                matrixSection(state)
+                selectionTools(state)
+                exactZoneValues(state)
+                editingTools
+            }.padding(.vertical, 2)
         }
     }
 
@@ -211,7 +221,7 @@ struct LIFXLunaEditorView: View {
                                 hasEdits = true
                             }), state: hasEdits ? "Draft" : "Loaded") { color in
                                 guard var next = draft else { return }
-                                next.colors[index] = next.colors[index].painted(color, fallbackBrightness: device.brightness, kelvin: device.kelvin)
+                                next.colors[index] = next.colors[index].settingChroma(color)
                                 draft = next
                                 hasEdits = true
                             }

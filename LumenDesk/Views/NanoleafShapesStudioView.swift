@@ -238,7 +238,7 @@ struct NanoleafShapesStudio: View {
         let total = layout.paintablePanels.count
         let groups = shapes.groups[deviceID] ?? []
         return VStack(alignment: .leading, spacing: 8) {
-            Text(selection.isEmpty ? "No panels selected \u{2014} tools affect all \(total)"
+            Text(selection.isEmpty ? "Select panels to edit, or choose All for the whole wall"
                  : "\(selection.count) of \(total) panels selected")
                 .font(.callout.weight(.medium))
             HStack(spacing: 8) {

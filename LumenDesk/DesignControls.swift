@@ -39,7 +39,7 @@ struct SpectrumValueRow: View {
         .padding(.vertical, 9)
         .overlay(alignment: .bottom) { Rectangle().fill(Lumen.ruleSoft).frame(height: 1) }
         .onAppear { hex = rgb.hexString }
-        .onChange(of: rgb) { value in if !editingHex { hex = value.hexString } }
+        .onChange(of: rgb) { value in hex = value.hexString; invalidHex = false }
         .onChange(of: editingHex) { focused in if !focused { submitHex() } }
     }
 
@@ -74,7 +74,9 @@ struct SpectrumValueRow: View {
         invalidHex = false
         guard parsed != rgb else { hex = parsed.hexString; return }
         commitColor(parsed.swiftUIColor)
-        hex = parsed.hexString
+        // The editor may normalize chroma (Luna); display its actual value.
+        // A changed color updates this again through onChange above.
+        hex = rgb.hexString
     }
 }
 

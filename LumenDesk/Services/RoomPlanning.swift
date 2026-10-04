@@ -331,3 +331,11 @@ enum RoomWorkspaceSelection {
         selected.isEmpty ? Set(available) : selected.intersection(available)
     }
 }
+
+/// Region selection is explicit: None must never expand to the whole device.
+/// Room bulk selection intentionally has different semantics above.
+enum SpectrumRegionSelection {
+    static func targets(selected: Set<Int>, available: Set<Int>) -> Set<Int> {
+        selected.intersection(available)
+    }
+}

@@ -5,7 +5,7 @@ import AppKit
 import UIKit
 #endif
 
-// MARK: - LumenDesk design system — Light in place
+// MARK: - LumenDesk design system — Spectrum Studio
 //
 // Achromatic structure contains lighting color. Room state, selection and
 // connectivity also have text or shape. Saved placement is relative, never
@@ -20,18 +20,18 @@ enum Lumen {
     // its own and not a property of the surface it lands on.
 
     /// Ground beneath everything, and the well a control recesses into.
-    static let stage        = Color(hex: 0x101112)
+    static let stage        = Color(hex: 0x17191C)
     /// Large working areas: the inspector, sheets, secondary panels.
-    static let deck         = Color(hex: 0x17191B)
+    static let deck         = Color(hex: 0x202328)
     /// A room's floor, and the standard panel fill everywhere else.
     ///
     /// The whole cool ramp from here up was lifted one step after the first
     /// build rendered: at the original values a room read as a hole in the
     /// page and the walls barely separated from the floor they enclosed. A
     /// drawing needs its sheet to be visibly lighter than the dark around it.
-    static let floor        = Color(hex: 0x1D2022)
+    static let floor        = Color(hex: 0x24272C)
     /// The selected room's floor, and any hovered or raised surface.
-    static let floorRaised  = Color(hex: 0x272B2E)
+    static let floorRaised  = Color(hex: 0x30343B)
     /// The loudest surface in the system, used for grouped controls.
     static let stripLoud    = Color(hex: 0x32373A)
 
@@ -68,6 +68,8 @@ enum Lumen {
 
     /// Selection and annotations share the neutral foreground.
     static let mark = Color(hex: 0xEDF0F1)
+    /// Studio actions use warm amber; output colors remain device content.
+    static let studioAccent = Color(hex: 0xFFBC72)
 
     // MARK: Network and status
 
@@ -472,7 +474,7 @@ private struct LumenKeyFace: View {
     }
 
     private var face: Color {
-        if lit { return configuration.isPressed ? Lumen.chalk : Lumen.lit }
+        if lit { return configuration.isPressed ? Lumen.studioAccent.opacity(0.8) : Lumen.studioAccent }
         return configuration.isPressed ? Lumen.stripLoud : Lumen.stripRaised
     }
 

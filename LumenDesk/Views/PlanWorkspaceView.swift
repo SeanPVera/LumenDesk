@@ -2,9 +2,21 @@ import SwiftUI
 
 /// A room is the working context, not a destination hidden behind a drawing.
 /// Domain state remains in LightManager; this view owns only navigation and selection.
+/// Presentation drafts survive navigation without becoming applied device state.
+final class SpectrumDraftStore: ObservableObject {
+    @Published var luna: [String: LIFXMatrixState] = [:]
+    @Published var govee: [String: GoveeSegmentState] = [:]
+
+    func retainDevices(_ ids: Set<String>) {
+        luna = luna.filter { ids.contains($0.key) }
+        govee = govee.filter { ids.contains($0.key) }
+    }
+}
+
 struct PlanWorkspaceView: View {
     @EnvironmentObject private var manager: LightManager
     @Binding var scope: LightScope
+    @Binding var requestedDeviceID: String?
     @State private var selectedIDs: Set<String> = []
     @State private var section: RoomWorkspaceSection = .control
     @State private var showingSetup = false
@@ -12,14 +24,24 @@ struct PlanWorkspaceView: View {
     @State private var showingPlan = false
     @State private var configurationRoom: Room?
     @State private var searchText = ""
+    @State private var studioMode: SpectrumWorkspaceMode = .overview
+    @ObservedObject var studioDrafts: SpectrumDraftStore
+    @State private var savingScene = false
+    @State private var sceneName = ""
     @AppStorage("LumenDesk.workspaceLayout.v1") private var layout = WorkspaceLayout.automatic.rawValue
     @AppStorage("LumenDesk.interfaceDensity.v1") private var density = InterfaceDensity.comfortable.rawValue
 
     init(scope: Binding<LightScope> = .constant(.all),
+         requestedDeviceID: Binding<String?> = .constant(nil),
+         studioDrafts: SpectrumDraftStore = SpectrumDraftStore(),
          initialSelection: Set<String> = [], initialSection: RoomWorkspaceSection = .control) {
         _scope = scope
-        _selectedIDs = State(initialValue: initialSelection)
+        _requestedDeviceID = requestedDeviceID
+        self.studioDrafts = studioDrafts
+        let selection = requestedDeviceID.wrappedValue.map { Set([$0]) } ?? initialSelection
+        _selectedIDs = State(initialValue: selection)
         _section = State(initialValue: initialSection)
+        _studioMode = State(initialValue: selection.count == 1 ? .detail : .overview)
     }
 
     private var lights: [LightDevice] { manager.devices(in: scope) }
@@ -49,6 +71,9 @@ struct PlanWorkspaceView: View {
     var body: some View {
         GeometryReader { geometry in
             ScrollView {
+                #if os(macOS)
+                studioWorkspace(width: geometry.size.width)
+                #else
                 VStack(alignment: .leading, spacing: LumenToken.Spacing.s6) {
                     scopeHeader
                     runningOutput
@@ -75,13 +100,33 @@ struct PlanWorkspaceView: View {
                 .padding(geometry.size.width < 600 ? 16 : 24)
                 .frame(maxWidth: 1440)
                 .frame(maxWidth: .infinity, alignment: .top)
+                #endif
             }
         }
         .background(Lumen.stage)
         .navigationTitle("Room")
-        .onChange(of: scope) { _ in selectedIDs.removeAll(); searchText = "" }
+        .onChange(of: scope) { _ in
+            selectedIDs.removeAll(); searchText = ""; studioMode = .overview
+            requestedDeviceID = nil
+        }
+        .onChange(of: studioMode) { mode in
+            requestedDeviceID = mode == .detail && selectedIDs.count == 1 ? selectedIDs.first : nil
+        }
+        .onChange(of: requestedDeviceID) { id in
+            if let id, lights.contains(where: { $0.id == id }) {
+                selectedIDs = [id]
+                studioMode = .detail
+                section = .control
+            } else if id == nil {
+                studioMode = .overview
+                selectedIDs.removeAll()
+            }
+        }
         .onChange(of: lights.map(\.id)) { ids in
             selectedIDs = RoomWorkspaceSelection.reconciled(selected: selectedIDs, available: ids)
+            if studioMode == .detail && targets.count != 1 { studioMode = .overview }
+            let liveIDs = Set(manager.devices.map(\.id))
+            studioDrafts.retainDevices(liveIDs)
         }
         .onChange(of: manager.rooms.map(\.id)) { ids in
             if case .room(let id) = scope, !ids.contains(id) { scope = .all }
@@ -90,7 +135,167 @@ struct PlanWorkspaceView: View {
         .sheet(isPresented: $showingNewRoom) { NewRoomSheet().environmentObject(manager) }
         .sheet(isPresented: $showingPlan) { RoomArrangementSheet().environmentObject(manager) }
         .sheet(item: $configurationRoom) { RoomConfigurationView(room: $0).environmentObject(manager) }
+        .alert("Save room scene", isPresented: $savingScene) {
+            TextField("Scene name", text: $sceneName)
+            Button("Save") { manager.captureScene(name: sceneName, scope: scope) }
+                .disabled(sceneName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Captures the current output of \(manager.scopeDisplayName(scope)). Unapplied editor drafts are not included.")
+        }
     }
+
+    #if os(macOS)
+    private func studioWorkspace(width: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 20) {
+            scopeHeader
+            HStack(spacing: 16) {
+                Picker("Workspace view", selection: $studioMode) {
+                    Text("Room overview").tag(SpectrumWorkspaceMode.overview)
+                    Text("Device detail").tag(SpectrumWorkspaceMode.detail)
+                }
+                .pickerStyle(.segmented).frame(maxWidth: 310)
+                Spacer(minLength: 0)
+                Button("Save room scene…") { sceneName = ""; savingScene = true }
+                    .buttonStyle(LumenSecondaryButtonStyle(compact: true))
+                    .disabled(lights.isEmpty)
+            }
+            runningOutput
+            if lights.isEmpty {
+                emptyState
+            } else if section == .music {
+                MusicModeView(scope: $scope, showsScopePicker: false)
+            } else if section == .compositions {
+                LibraryWorkspaceView(scope: $scope, embedded: true)
+            } else {
+                if studioMode == .overview {
+                    studioOverview(wide: width >= 850)
+                } else if selectedIDs.count == 1, let light = targets.first {
+                    studioDeviceEditor(light, width: width - 40)
+                } else {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Choose a light to work on").font(.title3.weight(.semibold))
+                        Text("Open a light from the navigator or its Edit button in the room overview.")
+                            .foregroundStyle(Lumen.meter)
+                        Button("Room overview") { studioMode = .overview }
+                            .buttonStyle(LumenSecondaryButtonStyle())
+                    }.padding(.vertical, 40)
+                }
+                studioSceneShelf
+            }
+        }
+        .padding(width < 600 ? 16 : 24)
+        .frame(maxWidth: 1500)
+        .frame(maxWidth: .infinity, alignment: .top)
+    }
+
+    @ViewBuilder private func studioOverview(wide: Bool) -> some View {
+        if wide {
+            HStack(alignment: .top, spacing: 24) {
+                studioFixtureLanes.frame(maxWidth: .infinity)
+                studioRoomInspector.frame(width: 270)
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 24) {
+                studioFixtureLanes
+                studioRoomInspector
+            }
+        }
+    }
+
+    private var studioFixtureLanes: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if lights.count > 6 {
+                TextField("Find a light", text: $searchText).textFieldStyle(.roundedBorder).padding(.bottom, 12)
+            }
+            ForEach(visibleLights) { light in
+                SpectrumFixtureLane(light: light, selected: selectedIDs.contains(light.id),
+                                    hasDraft: manager.shapes.session(light.id)?.hasUnappliedChanges == true || studioDrafts.luna[light.id] != nil || studioDrafts.govee[light.id] != nil,
+                                    select: {
+                                        if selectedIDs.contains(light.id) { selectedIDs.remove(light.id) }
+                                        else { selectedIDs.insert(light.id) }
+                                    }, edit: {
+                                        selectedIDs = [light.id]
+                                        requestedDeviceID = light.id
+                                        studioMode = .detail
+                                    })
+            }
+            if visibleLights.isEmpty { Text("No matching lights.").foregroundStyle(Lumen.meter).padding(.vertical, 24) }
+        }
+    }
+
+    private var studioRoomInspector: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            RoomOutputControls(lights: targets, title: selectedIDs.isEmpty ? "Room controls" : "\(targets.count) selected lights")
+            if !selectedIDs.isEmpty {
+                Button("Clear selection — whole room") { selectedIDs.removeAll() }
+                    .buttonStyle(LumenSecondaryButtonStyle(compact: true))
+            }
+            Text("Panel and zone drafts stay separate from room controls. Open a light to edit its design.")
+                .font(.caption).foregroundStyle(Lumen.meter)
+        }
+        .padding(18)
+        .background(Lumen.deck, in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    @ViewBuilder private func studioDeviceEditor(_ light: LightDevice, width: CGFloat) -> some View {
+        if manager.animatingEffect(for: light.id) != nil {
+            Text("Stop the running show above to edit \(light.label).")
+                .foregroundStyle(Lumen.meter).padding(.vertical, 28)
+        } else if light.brand == .nanoleaf {
+            NanoleafShapesStudio(device: light, shapes: manager.shapes, wide: width >= 850)
+                .id(light.id)
+        } else if light.isLIFXLuna {
+            LIFXLunaEditorView(device: light, embedded: true, initialDraft: studioDrafts.luna[light.id],
+                              onDraftChange: { studioDrafts.luna[light.id] = $0 })
+                .id(light.id).frame(height: width >= 850 ? 820 : 1080)
+        } else if manager.segmentStudioProfile(for: light) != nil {
+            GoveeSegmentEditorView(device: light, embedded: true, initialDraft: studioDrafts.govee[light.id],
+                                   onDraftChange: { studioDrafts.govee[light.id] = $0 })
+                .id(light.id).frame(height: width >= 850 ? 820 : 1100)
+        } else {
+            LightRowView(device: light).padding(20).background(Lumen.deck)
+        }
+    }
+
+    private var studioSceneShelf: some View {
+        let ids = Set(lights.map(\.id))
+        let scenes = manager.scenes.filter { !Set($0.snapshots.keys).isDisjoint(with: ids) }
+        return VStack(alignment: .leading, spacing: 12) {
+            Divider()
+            Text("Saved room scenes").font(.headline)
+            if scenes.isEmpty {
+                Text("Capture this room’s lighting with Save room scene.").font(.callout).foregroundStyle(Lumen.meter)
+            } else {
+                ScrollView(.horizontal) {
+                    HStack(spacing: 12) {
+                        ForEach(scenes) { scene in
+                            Button { manager.applyScene(scene) } label: {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    HStack(spacing: 3) {
+                                        ForEach(scene.snapshots.keys.sorted(), id: \.self) { id in
+                                            if let snapshot = scene.snapshots[id] {
+                                                RoundedRectangle(cornerRadius: 2)
+                                                    .fill(Color(hue: snapshot.hue, saturation: snapshot.saturation,
+                                                                brightness: snapshot.isOn ? max(0.08, snapshot.brightness) : 0))
+                                                    .frame(height: 22)
+                                            }
+                                        }
+                                    }
+                                    Text(scene.name).font(.callout.weight(.medium)).lineLimit(1)
+                                    Text("Apply to \(scene.snapshots.count) saved lights")
+                                        .font(.caption).foregroundStyle(Lumen.meter)
+                                }.padding(12).frame(width: 190).background(Lumen.deck, in: RoundedRectangle(cornerRadius: 6))
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Apply \(scene.name) to its \(scene.snapshots.count) saved lights")
+                        }
+                    }
+                }
+            }
+        }
+    }
+    #endif
 
     private var scopeHeader: some View {
         ViewThatFits(in: .horizontal) {
@@ -302,6 +507,122 @@ struct PlanWorkspaceView: View {
     }
 }
 
+enum SpectrumWorkspaceMode: String, Hashable {
+    case overview, detail
+}
+
+/// A single room lane combines identity, hardware geometry and access to editing.
+/// Its previews read active output, never an editor's pending draft.
+struct SpectrumFixtureLane: View {
+    @EnvironmentObject private var manager: LightManager
+    @ObservedObject var light: LightDevice
+    let selected: Bool
+    let hasDraft: Bool
+    let select: () -> Void
+    let edit: () -> Void
+
+    private var detail: String {
+        let brand = light.brand.rawValue.uppercased()
+        if light.isLIFXLuna { return "\(brand) · 26 zones" }
+        if light.brand == .nanoleaf, let layout = manager.shapes.layout(light.id) {
+            return "\(brand) · \(layout.paintablePanels.count) panels"
+        }
+        if manager.segmentStudioProfile(for: light) != nil {
+            return "\(brand) · \(manager.segmentState(for: light).segmentCount) segments"
+        }
+        return "\(brand) · Whole light"
+    }
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 18) {
+                identity.frame(width: 150, alignment: .leading)
+                preview.frame(minWidth: 130, maxWidth: .infinity).frame(height: 120)
+                actions
+            }
+            VStack(alignment: .leading, spacing: 12) {
+                HStack { identity; Spacer(); actions }
+                preview.frame(maxWidth: .infinity).frame(height: 140)
+            }
+        }
+        .padding(.vertical, 18)
+        .overlay(alignment: .bottom) { Rectangle().fill(Lumen.ruleSoft).frame(height: 1) }
+    }
+
+    private var identity: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Button(action: select) {
+                Image(systemName: selected ? "checkmark.square.fill" : "square")
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(selected ? "Deselect" : "Select") \(light.label)")
+            .accessibilityAddTraits(selected ? .isSelected : [])
+            VStack(alignment: .leading, spacing: 6) {
+                Text(light.label).font(.body.weight(.medium)).lineLimit(2)
+                Text(detail).font(.caption).foregroundStyle(Lumen.meter)
+                if hasDraft { Text("Draft available").font(.caption).foregroundStyle(Lumen.studioAccent) }
+                if let run = manager.animatingEffect(for: light.id) {
+                    Label(run.name, systemImage: "waveform").font(.caption).foregroundStyle(Lumen.meter)
+                }
+            }
+        }
+    }
+
+    private var actions: some View {
+        VStack(alignment: .trailing, spacing: 10) {
+            Text(light.isStale ? "Offline" : light.isOn ? "\(Int((light.brightness * 100).rounded()))%" : "Off")
+                .font(.title3.monospacedDigit())
+            Button("Edit", action: edit).buttonStyle(LumenSecondaryButtonStyle(compact: true))
+                .accessibilityLabel("Edit \(light.label)")
+        }
+    }
+
+    @ViewBuilder private var preview: some View {
+        if light.brand == .nanoleaf {
+            NanoleafMiniWall(shapes: manager.shapes, deviceID: light.id, fallback: light.color,
+                             lit: light.isOn && !light.isStale)
+        } else if let state = manager.activeLIFXMatrixState(for: light.id) {
+            Grid(horizontalSpacing: 4, verticalSpacing: 4) {
+                ForEach(0..<state.height, id: \.self) { row in
+                    GridRow {
+                        ForEach(0..<state.width, id: \.self) { column in
+                            let index = row * state.width + column
+                            if state.containsZone(index) {
+                                RoundedRectangle(cornerRadius: 3).fill(state.colors[index].color)
+                                    .frame(width: 15, height: 15)
+                            } else { Color.clear.frame(width: 15, height: 15) }
+                        }
+                    }
+                }
+            }
+            .opacity(light.isOn && !light.isStale ? 1 : 0.25)
+            .accessibilityLabel("\(state.zoneCount) matrix zones")
+        } else if let state = manager.activeSegmentState(for: light.id) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 12), spacing: 3)], spacing: 3) {
+                ForEach(Array(state.colors.enumerated()), id: \.offset) { index, color in
+                    RoundedRectangle(cornerRadius: 2).fill(color.litColor).frame(height: 28)
+                        .accessibilityLabel("Segment \(index + 1)")
+                }
+            }
+            .opacity(light.isOn && !light.isStale ? 1 : 0.25)
+        } else if light.isLIFXLuna || manager.segmentStudioProfile(for: light) != nil {
+            VStack(spacing: 8) {
+                Image(systemName: light.isLIFXLuna ? "circle.grid.3x3" : "rectangle.split.3x1")
+                    .font(.title).foregroundStyle(Lumen.meter)
+                Text("No applied layout available").font(.caption).foregroundStyle(Lumen.meter)
+            }
+        } else {
+            VStack(spacing: 8) {
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(light.isOn && !light.isStale ? light.color : Lumen.floorRaised)
+                    .frame(maxWidth: 180).frame(height: 48)
+                Text(light.isStale ? "Last reading unavailable" : manager.isWhiteMode(light.id) ? "\(light.kelvin) K" : "Whole-light color")
+                    .font(.caption).foregroundStyle(Lumen.meter)
+            }
+        }
+    }
+}
+
 enum RoomWorkspaceSection: String, CaseIterable, Identifiable {
     case control = "Light", compositions = "Compositions", music = "Music"
     var id: String { rawValue }
@@ -506,7 +827,11 @@ struct RoomOutputControls: View {
             }
             .disabled(ids.isEmpty || owned)
             LumenFader(label: "Brightness", value: Binding(
-                get: { level }, set: { manager.setBrightness(deviceIDs: ids, value: $0) }))
+                get: { level }, set: { manager.setBrightness(deviceIDs: ids, value: $0) }),
+                       format: { value in
+                           Set(lights.filter { !$0.isStale }.map { Int(($0.brightness * 100).rounded()) }).count > 1
+                               ? "Mixed" : LumenFader.percent(value)
+                       })
                 .disabled(ids.isEmpty || owned)
             ColorPicker("Color", selection: Binding(
                 get: { lights.first?.color ?? .white },

@@ -12,6 +12,10 @@ struct GoveeSegmentEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject var device: LightDevice
+    var embedded = false
+    var initialSelection: Set<Int> = []
+    var initialDraft: GoveeSegmentState? = nil
+    var onDraftChange: ((GoveeSegmentState?) -> Void)? = nil
 
     @State private var draft = GoveeSegmentState(colors: [])
     @State private var openingState: GoveeSegmentState?
@@ -48,10 +52,9 @@ struct GoveeSegmentEditorView: View {
     }
     private var unitName: String { profile.editorUnitName }
 
-    /// Paint operations target the selection, or the whole strip when nothing
-    /// is selected.
+    /// Only explicitly selected regions receive paint and intensity edits.
     private var targetIndexes: [Int] {
-        selection.isEmpty ? Array(0..<draft.segmentCount) : selection.sorted()
+        SpectrumRegionSelection.targets(selected: selection, available: Set(draft.colors.indices)).sorted()
     }
 
     var body: some View {
@@ -76,12 +79,14 @@ struct GoveeSegmentEditorView: View {
             footer
         }
         .padding(20)
-        .sheetFrame(minWidth: 620, idealWidth: 1000, minHeight: 560, idealHeight: 740)
+        .sheetFrame(minWidth: embedded ? nil : 620, idealWidth: embedded ? nil : 1000,
+                    minHeight: embedded ? nil : 560, idealHeight: embedded ? nil : 740)
         .background(LumenBackground(glow: false))
         .onAppear(perform: load)
         .onDisappear {
             manager.endSegmentPreview(device)
             manager.storeSegmentState(draft, for: device)
+            onDraftChange?(draft == openingState ? nil : draft)
         }
     }
 
@@ -91,18 +96,47 @@ struct GoveeSegmentEditorView: View {
             stripSection
             if limitsZones { zonePowerSection }
             selectionToolbar
+            exactSegmentValues
             DisclosureGroup("Hardware & live preview") { setupSection.padding(.top, 12) }
         }
     }
 
     private var paintToolsColumn: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text(selection.isEmpty ? "Paint all \(draft.segmentCount) \(unitName)s" : "Paint \(selection.count) selected")
+            Text(selection.isEmpty ? "Select regions to paint" : "Paint \(selection.count) selected")
                 .font(.headline)
-            paintSection
-            brightnessSection
-            if profile.supportsGradient { gradientSection }
+            paintSection.disabled(targetIndexes.isEmpty)
+            brightnessSection.disabled(targetIndexes.isEmpty)
+            if profile.supportsGradient { gradientSection.disabled(targetIndexes.isEmpty) }
             DisclosureGroup("Presets") { presetSection.padding(.top, 12) }
+        }
+    }
+
+    private var exactSegmentValues: some View {
+        let indices = selection.sorted().filter { draft.colors.indices.contains($0) }
+        return VStack(alignment: .leading, spacing: 8) {
+            Text("Selected \(unitName)s · \(indices.count)").font(.headline)
+            if indices.isEmpty {
+                Text("Select \(unitName)s to inspect their exact values.").font(.caption).foregroundStyle(Lumen.meter)
+            } else {
+                Text("RGB is the held color. Region intensity and power apply separately.")
+                    .font(.caption).foregroundStyle(Lumen.meter)
+                ScrollView([.horizontal, .vertical]) {
+                    VStack(spacing: 0) {
+                        ForEach(indices, id: \.self) { index in
+                            SpectrumValueRow(name: "\(unitName.capitalized) \(index + 1)", color: draft.colors[index].color,
+                                             intensity: Binding(get: { draft.colors[index].brightness }, set: { value in
+                                updateDraft { $0.colors[index].brightness = value }
+                            }), state: draft.colors[index].isOn ? "Draft" : "Off") { color in
+                                updateDraft { state in
+                                    let old = state.colors[index]
+                                    state.colors[index] = GoveeSegmentColor(color: color, brightness: old.brightness, isOn: old.isOn)
+                                }
+                            }
+                        }
+                    }.frame(minWidth: 460)
+                }.frame(height: min(250, CGFloat(indices.count) * 54))
+            }
         }
     }
 
@@ -113,7 +147,7 @@ struct GoveeSegmentEditorView: View {
             Label("\(studioName) — \(device.label)", systemImage: layout.icon)
                 .font(LumenType.display(size: 19, weight: .bold))
             Spacer()
-            Button("Close preview") { dismiss() }.keyboardShortcut(.cancelAction)
+            if !embedded { Button("Close preview") { dismiss() }.keyboardShortcut(.cancelAction) }
         }
     }
 
@@ -157,18 +191,7 @@ struct GoveeSegmentEditorView: View {
 
     private var selectionCaption: String {
         if selection.isEmpty {
-            switch layout {
-            case .lamp where isUplighter:
-                return "Choose one or more lighting zones to paint. With nothing selected, painting updates all \(draft.segmentCount). Use each zone's switch to decide which ones the lamp lights."
-            case .stringLights:
-                return "Choose individual \(unitName)s along the strand. With nothing selected, painting updates the whole string."
-            case .curtain:
-                return "Choose one or more vertical columns. With nothing selected, painting updates the whole curtain."
-            case .wallLight:
-                return "Select numbered segments to paint them, counted from the controller along the chain of bars. With nothing selected, painting fills every bar."
-            default:
-                return "Select numbered segments to paint them. With nothing selected, painting fills the whole strip."
-            }
+            return "Select numbered \(unitName)s to edit, or choose All to paint the whole light. None leaves every region untouched."
         }
         return "\(selection.count) \(unitName)\(selection.count == 1 ? "" : "s") selected — colors and brightness apply to the selection."
     }
@@ -603,7 +626,7 @@ struct GoveeSegmentEditorView: View {
 
     private var brightnessSection: some View {
         LumenFader(
-            label: selection.isEmpty ? "All \(unitName)s" : "Selected \(unitName)s",
+            label: "Selected \(unitName)s",
             value: selectionBrightness,
             range: 0.05...1,
             track: .tint(paintColor),
@@ -611,7 +634,7 @@ struct GoveeSegmentEditorView: View {
                 if !editing { manager.storeSegmentState(draft, for: device) }
             }
         )
-        .accessibilityLabel("Brightness for \(selection.isEmpty ? "all \(unitName)s" : "selected \(unitName)s")")
+        .accessibilityLabel("Brightness for selected \(unitName)s")
     }
 
     private var gradientSection: some View {
@@ -794,6 +817,7 @@ struct GoveeSegmentEditorView: View {
                 return targets.map { draft.colors[$0].brightness }.reduce(0, +) / Double(targets.count)
             },
             set: { newValue in
+                guard !targetIndexes.isEmpty else { return }
                 updateDraft(persist: false) { state in
                     for index in targetIndexes where state.colors.indices.contains(index) {
                         state.colors[index].brightness = newValue
@@ -837,13 +861,14 @@ struct GoveeSegmentEditorView: View {
         // once. Open on something it can actually show, and say what changed.
         let requested = state.poweredSegments
         state = profile.enforcingZoneLimit(state)
-        draft = state
         openingState = state
+        draft = initialDraft.map { profile.enforcingZoneLimit(profile.normalizedEditorState($0)) } ?? state
         let trimmed = requested.filter { !state.colors[$0].isOn }
         zoneLimitNote = trimmed.isEmpty
             ? nil
             : "\(zoneNameList(trimmed)) switched off — this lamp lights \(zoneLimit) \(unitName)s at a time. Pick the ones you want."
-        zoneActivationOrder = state.poweredSegments.reversed()
+        zoneActivationOrder = draft.poweredSegments.reversed()
+        selection = SpectrumRegionSelection.targets(selected: initialSelection, available: Set(draft.colors.indices))
         paintColor = device.color
     }
 
@@ -884,6 +909,7 @@ struct GoveeSegmentEditorView: View {
     /// is lighting it — a switched-off zone keeps the new color for when it
     /// comes back on.
     private func paintTargets(with color: Color) {
+        guard !targetIndexes.isEmpty else { return }
         updateDraft { state in
             for index in targetIndexes where state.colors.indices.contains(index) {
                 let existing = state.colors[index]

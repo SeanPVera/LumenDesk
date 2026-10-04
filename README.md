@@ -614,7 +614,11 @@ Demo Mode is useful for screenshots, testing UI flows, or learning the app befor
 
 ### Interface
 
-LumenDesk uses a neutral field of named emitters with one shared editing surface. Color belongs to fixture output, palettes and scene scores. Faders expose numeric values, keyboard adjustments and accessibility labels; selection uses checkmarks and boundaries as well as color. Native windows, menus, alerts, color pickers and sheets retain platform behavior. [Design system](DESIGN_SYSTEM.md) records tokens, minimum window sizes and remaining manual accessibility checks.
+The native Mac app uses **Spectrum Studio**: a room and device sidebar, a room overview with a lane for each light, and an integrated device editor. Graphite surfaces and amber controls frame actual fixture colors. A scene shelf recalls scenes to their saved fixture IDs; Save room scene captures current output, excluding unapplied drafts.
+
+Nanoleaf panels, Govee regions, and Luna zones pair a spatial canvas with an exact-value table. Select regions to edit HEX and intensity; **None** disables selection-based edits, and **All** explicitly targets the entire fixture. Nanoleaf RGB includes panel intensity, while Govee and Luna retain separate intensity channels. Unapplied Govee and Luna drafts survive navigation for the current app session; Nanoleaf keeps its existing editing sessions. Leaving an editor ends its temporary preview.
+
+Native menus, alerts, color pickers, sheets and keyboard controls retain platform behavior. iOS retains its room tabs and gains the shared editor refinements. The browser keeps its existing room workspace. [Design system](DESIGN_SYSTEM.md) records tokens and validation boundaries; [Spectrum implementation](SPECTRUM_STUDIO.md) describes the native workspace.
 
 ### Accessibility and interface preferences
 
@@ -806,7 +810,7 @@ design-prototype/                   # Simulated UX mockup, published under /prot
 LumenDesk/
 ├── LumenDeskApp.swift              # App entry point, macOS commands, settings scene, menu bar extra
 ├── ContentView.swift               # Main workspace, header, search, filters, bulk actions, shortcut sheet
-├── Theme.swift                     # Light in place tokens, surfaces, button styles, mark
+├── Theme.swift                     # Spectrum Studio tokens, surfaces, button styles, mark
 ├── DesignControls.swift            # Instrument controls: fader, power key, rocker, chips, selector, lens, meters
 ├── Info.plist                      # Local network and platform privacy metadata
 ├── LumenDesk.entitlements          # Sandbox and network entitlements

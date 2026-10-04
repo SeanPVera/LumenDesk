@@ -1,4 +1,4 @@
-# LumenDesk design system — Light in place
+# LumenDesk design system — Spectrum Studio
 
 Source of truth: `LumenDesk/Theme.swift` (`Lumen`, `LumenType`,
 `LumenToken`), `LumenDesk/DesignControls.swift`, and `web/app/src/styles.css`.
@@ -8,10 +8,10 @@ Dark appearance is intentional; there is no separate supported light theme.
 
 | Role | Native token | sRGB hex |
 | --- | --- | --- |
-| Canvas | stage | #101112 |
-| Secondary surface | deck | #17191B |
-| Control surface | floor | #1D2022 |
-| Raised/selected surface | floorRaised | #272B2E |
+| Canvas | stage | #17191C |
+| Secondary surface | deck | #202328 |
+| Control surface | floor | #24272C |
+| Raised/selected surface | floorRaised | #30343B |
 | Emphasis surface | stripLoud | #32373A |
 | Quiet separator | ruleSoft | #303539 |
 | Control boundary | rule | #50585D |
@@ -21,11 +21,12 @@ Dark appearance is intentional; there is no separate supported light theme.
 | Nonessential/inactive marks | faint | #778187 |
 | Focus/illumination | lit | #F8FAFA |
 | Selection | mark | #EDF0F1 |
+| Studio actions / faders | studioAccent | #FFBC72 |
 | Connection/success | link | #B8C8C5 |
 | Warning | warn | #F0B03C |
 | Error | fail | #E38A7C |
 
-Browser equivalents are semantic CSS variables at `:root`; its canvas is #101112,
+The browser retains its earlier palette. Browser equivalents are semantic CSS variables at `:root`; its canvas is #101112,
 surface #17191B, raised #272B2E, rule #50585D, text #EDF0F1, secondary #BCC3C7,
 muted #A0A9AE, warning #F0B03C and error #E38A7C. The browser uses 4 px corners for native HTML controls. Success, offline, warning and error also carry text/icons.
 Old semantic aliases remain to avoid needlessly rewriting every secondary view.
@@ -80,9 +81,9 @@ safety guarantee and brightness modulation still occurs.
 
 ## Adaptation and validation boundaries
 
-macOS minimum window: 620 × 540 pt. Room editor columns collapse below 900;
-spatial placement requires enough width for readable names and at most eight
-fixtures, otherwise the field uses an adaptive ordered grid. Segment Studio
+macOS minimum window: 620 × 540 pt. The native sidebar can collapse; room lanes
+and the room inspector stack below 850 pt of detail width. The Mac overview
+uses device lanes; iOS keeps its adaptive fixture field. Segment Studio
 splits canvas/tools at 820 pt, Luna at 800. Scroll preserves access at shorter
 heights. Web reflows at 900/540 px, with captures down to 390 px.
 
@@ -90,3 +91,18 @@ Native screenshots are production SwiftUI hosted in AppKit on CI, not iOS
 simulator screenshots. Browser axe checks supplement rendered review; VoiceOver,
 Full Keyboard Access, larger accessibility text and physical touch remain manual
 release checks. See REDESIGN_REPORT.md for exact inspected states and results.
+
+## Spectrum workspace
+
+Mac navigation uses a native split view with rooms, lights, Scenes, Music,
+Schedules, Devices and Settings. Overview lanes expose actual Nanoleaf topology,
+applied segment layouts and Luna's 26-zone face. Unknown applied layouts say so.
+Device detail keeps the canvas, selection tools, exact-value rows and paint tools
+together. Per-region HEX fields validate six digits; numeric intensity is clamped
+to 0–100%. The table scrolls horizontally at narrow widths. None is an empty edit
+target; room-level bulk controls retain their explicit whole-room default.
+
+Secondary orientation, presets and gradients use disclosure controls. A running
+show blocks entry to painting until it is stopped. Preview cleanup and Apply use
+the existing manager/controller paths. Presentation drafts live in the shell,
+separately from device output and saved scenes. See SPECTRUM_STUDIO.md.

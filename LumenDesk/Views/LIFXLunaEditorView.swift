@@ -7,6 +7,10 @@ struct LIFXLunaEditorView: View {
     @EnvironmentObject var manager: LightManager
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var device: LightDevice
+    var embedded = false
+    var initialSelection: Set<Int> = []
+    var initialDraft: LIFXMatrixState? = nil
+    var onDraftChange: ((LIFXMatrixState?) -> Void)? = nil
 
     @State private var draft: LIFXMatrixState?
     @State private var selection: Set<Int> = []
@@ -16,7 +20,7 @@ struct LIFXLunaEditorView: View {
 
     private var targetIndices: [Int] {
         guard let draft else { return [] }
-        return selection.isEmpty ? draft.activeZoneIndices : selection.sorted()
+        return SpectrumRegionSelection.targets(selected: selection, available: Set(draft.activeZoneIndices)).sorted()
     }
 
     var body: some View {
@@ -28,7 +32,7 @@ struct LIFXLunaEditorView: View {
                     ScrollView {
                         if geometry.size.width >= 800 {
                             HStack(alignment: .top, spacing: 28) {
-                                VStack(spacing: 18) { matrixSection(draft); selectionTools(draft) }
+                                VStack(spacing: 18) { matrixSection(draft); selectionTools(draft); exactZoneValues(draft) }
                                     .frame(maxWidth: .infinity)
                                 editingTools.frame(width: 320)
                             }.padding(.vertical, 2)
@@ -36,6 +40,7 @@ struct LIFXLunaEditorView: View {
                             VStack(alignment: .leading, spacing: 20) {
                                 matrixSection(draft)
                                 selectionTools(draft)
+                                exactZoneValues(draft)
                                 editingTools
                             }.padding(.vertical, 2)
                         }
@@ -47,12 +52,16 @@ struct LIFXLunaEditorView: View {
             }
         }
         .padding(20)
-        .sheetFrame(minWidth: 520, idealWidth: 960, minHeight: 560, idealHeight: 740)
+        .sheetFrame(minWidth: embedded ? nil : 520, idealWidth: embedded ? nil : 960,
+                    minHeight: embedded ? nil : 560, idealHeight: embedded ? nil : 740)
         .background(LumenBackground(glow: false))
         .onAppear {
-            if let state = manager.lifxMatrixState(for: device) { draft = state }
+            if let state = initialDraft ?? manager.lifxMatrixState(for: device) { draft = state }
+            hasEdits = initialDraft != nil
+            selection = SpectrumRegionSelection.targets(selected: initialSelection, available: Set(draft?.activeZoneIndices ?? []))
             manager.refreshLIFXMatrix(device)
         }
+        .onDisappear { onDraftChange?(hasEdits ? draft : nil) }
         .onReceive(manager.$lifxMatrixStates) { states in
             guard let state = states[device.id], !hasEdits else { return }
             draft = state
@@ -62,9 +71,9 @@ struct LIFXLunaEditorView: View {
 
     private var editingTools: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text(selection.isEmpty ? "Paint the lamp" : "Paint \(selection.count) selected zones").font(.headline)
-            paintTools
-            gradientTools
+            Text(selection.isEmpty ? "Select zones to paint" : "Paint \(selection.count) selected zones").font(.headline)
+            paintTools.disabled(targetIndices.isEmpty)
+            gradientTools.disabled(targetIndices.isEmpty)
             DisclosureGroup("Luna looks") { presetTools.padding(.top, 12) }
             Text("These are draft colors. Apply writes them to Luna; closing leaves the lamp unchanged.")
                 .font(.caption).foregroundStyle(Lumen.meter)
@@ -76,7 +85,7 @@ struct LIFXLunaEditorView: View {
             Label("Luna Color Studio — \(device.label)", systemImage: "circle.grid.3x3.fill")
                 .font(LumenType.display(size: 19, weight: .bold))
             Spacer()
-            Button("Close draft") { dismiss() }.keyboardShortcut(.cancelAction)
+            if !embedded { Button("Close draft") { dismiss() }.keyboardShortcut(.cancelAction) }
         }
     }
 
@@ -115,7 +124,7 @@ struct LIFXLunaEditorView: View {
             HStack {
                 Text("Lamp face").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                 Spacer()
-                Text(selection.isEmpty ? "All 26 zones" : "\(selection.count) selected")
+                Text("\(selection.count) selected")
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
@@ -179,6 +188,39 @@ struct LIFXLunaEditorView: View {
     }
 
     // MARK: - Tools
+
+    private func exactZoneValues(_ state: LIFXMatrixState) -> some View {
+        let indices = selection.sorted().filter { state.containsZone($0) }
+        return VStack(alignment: .leading, spacing: 8) {
+            Text("Selected zones · \(indices.count)").font(.headline)
+            if indices.isEmpty {
+                Text("Select zones to inspect their exact values.").font(.caption).foregroundStyle(Lumen.meter)
+            } else {
+                Text("RGB describes chroma. Each zone retains its own intensity.")
+                    .font(.caption).foregroundStyle(Lumen.meter)
+                ScrollView([.horizontal, .vertical]) {
+                    VStack(spacing: 0) {
+                        ForEach(indices, id: \.self) { index in
+                            let value = state.colors[index]
+                            let color = Color(hue: Double(value.hue) / 65535, saturation: Double(value.saturation) / 65535, brightness: 1)
+                            SpectrumValueRow(name: "Zone \((state.activeZoneIndices.firstIndex(of: index) ?? index) + 1)", color: color,
+                                             intensity: Binding(get: { Double(draft?.colors[index].brightness ?? 0) / 65535 }, set: { level in
+                                guard var next = draft else { return }
+                                next.colors[index] = next.colors[index].settingBrightness(level)
+                                draft = next
+                                hasEdits = true
+                            }), state: hasEdits ? "Draft" : "Loaded") { color in
+                                guard var next = draft else { return }
+                                next.colors[index] = next.colors[index].painted(color, fallbackBrightness: device.brightness, kelvin: device.kelvin)
+                                draft = next
+                                hasEdits = true
+                            }
+                        }
+                    }.frame(minWidth: 460)
+                }.frame(height: min(250, CGFloat(indices.count) * 54))
+            }
+        }
+    }
 
     private func selectionTools(_ state: LIFXMatrixState) -> some View {
         HStack(spacing: 8) {
@@ -244,7 +286,7 @@ struct LIFXLunaEditorView: View {
 
     private var presetTools: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Luna looks").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            Text("Whole-lamp looks").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 104))], spacing: 8) {
                 ForEach(LunaLook.allCases) { look in
                     Button(look.title) { apply(look) }
@@ -277,7 +319,7 @@ struct LIFXLunaEditorView: View {
     // MARK: - Editing
 
     private func paintTargets(_ color: Color) {
-        guard var next = draft else { return }
+        guard var next = draft, !targetIndices.isEmpty else { return }
         for index in targetIndices where next.colors.indices.contains(index) {
             next.colors[index] = next.colors[index].painted(
                 color,

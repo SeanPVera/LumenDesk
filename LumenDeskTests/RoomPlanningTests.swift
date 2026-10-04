@@ -340,6 +340,48 @@ final class SpectrumRegionSelectionTests: XCTestCase {
 /// production SwiftUI in a real AppKit window; these are not mockup screenshots.
 /// No LightManager.start(), UDP clients, microphone or screen capture is used.
 #if os(macOS)
+final class SpectrumEditorLifecycleTests: XCTestCase {
+    @MainActor
+    func testClosingGoveeEditorAfterShowTakeoverPreservesOutputAndKeepsDraft() async throws {
+        let manager = LightManager(defaults: UserDefaults(suiteName: UUID().uuidString)!,
+                                   persistenceStore: temporaryPersistenceStore())
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+        let light = try XCTUnwrap(manager.devices.first { manager.segmentProfile(for: $0)?.layout == .cobStrip })
+        let applied = manager.segmentState(for: light)
+        manager.applySegments(light, state: applied)
+        var pending = applied
+        pending.colors[0] = GoveeSegmentColor(color: .red, brightness: 0.23)
+        let appeared = expectation(description: "Editor mounted")
+        let disappeared = expectation(description: "Draft retained on close")
+        var retained: GoveeSegmentState?
+        let editor = GoveeSegmentEditorView(device: light, initialDraft: pending, onDraftChange: {
+            retained = $0
+            disappeared.fulfill()
+        }).environmentObject(manager).onAppear { appeared.fulfill() }
+        let host = NSHostingView(rootView: AnyView(editor))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 800),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = host
+        window.orderFront(nil)
+        defer { window.orderOut(nil) }
+        await fulfillment(of: [appeared], timeout: 3)
+
+        let effect = try XCTUnwrap(LightingCatalog.effects.first { $0.id != "music-pulse" })
+        manager.startEffect(effect, scope: .all)
+        XCTAssertNotNil(manager.animatingEffect(for: light.id))
+        let outputColors = manager.segmentState(for: light).colors
+        host.rootView = AnyView(EmptyView())
+        await fulfillment(of: [disappeared], timeout: 3)
+
+        XCTAssertEqual(manager.segmentState(for: light).colors, outputColors,
+                       "Closing the editor must not overwrite output after a show takes ownership")
+        XCTAssertEqual(retained?.colors, pending.colors, "The unapplied draft must survive navigation")
+        XCTAssertNotNil(manager.animatingEffect(for: light.id))
+        manager.stopAllEffects()
+    }
+}
+
 final class RoomWorkspaceRenderTests: XCTestCase {
     @MainActor
     func testRenderReviewStates() async throws {

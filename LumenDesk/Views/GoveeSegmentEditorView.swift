@@ -79,8 +79,13 @@ struct GoveeSegmentEditorView: View {
         .onDisappear {
             // A workspace switch may already have replaced the device objects.
             guard loaded, manager.devices.contains(where: { $0 === device }) else { return }
-            manager.endSegmentPreview(device)
-            manager.storeSegmentState(draft, for: device)
+            loaded = false
+            // A show can take ownership while this editor is mounted. Its
+            // stream uses the same transport; leaving must not shut it down.
+            if manager.animatingEffect(for: device.id) == nil {
+                manager.endSegmentPreview(device)
+                manager.storeSegmentState(draft, for: device)
+            }
             onDraftChange?(draft == openingState ? nil : draft)
         }
     }
@@ -909,6 +914,7 @@ struct GoveeSegmentEditorView: View {
     /// Central mutation point: every edit optionally persists the draft and
     /// streams a live frame to the light.
     private func updateDraft(persist: Bool = true, _ mutate: (inout GoveeSegmentState) -> Void) {
+        guard loaded, manager.animatingEffect(for: device.id) == nil else { return }
         mutate(&draft)
         if livePreview { manager.previewSegments(device, state: draft) }
         if persist { manager.storeSegmentState(draft, for: device) }

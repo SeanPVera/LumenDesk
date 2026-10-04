@@ -625,8 +625,8 @@ Native menus, alerts, color pickers, sheets and keyboard controls retain platfor
 The UI honors system accessibility settings where applicable, including reduced motion and reduced transparency. Interface preferences include:
 
 - Quiet Interface.
-- Workspace layout.
-- Interface density.
+- Workspace layout on iOS.
+- Interface density, including compact room rows on Mac.
 - Menu bar content scope.
 - Menu bar urgent-only mode.
 - Confirmation policy.

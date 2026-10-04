@@ -216,7 +216,7 @@ struct PlanWorkspaceView: View {
                 TextField("Find a light", text: $searchText).textFieldStyle(.roundedBorder).padding(.bottom, 12)
             }
             ForEach(visibleLights) { light in
-                SpectrumFixtureLane(light: light, selected: selectedIDs.contains(light.id),
+                SpectrumFixtureLane(light: light, compact: density == InterfaceDensity.compact.rawValue, selected: selectedIDs.contains(light.id),
                                     hasDraft: manager.shapes.session(light.id)?.hasUnappliedChanges == true || studioDrafts.luna[light.id] != nil || studioDrafts.govee[light.id] != nil,
                                     select: {
                                         if selectedIDs.contains(light.id) { selectedIDs.remove(light.id) }
@@ -538,6 +538,7 @@ enum SpectrumWorkspaceMode: String, Hashable {
 struct SpectrumFixtureLane: View {
     @EnvironmentObject private var manager: LightManager
     @ObservedObject var light: LightDevice
+    var compact = false
     let selected: Bool
     let hasDraft: Bool
     let select: () -> Void
@@ -559,15 +560,15 @@ struct SpectrumFixtureLane: View {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: 18) {
                 identity.frame(width: 150, alignment: .leading)
-                preview.frame(minWidth: 130, maxWidth: .infinity).frame(height: 120)
+                preview.frame(minWidth: 130, maxWidth: .infinity).frame(height: compact ? 80 : 120)
                 actions
             }
             VStack(alignment: .leading, spacing: 12) {
                 HStack { identity; Spacer(); actions }
-                preview.frame(maxWidth: .infinity).frame(height: 140)
+                preview.frame(maxWidth: .infinity).frame(height: compact ? 100 : 140)
             }
         }
-        .padding(.vertical, 18)
+        .padding(.vertical, compact ? 12 : 18)
         .overlay(alignment: .bottom) { Rectangle().fill(Lumen.ruleSoft).frame(height: 1) }
     }
 

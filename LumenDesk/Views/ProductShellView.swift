@@ -1177,10 +1177,12 @@ struct SettingsWorkspaceView: View {
                            subtitle: "Set the desk's density, confirmation, privacy, and demo behavior.")
 
                 SettingsSection(title: "Workspace", icon: "rectangle.3.group") {
+                    #if !os(macOS)
                     SettingSelectorRow(title: "Layout", selection: $layout,
                                        options: WorkspaceLayout.allCases.map {
                                            LumenOption(value: $0.rawValue, title: $0.title)
                                        })
+                    #endif
                     SettingSelectorRow(title: "Density", selection: $density,
                                        options: InterfaceDensity.allCases.map {
                                            LumenOption(value: $0.rawValue, title: $0.title)

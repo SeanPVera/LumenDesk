@@ -82,6 +82,8 @@ struct NanoleafShapesStudio: View {
             if selection.isEmpty { selection = initialSelection }
         }
         .onDisappear {
+            colorEditEnd?.cancel()
+            shapes.edit(deviceID) { $0.endContinuousEdit() }
             // A preview is temporary; leaving the editor puts back what the
             // wall showed before it, where that can be done. The draft stays.
             if let message = shapes.endPreview(deviceID, restore: true) { manager.publishError(message) }
@@ -186,6 +188,9 @@ struct NanoleafShapesStudio: View {
             }
             legend(for: display(layout).source)
             selectionBar(layout)
+            if let session, !selection.isEmpty {
+                exactPanelValues(layout, session: session)
+            }
             if let message = studioMessage ?? wall.lastChange?.summary {
                 Label(message, systemImage: "info.circle").font(.caption).foregroundStyle(Lumen.meter)
                     .fixedSize(horizontal: false, vertical: true)
@@ -233,7 +238,7 @@ struct NanoleafShapesStudio: View {
         let total = layout.paintablePanels.count
         let groups = shapes.groups[deviceID] ?? []
         return VStack(alignment: .leading, spacing: 8) {
-            Text(selection.isEmpty ? "No panels selected \u{2014} tools affect all \(total)"
+            Text(selection.isEmpty ? "Select panels to edit, or choose All for the whole wall"
                  : "\(selection.count) of \(total) panels selected")
                 .font(.callout.weight(.medium))
             HStack(spacing: 8) {
@@ -284,7 +289,7 @@ struct NanoleafShapesStudio: View {
 
     private func inspector(_ layout: NanoleafLayout) -> some View {
         VStack(alignment: .leading, spacing: 18) {
-            orientationSection(layout)
+            DisclosureGroup("Wall orientation") { orientationSection(layout).padding(.top, 12) }
             Divider()
             if let runningShow {
                 Label("\(runningShow.name) is running on this wall. Stop it before painting panels.", systemImage: "waveform")
@@ -300,10 +305,15 @@ struct NanoleafShapesStudio: View {
                 panelDetails(panel, layout: layout)
             }
             Divider()
-            designsSection(layout)
-            Divider()
-            NanoleafSceneLibrary(device: device, shapes: shapes) { colors, name in
-                startFromScene(colors, name: name)
+            LumenFader(label: "Wall brightness", value: Binding(
+                get: { device.brightness },
+                set: { manager.setBrightness(device, value: $0) }))
+                .disabled(device.isStale || runningShow != nil || isPreviewing)
+            DisclosureGroup("Saved designs") { designsSection(layout).padding(.top, 12) }
+            DisclosureGroup("Controller scenes") {
+                NanoleafSceneLibrary(device: device, shapes: shapes) { colors, name in
+                    startFromScene(colors, name: name)
+                }.padding(.top, 12)
             }
             Divider()
             panelList(layout)
@@ -452,7 +462,7 @@ struct NanoleafShapesStudio: View {
         let targets = targetIDs(layout)
         return VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Text(selection.isEmpty ? "Paint all \(targets.count) panels" : "Paint \(targets.count) selected")
+                Text(selection.isEmpty ? "Select panels to paint" : "Paint \(targets.count) selected")
                     .font(.headline)
                 Spacer()
                 Button { edit { $0.undo() } } label: { Image(systemName: "arrow.uturn.backward").accessibilityLabel("Undo edit") }
@@ -464,49 +474,53 @@ struct NanoleafShapesStudio: View {
             Text(sessionLine(session)).font(.caption).foregroundStyle(Lumen.meter)
                 .fixedSize(horizontal: false, vertical: true)
 
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 44), spacing: 6)], spacing: 6) {
-                ForEach(LightRowView.colorSwatches, id: \.label) { swatch in
-                    Button { recolor(panelColor(swatch.color), layout: layout) } label: {
-                        RoundedRectangle(cornerRadius: 2).fill(swatch.color).frame(width: 44, height: 32)
-                            .overlay(RoundedRectangle(cornerRadius: 2).stroke(Lumen.rule, lineWidth: 1))
+            Group {
+                DisclosureGroup("Quick colors") {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 44), spacing: 6)], spacing: 6) {
+                        ForEach(LightRowView.colorSwatches, id: \.label) { swatch in
+                            Button { recolor(panelColor(swatch.color), layout: layout) } label: {
+                                RoundedRectangle(cornerRadius: 2).fill(swatch.color).frame(width: 44, height: 32)
+                                    .overlay(RoundedRectangle(cornerRadius: 2).stroke(Lumen.rule, lineWidth: 1))
+                            }
+                            .buttonStyle(.plain)
+                            .help(swatch.label)
+                            .accessibilityLabel("Paint \(swatch.label)")
+                        }
                     }
-                    .buttonStyle(.plain)
-                    .help(swatch.label)
-                    .accessibilityLabel("Paint \(swatch.label)")
                 }
-            }
-            ColorPicker("Colour", selection: Binding(get: { paintColor }, set: { value in
-                paintColor = value
-                recolorContinuously(panelColor(value), layout: layout)
-            }), supportsOpacity: false)
-            HStack(spacing: 8) {
-                TextField("#RRGGBB", text: $hexDraft)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 120)
-                    .onSubmit { paintHex(layout) }
-                    .accessibilityLabel("Exact colour as hex")
-                Button("Set exact colour") { paintHex(layout) }
-                    .buttonStyle(LumenSecondaryButtonStyle(compact: true))
-            }
-            if let hexProblem { Text(hexProblem).font(.caption).foregroundStyle(Lumen.warn) }
-            LumenFader(label: "Panel intensity", value: Binding(
-                get: { averageIntensity(targets, in: session) },
-                set: { value in shapes.edit(deviceID) { $0.edit { $0.setIntensity(value, panels: targets) } } }),
-                       onEditingChanged: { editing in
-                           shapes.edit(deviceID) { session in
-                               if editing { session.beginContinuousEdit() } else { session.endContinuousEdit() }
-                           }
-                       })
-            HStack(spacing: 8) {
-                Button("Turn off") { shapes.edit(deviceID) { $0.edit { $0.setIntensity(0, panels: targets) } } }
-                Button("Full intensity") { shapes.edit(deviceID) { $0.edit { $0.setIntensity(1, panels: targets) } } }
-            }
-            .buttonStyle(LumenSecondaryButtonStyle(compact: true))
-            Text("Intensity belongs to each panel. The wall\u{2019}s master brightness (\(Int((device.brightness * 100).rounded()))%) applies on top, once.")
-                .font(.caption).foregroundStyle(Lumen.meter)
-                .fixedSize(horizontal: false, vertical: true)
-            gradientTools(layout, targets: targets)
-            themeMenu(layout, targets: targets)
+                ColorPicker("Colour", selection: Binding(get: { paintColor }, set: { value in
+                    paintColor = value
+                    recolorContinuously(panelColor(value), layout: layout)
+                }), supportsOpacity: false)
+                HStack(spacing: 8) {
+                    TextField("#RRGGBB", text: $hexDraft)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 120)
+                        .onSubmit { paintHex(layout) }
+                        .accessibilityLabel("Exact colour as hex")
+                    Button("Set exact colour") { paintHex(layout) }
+                        .buttonStyle(LumenSecondaryButtonStyle(compact: true))
+                }
+                if let hexProblem { Text(hexProblem).font(.caption).foregroundStyle(Lumen.warn) }
+                LumenFader(label: "Panel intensity", value: Binding(
+                    get: { averageIntensity(targets, in: session) },
+                    set: { value in shapes.edit(deviceID) { $0.edit { $0.setIntensity(value, panels: targets) } } }),
+                           onEditingChanged: { editing in
+                               shapes.edit(deviceID) { session in
+                                   if editing { session.beginContinuousEdit() } else { session.endContinuousEdit() }
+                               }
+                           })
+                HStack(spacing: 8) {
+                    Button("Turn off") { shapes.edit(deviceID) { $0.edit { $0.setIntensity(0, panels: targets) } } }
+                    Button("Full intensity") { shapes.edit(deviceID) { $0.edit { $0.setIntensity(1, panels: targets) } } }
+                }
+                .buttonStyle(LumenSecondaryButtonStyle(compact: true))
+                Text("Intensity belongs to each panel. The wall\u{2019}s master brightness (\(Int((device.brightness * 100).rounded()))%) applies on top, once.")
+                    .font(.caption).foregroundStyle(Lumen.meter)
+                    .fixedSize(horizontal: false, vertical: true)
+                DisclosureGroup("Gradient") { gradientTools(layout, targets: targets).padding(.top, 10) }
+                themeMenu(layout, targets: targets)
+            }.disabled(targets.isEmpty)
             Divider()
             Toggle("Preview on the wall as I edit", isOn: Binding(
                 get: { isPreviewing },
@@ -561,6 +575,39 @@ struct NanoleafShapesStudio: View {
     }
 
     // MARK: Panel details and list
+
+    private func exactPanelValues(_ layout: NanoleafLayout, session: NanoleafEditingSession) -> some View {
+        let numbers = layout.panelNumbers(rotationDegrees: rotation)
+        let ids = selection.intersection(layout.paintableIDs).sorted { (numbers[$0] ?? 0) < (numbers[$1] ?? 0) }
+        return VStack(alignment: .leading, spacing: 8) {
+            Text("Selected panels · \(ids.count)").font(.headline)
+            Text("Exact RGB includes panel intensity. Wall brightness applies separately.")
+                .font(.caption).foregroundStyle(Lumen.meter)
+            ScrollView([.horizontal, .vertical]) {
+                VStack(spacing: 0) {
+                    ForEach(ids, id: \.self) { id in
+                        if let color = session.draft[id] {
+                            SpectrumValueRow(name: "Panel \(numbers[id] ?? 0)", color: color.rgb.swiftUIColor,
+                                             intensity: Binding(get: { shapes.session(deviceID)?.draft[id]?.intensity ?? 0 },
+                                                                set: { value in
+                                shapes.edit(deviceID) { $0.edit { $0.setIntensity(value, panels: [id]) } }
+                            }), state: session.hasUnappliedChanges ? "Draft" : "Loaded") { value in
+                                let color = panelColor(value)
+                                shapes.edit(deviceID) { $0.edit { $0.paint(color, panels: [id]) } }
+                            }
+                            .disabled(runningShow != nil)
+                        } else {
+                            HStack {
+                                Text("Panel \(numbers[id] ?? 0)").font(.caption.monospacedDigit())
+                                Spacer()
+                                Text("No draft value — paint to set").font(.caption).foregroundStyle(Lumen.meter)
+                            }.padding(.vertical, 12)
+                        }
+                    }
+                }.frame(minWidth: 460)
+            }.frame(height: min(260, CGFloat(ids.count) * 54))
+        }
+    }
 
     private func panelDetails(_ panel: NanoleafPanel, layout: NanoleafLayout) -> some View {
         let number = layout.panelNumbers(rotationDegrees: rotation)[panel.panelID] ?? 0
@@ -721,8 +768,7 @@ struct NanoleafShapesStudio: View {
     }
 
     private func targetIDs(_ layout: NanoleafLayout) -> Set<Int> {
-        let selected = selection.intersection(layout.paintableIDs)
-        return selected.isEmpty ? layout.paintableIDs : selected
+        SpectrumRegionSelection.targets(selected: selection, available: layout.paintableIDs)
     }
 
     private func toggle(_ id: Int) {
@@ -788,6 +834,7 @@ struct NanoleafShapesStudio: View {
 
     private func recolor(_ color: NanoleafPanelColor, layout: NanoleafLayout) {
         let targets = targetIDs(layout)
+        guard !targets.isEmpty else { return }
         shapes.edit(deviceID) { $0.edit { $0.recolor(color, panels: targets) } }
     }
 
@@ -795,6 +842,7 @@ struct NanoleafShapesStudio: View {
     /// undo step: it ends after the picker has been still for a moment.
     private func recolorContinuously(_ color: NanoleafPanelColor, layout: NanoleafLayout) {
         let targets = targetIDs(layout)
+        guard !targets.isEmpty else { return }
         shapes.edit(deviceID) { session in
             session.beginContinuousEdit()
             session.edit { $0.recolor(color, panels: targets) }
@@ -814,6 +862,7 @@ struct NanoleafShapesStudio: View {
         }
         hexProblem = nil
         let targets = targetIDs(layout)
+        guard !targets.isEmpty else { return }
         // Exact: the panel is sent these bytes, intensity included.
         shapes.edit(deviceID) { $0.edit { $0.paint(color, panels: targets) } }
     }

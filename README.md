@@ -220,7 +220,7 @@ Govee RGBIC devices are individually addressable in zones, and the Govee Home ap
 - **Uplighter Color Studio** knows the H60B0 lights only two of its three zones at a time. Each zone card has its own switch, one-tap combinations (Upper + Middle, Upper + Lower, Middle + Lower) pick a pair outright, and switching a third zone on hands the slot over from whichever has been lit longest and says so. A switched-off zone keeps the color it is holding, so turning it back on restores it. Scenes, undo, Music Mode, and the held-layout re-apply all follow the same choice, and no LumenDesk path asks the lamp for three lit zones.
 - **String Light Studio** follows the physical strand from the controller in numbered rows. H70C1 exposes all 100 Uni-IC beads; H70C2 and H70C4 expose all 200. Outdoor bulb strings use their actual bulb counts, including 30 for H7021 and 15 for H7020/H7028, with expandable models remaining adjustable.
 - H70B1 is treated as a curtain instead of a one-dimensional string. LumenDesk edits its 20 locally addressable vertical column groups; per-bead pixel artwork remains in Govee Home.
-- Tap or drag across segments to select them; paint the selection with swatches, recent colors, or the system color picker. With nothing selected, painting fills the whole strip.
+- Tap or drag across segments to select them; paint the selection with swatches, recent colors, or the system color picker. Choose All to paint the whole strip; with nothing selected, painting is disabled.
 - Selection tools: All, None, Invert, Every Other, and shift-left/right to rotate the layout along the strip.
 - **Per-segment brightness** — dim any selection independently of the rest of the strip.
 - **Blend Across Selection** — fade from one color to another across the selected segments.
@@ -614,15 +614,19 @@ Demo Mode is useful for screenshots, testing UI flows, or learning the app befor
 
 ### Interface
 
-LumenDesk uses a neutral field of named emitters with one shared editing surface. Color belongs to fixture output, palettes and scene scores. Faders expose numeric values, keyboard adjustments and accessibility labels; selection uses checkmarks and boundaries as well as color. Native windows, menus, alerts, color pickers and sheets retain platform behavior. [Design system](DESIGN_SYSTEM.md) records tokens, minimum window sizes and remaining manual accessibility checks.
+The native Mac app uses **Spectrum Studio**: a room and device sidebar, a room overview with a lane for each light, and an integrated device editor. Graphite surfaces and amber controls frame actual fixture colors. A scene shelf recalls scenes to their saved fixture IDs; Save room scene captures current output, excluding unapplied drafts.
+
+Nanoleaf panels, Govee regions, and Luna zones pair a spatial canvas with an exact-value table. Select regions to edit HEX and intensity; **None** disables selection-based edits, and **All** explicitly targets the entire fixture. Nanoleaf RGB includes panel intensity, while Govee and Luna retain separate intensity channels. Unapplied Govee and Luna drafts survive navigation for the current app session; Nanoleaf keeps its existing editing sessions. Leaving an editor ends its temporary preview.
+
+Native menus, alerts, color pickers, sheets and keyboard controls retain platform behavior. iOS retains its room tabs and gains the shared editor refinements. The browser keeps its existing room workspace. [Design system](DESIGN_SYSTEM.md) records tokens and validation boundaries; [Spectrum implementation](SPECTRUM_STUDIO.md) describes the native workspace.
 
 ### Accessibility and interface preferences
 
 The UI honors system accessibility settings where applicable, including reduced motion and reduced transparency. Interface preferences include:
 
 - Quiet Interface.
-- Workspace layout.
-- Interface density.
+- Workspace layout on iOS.
+- Interface density, including compact room rows on Mac.
 - Menu bar content scope.
 - Menu bar urgent-only mode.
 - Confirmation policy.
@@ -806,7 +810,7 @@ design-prototype/                   # Simulated UX mockup, published under /prot
 LumenDesk/
 ├── LumenDeskApp.swift              # App entry point, macOS commands, settings scene, menu bar extra
 ├── ContentView.swift               # Main workspace, header, search, filters, bulk actions, shortcut sheet
-├── Theme.swift                     # Light in place tokens, surfaces, button styles, mark
+├── Theme.swift                     # Spectrum Studio tokens, surfaces, button styles, mark
 ├── DesignControls.swift            # Instrument controls: fader, power key, rocker, chips, selector, lens, meters
 ├── Info.plist                      # Local network and platform privacy metadata
 ├── LumenDesk.entitlements          # Sandbox and network entitlements

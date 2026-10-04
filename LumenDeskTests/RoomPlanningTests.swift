@@ -305,10 +305,83 @@ final class RoomWorkspaceTests: XCTestCase {
     }
 }
 
+/// Region edits must stay narrower than room-level bulk controls.
+final class SpectrumRegionSelectionTests: XCTestCase {
+    func testNoneAndRemovedRegionsNeverExpandToTheWholeFixture() {
+        let available: Set<Int> = [1, 2, 3, 4]
+        XCTAssertTrue(SpectrumRegionSelection.targets(selected: [], available: available).isEmpty)
+        XCTAssertTrue(SpectrumRegionSelection.targets(selected: [99], available: available).isEmpty)
+        XCTAssertEqual(SpectrumRegionSelection.targets(selected: [2, 99], available: available), [2])
+        XCTAssertEqual(SpectrumRegionSelection.targets(selected: available, available: available), available)
+    }
+
+    func testExactLunaChromaKeepsDarkZonesDarkAndPreservesTheirWhitePoint() {
+        let dark = LIFXMatrixColor(hue: 100, saturation: 200, brightness: 0, kelvin: 2800)
+        let changed = dark.settingChroma(.blue)
+        XCTAssertEqual(changed.brightness, 0)
+        XCTAssertEqual(changed.kelvin, 2800)
+        XCTAssertGreaterThan(changed.saturation, 65000)
+        XCTAssertNotEqual(changed.hue, dark.hue)
+        let lit = dark.settingBrightness(0.42)
+        XCTAssertEqual(lit.settingChroma(.red).brightness, lit.brightness)
+        XCTAssertEqual(lit.settingChroma(.red).kelvin, lit.kelvin)
+    }
+
+    func testLunaSelectionExcludesTheFourNonexistentCorners() {
+        let corners: Set<Int> = [0, 4, 25, 29]
+        let face = Set(0..<30).subtracting(corners)
+        let targets = SpectrumRegionSelection.targets(selected: Set(0..<30), available: face)
+        XCTAssertEqual(targets.count, 26)
+        XCTAssertTrue(targets.isDisjoint(with: corners))
+    }
+}
+
 /// Opt-in rendered review, separate from behavioral tests. NSHostingView renders
 /// production SwiftUI in a real AppKit window; these are not mockup screenshots.
 /// No LightManager.start(), UDP clients, microphone or screen capture is used.
 #if os(macOS)
+final class SpectrumEditorLifecycleTests: XCTestCase {
+    @MainActor
+    func testClosingGoveeEditorAfterShowTakeoverPreservesOutputAndKeepsDraft() async throws {
+        let manager = LightManager(defaults: UserDefaults(suiteName: UUID().uuidString)!,
+                                   persistenceStore: temporaryPersistenceStore())
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+        let light = try XCTUnwrap(manager.devices.first { manager.segmentProfile(for: $0)?.layout == .cobStrip })
+        let applied = manager.segmentState(for: light)
+        manager.applySegments(light, state: applied)
+        var pending = applied
+        pending.colors[0] = GoveeSegmentColor(color: .red, brightness: 0.23)
+        let appeared = expectation(description: "Editor mounted")
+        let disappeared = expectation(description: "Draft retained on close")
+        var retained: GoveeSegmentState?
+        let editor = GoveeSegmentEditorView(device: light, initialDraft: pending, onDraftChange: {
+            retained = $0
+            disappeared.fulfill()
+        }).environmentObject(manager).onAppear { appeared.fulfill() }
+        let host = NSHostingView(rootView: AnyView(editor))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 800),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = host
+        window.orderFront(nil)
+        defer { window.orderOut(nil) }
+        await fulfillment(of: [appeared], timeout: 3)
+
+        let effect = try XCTUnwrap(LightingCatalog.effects.first { $0.id != "music-pulse" })
+        manager.startEffect(effect, scope: .all)
+        XCTAssertNotNil(manager.animatingEffect(for: light.id))
+        let outputColors = manager.segmentState(for: light).colors
+        host.rootView = AnyView(EmptyView())
+        await fulfillment(of: [disappeared], timeout: 3)
+
+        XCTAssertEqual(manager.segmentState(for: light).colors, outputColors,
+                       "Closing the editor must not overwrite output after a show takes ownership")
+        XCTAssertEqual(retained?.colors, pending.colors, "The unapplied draft must survive navigation")
+        XCTAssertNotNil(manager.animatingEffect(for: light.id))
+        manager.stopAllEffects()
+    }
+}
+
 final class RoomWorkspaceRenderTests: XCTestCase {
     @MainActor
     func testRenderReviewStates() async throws {
@@ -323,6 +396,7 @@ final class RoomWorkspaceRenderTests: XCTestCase {
         let room = try XCTUnwrap(manager.rooms.first)
         let scope = LightScope.room(room.id)
         try await capture("shell-demo", LumenDeskShellView(), manager, width: 1100, height: 1000)
+        try await capture("shell-620", LumenDeskShellView(), manager, width: 620, height: 1000)
         try await capture("room-all-offline", PlanWorkspaceView(scope: .constant(.all)), manager, width: 1440, height: 1100)
         try await capture("room-620", PlanWorkspaceView(scope: .constant(scope)), manager, width: 620, height: 850)
         try await capture("room-1100", PlanWorkspaceView(scope: .constant(scope)), manager, width: 1100, height: 900)
@@ -333,7 +407,7 @@ final class RoomWorkspaceRenderTests: XCTestCase {
         let light = try XCTUnwrap(manager.devices(in: room).first)
         try await capture("fixture-inspector", PlanWorkspaceView(scope: .constant(scope), initialSelection: [light.id]),
                           manager, width: 1100, height: 1100)
-        try await capture("luna-studio", LIFXLunaEditorView(device: light), manager, width: 1000, height: 800)
+        try await capture("luna-studio", LIFXLunaEditorView(device: light, initialSelection: [6, 7, 8]), manager, width: 1100, height: 950)
         try await capture("room-configuration", RoomConfigurationView(room: room), manager, width: 660, height: 850)
         try await capture("scenes", LibraryWorkspaceView(scope: .constant(scope)), manager, width: 900, height: 800)
         try await capture("music-stopped", ScrollView { MusicModeView(scope: .constant(scope)).padding(24) },
@@ -353,8 +427,15 @@ final class RoomWorkspaceRenderTests: XCTestCase {
         manager.stopAllEffects()
         try await capture("room-arrangement", RoomArrangementSheet(), manager, width: 820, height: 850)
         let strip = try XCTUnwrap(manager.devices.first { manager.segmentProfile(for: $0)?.layout == .cobStrip })
-        try await capture("segment-studio", GoveeSegmentEditorView(device: strip), manager, width: 1000, height: 780)
+        try await capture("segment-studio", GoveeSegmentEditorView(device: strip, initialSelection: [0, 1, 2]), manager, width: 1100, height: 950)
+        try await capture("spectrum-segment-detail", PlanWorkspaceView(scope: .constant(.all), initialSelection: [strip.id]),
+                          manager, width: 1200, height: 1200)
         try await capture("segment-compact", GoveeSegmentEditorView(device: strip), manager, width: 620, height: 850)
+        let string = try XCTUnwrap(manager.devices.first { manager.segmentProfile(for: $0)?.layout == .stringLights })
+        manager.applySegments(string, state: manager.segmentState(for: string))
+        try await capture("dense-room-lane", SpectrumFixtureLane(light: string, selected: false,
+                                                                  hasDraft: false, select: {}, edit: {}).padding(24),
+                          manager, width: 400, height: 280)
         try await capture("discovery-partial", DevicesWorkspaceView(), manager, width: 850, height: 900)
         try await captureShapes(manager)
         try await capture("onboarding", OnboardingView(onFinish: {}), manager, width: 760, height: 720)

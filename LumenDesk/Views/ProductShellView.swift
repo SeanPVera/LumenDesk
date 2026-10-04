@@ -7,6 +7,8 @@ import SwiftUI
 
 enum LumenDeskDestination: String, CaseIterable, Identifiable {
     case home = "Room"
+    case scenes = "Scenes"
+    case music = "Music"
     case automation = "Schedules"
     case devices = "Devices"
     case settings = "Settings"
@@ -16,6 +18,8 @@ enum LumenDeskDestination: String, CaseIterable, Identifiable {
     var symbol: String {
         switch self {
         case .home: return "square.grid.3x3.topleft.filled"
+        case .scenes: return "square.stack.3d.up"
+        case .music: return "music.note"
         case .automation: return "clock"
         case .devices: return "lightbulb.2"
         case .settings: return "gearshape"
@@ -25,28 +29,31 @@ enum LumenDeskDestination: String, CaseIterable, Identifiable {
 
 // MARK: - Shell
 
-/// Named horizontal workspace navigation on Mac; native tabs on iPhone.
+/// A room/device navigator anchors Spectrum Studio on Mac; iPhone retains tabs.
 struct LumenDeskShellView: View {
     @EnvironmentObject private var manager: LightManager
     @State private var destination: LumenDeskDestination = .home
     @State private var showingSettings = false
     @State private var scope: LightScope = .all
+    @State private var requestedDeviceID: String?
+    @StateObject private var studioDrafts = SpectrumDraftStore()
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            #if os(macOS)
-            desktopShell
-            #else
-            mobileShell
-            #endif
-
-            statusOverlays
-        }
-        .tint(Lumen.chalk)
-        .background(Lumen.stage)
-        .safeAreaInset(edge: .top, spacing: 0) {
+        VStack(spacing: 0) {
             if manager.isDemoMode { DemoModeBanner() }
+            ZStack(alignment: .bottom) {
+                #if os(macOS)
+                desktopShell
+                #else
+                mobileShell
+                #endif
+                statusOverlays
+            }
         }
+        .onChange(of: scope) { _ in requestedDeviceID = nil }
+        .onChange(of: manager.isDemoMode) { _ in studioDrafts.retainDevices([]) }
+        .tint(Lumen.studioAccent)
+        .background(Lumen.stage)
         .sheet(isPresented: $showingSettings) {
             NavigationStack { SettingsWorkspaceView() }
                 .environmentObject(manager)
@@ -55,14 +62,17 @@ struct LumenDeskShellView: View {
 
     #if os(macOS)
     private var desktopShell: some View {
-        HStack(spacing: 0) {
+        NavigationSplitView {
+            SpectrumNavigation(destination: $destination, scope: $scope,
+                               requestedDeviceID: $requestedDeviceID)
+                .navigationSplitViewColumnWidth(min: 180, ideal: 210, max: 260)
+                .navigationTitle("LumenDesk")
+        } detail: {
             NavigationStack {
                 destinationView(destination)
-                    .safeAreaInset(edge: .top, spacing: 0) {
-                        WorkspaceNavigation(destination: $destination)
-                    }
             }
         }
+        .navigationSplitViewStyle(.balanced)
         .background(Lumen.stage)
         .toolbar {
             ToolbarItemGroup {
@@ -116,7 +126,11 @@ struct LumenDeskShellView: View {
     @ViewBuilder
     private func destinationView(_ item: LumenDeskDestination) -> some View {
         switch item {
-        case .home: PlanWorkspaceView(scope: $scope)
+        case .home: PlanWorkspaceView(scope: $scope, requestedDeviceID: $requestedDeviceID, studioDrafts: studioDrafts)
+        case .scenes: LibraryWorkspaceView(scope: $scope)
+        case .music:
+            ScrollView { MusicModeView(scope: $scope).padding(24) }
+                .navigationTitle("Music")
         case .automation: AutomationWorkspaceView()
         case .devices: DevicesWorkspaceView()
         case .settings: SettingsWorkspaceView()
@@ -158,30 +172,88 @@ struct LumenDeskShellView: View {
 }
 
 #if os(macOS)
-/// Named navigation takes one horizontal line; the room keeps the window.
-private struct WorkspaceNavigation: View {
+/// The navigator changes presentation scope, never the target IDs saved in scenes.
+private struct SpectrumNavigation: View {
+    @EnvironmentObject private var manager: LightManager
     @Binding var destination: LumenDeskDestination
+    @Binding var scope: LightScope
+    @Binding var requestedDeviceID: String?
+
     var body: some View {
-        HStack(spacing: 24) {
-            LumenMark(size: 20).accessibilityHidden(true)
-            ForEach(LumenDeskDestination.allCases) { item in
-                Button { destination = item } label: {
-                    Text(item.rawValue)
-                        .font(.callout.weight(destination == item ? .semibold : .regular))
-                        .foregroundStyle(destination == item ? Lumen.lit : Lumen.meter)
-                        .padding(.vertical, 12)
-                        .overlay(alignment: .bottom) {
-                            if destination == item { Rectangle().fill(Lumen.lit).frame(height: 2) }
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 5) {
+                    heading("Rooms")
+                    roomButton("All lights", scope: .all, symbol: "lightbulb.2")
+                    ForEach(manager.rooms) { room in
+                        roomButton(room.name, scope: .room(room.id), symbol: "rectangle.3.group")
+                    }
+                    heading("Lights")
+                    ForEach(manager.devices(in: scope)) { light in
+                        Button {
+                            requestedDeviceID = light.id
+                            destination = .home
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: light.brand == .nanoleaf ? "hexagon" : light.isLIFXLuna ? "circle.grid.3x3" : "lightbulb")
+                                    .frame(width: 22)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(light.label).lineLimit(2)
+                                    Text(light.isStale ? "Not responding" : light.brand.rawValue.uppercased())
+                                        .font(.caption).foregroundStyle(Lumen.meter)
+                                }
+                                Spacer(minLength: 0)
+                            }
+                            .padding(10)
+                            .background(destination == .home && requestedDeviceID == light.id
+                                        ? Lumen.floorRaised : Color.clear, in: RoundedRectangle(cornerRadius: 6))
                         }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Edit \(light.label)")
+                        .accessibilityAddTraits(destination == .home && requestedDeviceID == light.id ? .isSelected : [])
+                    }
+                    Divider().padding(.vertical, 14)
+                    ForEach([LumenDeskDestination.scenes, .music, .automation, .devices, .settings]) { item in
+                        Button { destination = item } label: {
+                            Label(item.rawValue, systemImage: item.symbol)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(10)
+                                .background(destination == item ? Lumen.floorRaised : Color.clear,
+                                            in: RoundedRectangle(cornerRadius: 6))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityAddTraits(destination == item ? .isSelected : [])
+                    }
                 }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(destination == item ? .isSelected : [])
+                .padding(12)
             }
-            Spacer(minLength: 0)
+            Label(manager.isDemoMode ? "Demo workspace" : "Local control only", systemImage: manager.isDemoMode ? "play.rectangle" : "network")
+                .font(.caption).foregroundStyle(Lumen.meter)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(18)
         }
-        .padding(.horizontal, 24)
-        .background(Lumen.stage)
-        .overlay(alignment: .bottom) { Rectangle().fill(Lumen.ruleSoft).frame(height: 1) }
+        .background(Lumen.deck)
+    }
+
+    private func heading(_ title: String) -> some View {
+        Text(title.uppercased()).font(.caption.weight(.medium)).tracking(1)
+            .foregroundStyle(Lumen.muted).padding(.horizontal, 10).padding(.top, 16).padding(.bottom, 5)
+    }
+
+    private func roomButton(_ title: String, scope target: LightScope, symbol: String) -> some View {
+        Button {
+            scope = target
+            requestedDeviceID = nil
+            destination = .home
+        } label: {
+            Label(title, systemImage: symbol)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(10)
+                .background(scope == target ? Lumen.floorRaised : Color.clear,
+                            in: RoundedRectangle(cornerRadius: 6))
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(scope == target ? .isSelected : [])
     }
 }
 #endif
@@ -1105,10 +1177,12 @@ struct SettingsWorkspaceView: View {
                            subtitle: "Set the desk's density, confirmation, privacy, and demo behavior.")
 
                 SettingsSection(title: "Workspace", icon: "rectangle.3.group") {
+                    #if !os(macOS)
                     SettingSelectorRow(title: "Layout", selection: $layout,
                                        options: WorkspaceLayout.allCases.map {
                                            LumenOption(value: $0.rawValue, title: $0.title)
                                        })
+                    #endif
                     SettingSelectorRow(title: "Density", selection: $density,
                                        options: InterfaceDensity.allCases.map {
                                            LumenOption(value: $0.rawValue, title: $0.title)

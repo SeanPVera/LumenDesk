@@ -113,19 +113,21 @@ Documented in `MUSIC_MODE_ARCHITECTURE.md`; read it before touching the pipeline
 
 ### Views and navigation
 
-`RootView` selects onboarding or `LumenDeskShellView`. The current shell uses
-named Room / Schedules / Devices / Settings navigation on macOS and native tabs
-plus Settings access on iOS. `PlanWorkspaceView` is now the selected-room workspace:
-Light, Compositions and Music share one `LightScope` binding. `RoomConfigurationView`
-and `RoomArrangementSheet` hold advanced organization. The file name Plan remains
-for source compatibility; the primary workspace is not the old whole-home drawing.
-`ContentView` remains legacy, with shared toast/diagnostic components still used.
+`RootView` selects onboarding or `LumenDeskShellView`. On macOS, Spectrum Studio
+uses a native split-view sidebar with rooms, devices, Scenes, Music, Schedules,
+Devices and Settings. `PlanWorkspaceView` contains room overview lanes and inline
+Nanoleaf/Govee/Luna editors. The shell owns `SpectrumDraftStore` so Govee/Luna
+presentation drafts survive navigation without becoming applied output. iOS keeps
+native tabs and its Light/Compositions/Music room workspace. Region editors use
+explicit selection: None edits nothing; room bulk controls retain their own
+whole-room default. `RoomConfigurationView` and `RoomArrangementSheet` handle
+organization. `ContentView` remains legacy with shared diagnostic components.
 
-The dark visual system is **Light in place**. `Theme.swift` holds neutral tokens;
-fixture colors appear as output content. `DesignControls.swift` retains accessible
-faders and buttons with native menus, fields, sheets and color pickers. Do not
-reintroduce decorative console hardware or an icon-only navigation rail. Read
-`DESIGN_SYSTEM.md` and `REDESIGN_REPORT.md` for the current hierarchy and validation.
+The native visual system is **Spectrum Studio**: graphite surfaces, restrained
+amber actions and actual device color. `Theme.swift` owns tokens;
+`DesignControls.swift` owns faders, buttons and validated exact-value rows. Use
+native menus, fields, sheets and color pickers. Read `DESIGN_SYSTEM.md` and
+`SPECTRUM_STUDIO.md` for hierarchy and validation boundaries.
 
 
 ## Conventions and invariants

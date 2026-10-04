@@ -65,6 +65,16 @@ struct LIFXMatrixColor: Codable, Equatable {
                                kelvin: kelvin)
     }
 
+    /// Exact chroma editing preserves the independent HSBK channels, including
+    /// zero brightness and the zone's existing white point.
+    func settingChroma(_ color: Color) -> LIFXMatrixColor {
+        let converted = LIFXMatrixColor(color: color, brightness: 1, kelvin: 3500)
+        var copy = self
+        copy.hue = converted.hue
+        copy.saturation = converted.saturation
+        return copy
+    }
+
     func settingBrightness(_ value: Double) -> LIFXMatrixColor {
         var copy = self
         copy.brightness = UInt16(max(0, min(65_535, Int((value * 65_535).rounded()))))

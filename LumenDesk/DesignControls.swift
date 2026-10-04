@@ -1,5 +1,86 @@
 import SwiftUI
 
+/// Exact region values bind to the same draft as the spatial canvas. Color
+/// commits are validated before invoking the editor's existing mutation path.
+struct SpectrumValueRow: View {
+    @Environment(\.isEnabled) private var isEnabled
+    let name: String
+    let color: Color
+    @Binding var intensity: Double
+    var intensityRange: ClosedRange<Double> = 0...1
+    let state: String
+    let commitColor: (Color) -> Void
+    @State private var hex = ""
+    @State private var invalidHex = false
+    @FocusState private var editingHex: Bool
+
+    private var rgb: NanoleafRGB {
+        let values = color.rgbComponents
+        func byte(_ value: Double) -> UInt8 { UInt8(min(255, max(0, (value * 255).rounded()))) }
+        return NanoleafRGB(red: byte(values.r), green: byte(values.g), blue: byte(values.b))
+    }
+
+    private var percent: Binding<Double> {
+        Binding(get: { intensity * 100 }, set: { value in
+            guard isEnabled, value.isFinite else { return }
+            intensity = min(intensityRange.upperBound, max(intensityRange.lowerBound, value / 100))
+        })
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            ViewThatFits(in: .horizontal) {
+                fields(showsRGB: true)
+                fields(showsRGB: false)
+            }
+            if invalidHex {
+                Text("Enter six hex digits, such as #FFB36B.").font(.caption).foregroundStyle(Lumen.warn)
+            }
+        }
+        .padding(.vertical, 9)
+        .overlay(alignment: .bottom) { Rectangle().fill(Lumen.ruleSoft).frame(height: 1) }
+        .onAppear { hex = rgb.hexString }
+        .onChange(of: rgb) { value in hex = value.hexString; invalidHex = false }
+        .onChange(of: editingHex) { focused in if !focused { submitHex() } }
+    }
+
+    private func fields(showsRGB: Bool) -> some View {
+        HStack(spacing: 12) {
+            Text(name).font(.caption.monospacedDigit()).frame(width: 62, alignment: .leading)
+            RoundedRectangle(cornerRadius: 2).fill(color).frame(width: 18, height: 18)
+                .accessibilityHidden(true)
+            TextField("HEX", text: $hex).textFieldStyle(.roundedBorder)
+                .font(.caption.monospaced()).frame(width: 92)
+                .focused($editingHex).onSubmit(submitHex)
+                .accessibilityLabel("\(name) hex color")
+            if showsRGB {
+                Text("\(rgb.red) · \(rgb.green) · \(rgb.blue)")
+                    .font(.caption.monospacedDigit()).foregroundStyle(Lumen.meter)
+                    .frame(minWidth: 100, alignment: .leading)
+                    .accessibilityLabel("Red \(rgb.red), green \(rgb.green), blue \(rgb.blue)")
+            }
+            Spacer(minLength: 0)
+            TextField("Intensity", value: percent, format: .number.precision(.fractionLength(0)))
+                .textFieldStyle(.roundedBorder).multilineTextAlignment(.trailing)
+                .font(.caption.monospacedDigit()).frame(width: 48)
+                .accessibilityLabel("\(name) intensity percent")
+            Text("%").font(.caption).foregroundStyle(Lumen.meter)
+            Text(state).font(.caption).foregroundStyle(Lumen.meter).frame(minWidth: 44, alignment: .trailing)
+        }
+    }
+
+    private func submitHex() {
+        guard isEnabled else { return }
+        guard let parsed = NanoleafRGB(hex: hex) else { invalidHex = true; return }
+        invalidHex = false
+        guard parsed != rgb else { hex = parsed.hexString; return }
+        commitColor(parsed.swiftUIColor)
+        // The editor may normalize chroma (Luna); display its actual value.
+        // A changed color updates this again through onChange above.
+        hex = rgb.hexString
+    }
+}
+
 // MARK: - Shared light controls
 // Presentation only: bindings retain existing command/commit behavior.
 // Neutral chrome, visible focus, tabular values and keyboard/VoiceOver actions.
@@ -12,7 +93,7 @@ struct LumenFaderTrack {
     let gradient: LinearGradient
 
     static let beam = LumenFaderTrack(
-        gradient: LinearGradient(colors: [Lumen.chalk.opacity(0.55), Lumen.lit],
+        gradient: LinearGradient(colors: [Lumen.studioAccent.opacity(0.65), Lumen.studioAccent],
                                  startPoint: .leading, endPoint: .trailing)
     )
 
@@ -64,7 +145,7 @@ struct LumenFader: View {
             if showsHeader {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(label)
-                        .font(.system(size: 11.5, weight: .medium))
+                        .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(Lumen.meter)
                         .lineLimit(1)
                     Spacer(minLength: 8)

@@ -419,26 +419,7 @@ final class LightManager: ObservableObject {
                     title: "Automation ran",
                     detail: "\(room.name): \(entry.action.displayName) at \(entry.timeString)"
                 )
-                let lights = devices(in: room)
-                switch entry.action {
-                case .turnOn, .atSunrise:
-                    for device in lights {
-                        device.isOn = true
-                        sendPower(device, on: true)
-                    }
-                case .turnOff, .atSunset:
-                    for device in lights {
-                        device.isOn = false
-                        sendPower(device, on: false)
-                    }
-                default:
-                    if let brightness = entry.action.brightnessValue {
-                        for device in lights {
-                            device.brightness = brightness
-                            sendBrightness(device, value: brightness)
-                        }
-                    }
-                }
+                applyScheduleAction(entry.action, to: devices(in: room))
             }
         }
     }
@@ -468,13 +449,7 @@ final class LightManager: ObservableObject {
 
     func runMissedAutomation(_ missed: MissedAutomation) {
         guard let room = rooms.first(where: { $0.id == missed.roomID }) else { return }
-        let lights = devices(in: room)
-        if let brightness = missed.entry.action.brightnessValue {
-            for device in lights { device.brightness = brightness; sendBrightness(device, value: brightness) }
-        } else {
-            let on = missed.entry.action == .turnOn || missed.entry.action == .atSunrise
-            for device in lights { device.isOn = on; sendPower(device, on: on) }
-        }
+        applyScheduleAction(missed.entry.action, to: devices(in: room))
         if scheduleEngine.removeMissedAutomation(id: missed.id) { objectWillChange.send() }
     }
 
@@ -854,7 +829,7 @@ final class LightManager: ObservableObject {
         guard !lights.isEmpty else { return }
         stopEffects(touching: deviceIDs)
         recordChange(lights)
-        announceAction("\(lights.count) lights turned \(on ? "on" : "off")", lights: lights)
+        announceAction("Turned \(on ? "on" : "off")", lights: lights)
         for d in lights { d.isOn = on; sendPower(d, on: on) }
     }
 
@@ -1586,6 +1561,7 @@ final class LightManager: ObservableObject {
     }
 
     private func apply(_ entry: [LightRuntimeSnapshot]) {
+        cancelPendingBrightness(deviceIDs: Set(entry.map(\.deviceID)))
         for snap in entry {
             guard let d = device(withID: snap.deviceID) else { continue }
             d.isOn = snap.isOn
@@ -3614,9 +3590,24 @@ extension LightManager {
         }
     }
 
+    /// Cancels debounced brightness sends so a later undo, scene, or schedule
+    /// write is not overwritten by a stale slider flush.
+    func cancelPendingBrightness(deviceIDs: Set<String>? = nil) {
+        if let deviceIDs {
+            for id in deviceIDs {
+                brightnessTasks[id]?.cancel()
+                brightnessTasks[id] = nil
+            }
+        } else {
+            brightnessTasks.values.forEach { $0.cancel() }
+            brightnessTasks = [:]
+        }
+    }
+
+    var pendingBrightnessDeviceIDsForTesting: Set<String> { Set(brightnessTasks.keys) }
+
     func commitBrightness(_ device: LightDevice, value: Double) {
-        brightnessTasks[device.id]?.cancel()
-        brightnessTasks[device.id] = nil
+        cancelPendingBrightness(deviceIDs: [device.id])
         device.brightness = value
         sendBrightness(device, value: value)
         logActivity(.command, title: "Brightness changed", detail: "\(device.label): \(Int(value * 100))%")
@@ -3856,13 +3847,37 @@ extension LightManager {
     }
 
     func testSchedule(_ entry: ScheduleEntry, in room: Room) {
-        let lights = devices(in: room)
-        switch entry.action {
-        case .turnOn, .atSunrise: setPower(deviceIDs: Set(lights.map(\.id)), on: true)
-        case .turnOff, .atSunset: setPower(deviceIDs: Set(lights.map(\.id)), on: false)
-        default: if let value = entry.action.brightnessValue { setBrightness(deviceIDs: Set(lights.map(\.id)), value: value) }
-        }
+        applyScheduleAction(entry.action, to: devices(in: room))
         logActivity(.schedule, title: "Schedule tested", detail: "\(room.name): \(entry.action.displayName)")
+    }
+
+    /// Shared show-takeover path for real scheduled runs, tests, and missed
+    /// catch-up. Stops effects that would repaint over the change and sends
+    /// brightness immediately (not the slider debounce).
+    private func applyScheduleAction(_ action: ScheduleAction, to lights: [LightDevice]) {
+        guard !lights.isEmpty else { return }
+        let ids = Set(lights.map(\.id))
+        stopEffects(touching: ids)
+        cancelPendingBrightness(deviceIDs: ids)
+        switch action {
+        case .turnOn, .atSunrise:
+            for device in lights {
+                device.isOn = true
+                sendPower(device, on: true)
+            }
+        case .turnOff, .atSunset:
+            for device in lights {
+                device.isOn = false
+                sendPower(device, on: false)
+            }
+        default:
+            if let brightness = action.brightnessValue {
+                for device in lights {
+                    device.brightness = brightness
+                    sendBrightness(device, value: brightness)
+                }
+            }
+        }
     }
 
     func scenePreview(_ scene: LightingScene) -> SceneApplicationPreview {
@@ -3900,7 +3915,9 @@ extension LightManager {
             )
             return
         }
-        stopEffects(touching: Set(preview.affected.map(\.id)))
+        let affectedIDs = Set(preview.affected.map(\.id))
+        stopEffects(touching: affectedIDs)
+        cancelPendingBrightness(deviceIDs: affectedIDs)
         recordChange(preview.affected)
         var succeeded: [String] = [], failed: [String] = [], skipped: [String] = []
         for device in preview.affected {
@@ -4095,8 +4112,7 @@ extension LightManager {
 
     private func cancelWorkspaceTasks() {
         scanGeneration += 1
-        brightnessTasks.values.forEach { $0.cancel() }
-        brightnessTasks = [:]
+        cancelPendingBrightness()
         commandCoordinator.cancelAllTasks(clearPendingAndExpectations: true)
     }
 

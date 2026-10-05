@@ -342,7 +342,7 @@ final class AudioReactiveSessionController: ObservableObject {
     }
 
     /// One audible predicate for subscribe and render paths.
-    static func isAudible(_ snapshot: AudioReactiveSnapshot) -> Bool {
+    nonisolated static func isAudible(_ snapshot: AudioReactiveSnapshot) -> Bool {
         snapshot.confidence >= 0.025
             || snapshot.level >= 0.025
             || snapshot.energy >= 0.035

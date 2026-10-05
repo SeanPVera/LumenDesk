@@ -903,20 +903,22 @@ final class MusicFeatureAnalyzer {
                 vDSP_vadd(spectrumPower, 1, magnitudeScratch, 1, &spectrumPower, 1, binCount)
             }
             var invChannels = 1 / channelCount
-            vDSP_vsmul(spectrumPower, 1, &invChannels, &fftMagnitudes, 1, binCount)
+            // Separate buffers: Swift exclusivity rejects in-place vvsqrtf.
+            vDSP_vsmul(spectrumPower, 1, &invChannels, &magnitudeScratch, 1, binCount)
             var sqrtCount = Int32(fftMagnitudes.count)
-            vvsqrtf(&fftMagnitudes, &fftMagnitudes, &sqrtCount)
+            vvsqrtf(&fftMagnitudes, &magnitudeScratch, &sqrtCount)
         }
         let rms = Double(sqrt(totalMeanSquare / channelCount))
         // Compressed log magnitudes are what the flux is measured on: the
         // difference of two logs is a ratio, so an onset means the same thing
-        // at any playback volume.
+        // at any playback volume. spectrumPower is free here and avoids an
+        // overlapping in-place vvlog1pf on magnitudeScratch.
         var compression = Float(Self.logCompression)
         vDSP_vsmul(fftMagnitudes, 1, &compression, &magnitudeScratch, 1, binCount)
         var n = Int32(fftMagnitudes.count)
-        vvlog1pf(&magnitudeScratch, &magnitudeScratch, &n)
+        vvlog1pf(&spectrumPower, &magnitudeScratch, &n)
         for bin in logMagnitudes.indices {
-            logMagnitudes[bin] = Double(magnitudeScratch[bin])
+            logMagnitudes[bin] = Double(spectrumPower[bin])
         }
 
         // Fixed soft-knee loudness preserves quiet/loud contrast. Adaptive gain

@@ -12,9 +12,14 @@ final class SpectrumDraftStore: ObservableObject {
     func retainDevices(_ ids: Set<String>) {
         luna = luna.filter { ids.contains($0.key) }
         govee = govee.filter { ids.contains($0.key) }
-        for scope in selections.keys {
-            selections[scope] = RoomWorkspaceSelection.reconciled(selected: selections[scope] ?? [], available: Array(ids))
+        // Reconcile every scope, then assign once so observers see a single change
+        // instead of one publication per scope key.
+        let available = Array(ids)
+        var next = selections
+        for scope in next.keys {
+            next[scope] = RoomWorkspaceSelection.reconciled(selected: next[scope] ?? [], available: available)
         }
+        selections = next
     }
 }
 
@@ -35,6 +40,8 @@ struct PlanWorkspaceView: View {
     @AppStorage("LumenDesk.workspaceLayout.v1") private var layout = WorkspaceLayout.automatic.rawValue
     @AppStorage("LumenDesk.interfaceDensity.v1") private var density = InterfaceDensity.comfortable.rawValue
 
+    @State private var pendingInitialSelection: Set<String>?
+
     init(scope: Binding<LightScope> = .constant(.all),
          requestedDeviceID: Binding<String?> = .constant(nil),
          studioDrafts: SpectrumDraftStore = SpectrumDraftStore(),
@@ -42,9 +49,10 @@ struct PlanWorkspaceView: View {
         _scope = scope
         _requestedDeviceID = requestedDeviceID
         self.studioDrafts = studioDrafts
-        if studioDrafts.selections[scope.wrappedValue] == nil, !initialSelection.isEmpty {
-            studioDrafts.selections[scope.wrappedValue] = initialSelection
-        }
+        // Seeding @Published selections from a View init publishes during the
+        // parent's body evaluation. Defer to onAppear instead.
+        let shouldSeed = studioDrafts.selections[scope.wrappedValue] == nil && !initialSelection.isEmpty
+        _pendingInitialSelection = State(initialValue: shouldSeed ? initialSelection : nil)
         _section = State(initialValue: initialSection)
         _studioMode = State(initialValue: requestedDeviceID.wrappedValue != nil || initialSelection.count == 1 ? .detail : .overview)
     }
@@ -122,6 +130,12 @@ struct PlanWorkspaceView: View {
         }
         .background(Lumen.stage)
         .navigationTitle("Room")
+        .onAppear {
+            if let pending = pendingInitialSelection, studioDrafts.selections[scope] == nil {
+                studioDrafts.selections[scope] = pending
+            }
+            pendingInitialSelection = nil
+        }
         .onChange(of: scope) { _ in
             searchText = ""; studioMode = .overview
             requestedDeviceID = nil
@@ -259,7 +273,7 @@ struct PlanWorkspaceView: View {
 
     private var studioRoomInspector: some View {
         VStack(alignment: .leading, spacing: 18) {
-            RoomOutputControls(lights: targets, title: selectedIDs.isEmpty ? "Room controls" : "\(targets.count) selected lights")
+            RoomOutputControls(lights: targets, title: selectedIDs.isEmpty ? "Room controls" : "\(targets.count) selected light\(targets.count == 1 ? "" : "s")")
             roomColorSchemes
             if !selectedIDs.isEmpty {
                 Button("Clear selection — whole room") { selectedIDs.removeAll() }
@@ -276,17 +290,11 @@ struct PlanWorkspaceView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Color schemes").font(.headline)
             Menu("Apply a color scheme") {
-                ForEach(LightingTheme.Category.allCases, id: \.self) { category in
-                    Menu(category.rawValue) {
-                        ForEach(LightingCatalog.themes.filter { $0.category == category }) { theme in
-                            Button(theme.name) {
-                                manager.applyTheme(theme, deviceIDs: Set(targets.map(\.id)), in: scope)
-                            }
-                        }
-                    }
+                LightingThemeCategoryMenuContent { theme in
+                    manager.applyTheme(theme, deviceIDs: Set(targets.map(\.id)), in: scope)
                 }
             }.disabled(targets.isEmpty)
-            Text("Applies across \(targets.count) targeted lights, including their supported panels and zones. Turns them on at the scheme’s brightness.")
+            Text("Applies across \(targets.count) targeted light\(targets.count == 1 ? "" : "s"), including their supported panels and zones. Turns them on at the scheme’s brightness.")
                 .font(.caption).foregroundStyle(Lumen.meter)
         }
     }
@@ -925,7 +933,10 @@ struct RoomOutputControls: View {
         _output = StateObject(wrappedValue: RoomOutputState(lights: lights))
     }
 
-    private var ids: Set<String> { output.ids }
+    /// Always derive command targets from the current `lights` prop. `output`
+    /// can lag behind on macOS 13 when the one-argument `onChange` closure
+    /// observes the previous light set.
+    private var ids: Set<String> { Set(lights.map(\.id)) }
     private var owned: Bool { lights.contains { manager.animatingEffect(for: $0.id) != nil } }
 
     var body: some View {
@@ -972,7 +983,8 @@ struct RoomOutputControls: View {
                     .font(.callout).foregroundStyle(Lumen.meter)
             }
         }
-        .onChange(of: lights.map(ObjectIdentifier.init)) { _ in output.observe(lights) }
+        .onAppear { output.observe(lights) }
+        .onChange(of: lights.map(\.id)) { _ in output.observe(lights) }
     }
 }
 

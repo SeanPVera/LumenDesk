@@ -218,15 +218,8 @@ struct RoomSectionView: View {
                     // One submenu per mood. A flat list of every theme was
                     // workable at eighteen and is a wall at forty-eight.
                     Menu("Apply Theme") {
-                        ForEach(LightingTheme.Category.allCases, id: \.self) { category in
-                            let themes = LightingCatalog.themes.filter { $0.category == category }
-                            if !themes.isEmpty {
-                                Menu(category.rawValue) {
-                                    ForEach(themes) { theme in
-                                        Button(theme.name) { manager.applyTheme(theme, scope: .room(room.id)) }
-                                    }
-                                }
-                            }
+                        LightingThemeCategoryMenuContent { theme in
+                            manager.applyTheme(theme, scope: .room(room.id))
                         }
                     }
                     Menu("Start Effect") {

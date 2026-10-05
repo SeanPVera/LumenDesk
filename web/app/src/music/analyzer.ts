@@ -129,7 +129,8 @@ export class MusicFeatureAnalyzer {
     const image = left + right < 1e-8 ? .5 : right / (left + right);
     for (let i = 0; i < samples.length; i++) {
       this.ring[this.ringWrite] = stereo ? ((stereo.left[i] ?? 0) + (stereo.right[i] ?? 0)) / 2 : samples[i] ?? 0;
-      this.ringWrite = (this.ringWrite + 1) % WINDOW;
+      // Using bitwise AND for power-of-two ring buffer wrapping avoids floating-point modulo overhead
+      this.ringWrite = (this.ringWrite + 1) & (WINDOW - 1);
       this.processedSamples++;
       if (--this.samplesUntilHop <= 0) {
         this.samplesUntilHop = HOP;
@@ -143,8 +144,9 @@ export class MusicFeatureAnalyzer {
 
   private hop(stereo: number): AudioReactiveSnapshot {
     let square = 0;
+    // Using bitwise AND with (WINDOW - 1) for power-of-two ring buffer indexing avoids floating-point modulo overhead
     for (let i = 0; i < WINDOW; i++) {
-      const sample = this.ring[(this.ringWrite + i) % WINDOW];
+      const sample = this.ring[(this.ringWrite + i) & (WINDOW - 1)];
       square += sample * sample;
       this.windowed[i] = sample * this.hann[i];
     }

@@ -904,7 +904,8 @@ final class MusicFeatureAnalyzer {
             }
             var invChannels = 1 / channelCount
             vDSP_vsmul(spectrumPower, 1, &invChannels, &fftMagnitudes, 1, binCount)
-            vDSP_vsqrt(fftMagnitudes, 1, &fftMagnitudes, 1, binCount)
+            var sqrtCount = Int32(fftMagnitudes.count)
+            vvsqrtf(&fftMagnitudes, &fftMagnitudes, &sqrtCount)
         }
         let rms = Double(sqrt(totalMeanSquare / channelCount))
         // Compressed log magnitudes are what the flux is measured on: the

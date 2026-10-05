@@ -18,12 +18,15 @@ control behavior. Nothing here establishes perceptual synchronization.
    system capture uses sample presentation time. All are mapped to buffer-end
    monotonic host time, with receipt time only as a fallback.
 2. **`MusicFeatureAnalyzer`** consumes every accepted buffer exactly once on the
-   analysis queue. Channels are averaged for the FFT and the first two channels
-   provide stereo balance. A ring supports arbitrary buffer sizes, a 2048-sample
+   analysis queue. Channel powers are averaged after separate FFTs so opposite
+   stereo phase cannot cancel audible music; RMS also averages channel energy.
+   The first two channels provide stereo balance. Per-channel rings support arbitrary buffer sizes, a 2048-sample
    Hann window and a 512-sample hop. Rate changes and capture discontinuities reset
    FFT history, tracker and envelopes together. Duplicate/reversed end timestamps
-   are rejected. The single-slot ingress guard bounds analysis work; discarded
-   buffers are counted and the next accepted buffer starts a new contiguous run.
+   are rejected. Ingress admits short capture bursts on a user-initiated serial
+   queue, bounded by 250 ms of audio and 32 buffers (one oversized buffer may
+   enter an empty queue). Overflow buffers are counted and the next accepted
+   buffer starts a new contiguous run. Counts reset for each source generation.
    This is bounded capture, not a claim that capture can never lose samples.
 3. Fixed soft-knee RMS level preserves quiet/loud contrast; adaptive gain is
    retained for onset detection. Rectified log spectral flux is averaged within
@@ -39,6 +42,10 @@ control behavior. Nothing here establishes perceptual synchronization.
    scopes. Source generations guard analysis and publication. Source changes
    cannot replace another room's capture. Scope identity guards completion and
    frame callbacks. Demo grooves enter here as explicitly synthetic snapshots.
+   The render timer runs in common run-loop modes so native control tracking
+   does not pause lighting. Capture delegate failures surface as unavailable;
+   input health distinguishes silence from missing samples. Restart reconnects
+   the shared system source while retaining scope sessions and restore snapshots.
 5. **`MusicChoreographyEngine.makeFrame`** applies freshness, configuration, roles
    and topology to produce vendor-neutral HSB states, transition durations,
    timestamp and sequence. No vendor command or second audio pipeline lives here.

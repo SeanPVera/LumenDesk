@@ -1,5 +1,8 @@
 import SwiftUI
 import UniformTypeIdentifiers
+#if os(macOS)
+import AppKit
+#endif
 
 struct MusicModeView: View {
     @EnvironmentObject private var manager: LightManager
@@ -98,6 +101,18 @@ struct MusicModeView: View {
                  ? "Stopping restores the lighting from before the show."
                  : "Stopping keeps the last lighting output.")
                 .font(.caption).foregroundStyle(Lumen.meter)
+            #if os(macOS)
+            HStack(alignment: .top, spacing: 12) {
+                Text("Play a song in Apple Music, then start system audio. LumenDesk listens to audio playing on this Mac; no file import is needed. Other apps playing audio are included.")
+                    .font(.caption).foregroundStyle(Lumen.meter)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Open Apple Music") {
+                    if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Music") {
+                        NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
+                    }
+                }.buttonStyle(LumenSecondaryButtonStyle(compact: true))
+            }
+            #endif
             Toggle("Explain controls", isOn: $showsPlainHelp)
                 .toggleStyle(LumenRockerStyle())
         }
@@ -688,12 +703,11 @@ private struct MusicModeInputStatusView: View {
                     .font(LumenType.display(size: 15, weight: .semibold))
                     .foregroundStyle(statusColor)
                 Spacer()
-                if isRunning && !controller.isAudioPlaying {
-                    Label("No audio playing", systemImage: "speaker.slash.fill")
-                        .font(.caption.weight(.semibold)).foregroundStyle(Lumen.warning)
-                } else if isRunning {
-                    Label("Input active", systemImage: "checkmark.circle.fill")
-                        .font(.caption.weight(.semibold)).foregroundStyle(Lumen.success)
+                if isRunning {
+                    Label(controller.isAudioPlaying ? "Input active" : controller.inputHealth.displayName,
+                          systemImage: controller.isAudioPlaying ? "checkmark.circle.fill" : "speaker.slash.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(controller.isAudioPlaying ? Lumen.success : Lumen.warning)
                 }
             }
             meter("Input", value: controller.latestSnapshot.level, color: Lumen.beamBright, segments: 32)
@@ -719,14 +733,29 @@ private struct MusicModeInputStatusView: View {
                     meter("Mids", value: controller.latestSnapshot.mids, color: Lumen.meter, segments: 12)
                     meter("Highs", value: controller.latestSnapshot.highs, color: Lumen.muted, segments: 12)
                 }.padding(.top, 12)
+                Text("\(controller.latestSnapshot.inputChannels ?? 0) input channels · \(controller.latestSnapshot.droppedBuffers) dropped buffers")
+                    .font(.caption.monospacedDigit()).foregroundStyle(Lumen.meter)
             }
             if controller.sourceStatus == .permissionDenied {
                 Text(permissionMessage)
                     .font(.caption).foregroundStyle(Lumen.warning)
             } else if controller.sourceStatus == .unavailable {
-                Text("The audio source is unavailable. Check permission and try starting Music Mode again.")
+                Text("Audio capture is unavailable or was interrupted. Restart the source to reconnect.")
                     .font(.caption).foregroundStyle(Lumen.warning)
             }
+            #if os(macOS)
+            if isRunning && controller.canRestartSystemAudio {
+                if !controller.isAudioPlaying && controller.sourceStatus == .systemAudio {
+                    Text(controller.inputHealth == .stalled
+                         ? "The capture stopped delivering audio. Restart system audio. If it stays silent, check LumenDesk’s Screen & System Audio Recording permission in System Settings."
+                         : "Start playback in Apple Music and check that it is audible on this Mac. If music is playing but this meter stays empty, restart system audio.")
+                        .font(.caption).foregroundStyle(Lumen.meter)
+                }
+                Button("Restart system audio") { controller.restartSystemAudio() }
+                    .buttonStyle(LumenSecondaryButtonStyle(compact: true))
+                    .disabled(controller.sourceStatus == .requestingPermission)
+            }
+            #endif
             if showsPlainHelp {
                 Text("Input shows received audio level. Energy describes the music, not measured light output. A tempo appears only when the analyzer has a reliable pulse; generated lighting is shown separately below.")
                     .font(.caption)

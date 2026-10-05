@@ -847,14 +847,20 @@ final class LightManager: ObservableObject {
 
     func setPower(deviceIDs: Set<String>, on: Bool) {
         let lights = devices.filter { deviceIDs.contains($0.id) }
+        guard !lights.isEmpty else { return }
+        stopEffects(touching: deviceIDs)
         recordChange(lights)
+        announceAction("\(lights.count) lights turned \(on ? "on" : "off")", lights: lights)
         for d in lights { d.isOn = on; sendPower(d, on: on) }
     }
 
     func setBrightness(deviceIDs: Set<String>, value: Double) {
         let lights = devices.filter { deviceIDs.contains($0.id) }
+        guard !lights.isEmpty else { return }
+        stopEffects(touching: deviceIDs)
         recordChange(lights)
-        for d in lights { d.brightness = value; sendBrightness(d, value: value) }
+        let clamped = min(1, max(0, value))
+        for d in lights { previewBrightness(d, value: clamped) }
     }
 
     /// One undo entry for a deliberate multi-fixture color edit.
@@ -910,6 +916,17 @@ final class LightManager: ObservableObject {
                          : "No lights in “\(scopeDisplayName(scope))” to theme.")
             return
         }
+        applyTheme(theme, to: targets, suffix: scope == .all ? "" : " in “\(scopeDisplayName(scope))”")
+    }
+
+    /// Palette distribution follows room order and respects an explicit selection.
+    func applyTheme(_ theme: LightingTheme, deviceIDs: Set<String>, in scope: LightScope) {
+        let targets = devices(in: scope).filter { deviceIDs.contains($0.id) }
+        guard !targets.isEmpty else { return }
+        applyTheme(theme, to: targets, suffix: "")
+    }
+
+    private func applyTheme(_ theme: LightingTheme, to targets: [LightDevice], suffix: String) {
         stopEffects(touching: Set(targets.map(\.id)))
         recordChange(targets)
 
@@ -921,7 +938,6 @@ final class LightManager: ObservableObject {
             applyThemePlan(fixturePlan, to: device)
         }
 
-        let suffix = scope == .all ? "" : " in “\(scopeDisplayName(scope))”"
         var message = "Applied “\(theme.name)” to \(targets.count) light\(targets.count == 1 ? "" : "s")\(suffix)."
         if let adaptation = plan.adaptationSummary { message += " \(adaptation)" }
         publishError(message)

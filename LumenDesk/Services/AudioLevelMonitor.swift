@@ -96,14 +96,15 @@ final class AudioCaptureService {
     // Mic taps deliver on the AVAudioEngine render thread while system-audio
     // taps deliver on their own capture queue; serialize both onto this queue
     // before touching the analyzer's mutable state.
-    private let analysisQueue = DispatchQueue(label: "LumenDesk.audioAnalysis")
-    // A single-slot guard sheds buffers only when analysis is genuinely behind,
-    // instead of dropping most of the audio on a fixed timer. Beat tracking
-    // needs a gapless signal: the previous 20 Hz throttle analyzed 1024 samples
-    // out of every 50 ms and never saw the other 60% of the music, so onsets
-    // landing in the gaps were invisible and beat times could only ever be
-    // accurate to ±25 ms.
-    private let analysisSlot = DispatchSemaphore(value: 1)
+    private let analysisQueue: DispatchQueue
+    // ScreenCaptureKit can deliver several small buffers in a burst. Preserve
+    // their continuity while bounding outstanding work by both duration and count.
+    // A single in-flight slot reset the tracker on ordinary callback jitter.
+    private var pendingAudioDuration: TimeInterval = 0
+    private var pendingBufferCount = 0
+    private var ingressGeneration = 0
+    private static let maximumPendingDuration: TimeInterval = 0.25
+    private static let maximumPendingBuffers = 32
     // Analysis produces a snapshot per hop (~90 Hz). The main thread only needs
     // the newest one, so publication is throttled independently — except for
     // beats, which are published immediately.
@@ -123,13 +124,20 @@ final class AudioCaptureService {
     private var snapshotSubscribers: [UUID: (AudioReactiveSnapshot) -> Void] = [:]
     var onLevel: ((Double) -> Void)?
     var onSnapshot: ((AudioReactiveSnapshot) -> Void)?
+    var onCaptureFailure: (() -> Void)?
 
     #if os(macOS)
     private var systemAudioCapture: SystemAudioCapturing?
     private let makeSystemAudioCapture: (@escaping (AVAudioPCMBuffer, TimeInterval) -> Void) -> SystemAudioCapturing
 
-    init(makeSystemAudioCapture: @escaping (@escaping (AVAudioPCMBuffer, TimeInterval) -> Void) -> SystemAudioCapturing = { SystemAudioCapture(onBuffer: $0) }) {
+    init(makeSystemAudioCapture: @escaping (@escaping (AVAudioPCMBuffer, TimeInterval) -> Void) -> SystemAudioCapturing = { SystemAudioCapture(onBuffer: $0) },
+         analysisQueue: DispatchQueue = DispatchQueue(label: "LumenDesk.audioAnalysis", qos: .userInitiated)) {
         self.makeSystemAudioCapture = makeSystemAudioCapture
+        self.analysisQueue = analysisQueue
+    }
+    #else
+    init() {
+        analysisQueue = DispatchQueue(label: "LumenDesk.audioAnalysis", qos: .userInitiated)
     }
     #endif
     private var playerNode: AVAudioPlayerNode?
@@ -194,9 +202,14 @@ final class AudioCaptureService {
         // The microphone is never started here, so room noise can't pollute the
         // music analysis, and there is no silent mic fallback.
         let capture = makeSystemAudioCapture { [weak self] buffer, capturedAt in
-            // SystemAudioCapture already created an owned mono buffer. Avoid
+            // SystemAudioCapture already created an owned planar buffer. Avoid
             // allocating and copying it a second time before analysis.
             self?.consume(buffer, requiresOwnedCopy: false, generation: generation, hostTime: capturedAt)
+        }
+        capture.onFailure = { [weak self] in
+            guard let self, self.startGeneration == generation else { return }
+            self.isRunning = false
+            self.onCaptureFailure?()
         }
         systemAudioCapture = capture
         capture.start { [weak self] result in
@@ -244,6 +257,13 @@ final class AudioCaptureService {
     /// capture callback that is already analyzing a buffer.
     private func resetAnalyzer(sourceDescription: String) {
         let generation = startGeneration
+        ingressLock.lock()
+        ingressGeneration = generation
+        pendingAudioDuration = 0
+        pendingBufferCount = 0
+        droppedBuffers = 0
+        discontinuity = false
+        ingressLock.unlock()
         analysisQueue.async { [weak self] in
             guard let self else { return }
             self.analyzerGeneration = generation
@@ -309,11 +329,19 @@ final class AudioCaptureService {
     #endif
 
     private func consume(_ buffer: AVAudioPCMBuffer, requiresOwnedCopy: Bool = true, generation: Int, hostTime: TimeInterval) {
-        guard analysisSlot.wait(timeout: .now()) == .success else {
-            ingressLock.lock(); droppedBuffers += 1; discontinuity = true; ingressLock.unlock()
+        guard buffer.frameLength > 0, buffer.format.sampleRate > 0 else { return }
+        let duration = Double(buffer.frameLength) / buffer.format.sampleRate
+        ingressLock.lock()
+        guard ingressGeneration == generation else { ingressLock.unlock(); return }
+        guard pendingBufferCount < Self.maximumPendingBuffers,
+              pendingBufferCount == 0 || pendingAudioDuration + duration <= Self.maximumPendingDuration else {
+            droppedBuffers += 1
+            discontinuity = true
+            ingressLock.unlock()
             return
         }
-        ingressLock.lock()
+        pendingBufferCount += 1
+        pendingAudioDuration += duration
         let resetRequired = discontinuity
         let dropped = droppedBuffers
         discontinuity = false
@@ -321,7 +349,7 @@ final class AudioCaptureService {
         let analysisBuffer: AVAudioPCMBuffer
         if requiresOwnedCopy {
             guard let ownedBuffer = buffer.ownedFloatCopy() else {
-                analysisSlot.signal()
+                finishBuffer(duration: duration, generation: generation)
                 return
             }
             analysisBuffer = ownedBuffer
@@ -330,7 +358,7 @@ final class AudioCaptureService {
         }
         analysisQueue.async { [weak self] in
             guard let self else { return }
-            defer { self.analysisSlot.signal() }
+            defer { self.finishBuffer(duration: duration, generation: generation) }
             guard self.analyzerGeneration == generation else { return }
             if resetRequired { self.analyzer.resetStream() }
             guard var snapshot = self.analyzer.analyze(analysisBuffer, hostTime: hostTime) else { return }
@@ -345,6 +373,14 @@ final class AudioCaptureService {
                 for subscriber in self.snapshotSubscribers.values { subscriber(snapshot) }
             }
         }
+    }
+
+    private func finishBuffer(duration: TimeInterval, generation: Int) {
+        ingressLock.lock()
+        defer { ingressLock.unlock() }
+        guard ingressGeneration == generation else { return }
+        pendingBufferCount -= 1
+        pendingAudioDuration = max(0, pendingAudioDuration - duration)
     }
 
     func startFromFile(url: URL, completion: @escaping (AudioStartResult) -> Void) {
@@ -696,11 +732,10 @@ final class MusicFeatureAnalyzer {
     }
 
     // Gapless STFT plumbing.
-    private var ring = [Float](repeating: 0, count: MusicFeatureAnalyzer.windowSize)
+    private var channelRings: [[Float]] = []
     private var ringWriteIndex = 0
     private var samplesUntilHop = MusicFeatureAnalyzer.hopSize
     private var processedSamples: Int64 = 0
-    private var monoSamples: [Float] = []
     private var chronologicalSamples = [Float](repeating: 0, count: MusicFeatureAnalyzer.windowSize)
     private var windowedSamples = [Float](repeating: 0, count: MusicFeatureAnalyzer.windowSize)
     private var hannWindow = [Float](repeating: 0, count: MusicFeatureAnalyzer.windowSize)
@@ -711,6 +746,7 @@ final class MusicFeatureAnalyzer {
     private var fftReal = [Float](repeating: 0, count: MusicFeatureAnalyzer.windowSize / 2)
     private var fftImaginary = [Float](repeating: 0, count: MusicFeatureAnalyzer.windowSize / 2)
     private var fftMagnitudes = [Float](repeating: 0, count: MusicFeatureAnalyzer.windowSize / 2)
+    private var spectrumPower = [Float](repeating: 0, count: MusicFeatureAnalyzer.windowSize / 2)
     private var logMagnitudes = [Double](repeating: 0, count: MusicFeatureAnalyzer.windowSize / 2)
     private var previousLogMagnitudes = [Double](repeating: 0, count: MusicFeatureAnalyzer.windowSize / 2)
 
@@ -772,7 +808,12 @@ final class MusicFeatureAnalyzer {
         guard !buffer.format.isInterleaved, let channelData = buffer.floatChannelData, fftSetup != nil else { return nil }
         let frameCount = Int(buffer.frameLength)
         let sampleRate = buffer.format.sampleRate
-        guard frameCount > 0, sampleRate > 0 else { return nil }
+        let channels = Int(buffer.format.channelCount)
+        guard frameCount > 0, sampleRate > 0, channels > 0 else { return nil }
+        if channelRings.count != channels {
+            resetStream()
+            channelRings = Array(repeating: Array(repeating: 0, count: Self.windowSize), count: channels)
+        }
         if configuredSampleRate != 0 && configuredSampleRate != sampleRate { resetStream() }
         // Accurate sample timestamps expose missing or duplicate audio. Never
         // splice a discontinuity into the FFT as if it were a musical onset.
@@ -782,26 +823,6 @@ final class MusicFeatureAnalyzer {
         }
         lastBufferEnd = hostTime
         configureIfNeeded(sampleRate: sampleRate)
-
-        let channels = Int(buffer.format.channelCount)
-        if monoSamples.count != frameCount {
-            monoSamples = [Float](repeating: 0, count: frameCount)
-        } else {
-            vDSP_vclr(&monoSamples, 1, vDSP_Length(frameCount))
-        }
-        for channel in 0..<channels {
-            monoSamples.withUnsafeMutableBufferPointer { destination in
-                guard let output = destination.baseAddress else { return }
-                vDSP_vadd(
-                    output, 1,
-                    channelData[channel], 1,
-                    output, 1,
-                    vDSP_Length(frameCount)
-                )
-            }
-        }
-        var divisorValue = Float(max(1, channels))
-        vDSP_vsdiv(monoSamples, 1, &divisorValue, &monoSamples, 1, vDSP_Length(frameCount))
 
         if channels >= 2 {
             var leftMean: Float = 0
@@ -825,7 +846,7 @@ final class MusicFeatureAnalyzer {
         var index = 0
         while index < frameCount {
             let chunk = max(1, min(samplesUntilHop, frameCount - index))
-            copyIntoRing(from: index, count: chunk)
+            copyIntoRing(channelData, from: index, count: chunk)
             index += chunk
             processedSamples += Int64(chunk)
             samplesUntilHop -= chunk
@@ -852,17 +873,29 @@ final class MusicFeatureAnalyzer {
         let dt = Double(Self.hopSize) / sampleRate
         let streamTime = Double(processedSamples) / sampleRate
 
-        fillChronologicalWindow()
-        var meanSquare: Float = 0
-        vDSP_measqv(chronologicalSamples, 1, &meanSquare, vDSP_Length(Self.windowSize))
-        let rms = Double(sqrt(meanSquare))
-        vDSP_vmul(
-            chronologicalSamples, 1,
-            hannWindow, 1,
-            &windowedSamples, 1,
-            vDSP_Length(Self.windowSize)
-        )
-        updateSpectrum()
+        // Average channel POWER, not waveforms. Stereo widening and opposite
+        // phase are audible but can vanish in an (L + R) / 2 downmix. This also
+        // preserves hard-panned instruments without inventing extra frequencies.
+        vDSP_vclr(&spectrumPower, 1, vDSP_Length(spectrumPower.count))
+        var totalMeanSquare: Float = 0
+        for channel in channelRings.indices {
+            fillChronologicalWindow(channel: channel)
+            var meanSquare: Float = 0
+            vDSP_measqv(chronologicalSamples, 1, &meanSquare, vDSP_Length(Self.windowSize))
+            totalMeanSquare += meanSquare
+            vDSP_vmul(chronologicalSamples, 1, hannWindow, 1, &windowedSamples, 1,
+                      vDSP_Length(Self.windowSize))
+            updateSpectrum()
+            for bin in spectrumPower.indices {
+                spectrumPower[bin] += fftMagnitudes[bin] * fftMagnitudes[bin]
+            }
+        }
+        let channelCount = Float(channelRings.count)
+        let rms = Double(sqrt(totalMeanSquare / channelCount))
+        for bin in fftMagnitudes.indices {
+            fftMagnitudes[bin] = sqrt(spectrumPower[bin] / channelCount)
+            logMagnitudes[bin] = log1p(Double(fftMagnitudes[bin]) * Self.logCompression)
+        }
 
         // Fixed soft-knee loudness preserves quiet/loud contrast. Adaptive gain
         // remains in the onset detector, where playback-volume independence is useful.
@@ -1026,9 +1059,6 @@ final class MusicFeatureAnalyzer {
         // difference of two logs is a ratio, so an onset means the same thing
         // at any playback volume. Bin 0 packs DC and Nyquist together and
         // carries rumble and any DC offset, so it never participates in a band.
-        for index in 1..<half {
-            logMagnitudes[index] = log1p(Double(fftMagnitudes[index]) * Self.logCompression)
-        }
     }
 
     private func bandMagnitude(_ range: BinRange) -> Double {
@@ -1091,18 +1121,17 @@ final class MusicFeatureAnalyzer {
 
     // MARK: - Buffering
 
-    private func copyIntoRing(from sourceIndex: Int, count: Int) {
+    private func copyIntoRing(_ channels: UnsafePointer<UnsafeMutablePointer<Float>>, from sourceIndex: Int, count: Int) {
         var copied = 0
         while copied < count {
             let amount = min(Self.windowSize - ringWriteIndex, count - copied)
             let destinationIndex = ringWriteIndex
             let sourceOffset = sourceIndex + copied
-            monoSamples.withUnsafeBufferPointer { source in
-                guard let sourceBase = source.baseAddress else { return }
-                ring.withUnsafeMutableBufferPointer { destination in
+            for channel in channelRings.indices {
+                channelRings[channel].withUnsafeMutableBufferPointer { destination in
                     guard let destinationBase = destination.baseAddress else { return }
                     destinationBase.advanced(by: destinationIndex)
-                        .update(from: sourceBase.advanced(by: sourceOffset), count: amount)
+                        .update(from: channels[channel].advanced(by: sourceOffset), count: amount)
                 }
             }
             ringWriteIndex = (ringWriteIndex + amount) % Self.windowSize
@@ -1112,12 +1141,12 @@ final class MusicFeatureAnalyzer {
 
     /// Unrolls the ring into oldest-to-newest order. `ringWriteIndex` is the
     /// next slot to write, which is also the oldest retained sample.
-    private func fillChronologicalWindow() {
+    private func fillChronologicalWindow(channel: Int) {
         let size = Self.windowSize
         let head = ringWriteIndex
         let tail = size - head
         chronologicalSamples.withUnsafeMutableBufferPointer { destination in
-            ring.withUnsafeBufferPointer { source in
+            channelRings[channel].withUnsafeBufferPointer { source in
                 guard let destinationBase = destination.baseAddress,
                       let sourceBase = source.baseAddress else { return }
                 destinationBase.update(from: sourceBase.advanced(by: head), count: tail)
@@ -1131,7 +1160,7 @@ final class MusicFeatureAnalyzer {
     /// Reacquire after missing audio or a format change; old spectral windows,
     /// tempo history and sample-rate arithmetic cannot cross that boundary.
     func resetStream() {
-        ring = Array(repeating: 0, count: Self.windowSize)
+        channelRings = Array(repeating: Array(repeating: 0, count: Self.windowSize), count: channelRings.count)
         ringWriteIndex = 0; samplesUntilHop = Self.hopSize; processedSamples = 0
         previousLogMagnitudes = Array(repeating: 0, count: Self.windowSize / 2)
         logMagnitudes = previousLogMagnitudes
@@ -1226,11 +1255,13 @@ enum SystemAudioStartResult {
 }
 
 protocol SystemAudioCapturing: AnyObject {
+    var onFailure: (() -> Void)? { get set }
     func start(completion: @escaping (SystemAudioStartResult) -> Void)
     func stop()
 }
 
-final class SystemAudioCapture: NSObject, SCStreamOutput, SystemAudioCapturing {
+final class SystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelegate, SystemAudioCapturing {
+    var onFailure: (() -> Void)?
     private var stream: SCStream?
     private var startTask: Task<Void, Never>?
     private let onBuffer: (AVAudioPCMBuffer, TimeInterval) -> Void
@@ -1275,8 +1306,8 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, SystemAudioCapturing {
                 configuration.minimumFrameInterval = CMTime(value: 1, timescale: 1)
                 configuration.queueDepth = 3
                 configuration.showsCursor = false
-                let stream = SCStream(filter: filter, configuration: configuration, delegate: nil)
-                try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: DispatchQueue(label: "LumenDesk.systemAudio"))
+                let stream = SCStream(filter: filter, configuration: configuration, delegate: self)
+                try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: DispatchQueue(label: "LumenDesk.systemAudio", qos: .userInitiated))
                 // A display stream always produces video frames. Register a
                 // (no-op) screen output too — the delegate ignores non-audio —
                 // so the frames are consumed instead of spamming "stream output
@@ -1315,6 +1346,14 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, SystemAudioCapturing {
         let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
         let end = pts + Double(buffer.frameLength) / buffer.format.sampleRate
         onBuffer(buffer, end.isFinite ? end : ProcessInfo.processInfo.systemUptime)
+    }
+
+    func stream(_ stream: SCStream, didStopWithError error: Error) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.stream === stream else { return }
+            self.stream = nil
+            self.onFailure?()
+        }
     }
 }
 

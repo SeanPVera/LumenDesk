@@ -385,9 +385,11 @@ The rest of this section is the plain-English guide. The technical description f
 
 **On a Mac**
 
-1. **Play something.** Any app counts — Spotify, YouTube, a game, a DJ set. LumenDesk listens to the sound your Mac is already making.
+1. **Play a song in Apple Music.** Use **Open Apple Music** in Music Mode, or open it yourself. No track import is needed. Other apps playing audio on this Mac are included too.
 2. **Pick a room and a preset.** Choose the room in the workspace header, then pick a preset. **Balanced** is the safe first choice.
-3. **Press Start Music Mode.** The first time, macOS asks for **Screen Recording** permission. That is the only way any app is allowed to hear your Mac's audio; turn LumenDesk on in System Settings, come back, and press Start again. Nothing is recorded or saved.
+3. **Press Start system audio.** The first time, macOS asks for **Screen Recording** (or **Screen & System Audio Recording**) permission. Enable LumenDesk in System Settings, come back, and press Start again. Nothing is recorded or saved.
+
+The input card distinguishes **Audio is silent** from **No audio received**. If Apple Music is audible on this Mac but the meter stays empty, use **Restart system audio** to reconnect without losing the room’s settings or its saved pre-show lighting. Capture interruptions are reported instead of leaving a connected label indefinitely. Audio diagnostics includes channel and dropped-buffer counts. LumenDesk measures stereo channel energy separately so wide or opposite-phase material cannot disappear in a mono downmix, and short callback bursts no longer reset beat analysis.
 
 **On an iPhone or iPad**
 
@@ -615,6 +617,8 @@ Demo Mode is useful for screenshots, testing UI flows, or learning the app befor
 ### Interface
 
 The native Mac app uses **Spectrum Studio**: a room and device sidebar, a room overview with a lane for each light, and an integrated device editor. Graphite surfaces and amber controls frame actual fixture colors. A scene shelf recalls scenes to their saved fixture IDs; Save room scene captures current output, excluding unapplied drafts.
+
+The room overview identifies **Entire room** or the selected light count. Selections persist per room during navigation and opening a device editor does not replace them. Room power, brightness, color, white temperature and **Color schemes** act on those targets, including an attempt to reach lights marked stale. A manual change stops any show touching those lights; other lights in that show return to their saved state. Color schemes use each fixture’s supported panels and zones. Saved scenes still recall their original saved fixture IDs.
 
 Nanoleaf panels, Govee regions, and Luna zones pair a spatial canvas with an exact-value table. Select regions to edit HEX and intensity; **None** disables selection-based edits, and **All** explicitly targets the entire fixture. Nanoleaf RGB includes panel intensity, while Govee and Luna retain separate intensity channels. Unapplied Govee and Luna drafts survive navigation for the current app session; Nanoleaf keeps its existing editing sessions. Leaving an editor ends its temporary preview.
 

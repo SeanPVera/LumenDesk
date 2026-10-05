@@ -2,9 +2,165 @@ import AVFoundation
 import CoreMIDI
 import SwiftUI
 import XCTest
+import AppKit
 @testable import LumenDesk
 
 final class MusicModeTests: XCTestCase {
+    func testStereoPhaseCannotCancelAudibleMusicOrItsPulse() throws {
+        let reference = MusicFeatureAnalyzer(sourceDescription: "Mono")
+        let stereo = MusicFeatureAnalyzer(sourceDescription: "Stereo")
+        var a: AudioReactiveSnapshot?
+        var b: AudioReactiveSnapshot?
+        for index in 0..<240 {
+            let mono = rhythmBuffer(startSample: index * 1024, frames: 1024,
+                                    sampleRate: 48_000, beatPeriod: 0.5, includeHiHats: true)
+            let pair = AVAudioPCMBuffer(pcmFormat: AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 2)!, frameCapacity: 1024)!
+            pair.frameLength = 1024
+            for frame in 0..<1024 {
+                let sample = mono.floatChannelData![0][frame]
+                pair.floatChannelData![0][frame] = sample
+                pair.floatChannelData![1][frame] = -sample
+            }
+            let time = 100 + Double((index + 1) * 1024) / 48_000
+            a = reference.analyze(mono, hostTime: time)
+            b = stereo.analyze(pair, hostTime: time)
+            XCTAssertEqual(try XCTUnwrap(b).rawRMS, try XCTUnwrap(a).rawRMS, accuracy: 0.00001)
+            XCTAssertEqual(b!.energy, a!.energy, accuracy: 0.00001)
+            XCTAssertEqual(b!.bass, a!.bass, accuracy: 0.00001)
+            XCTAssertEqual(b!.beatCount, a!.beatCount)
+        }
+        XCTAssertGreaterThan(try XCTUnwrap(b).beatCount, 0)
+        XCTAssertEqual(b?.inputChannels, 2)
+        XCTAssertEqual(b?.stereo, 0.5)
+    }
+
+    @MainActor
+    func testCaptureBurstPreservesContiguousSamples() async throws {
+        let queue = DispatchQueue(label: "test.capture.burst")
+        let backend = MusicCaptureStub()
+        var deliver: ((AVAudioPCMBuffer, TimeInterval) -> Void)?
+        let capture = AudioCaptureService(makeSystemAudioCapture: { callback in
+            deliver = callback
+            return backend
+        }, analysisQueue: queue)
+        var snapshots: [AudioReactiveSnapshot] = []
+        capture.onSnapshot = { snapshots.append($0) }
+        queue.suspend()
+        capture.requestAccessAndStart { _ in }
+        backend.completions.last?(.started)
+        for index in 0..<12 {
+            deliver?(buffer(frequency: 100, amplitude: 0.5, startSample: index * 480, frames: 480),
+                     100 + Double(index + 1) * 0.01)
+        }
+        queue.resume()
+        let drained = expectation(description: "Analysis and main publication drained")
+        queue.async { DispatchQueue.main.async { drained.fulfill() } }
+        await fulfillment(of: [drained], timeout: 3)
+        XCTAssertGreaterThan(try XCTUnwrap(snapshots.last).analyzedSamples, 4096)
+        XCTAssertEqual(snapshots.last?.droppedBuffers, 0)
+        XCTAssertGreaterThan(snapshots.last?.level ?? 0, 0.1)
+        capture.stop()
+    }
+
+    @MainActor
+    func testCaptureOverloadIsBoundedAndRestartsWithoutOldDropCounts() async throws {
+        let queue = DispatchQueue(label: "test.capture.overload")
+        let backend = MusicCaptureStub()
+        var deliver: ((AVAudioPCMBuffer, TimeInterval) -> Void)?
+        let capture = AudioCaptureService(makeSystemAudioCapture: { deliver = $0; return backend }, analysisQueue: queue)
+        var snapshots: [AudioReactiveSnapshot] = []
+        capture.onSnapshot = { snapshots.append($0) }
+        queue.suspend()
+        capture.requestAccessAndStart { _ in }
+        backend.completions.last?(.started)
+        for index in 0..<50 {
+            deliver?(buffer(frequency: 100, amplitude: 0.5, startSample: index * 1024),
+                     100 + Double((index + 1) * 1024) / 48_000)
+        }
+        queue.resume()
+        let drained = expectation(description: "Bounded backlog drained")
+        queue.async { DispatchQueue.main.async { drained.fulfill() } }
+        await fulfillment(of: [drained], timeout: 3)
+        XCTAssertLessThanOrEqual(try XCTUnwrap(snapshots.last).analyzedSamples, 12_000)
+        let resumed = expectation(description: "Fresh audio after overflow")
+        capture.onSnapshot = { snapshot in
+            XCTAssertGreaterThan(snapshot.droppedBuffers, 0)
+            XCTAssertEqual(snapshot.analyzedSamples, 1024, "A real gap must reset the FFT window")
+            resumed.fulfill()
+        }
+        deliver?(buffer(frequency: 100, amplitude: 0.5), 102)
+        await fulfillment(of: [resumed], timeout: 3)
+        let oldCallback = deliver
+        capture.stop()
+        capture.requestAccessAndStart { _ in }
+        backend.completions.last?(.started)
+        let restarted = expectation(description: "New capture generation")
+        capture.onSnapshot = { snapshot in
+            XCTAssertEqual(snapshot.droppedBuffers, 0)
+            XCTAssertEqual(snapshot.analyzedSamples, 1024)
+            restarted.fulfill()
+        }
+        oldCallback?(buffer(frequency: 100, amplitude: 0.5), 103)
+        deliver?(buffer(frequency: 100, amplitude: 0.5), 104)
+        await fulfillment(of: [restarted], timeout: 3)
+        capture.stop()
+    }
+
+    func testInputHealthDistinguishesSilenceFromMissingCapture() {
+        XCTAssertEqual(MusicInputHealth.evaluate(AudioReactiveSnapshot(), startedAt: 100, now: 101), .waiting)
+        XCTAssertEqual(MusicInputHealth.evaluate(AudioReactiveSnapshot(), startedAt: 100, now: 104), .stalled)
+        var snapshot = AudioReactiveSnapshot(analysisTimestamp: 104)
+        XCTAssertEqual(MusicInputHealth.evaluate(snapshot, startedAt: 100, now: 104), .silent)
+        snapshot.level = 0.5
+        XCTAssertEqual(MusicInputHealth.evaluate(snapshot, startedAt: 100, now: 104), .receiving)
+        XCTAssertEqual(MusicInputHealth.evaluate(snapshot, startedAt: 100, now: 106), .stalled)
+    }
+
+    @MainActor
+    func testInterruptedSystemAudioRestartsOnceForAllRooms() async {
+        let backend = MusicCaptureStub()
+        var creations = 0
+        let capture = AudioCaptureService(makeSystemAudioCapture: { _ in creations += 1; return backend })
+        var time = 100.0
+        let controller = AudioReactiveSessionController(captureService: capture, now: { time })
+        let scopes: [LightScope] = [.room(UUID()), .room(UUID())]
+        for scope in scopes {
+            controller.start(scope: scope, configuration: .configuration(for: .balanced),
+                             topology: FixtureTopology(), fixtures: [], reducedMotion: false,
+                             useSyntheticPattern: false, onFrame: { _ in }, completion: { _ in })
+        }
+        backend.completions.last?(.started)
+        backend.onFailure?()
+        await Task.yield()
+        XCTAssertEqual(controller.sourceStatus, .unavailable)
+        XCTAssertEqual(controller.activeScopeIDs, Set(scopes))
+        time = 104
+        controller.restartSystemAudio()
+        XCTAssertEqual(creations, 2)
+        XCTAssertEqual(controller.inputHealth, .waiting)
+        backend.completions.last?(.started)
+        XCTAssertEqual(controller.sourceStatus, .systemAudio)
+        XCTAssertEqual(controller.activeScopeIDs, Set(scopes))
+        controller.stopAll()
+    }
+
+    @MainActor
+    func testLightingKeepsRenderingDuringMacControlTracking() {
+        let controller = AudioReactiveSessionController()
+        var frames = 0
+        controller.start(scope: .all, configuration: .configuration(for: .balanced),
+                         topology: FixtureTopology(), fixtures: [], reducedMotion: false,
+                         useSyntheticPattern: true, onFrame: { _ in frames += 1 }, completion: { _ in })
+        defer { controller.stopAll() }
+        let before = frames
+        // AppKit uses this mode while a slider or menu is tracking the pointer.
+        let deadline = Date().addingTimeInterval(0.4)
+        while frames == before && Date() < deadline {
+            RunLoop.main.run(mode: .eventTracking, before: deadline)
+        }
+        XCTAssertGreaterThan(frames, before)
+    }
+
     func testMasterZeroAndLiveCeilingIncludeFlashes() {
         let engine = MusicChoreographyEngine()
         let fixture = MusicFixtureDescriptor(id: "f", label: "Fixture", transport: .lifxLAN)
@@ -1572,6 +1728,7 @@ private final class MusicModePersistenceSpy: ApplicationPersistence {
 }
 
 private final class MusicCaptureStub: SystemAudioCapturing {
+    var onFailure: (() -> Void)?
     var completions: [(SystemAudioStartResult) -> Void] = []
     var stops = 0
     func start(completion: @escaping (SystemAudioStartResult) -> Void) { completions.append(completion) }

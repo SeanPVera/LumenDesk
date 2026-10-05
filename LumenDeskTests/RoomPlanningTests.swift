@@ -250,6 +250,99 @@ final class PlanLayoutTests: XCTestCase {
 
 
 final class RoomWorkspaceTests: XCTestCase {
+    @MainActor
+    func testRoomAggregateObservesIndividualDevicesAndIncludesStaleTargets() throws {
+        let manager = LightManager(defaults: UserDefaults(suiteName: UUID().uuidString)!,
+                                   persistenceStore: temporaryPersistenceStore())
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+        let a = try XCTUnwrap(manager.devices.first)
+        let b = try XCTUnwrap(manager.devices.last)
+        a.brightness = 0.2
+        b.brightness = 0.6
+        b.isStale = true
+        let aggregate = RoomOutputState(lights: [a, b])
+        XCTAssertEqual(aggregate.ids, [a.id, b.id])
+        XCTAssertEqual(aggregate.level, 0.4, accuracy: 0.001)
+        var updates = 0
+        let token = aggregate.objectWillChange.sink { updates += 1 }
+        defer { token.cancel() }
+        a.brightness = 0.8
+        XCTAssertGreaterThan(updates, 0, "Device updates must invalidate the room readout")
+        XCTAssertEqual(aggregate.level, 0.7, accuracy: 0.001)
+        aggregate.observe([b])
+        let previous = updates
+        a.brightness = 0.1
+        XCTAssertEqual(updates, previous, "Removed devices must be unsubscribed")
+        manager.setPower(deviceIDs: aggregate.ids, on: true)
+        XCTAssertTrue(b.isOn, "Stale lights remain eligible for a recovery command")
+    }
+
+    @MainActor
+    func testRoomPowerAndBrightnessTakeOverShowsAndRestoreOtherLights() throws {
+        let manager = LightManager(defaults: UserDefaults(suiteName: UUID().uuidString)!,
+                                   persistenceStore: temporaryPersistenceStore())
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+        let a = try XCTUnwrap(manager.devices.first { !$0.isStale })
+        let b = try XCTUnwrap(manager.devices.last { !$0.isStale && $0.id != a.id })
+        a.isOn = true
+        b.brightness = 0.31
+        let config = MusicModeConfiguration.configuration(for: .balanced)
+        manager.startMusicMode(configuration: config, scope: .all)
+        XCTAssertEqual(manager.activeEffects[.all], "music-pulse")
+        manager.setPower(deviceIDs: [a.id], on: false)
+        manager.musicModeController.renderNowForTesting()
+        XCTAssertNil(manager.activeEffects[.all])
+        XCTAssertFalse(a.isOn)
+        XCTAssertEqual(b.brightness, 0.31, accuracy: 0.001)
+        manager.startMusicMode(configuration: config, scope: .all)
+        manager.setBrightness(deviceIDs: [a.id], value: 1.4)
+        manager.musicModeController.renderNowForTesting()
+        XCTAssertNil(manager.activeEffects[.all])
+        XCTAssertEqual(a.brightness, 1)
+        XCTAssertEqual(b.brightness, 0.31, accuracy: 0.001)
+    }
+
+    @MainActor
+    func testSelectedColorSchemeCannotReachUnselectedLightsOrAnotherRoom() throws {
+        let manager = LightManager(defaults: UserDefaults(suiteName: UUID().uuidString)!,
+                                   persistenceStore: temporaryPersistenceStore())
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+        let room = try XCTUnwrap(manager.rooms.first { manager.devices(in: $0).count >= 2 })
+        let a = try XCTUnwrap(manager.devices(in: room).first)
+        let b = try XCTUnwrap(manager.devices(in: room).last)
+        let outside = try XCTUnwrap(manager.devices.first { !room.lightIDs.contains($0.id) })
+        b.isOn = false
+        outside.isOn = false
+        let before = b.color
+        manager.applyTheme(try XCTUnwrap(LightingCatalog.themes.first),
+                           deviceIDs: [a.id, outside.id], in: .room(room.id))
+        XCTAssertTrue(a.isOn)
+        XCTAssertFalse(b.isOn)
+        XCTAssertFalse(outside.isOn)
+        XCTAssertEqual(b.color, before)
+        manager.undo()
+        XCTAssertFalse(outside.isOn)
+    }
+
+    @MainActor
+    func testRoomSelectionSurvivesEditorAndDestinationRecreation() {
+        let room = LightScope.room(UUID())
+        let otherRoom = LightScope.room(UUID())
+        let drafts = SpectrumDraftStore()
+        drafts.selections[room] = ["a", "b"]
+        drafts.selections[otherRoom] = ["c"]
+        _ = PlanWorkspaceView(scope: .constant(room), requestedDeviceID: .constant("a"), studioDrafts: drafts)
+        _ = PlanWorkspaceView(scope: .constant(otherRoom), studioDrafts: drafts)
+        _ = PlanWorkspaceView(scope: .constant(room), requestedDeviceID: .constant(nil), studioDrafts: drafts)
+        XCTAssertEqual(drafts.selections[room], ["a", "b"])
+        XCTAssertEqual(drafts.selections[otherRoom], ["c"])
+        drafts.retainDevices(["b", "c"])
+        XCTAssertEqual(drafts.selections[room], ["b"])
+    }
+
     func testSelectionNeverExpandsAStaleSelectionToTheWholeRoom() {
         XCTAssertEqual(RoomWorkspaceSelection.targets(selected: ["gone"], available: ["a", "b"]), [])
         XCTAssertEqual(RoomWorkspaceSelection.targets(selected: [], available: ["a", "b"]), ["a", "b"])

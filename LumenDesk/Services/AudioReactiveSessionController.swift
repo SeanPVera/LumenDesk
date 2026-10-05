@@ -33,6 +33,28 @@ enum MusicCapturePreference: Equatable {
     case midiClock
 }
 
+enum MusicInputHealth: Equatable {
+    case waiting, receiving, silent, stalled
+
+    var displayName: String {
+        switch self {
+        case .waiting: return "Waiting for audio"
+        case .receiving: return "Input active"
+        case .silent: return "Audio is silent"
+        case .stalled: return "No audio received"
+        }
+    }
+
+    static func evaluate(_ snapshot: AudioReactiveSnapshot, startedAt: TimeInterval,
+                         now: TimeInterval) -> MusicInputHealth {
+        guard let timestamp = snapshot.analysisTimestamp else {
+            return now - startedAt < 3 ? .waiting : .stalled
+        }
+        guard now - timestamp <= snapshot.freshnessGrace + 1 else { return .stalled }
+        return snapshot.level >= 0.025 || snapshot.energy >= 0.035 ? .receiving : .silent
+    }
+}
+
 struct MusicGroove: Equatable, Identifiable {
     let id: String
     let name: String
@@ -98,6 +120,7 @@ final class AudioReactiveSessionController: ObservableObject {
     @Published private(set) var activeScopeIDs: Set<LightScope> = []
     @Published private(set) var latestFrames: [LightScope: MusicLightingFrame] = [:]
     @Published private(set) var isAudioPlaying = false
+    @Published private(set) var inputHealth: MusicInputHealth = .waiting
     @Published var selectedGrooveID: String = MusicGroove.fourOnTheFloor.id
 
     private let captureService: AudioCaptureService
@@ -119,6 +142,14 @@ final class AudioReactiveSessionController: ObservableObject {
     ) {
         self.captureService = captureService
         self.now = now
+        captureService.onCaptureFailure = { [weak self] in
+            Task { @MainActor in
+                guard let self, self.sessions.values.contains(where: { !$0.synthetic && $0.capture == .platformDefault }) else { return }
+                self.sourceStatus = .unavailable
+                self.inputHealth = .stalled
+                self.isAudioPlaying = false
+            }
+        }
         subscriptionToken = captureService.subscribe { [weak self] snapshot in
             Task { @MainActor in
                 guard let self, self.sessions.values.contains(where: { !$0.synthetic }) else { return }
@@ -241,6 +272,36 @@ final class AudioReactiveSessionController: ObservableObject {
         }
     }
 
+    var canRestartSystemAudio: Bool {
+        sessions.values.contains { !$0.synthetic && $0.capture == .platformDefault }
+    }
+
+    /// Restart the shared source without replacing room ownership, configuration,
+    /// or the saved lighting that Stop & Restore will return to.
+    func restartSystemAudio() {
+        guard canRestartSystemAudio, sourceStatus != .requestingPermission else { return }
+        captureService.stop()
+        liveCaptureBeganAt = now()
+        analysisSnapshot = AudioReactiveSnapshot()
+        latestSnapshot = analysisSnapshot
+        inputHealth = .waiting
+        isAudioPlaying = false
+        sourceStatus = .requestingPermission
+        captureService.requestAccessAndStart { [weak self] result in
+            guard let self, self.canRestartSystemAudio else { return }
+            switch result {
+            case .started:
+                #if os(macOS)
+                self.sourceStatus = .systemAudio
+                #else
+                self.sourceStatus = .microphone
+                #endif
+            case .needsScreenRecording: self.sourceStatus = .permissionDenied
+            case .unavailable: self.sourceStatus = .unavailable
+            }
+        }
+    }
+
     func update(
         scope: LightScope,
         configuration: MusicModeConfiguration,
@@ -298,10 +359,14 @@ final class AudioReactiveSessionController: ObservableObject {
         // Lighting and preview output do not benefit from display-refresh
         // cadence. Twenty frames per second remains fluid and cuts a third of
         // the choreography, allocation, and main-thread publication work.
-        renderTimer = Timer.scheduledTimer(withTimeInterval: 1 / 20, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.renderTick() }
+        let timer = Timer(timeInterval: 1 / 20, repeats: true) { [weak self] _ in
+            // The timer belongs to the main run loop, including slider/menu
+            // tracking. An actor task can itself wait for tracking to finish.
+            MainActor.assumeIsolated { self?.renderTick() }
         }
-        renderTimer?.tolerance = 0.01
+        timer.tolerance = 0.01
+        RunLoop.main.add(timer, forMode: .common)
+        renderTimer = timer
     }
 
     private func renderTick() {
@@ -312,6 +377,8 @@ final class AudioReactiveSessionController: ObservableObject {
         if sessions.values.contains(where: { !$0.synthetic }) {
             let fresh = analysisSnapshot.fresh(at: timestamp)
             isAudioPlaying = fresh.level >= 0.025 || fresh.energy >= 0.035
+            inputHealth = sourceStatus == .unavailable ? .stalled
+                : MusicInputHealth.evaluate(analysisSnapshot, startedAt: liveCaptureBeganAt, now: timestamp)
             if timestamp - lastSnapshotPublishedAt >= previewPublicationInterval {
                 latestSnapshot = fresh
                 lastSnapshotPublishedAt = timestamp
@@ -488,5 +555,6 @@ final class AudioReactiveSessionController: ObservableObject {
         analysisSnapshot = AudioReactiveSnapshot()
         lastSnapshotPublishedAt = -Double.greatestFiniteMagnitude
         isAudioPlaying = false
+        inputHealth = .waiting
     }
 }

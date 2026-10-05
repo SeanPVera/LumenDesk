@@ -288,7 +288,8 @@ final class RoomWorkspaceTests: XCTestCase {
         let b = try XCTUnwrap(manager.devices.last { !$0.isStale && $0.id != a.id })
         a.isOn = true
         b.brightness = 0.31
-        let config = MusicModeConfiguration.configuration(for: .balanced)
+        var config = MusicModeConfiguration.configuration(for: .balanced)
+        config.usesSyntheticDemoPattern = true
         manager.startMusicMode(configuration: config, scope: .all)
         XCTAssertEqual(manager.activeEffects[.all], "music-pulse")
         manager.setPower(deviceIDs: [a.id], on: false)
@@ -302,6 +303,24 @@ final class RoomWorkspaceTests: XCTestCase {
         XCTAssertNil(manager.activeEffects[.all])
         XCTAssertEqual(a.brightness, 1)
         XCTAssertEqual(b.brightness, 0.31, accuracy: 0.001)
+        let room = try XCTUnwrap(manager.rooms.first { $0.lightIDs.contains(a.id) })
+        manager.startMusicMode(configuration: config, scope: .all)
+        manager.setBrightness(in: room, value: 0.42)
+        XCTAssertNil(manager.activeEffects[.all])
+        XCTAssertEqual(a.brightness, 0.42, accuracy: 0.001)
+        manager.startMusicMode(configuration: config, scope: .all)
+        manager.setPower(in: room, on: false)
+        manager.confirmationCoordinator.confirmPendingRequest()
+        XCTAssertNil(manager.activeEffects[.all])
+        XCTAssertFalse(a.isOn)
+        manager.startMusicMode(configuration: config, scope: .all)
+        manager.setAllBrightness(0.25)
+        XCTAssertTrue(manager.activeEffects.isEmpty)
+        manager.startMusicMode(configuration: config, scope: .all)
+        manager.setAllPower(on: false)
+        manager.confirmationCoordinator.confirmPendingRequest()
+        XCTAssertTrue(manager.activeEffects.isEmpty)
+        XCTAssertTrue(manager.devices.allSatisfy { !$0.isOn })
     }
 
     @MainActor

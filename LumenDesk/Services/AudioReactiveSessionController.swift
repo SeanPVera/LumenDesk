@@ -143,7 +143,9 @@ final class AudioReactiveSessionController: ObservableObject {
         self.captureService = captureService
         self.now = now
         captureService.onCaptureFailure = { [weak self] in
-            Task { @MainActor in
+            // System capture reports failure on main, as it does start results.
+            // Handle it before a subsequent restart can change the generation.
+            MainActor.assumeIsolated {
                 guard let self, self.sessions.values.contains(where: { !$0.synthetic && $0.capture == .platformDefault }) else { return }
                 self.sourceStatus = .unavailable
                 self.inputHealth = .stalled
@@ -376,7 +378,7 @@ final class AudioReactiveSessionController: ObservableObject {
         lastRenderAt = timestamp
         if sessions.values.contains(where: { !$0.synthetic }) {
             let fresh = analysisSnapshot.fresh(at: timestamp)
-            isAudioPlaying = fresh.level >= 0.025 || fresh.energy >= 0.035
+            isAudioPlaying = sourceStatus != .unavailable && (fresh.level >= 0.025 || fresh.energy >= 0.035)
             inputHealth = sourceStatus == .unavailable ? .stalled
                 : MusicInputHealth.evaluate(analysisSnapshot, startedAt: liveCaptureBeganAt, now: timestamp)
             if timestamp - lastSnapshotPublishedAt >= previewPublicationInterval {

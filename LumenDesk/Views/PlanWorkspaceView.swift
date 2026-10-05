@@ -45,9 +45,8 @@ struct PlanWorkspaceView: View {
         if studioDrafts.selections[scope.wrappedValue] == nil, !initialSelection.isEmpty {
             studioDrafts.selections[scope.wrappedValue] = initialSelection
         }
-        let selection = studioDrafts.selections[scope.wrappedValue] ?? []
         _section = State(initialValue: initialSection)
-        _studioMode = State(initialValue: requestedDeviceID.wrappedValue != nil || selection.count == 1 ? .detail : .overview)
+        _studioMode = State(initialValue: requestedDeviceID.wrappedValue != nil || initialSelection.count == 1 ? .detail : .overview)
     }
 
     private var selectedIDs: Set<String> {

@@ -774,6 +774,7 @@ final class LightManager: ObservableObject {
         if staleCount > 0 {
             publishError("\(staleCount) light\(staleCount == 1 ? "" : "s") in \u{201C}\(room.name)\u{201D} may be offline.")
         }
+        stopEffects(touching: Set(lights.map(\.id)))
         recordChange(lights)
         announceAction("\(room.name) turned \(on ? "on" : "off")", lights: lights)
         for d in lights { d.isOn = on; sendPower(d, on: on) }
@@ -785,6 +786,7 @@ final class LightManager: ObservableObject {
             publishError("“\(room.name)” has no lights to control.")
             return
         }
+        stopEffects(touching: Set(lights.map(\.id)))
         recordChange(lights)
         let clamped = min(1, max(0, value))
         for d in lights { previewBrightness(d, value: clamped) }
@@ -830,6 +832,7 @@ final class LightManager: ObservableObject {
         if staleCount > 0 {
             publishError("\(staleCount) light\(staleCount == 1 ? "" : "s") may be offline.")
         }
+        stopEffects(touching: Set(devices.map(\.id)))
         recordChange(devices)
         announceAction("All lights turned \(on ? "on" : "off")", lights: devices)
         for d in devices { d.isOn = on; sendPower(d, on: on) }
@@ -840,6 +843,7 @@ final class LightManager: ObservableObject {
             publishError("No lights are available to control.")
             return
         }
+        stopEffects(touching: Set(devices.map(\.id)))
         recordChange(devices)
         let clamped = min(1, max(0, value))
         for d in devices { previewBrightness(d, value: clamped) }

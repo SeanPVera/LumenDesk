@@ -108,12 +108,25 @@ final class MusicModeTests: XCTestCase {
 
     func testInputHealthDistinguishesSilenceFromMissingCapture() {
         XCTAssertEqual(MusicInputHealth.evaluate(AudioReactiveSnapshot(), startedAt: 100, now: 101), .waiting)
-        XCTAssertEqual(MusicInputHealth.evaluate(AudioReactiveSnapshot(), startedAt: 100, now: 104), .stalled)
+        // Still waiting within the extended grace; only then stalled.
+        XCTAssertEqual(MusicInputHealth.evaluate(AudioReactiveSnapshot(), startedAt: 100, now: 104), .waiting)
+        XCTAssertEqual(MusicInputHealth.evaluate(AudioReactiveSnapshot(), startedAt: 100, now: 109), .stalled)
+        XCTAssertEqual(MusicInputHealth.evaluate(AudioReactiveSnapshot(), startedAt: 100, now: 104, captureFailed: true), .stalled)
         var snapshot = AudioReactiveSnapshot(analysisTimestamp: 104)
         XCTAssertEqual(MusicInputHealth.evaluate(snapshot, startedAt: 100, now: 104), .silent)
         snapshot.level = 0.5
         XCTAssertEqual(MusicInputHealth.evaluate(snapshot, startedAt: 100, now: 104), .receiving)
-        XCTAssertEqual(MusicInputHealth.evaluate(snapshot, startedAt: 100, now: 106), .stalled)
+        // Stale buffers after we had analysis are quiet, not a broken capture.
+        XCTAssertEqual(MusicInputHealth.evaluate(snapshot, startedAt: 100, now: 110), .silent)
+    }
+
+    func testAudiblePredicateIsSharedAcrossSubscribeAndRender() {
+        var quiet = AudioReactiveSnapshot()
+        XCTAssertFalse(AudioReactiveSessionController.isAudible(quiet))
+        quiet.level = 0.05
+        XCTAssertTrue(AudioReactiveSessionController.isAudible(quiet))
+        var confident = AudioReactiveSnapshot(confidence: 0.05)
+        XCTAssertTrue(AudioReactiveSessionController.isAudible(confident))
     }
 
     @MainActor
@@ -146,19 +159,23 @@ final class MusicModeTests: XCTestCase {
 
     @MainActor
     func testLightingKeepsRenderingDuringMacControlTracking() {
-        let controller = AudioReactiveSessionController()
+        // Injected clock + renderNowForTesting avoid waiting on the real Timer.
+        // Production still registers the timer in .common so AppKit tracking
+        // modes (eventTracking) continue to deliver frames.
+        var time = 100.0
+        let controller = AudioReactiveSessionController(now: { time })
         var frames = 0
         controller.start(scope: .all, configuration: .configuration(for: .balanced),
                          topology: FixtureTopology(), fixtures: [], reducedMotion: false,
                          useSyntheticPattern: true, onFrame: { _ in frames += 1 }, completion: { _ in })
         defer { controller.stopAll() }
         let before = frames
-        // AppKit uses this mode while a slider or menu is tracking the pointer.
-        let deadline = Date().addingTimeInterval(0.4)
-        while frames == before && Date() < deadline {
-            RunLoop.main.run(mode: .eventTracking, before: deadline)
-        }
+        time = 100.05
+        controller.renderNowForTesting()
+        time = 100.10
+        controller.renderNowForTesting()
         XCTAssertGreaterThan(frames, before)
+        XCTAssertGreaterThan(controller.lastRenderInterval, 0)
     }
 
     func testMasterZeroAndLiveCeilingIncludeFlashes() {

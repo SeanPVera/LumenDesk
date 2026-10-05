@@ -208,7 +208,8 @@ final class AudioCaptureService {
         }
         capture.onFailure = { [weak self] in
             guard let self, self.startGeneration == generation else { return }
-            self.isRunning = false
+            // Invalidate already queued publications as well as the failed tap.
+            self.stop()
             self.onCaptureFailure?()
         }
         systemAudioCapture = capture
@@ -1277,7 +1278,7 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelegate, Syst
         // to share LumenDesk's bundle identifier.
         _ = LSRegisterURL(Bundle.main.bundleURL as CFURL, true)
 
-        startTask = Task {
+        startTask = Task { @MainActor in
             do {
                 // Ask ScreenCaptureKit itself whether capture is allowed instead
                 // of pre-gating on CGPreflightScreenCaptureAccess(): the preflight
@@ -1290,7 +1291,7 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelegate, Syst
                 let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
                 guard !Task.isCancelled else { return }
                 guard let display = content.displays.first else {
-                    await MainActor.run { completion(.unavailable) }
+                    completion(.unavailable)
                     return
                 }
                 let filter = SCContentFilter(display: display, excludingWindows: [])
@@ -1321,14 +1322,14 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelegate, Syst
                 }
                 self.stream = stream
                 self.startTask = nil
-                await MainActor.run { completion(.started) }
+                completion(.started)
             } catch {
                 guard !Task.isCancelled else { return }
                 self.startTask = nil
                 // ScreenCaptureKit surfaces a missing Screen Recording grant as
                 // .userDeclined; anything else is a genuine capture failure.
                 let denied = (error as? SCStreamError)?.code == .userDeclined
-                await MainActor.run { completion(denied ? .needsScreenRecording : .unavailable) }
+                completion(denied ? .needsScreenRecording : .unavailable)
             }
         }
     }

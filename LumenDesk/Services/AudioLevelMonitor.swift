@@ -748,6 +748,7 @@ final class MusicFeatureAnalyzer {
     private var fftImaginary = [Float](repeating: 0, count: MusicFeatureAnalyzer.windowSize / 2)
     private var fftMagnitudes = [Float](repeating: 0, count: MusicFeatureAnalyzer.windowSize / 2)
     private var spectrumPower = [Float](repeating: 0, count: MusicFeatureAnalyzer.windowSize / 2)
+    private var magnitudeScratch = [Float](repeating: 0, count: MusicFeatureAnalyzer.windowSize / 2)
     private var logMagnitudes = [Double](repeating: 0, count: MusicFeatureAnalyzer.windowSize / 2)
     private var previousLogMagnitudes = [Double](repeating: 0, count: MusicFeatureAnalyzer.windowSize / 2)
 
@@ -877,25 +878,44 @@ final class MusicFeatureAnalyzer {
         // Average channel POWER, not waveforms. Stereo widening and opposite
         // phase are audible but can vanish in an (L + R) / 2 downmix. This also
         // preserves hard-panned instruments without inventing extra frequencies.
-        vDSP_vclr(&spectrumPower, 1, vDSP_Length(spectrumPower.count))
+        let binCount = vDSP_Length(fftMagnitudes.count)
         var totalMeanSquare: Float = 0
-        for channel in channelRings.indices {
-            fillChronologicalWindow(channel: channel)
-            var meanSquare: Float = 0
-            vDSP_measqv(chronologicalSamples, 1, &meanSquare, vDSP_Length(Self.windowSize))
-            totalMeanSquare += meanSquare
+        let channelCount = Float(max(1, channelRings.count))
+        if channelRings.count <= 1 {
+            // Mono fast path: one FFT, magnitudes are already the spectrum.
+            fillChronologicalWindow(channel: 0)
+            vDSP_measqv(chronologicalSamples, 1, &totalMeanSquare, vDSP_Length(Self.windowSize))
             vDSP_vmul(chronologicalSamples, 1, hannWindow, 1, &windowedSamples, 1,
                       vDSP_Length(Self.windowSize))
             updateSpectrum()
-            for bin in spectrumPower.indices {
-                spectrumPower[bin] += fftMagnitudes[bin] * fftMagnitudes[bin]
+        } else {
+            vDSP_vclr(&spectrumPower, 1, binCount)
+            for channel in channelRings.indices {
+                fillChronologicalWindow(channel: channel)
+                var meanSquare: Float = 0
+                vDSP_measqv(chronologicalSamples, 1, &meanSquare, vDSP_Length(Self.windowSize))
+                totalMeanSquare += meanSquare
+                vDSP_vmul(chronologicalSamples, 1, hannWindow, 1, &windowedSamples, 1,
+                          vDSP_Length(Self.windowSize))
+                updateSpectrum()
+                // Accumulate |X|² with vector ops instead of a scalar Swift loop.
+                vDSP_vsq(fftMagnitudes, 1, &magnitudeScratch, 1, binCount)
+                vDSP_vadd(spectrumPower, 1, magnitudeScratch, 1, &spectrumPower, 1, binCount)
             }
+            var invChannels = 1 / channelCount
+            vDSP_vsmul(spectrumPower, 1, &invChannels, &fftMagnitudes, 1, binCount)
+            vDSP_vsqrt(fftMagnitudes, 1, &fftMagnitudes, 1, binCount)
         }
-        let channelCount = Float(channelRings.count)
         let rms = Double(sqrt(totalMeanSquare / channelCount))
-        for bin in fftMagnitudes.indices {
-            fftMagnitudes[bin] = sqrt(spectrumPower[bin] / channelCount)
-            logMagnitudes[bin] = log1p(Double(fftMagnitudes[bin]) * Self.logCompression)
+        // Compressed log magnitudes are what the flux is measured on: the
+        // difference of two logs is a ratio, so an onset means the same thing
+        // at any playback volume.
+        var compression = Float(Self.logCompression)
+        vDSP_vsmul(fftMagnitudes, 1, &compression, &magnitudeScratch, 1, binCount)
+        var n = Int32(fftMagnitudes.count)
+        vvlog1pf(&magnitudeScratch, &magnitudeScratch, &n)
+        for bin in logMagnitudes.indices {
+            logMagnitudes[bin] = Double(magnitudeScratch[bin])
         }
 
         // Fixed soft-knee loudness preserves quiet/loud contrast. Adaptive gain
@@ -1056,10 +1076,8 @@ final class MusicFeatureAnalyzer {
         }
         var scale = 1 / Float(size)
         vDSP_vsmul(fftMagnitudes, 1, &scale, &fftMagnitudes, 1, vDSP_Length(half))
-        // Compressed log magnitudes are what the flux is measured on: the
-        // difference of two logs is a ratio, so an onset means the same thing
-        // at any playback volume. Bin 0 packs DC and Nyquist together and
-        // carries rumble and any DC offset, so it never participates in a band.
+        // Bin 0 packs DC and Nyquist together and carries rumble and any DC
+        // offset, so it never participates in a band.
     }
 
     private func bandMagnitude(_ range: BinRange) -> Double {

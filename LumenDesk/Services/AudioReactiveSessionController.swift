@@ -45,12 +45,26 @@ enum MusicInputHealth: Equatable {
         }
     }
 
+    /// Classifies input from the latest analysis snapshot.
+    ///
+    /// ScreenCaptureKit often stops delivering buffers while nothing is
+    /// playing, so a stale or missing timestamp alone is not a capture
+    /// failure. Treat that as quiet/waiting. `.stalled` is reserved for
+    /// never receiving any analysis after a long wait, or when the caller
+    /// forces it after an explicit capture failure.
     static func evaluate(_ snapshot: AudioReactiveSnapshot, startedAt: TimeInterval,
-                         now: TimeInterval) -> MusicInputHealth {
+                         now: TimeInterval, captureFailed: Bool = false) -> MusicInputHealth {
+        if captureFailed { return .stalled }
         guard let timestamp = snapshot.analysisTimestamp else {
-            return now - startedAt < 3 ? .waiting : .stalled
+            // No buffers yet. Stay waiting for a while; only then call it stalled.
+            return now - startedAt < 8 ? .waiting : .stalled
         }
-        guard now - timestamp <= snapshot.freshnessGrace + 1 else { return .stalled }
+        let age = now - timestamp
+        let quietGrace = max(snapshot.freshnessGrace + 1, 2)
+        if age > quietGrace {
+            // Had analysis before; buffer gaps during pause/silence are quiet.
+            return .silent
+        }
         return snapshot.level >= 0.025 || snapshot.energy >= 0.035 ? .receiving : .silent
     }
 }
@@ -146,10 +160,10 @@ final class AudioReactiveSessionController: ObservableObject {
             // System capture reports failure on main, as it does start results.
             // Handle it before a subsequent restart can change the generation.
             MainActor.assumeIsolated {
-                guard let self, self.sessions.values.contains(where: { !$0.synthetic && $0.capture == .platformDefault }) else { return }
+                guard let self, self.canRestartSystemAudio else { return }
                 self.sourceStatus = .unavailable
                 self.inputHealth = .stalled
-                self.isAudioPlaying = false
+                self.publishPlaybackState(false)
             }
         }
         subscriptionToken = captureService.subscribe { [weak self] snapshot in
@@ -157,12 +171,7 @@ final class AudioReactiveSessionController: ObservableObject {
                 guard let self, self.sessions.values.contains(where: { !$0.synthetic }) else { return }
                 guard snapshot.analysisTimestamp.map({ $0 >= self.liveCaptureBeganAt }) ?? true else { return }
                 self.analysisSnapshot = snapshot
-                let isPlaying = snapshot.confidence >= 0.025
-                    || snapshot.level >= 0.025
-                    || snapshot.energy >= 0.035
-                if self.isAudioPlaying != isPlaying {
-                    self.isAudioPlaying = isPlaying
-                }
+                self.publishPlaybackState(Self.isAudible(snapshot))
                 let timestamp = self.now()
                 if snapshot.beat > 0 || timestamp - self.lastSnapshotPublishedAt >= self.previewPublicationInterval {
                     self.latestSnapshot = snapshot
@@ -210,7 +219,7 @@ final class AudioReactiveSessionController: ObservableObject {
 
         if useSyntheticPattern {
             sourceStatus = .syntheticDemo
-            if !isAudioPlaying { isAudioPlaying = true }
+            publishPlaybackState(true)
             completion(.started)
             return
         }
@@ -247,20 +256,7 @@ final class AudioReactiveSessionController: ObservableObject {
         case .platformDefault:
             captureService.requestAccessAndStart { [weak self] result in
                 guard let self, self.sessions[scope] === session else { return }
-                switch result {
-                case .started:
-                    #if os(macOS)
-                    self.sourceStatus = .systemAudio
-                    #else
-                    self.sourceStatus = .microphone
-                    #endif
-                case .needsScreenRecording:
-                    self.removeFailedSession(scope)
-                    self.sourceStatus = .permissionDenied
-                case .unavailable:
-                    self.removeFailedSession(scope)
-                    self.sourceStatus = .unavailable
-                }
+                self.applyPlatformStartResult(result, removeSessionOnFailure: scope)
                 completion(result)
             }
         }
@@ -287,20 +283,11 @@ final class AudioReactiveSessionController: ObservableObject {
         analysisSnapshot = AudioReactiveSnapshot()
         latestSnapshot = analysisSnapshot
         inputHealth = .waiting
-        isAudioPlaying = false
+        publishPlaybackState(false)
         sourceStatus = .requestingPermission
         captureService.requestAccessAndStart { [weak self] result in
             guard let self, self.canRestartSystemAudio else { return }
-            switch result {
-            case .started:
-                #if os(macOS)
-                self.sourceStatus = .systemAudio
-                #else
-                self.sourceStatus = .microphone
-                #endif
-            case .needsScreenRecording: self.sourceStatus = .permissionDenied
-            case .unavailable: self.sourceStatus = .unavailable
-            }
+            self.applyPlatformStartResult(result, removeSessionOnFailure: nil)
         }
     }
 
@@ -354,6 +341,37 @@ final class AudioReactiveSessionController: ObservableObject {
         renderTick()
     }
 
+    /// One audible predicate for subscribe and render paths.
+    static func isAudible(_ snapshot: AudioReactiveSnapshot) -> Bool {
+        snapshot.confidence >= 0.025
+            || snapshot.level >= 0.025
+            || snapshot.energy >= 0.035
+    }
+
+    private func publishPlaybackState(_ playing: Bool) {
+        if isAudioPlaying != playing { isAudioPlaying = playing }
+    }
+
+    private func applyPlatformStartResult(
+        _ result: AudioCaptureService.AudioStartResult,
+        removeSessionOnFailure scope: LightScope?
+    ) {
+        switch result {
+        case .started:
+            #if os(macOS)
+            sourceStatus = .systemAudio
+            #else
+            sourceStatus = .microphone
+            #endif
+        case .needsScreenRecording:
+            if let scope { removeFailedSession(scope) }
+            sourceStatus = .permissionDenied
+        case .unavailable:
+            if let scope { removeFailedSession(scope) }
+            sourceStatus = .unavailable
+        }
+    }
+
     private func startRenderTimerIfNeeded() {
         guard renderTimer == nil else { return }
         lastRenderAt = nil
@@ -378,9 +396,12 @@ final class AudioReactiveSessionController: ObservableObject {
         lastRenderAt = timestamp
         if sessions.values.contains(where: { !$0.synthetic }) {
             let fresh = analysisSnapshot.fresh(at: timestamp)
-            isAudioPlaying = sourceStatus != .unavailable && (fresh.level >= 0.025 || fresh.energy >= 0.035)
-            inputHealth = sourceStatus == .unavailable ? .stalled
-                : MusicInputHealth.evaluate(analysisSnapshot, startedAt: liveCaptureBeganAt, now: timestamp)
+            let captureFailed = sourceStatus == .unavailable
+            let health = MusicInputHealth.evaluate(
+                analysisSnapshot, startedAt: liveCaptureBeganAt, now: timestamp,
+                captureFailed: captureFailed)
+            if inputHealth != health { inputHealth = health }
+            publishPlaybackState(!captureFailed && Self.isAudible(fresh))
             if timestamp - lastSnapshotPublishedAt >= previewPublicationInterval {
                 latestSnapshot = fresh
                 lastSnapshotPublishedAt = timestamp
@@ -399,7 +420,7 @@ final class AudioReactiveSessionController: ObservableObject {
                     latestSnapshot = snapshot
                     lastSnapshotPublishedAt = timestamp
                 }
-                if !isAudioPlaying { isAudioPlaying = true }
+                publishPlaybackState(true)
             }
             let frame = session.engine.makeFrame(
                 snapshot: snapshot,
@@ -556,7 +577,7 @@ final class AudioReactiveSessionController: ObservableObject {
         latestSnapshot = AudioReactiveSnapshot()
         analysisSnapshot = AudioReactiveSnapshot()
         lastSnapshotPublishedAt = -Double.greatestFiniteMagnitude
-        isAudioPlaying = false
+        publishPlaybackState(false)
         inputHealth = .waiting
     }
 }

@@ -740,15 +740,20 @@ private struct MusicModeInputStatusView: View {
                 Text(permissionMessage)
                     .font(.caption).foregroundStyle(Lumen.warning)
             } else if controller.sourceStatus == .unavailable {
-                Text("Audio capture is unavailable or was interrupted. Restart the source to reconnect.")
+                #if os(macOS)
+                Text("Audio capture is unavailable or was interrupted. Restart system audio to reconnect.")
                     .font(.caption).foregroundStyle(Lumen.warning)
+                #else
+                Text("Audio capture is unavailable or was interrupted. Stop Music Mode and start it again to reconnect.")
+                    .font(.caption).foregroundStyle(Lumen.warning)
+                #endif
             }
             #if os(macOS)
             if isRunning && controller.canRestartSystemAudio {
                 if !controller.isAudioPlaying && controller.sourceStatus == .systemAudio {
                     Text(controller.inputHealth == .stalled
-                         ? "The capture stopped delivering audio. Restart system audio. If it stays silent, check LumenDesk’s Screen & System Audio Recording permission in System Settings."
-                         : "Start playback in Apple Music and check that it is audible on this Mac. If music is playing but this meter stays empty, restart system audio.")
+                         ? "No analysis has arrived yet. Restart system audio. If it stays empty, check LumenDesk’s Screen & System Audio Recording permission in System Settings."
+                         : "Start playback in Apple Music and check that it is audible on this Mac. Quiet or paused tracks show as silent; if music is playing but this meter stays empty, restart system audio.")
                         .font(.caption).foregroundStyle(Lumen.meter)
                 }
                 Button("Restart system audio") { controller.restartSystemAudio() }

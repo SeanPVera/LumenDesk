@@ -43,9 +43,11 @@ control behavior. Nothing here establishes perceptual synchronization.
    cannot replace another room's capture. Scope identity guards completion and
    frame callbacks. Demo grooves enter here as explicitly synthetic snapshots.
    The render timer runs in common run-loop modes so native control tracking
-   does not pause lighting. Capture delegate failures surface as unavailable;
-   input health distinguishes silence from missing samples. Restart reconnects
-   the shared system source while retaining scope sessions and restore snapshots.
+   does not pause lighting. Capture delegate failures surface as unavailable
+   and stalled. While the source is otherwise healthy, missing buffers (common
+   when nothing is playing) are treated as quiet/waiting rather than a broken
+   capture. Restart reconnects the shared system source while retaining scope
+   sessions and restore snapshots.
 5. **`MusicChoreographyEngine.makeFrame`** applies freshness, configuration, roles
    and topology to produce vendor-neutral HSB states, transition durations,
    timestamp and sequence. No vendor command or second audio pipeline lives here.

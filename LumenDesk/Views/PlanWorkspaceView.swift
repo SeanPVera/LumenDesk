@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 
 /// A room is the working context, not a destination hidden behind a drawing.
 /// Domain state remains in LightManager; this view owns only navigation and selection.
@@ -6,10 +7,27 @@ import SwiftUI
 final class SpectrumDraftStore: ObservableObject {
     @Published var luna: [String: LIFXMatrixState] = [:]
     @Published var govee: [String: GoveeSegmentState] = [:]
+    @Published var selections: [LightScope: Set<String>] = [:]
 
     func retainDevices(_ ids: Set<String>) {
         luna = luna.filter { ids.contains($0.key) }
         govee = govee.filter { ids.contains($0.key) }
+        // Reconcile every scope, then assign once so observers see a single change
+        // instead of one publication per scope key.
+        let available = Array(ids)
+        var next = selections
+        for scope in next.keys {
+            next[scope] = RoomWorkspaceSelection.reconciled(selected: next[scope] ?? [], available: available)
+        }
+        selections = next
+    }
+
+    /// A different workspace (entering or leaving Demo Mode) shares no fixtures
+    /// with this one, so nothing here can be reconciled into it.
+    func clearAll() {
+        luna = [:]
+        govee = [:]
+        selections = [:]
     }
 }
 
@@ -17,7 +35,6 @@ struct PlanWorkspaceView: View {
     @EnvironmentObject private var manager: LightManager
     @Binding var scope: LightScope
     @Binding var requestedDeviceID: String?
-    @State private var selectedIDs: Set<String> = []
     @State private var section: RoomWorkspaceSection = .control
     @State private var showingSetup = false
     @State private var showingNewRoom = false
@@ -31,6 +48,8 @@ struct PlanWorkspaceView: View {
     @AppStorage("LumenDesk.workspaceLayout.v1") private var layout = WorkspaceLayout.automatic.rawValue
     @AppStorage("LumenDesk.interfaceDensity.v1") private var density = InterfaceDensity.comfortable.rawValue
 
+    @State private var pendingInitialSelection: Set<String>?
+
     init(scope: Binding<LightScope> = .constant(.all),
          requestedDeviceID: Binding<String?> = .constant(nil),
          studioDrafts: SpectrumDraftStore = SpectrumDraftStore(),
@@ -38,10 +57,24 @@ struct PlanWorkspaceView: View {
         _scope = scope
         _requestedDeviceID = requestedDeviceID
         self.studioDrafts = studioDrafts
-        let selection = requestedDeviceID.wrappedValue.map { Set([$0]) } ?? initialSelection
-        _selectedIDs = State(initialValue: selection)
+        // Seeding @Published selections from a View init publishes during the
+        // parent's body evaluation. Defer to onAppear instead.
+        let shouldSeed = studioDrafts.selections[scope.wrappedValue] == nil && !initialSelection.isEmpty
+        _pendingInitialSelection = State(initialValue: shouldSeed ? initialSelection : nil)
         _section = State(initialValue: initialSection)
-        _studioMode = State(initialValue: selection.count == 1 ? .detail : .overview)
+        _studioMode = State(initialValue: requestedDeviceID.wrappedValue != nil || initialSelection.count == 1 ? .detail : .overview)
+    }
+
+    private var selectedIDs: Set<String> {
+        get { studioDrafts.selections[scope] ?? [] }
+        nonmutating set { studioDrafts.selections[scope] = newValue }
+    }
+    private var selectionBinding: Binding<Set<String>> {
+        Binding(get: { selectedIDs }, set: { selectedIDs = $0 })
+    }
+    private var focusedLight: LightDevice? {
+        let id = requestedDeviceID ?? (selectedIDs.count == 1 ? selectedIDs.first : nil)
+        return lights.first { $0.id == id }
     }
 
     private var lights: [LightDevice] { manager.devices(in: scope) }
@@ -80,7 +113,7 @@ struct PlanWorkspaceView: View {
                     if lights.isEmpty {
                         emptyState
                     } else {
-                        RoomLightField(lights: lights, room: room, selectedIDs: $selectedIDs,
+                        RoomLightField(lights: lights, room: room, selectedIDs: selectionBinding,
                                        showsSpatialPlacement: geometry.size.width >= max(720, CGFloat(lights.count) * 155))
                         sectionPicker
                         switch section {
@@ -105,26 +138,31 @@ struct PlanWorkspaceView: View {
         }
         .background(Lumen.stage)
         .navigationTitle("Room")
+        .onAppear {
+            if let pending = pendingInitialSelection, studioDrafts.selections[scope] == nil {
+                studioDrafts.selections[scope] = pending
+            }
+            pendingInitialSelection = nil
+        }
         .onChange(of: scope) { _ in
-            selectedIDs.removeAll(); searchText = ""; studioMode = .overview
+            searchText = ""; studioMode = .overview
             requestedDeviceID = nil
         }
         .onChange(of: studioMode) { mode in
-            requestedDeviceID = mode == .detail && selectedIDs.count == 1 ? selectedIDs.first : nil
+            if mode == .overview { requestedDeviceID = nil }
+            else if requestedDeviceID == nil && selectedIDs.count == 1 { requestedDeviceID = selectedIDs.first }
         }
         .onChange(of: requestedDeviceID) { id in
             if let id, lights.contains(where: { $0.id == id }) {
-                selectedIDs = [id]
                 studioMode = .detail
                 section = .control
             } else if id == nil {
                 studioMode = .overview
-                selectedIDs.removeAll()
             }
         }
         .onChange(of: lights.map(\.id)) { ids in
             selectedIDs = RoomWorkspaceSelection.reconciled(selected: selectedIDs, available: ids)
-            if studioMode == .detail && targets.count != 1 { studioMode = .overview }
+            if studioMode == .detail && focusedLight == nil { studioMode = .overview }
             let liveIDs = Set(manager.devices.map(\.id))
             studioDrafts.retainDevices(liveIDs)
         }
@@ -163,7 +201,7 @@ struct PlanWorkspaceView: View {
             } else {
                 if studioMode == .overview {
                     studioOverview(wide: width >= 850)
-                } else if selectedIDs.count == 1, let light = targets.first {
+                } else if let light = focusedLight {
                     studioDeviceEditor(light, width: width - (width < 600 ? 32 : 48))
                 } else {
                     VStack(alignment: .leading, spacing: 12) {
@@ -212,6 +250,17 @@ struct PlanWorkspaceView: View {
 
     private var studioFixtureLanes: some View {
         VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text(selectedIDs.isEmpty ? "Entire room · \(lights.count) lights" : "\(targets.count) of \(lights.count) selected")
+                    .font(.callout.weight(.medium)).foregroundStyle(Lumen.meter)
+                Spacer()
+                Button("Select all") { selectedIDs = Set(lights.map(\.id)) }
+                    .buttonStyle(LumenSecondaryButtonStyle(compact: true))
+                if !selectedIDs.isEmpty {
+                    Button("Entire room") { selectedIDs.removeAll() }
+                        .buttonStyle(LumenSecondaryButtonStyle(compact: true))
+                }
+            }.padding(.bottom, 12)
             if lights.count > 6 {
                 TextField("Find a light", text: $searchText).textFieldStyle(.roundedBorder).padding(.bottom, 12)
             }
@@ -222,7 +271,6 @@ struct PlanWorkspaceView: View {
                                         if selectedIDs.contains(light.id) { selectedIDs.remove(light.id) }
                                         else { selectedIDs.insert(light.id) }
                                     }, edit: {
-                                        selectedIDs = [light.id]
                                         requestedDeviceID = light.id
                                         studioMode = .detail
                                     })
@@ -233,7 +281,9 @@ struct PlanWorkspaceView: View {
 
     private var studioRoomInspector: some View {
         VStack(alignment: .leading, spacing: 18) {
-            RoomOutputControls(lights: targets, title: selectedIDs.isEmpty ? "Room controls" : "\(targets.count) selected lights")
+            RoomOutputControls(lights: targets, title: selectedIDs.isEmpty ? "Room controls" : "\(targets.count) selected light\(targets.count == 1 ? "" : "s")")
+                .id(targets.map(ObjectIdentifier.init))
+            roomColorSchemes
             if !selectedIDs.isEmpty {
                 Button("Clear selection — whole room") { selectedIDs.removeAll() }
                     .buttonStyle(LumenSecondaryButtonStyle(compact: true))
@@ -243,6 +293,19 @@ struct PlanWorkspaceView: View {
         }
         .padding(18)
         .background(Lumen.deck, in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var roomColorSchemes: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Color schemes").font(.headline)
+            Menu("Apply a color scheme") {
+                LightingThemeCategoryMenuContent { theme in
+                    manager.applyTheme(theme, deviceIDs: Set(targets.map(\.id)), in: scope)
+                }
+            }.disabled(targets.isEmpty)
+            Text("Applies across \(targets.count) targeted light\(targets.count == 1 ? "" : "s"), including their supported panels and zones. Turns them on at the scheme’s brightness.")
+                .font(.caption).foregroundStyle(Lumen.meter)
+        }
     }
 
     @ViewBuilder private func studioDeviceEditor(_ light: LightDevice, width: CGFloat) -> some View {
@@ -383,7 +446,7 @@ struct PlanWorkspaceView: View {
                         }
                     }
                 }
-                Text("The running show owns these fixtures. Stop it before editing their output.")
+                Text("Room controls take over from a running show. Other lights in that show return to their saved state.")
                     .font(.caption).foregroundStyle(Lumen.meter)
             }
             .padding(16)
@@ -443,7 +506,8 @@ struct PlanWorkspaceView: View {
             } else {
                 RoomOutputControls(lights: targets, title: selectedIDs.isEmpty
                                    ? manager.scopeDisplayName(scope)
-                                   : "\(targets.count) selected fixtures")
+                                   : "\(targets.count) selected fixture\(targets.count == 1 ? "" : "s")")
+                    .id(targets.map(ObjectIdentifier.init))
             }
             if !selectedIDs.isEmpty && targets.isEmpty {
                 Text("The selected fixtures are no longer in this room. Clear selection to control the room.")
@@ -847,41 +911,70 @@ struct RoomFixtureLine: View {
     }
 }
 
+/// A room aggregate must observe its children, not just membership on the manager.
+/// Discovery, device controls and show frames all publish through LightDevice.
+/// This only invalidates. Values are always read from the view's current lights.
+final class RoomOutputState: ObservableObject {
+    private var observation: AnyCancellable?
+
+    init(lights: [LightDevice]) {
+        observation = Publishers.MergeMany(lights.map(\.objectWillChange)).sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
+    }
+
+    static func level(of lights: [LightDevice]) -> Double {
+        lights.isEmpty ? 0 : lights.reduce(0) { $0 + $1.brightness } / Double(lights.count)
+    }
+}
+
+/// Call sites give this view one identity per target set (`.id` over the
+/// lights' object identities), so a new selection or room builds a new
+/// observer. Re-pointing one from a one-argument `onChange` ran with the
+/// previous `lights` on every OS, which left the fader on the old selection.
 struct RoomOutputControls: View {
     @EnvironmentObject private var manager: LightManager
     let lights: [LightDevice]
     let title: String
+    @StateObject private var output: RoomOutputState
 
-    private var ids: Set<String> { Set(lights.filter { !$0.isStale }.map(\.id)) }
-    private var owned: Bool { lights.contains { manager.animatingEffect(for: $0.id) != nil } }
-    private var level: Double {
-        let online = lights.filter { !$0.isStale }
-        return online.isEmpty ? 0 : online.reduce(0) { $0 + $1.brightness } / Double(online.count)
+    init(lights: [LightDevice], title: String) {
+        self.lights = lights
+        self.title = title
+        _output = StateObject(wrappedValue: RoomOutputState(lights: lights))
     }
+
+    private var ids: Set<String> { Set(lights.map(\.id)) }
+    private var level: Double { RoomOutputState.level(of: lights) }
+    private var owned: Bool { lights.contains { manager.animatingEffect(for: $0.id) != nil } }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text(title).font(.headline)
-            Text("\(ids.count) available · \(lights.count - ids.count) not responding")
+            Text("\(lights.filter(\.isOn).count) on · \(lights.count) targeted")
                 .font(.caption).foregroundStyle(Lumen.meter)
+            if lights.contains(where: \.isStale) {
+                Text("\(lights.filter(\.isStale).count) not responding. Commands still attempt these lights.")
+                    .font(.caption).foregroundStyle(Lumen.warn)
+            }
             HStack(spacing: 12) {
                 Button("On") { manager.setPower(deviceIDs: ids, on: true) }
                     .buttonStyle(LumenPrimaryButtonStyle())
                 Button("Off") { manager.setPower(deviceIDs: ids, on: false) }
                     .buttonStyle(LumenSecondaryButtonStyle())
             }
-            .disabled(ids.isEmpty || owned)
+            .disabled(ids.isEmpty)
             LumenFader(label: "Brightness", value: Binding(
                 get: { level }, set: { manager.setBrightness(deviceIDs: ids, value: $0) }),
                        format: { value in
-                           Set(lights.filter { !$0.isStale }.map { Int(($0.brightness * 100).rounded()) }).count > 1
+                           Set(lights.map { Int(($0.brightness * 100).rounded()) }).count > 1
                                ? "Mixed" : LumenFader.percent(value)
                        })
-                .disabled(ids.isEmpty || owned)
+                .disabled(ids.isEmpty)
             ColorPicker("Color", selection: Binding(
                 get: { lights.first?.color ?? .white },
                 set: { manager.setColor(deviceIDs: ids, color: $0) }), supportsOpacity: false)
-                .disabled(ids.isEmpty || owned)
+                .disabled(ids.isEmpty)
             if Set(lights.map { $0.color.hsbComponents.h }).count > 1 || Set(lights.map { $0.color.hsbComponents.s }).count > 1 {
                 Text("Mixed colors. Picking a color replaces the selected output.")
                     .font(.caption).foregroundStyle(Lumen.meter)
@@ -891,11 +984,11 @@ struct RoomOutputControls: View {
                 set: { manager.setKelvin(deviceIDs: ids, kelvin: Int($0)) }),
                        range: 2500...9000, step: 100, track: .kelvin,
                        format: { "\(Int($0)) K" })
-                .disabled(ids.isEmpty || owned)
+                .disabled(ids.isEmpty)
             Text("Output depends on each fixture. Segment and matrix layouts are replaced by a single color or white setting.")
                 .font(.caption).foregroundStyle(Lumen.meter)
             if owned {
-                Label("Controlled by the running show", systemImage: "waveform")
+                Label("Changing a control stops the show touching these lights.", systemImage: "waveform")
                     .font(.callout).foregroundStyle(Lumen.meter)
             }
         }

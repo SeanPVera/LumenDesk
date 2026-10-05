@@ -159,6 +159,37 @@ test('format change resets sample clock and stereo survives analysis',()=>{
   assert.ok(Math.abs(next.analysisTimestamp-(100+2048/44100))<.001)
 })
 
+test('opposite-phase stereo keeps the level and pulse of the same mono signal',()=>{
+  const mono=new MusicFeatureAnalyzer('Mono'), stereo=new MusicFeatureAnalyzer('Stereo')
+  let a, b
+  for(let index=0;index<240;index++){
+    const left=Float32Array.from({length:1024},(_,i)=>{
+      const t=(index*1024+i)/48000, phase=t%.5
+      return .7*Math.sin(2*Math.PI*65*t)*Math.exp(-phase/.045)*(1-Math.exp(-phase/.002))
+    })
+    const right=left.map(v=>-v), end=100+(index+1)*1024/48000
+    a=mono.analyze(left,end,undefined,48000)
+    b=stereo.analyze(left,end,{left,right},48000)
+    assert.ok(Math.abs(b.rawRMS-a.rawRMS)<1e-6,`RMS ${b.rawRMS} vs ${a.rawRMS}`)
+    assert.ok(Math.abs(b.energy-a.energy)<1e-6)
+  }
+  assert.ok(b.beatCount>0)
+  assert.equal(b.beatCount,a.beatCount)
+})
+test('stream start is not an onset, and a real one after it still is',()=>{
+  const analyzer=new MusicFeatureAnalyzer('Test')
+  const tone=start=>Float32Array.from({length:1024},(_,i)=>.5*Math.sin(2*Math.PI*880*(start+i)/48000))
+  for(let index=0;index<2;index++){
+    const s=analyzer.analyze(tone(index*1024),100+(index+1)*1024/48000)
+    assert.equal(s.onset,0)
+    assert.equal(s.kick+s.snare+s.percussion,0)
+    assert.ok(s.level>0,'loudness is still measured while the window fills')
+  }
+  for(let index=2;index<4;index++) analyzer.analyze(new Float32Array(1024),100+(index+1)*1024/48000)
+  const click=Float32Array.from({length:1024},(_,i)=>i<12?(i%2?-1:1):0)
+  const hit=analyzer.analyze(click,100+5*1024/48000)
+  assert.ok(Math.max(hit.kick,hit.snare,hit.percussion)>.1)
+})
 test('tempo reacquisition never teleports palette position',()=>{
   const engine=new MusicChoreographyEngine(),config=configurationFor('soundcheck')
   let previous

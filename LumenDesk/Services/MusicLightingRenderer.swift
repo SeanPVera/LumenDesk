@@ -28,7 +28,16 @@ final class MusicLightingRenderer {
     private(set) var diagnostics = Diagnostics()
     private var latestSequence: [String: UInt64] = [:]
     static let maximumFrameAge: TimeInterval = 0.25
-    private var lastSentAt: [String: TimeInterval] = [:]
+    /// How early a handoff may land against its slot. The render clock ticks
+    /// every 50 ms with up to 10 ms of timer tolerance, and a repeating timer
+    /// snaps back to its schedule, so a late tick is followed by a short gap.
+    /// Comparing raw gaps against the ceiling dropped that next frame, and a
+    /// 60 ms ceiling against 50 ms ticks sent on only every other tick.
+    static let pacingTolerance: TimeInterval = 0.015
+    /// Each fixture's next slot. Slots advance by the transport's interval
+    /// from the previous slot, so the average rate holds at the ceiling while
+    /// single handoffs absorb render-clock jitter.
+    private var nextDueAt: [String: TimeInterval] = [:]
 
     func enqueue(
         _ frame: MusicLightingFrame,
@@ -36,7 +45,8 @@ final class MusicLightingRenderer {
         at timestamp: TimeInterval
     ) -> [MusicRenderCommand] {
         diagnostics.generatedFrames += 1
-        let fixtureByID = Dictionary(uniqueKeysWithValues: fixtures.map { ($0.id, $0) })
+        // A duplicated light ID (a hand-edited import) must not trap here.
+        let fixtureByID = Dictionary(fixtures.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let grouped = Dictionary(grouping: frame.states, by: \.fixtureID)
         for (fixtureID, states) in grouped {
             guard let fixture = fixtureByID[fixtureID] else { continue }
@@ -67,11 +77,15 @@ final class MusicLightingRenderer {
         for fixtureID in pendingByFixture.keys.sorted() where availableIDs.contains(fixtureID) {
             guard let pending = pendingByFixture[fixtureID] else { continue }
             let interval = Self.minimumInterval(for: pending.transport)
-            if let last = lastSentAt[fixtureID], timestamp - last + 0.000_001 < interval {
+            let tolerance = Self.pacingTolerance
+            if let due = nextDueAt[fixtureID], timestamp + tolerance + 0.000_001 < due {
                 continue
             }
+            // A slot taken late moves the schedule forward instead of banking
+            // credit for a burst of catch-up handoffs, so two handoffs are
+            // never closer than the interval less twice the tolerance.
+            nextDueAt[fixtureID] = max(nextDueAt[fixtureID] ?? timestamp, timestamp - tolerance) + interval
             pendingByFixture.removeValue(forKey: fixtureID)
-            lastSentAt[fixtureID] = timestamp
             diagnostics.commandsHandedOff += 1
             commands.append(MusicRenderCommand(
                 fixtureID: fixtureID,
@@ -86,13 +100,13 @@ final class MusicLightingRenderer {
     func reset(fixtureIDs: Set<String>? = nil) {
         guard let fixtureIDs else {
             pendingByFixture.removeAll(keepingCapacity: true)
-            lastSentAt.removeAll(keepingCapacity: true)
+            nextDueAt.removeAll(keepingCapacity: true)
             latestSequence.removeAll(keepingCapacity: true)
             return
         }
         for id in fixtureIDs {
             pendingByFixture.removeValue(forKey: id)
-            lastSentAt.removeValue(forKey: id)
+            nextDueAt.removeValue(forKey: id)
             latestSequence.removeValue(forKey: id)
         }
     }

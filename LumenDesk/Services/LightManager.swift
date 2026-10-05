@@ -16,7 +16,10 @@ enum NapPhase: Equatable {
 @MainActor
 final class LightManager: ObservableObject {
     @Published private(set) var devices: [LightDevice] = []
-    @Published private(set) var rooms: [Room] = []
+    @Published private(set) var rooms: [Room] = [] {
+        // Room membership decides which lights a show's frames may reach.
+        didSet { musicFixtureCache.removeAll() }
+    }
     @Published private(set) var favoriteIDs: Set<String> = []
     @Published private(set) var scenes: [LightingScene] = []
     @Published private(set) var isScanning: Bool = false
@@ -64,7 +67,9 @@ final class LightManager: ObservableObject {
     @Published private(set) var goveeSegmentPresets: [GoveeSegmentPreset] = []
     @Published private(set) var lifxMatrixStates: [String: LIFXMatrixState] = [:]
     @Published private(set) var musicModeConfiguration = MusicModeConfiguration.configuration(for: .soundcheck)
-    @Published private(set) var fixtureTopologies: [String: FixtureTopology] = [:]
+    @Published private(set) var fixtureTopologies: [String: FixtureTopology] = [:] {
+        didSet { musicFixtureCache.removeAll() }
+    }
 
     let musicModeController: AudioReactiveSessionController
 
@@ -194,6 +199,23 @@ final class LightManager: ObservableObject {
     private var effectRuns: [LightScope: EffectRun] = [:]
     private let musicLightingRenderer = MusicLightingRenderer()
     private var musicModelUpdateAt: [String: TimeInterval] = [:]
+    /// Descriptors a running show renders through. Building them walks segment
+    /// profiles and Shapes geometry, which is too much to repeat for every
+    /// 20 Hz frame. Room and topology edits clear it outright; a one-second
+    /// lifetime bounds how long anything rarer (a wall reporting a new layout)
+    /// takes to reach output.
+    private struct MusicFixtureCache {
+        let runID: UUID
+        let builtAt: TimeInterval
+        let fixtures: [MusicFixtureDescriptor]
+    }
+    private var musicFixtureCache: [LightScope: MusicFixtureCache] = [:]
+    /// Reduce Motion as the system reports it. Read and observed here rather
+    /// than passed in by whichever view started a show, so a show started from
+    /// a favorite, a scene card or Demo Mode honors it, and a change reaches
+    /// running shows whatever screen is open.
+    private(set) var reducesMotion = false
+    private var reduceMotionObserver: NSObjectProtocol?
     private var undoStack: [[LightRuntimeSnapshot]] = []
     private var redoStack: [[LightRuntimeSnapshot]] = []
     private var lastChangeTime: [String: Date] = [:]
@@ -257,6 +279,8 @@ final class LightManager: ObservableObject {
         self.commandCoordinator.onChange = { [weak self] in
             self?.objectWillChange.send()
         }
+        reducesMotion = LightManager.systemReducesMotion
+        observeSystemReduceMotion()
     }
 
     var isDemoMode: Bool { demoWorkspaceController.isActive }
@@ -419,26 +443,7 @@ final class LightManager: ObservableObject {
                     title: "Automation ran",
                     detail: "\(room.name): \(entry.action.displayName) at \(entry.timeString)"
                 )
-                let lights = devices(in: room)
-                switch entry.action {
-                case .turnOn, .atSunrise:
-                    for device in lights {
-                        device.isOn = true
-                        sendPower(device, on: true)
-                    }
-                case .turnOff, .atSunset:
-                    for device in lights {
-                        device.isOn = false
-                        sendPower(device, on: false)
-                    }
-                default:
-                    if let brightness = entry.action.brightnessValue {
-                        for device in lights {
-                            device.brightness = brightness
-                            sendBrightness(device, value: brightness)
-                        }
-                    }
-                }
+                applyScheduleAction(entry.action, to: devices(in: room))
             }
         }
     }
@@ -468,13 +473,7 @@ final class LightManager: ObservableObject {
 
     func runMissedAutomation(_ missed: MissedAutomation) {
         guard let room = rooms.first(where: { $0.id == missed.roomID }) else { return }
-        let lights = devices(in: room)
-        if let brightness = missed.entry.action.brightnessValue {
-            for device in lights { device.brightness = brightness; sendBrightness(device, value: brightness) }
-        } else {
-            let on = missed.entry.action == .turnOn || missed.entry.action == .atSunrise
-            for device in lights { device.isOn = on; sendPower(device, on: on) }
-        }
+        applyScheduleAction(missed.entry.action, to: devices(in: room))
         if scheduleEngine.removeMissedAutomation(id: missed.id) { objectWillChange.send() }
     }
 
@@ -774,6 +773,7 @@ final class LightManager: ObservableObject {
         if staleCount > 0 {
             publishError("\(staleCount) light\(staleCount == 1 ? "" : "s") in \u{201C}\(room.name)\u{201D} may be offline.")
         }
+        stopEffects(touching: Set(lights.map(\.id)))
         recordChange(lights)
         announceAction("\(room.name) turned \(on ? "on" : "off")", lights: lights)
         for d in lights { d.isOn = on; sendPower(d, on: on) }
@@ -785,6 +785,7 @@ final class LightManager: ObservableObject {
             publishError("“\(room.name)” has no lights to control.")
             return
         }
+        stopEffects(touching: Set(lights.map(\.id)))
         recordChange(lights)
         let clamped = min(1, max(0, value))
         for d in lights { previewBrightness(d, value: clamped) }
@@ -830,6 +831,7 @@ final class LightManager: ObservableObject {
         if staleCount > 0 {
             publishError("\(staleCount) light\(staleCount == 1 ? "" : "s") may be offline.")
         }
+        stopEffects(touching: Set(devices.map(\.id)))
         recordChange(devices)
         announceAction("All lights turned \(on ? "on" : "off")", lights: devices)
         for d in devices { d.isOn = on; sendPower(d, on: on) }
@@ -840,6 +842,7 @@ final class LightManager: ObservableObject {
             publishError("No lights are available to control.")
             return
         }
+        stopEffects(touching: Set(devices.map(\.id)))
         recordChange(devices)
         let clamped = min(1, max(0, value))
         for d in devices { previewBrightness(d, value: clamped) }
@@ -847,14 +850,20 @@ final class LightManager: ObservableObject {
 
     func setPower(deviceIDs: Set<String>, on: Bool) {
         let lights = devices.filter { deviceIDs.contains($0.id) }
+        guard !lights.isEmpty else { return }
+        stopEffects(touching: deviceIDs)
         recordChange(lights)
+        announceAction("Turned \(on ? "on" : "off")", lights: lights)
         for d in lights { d.isOn = on; sendPower(d, on: on) }
     }
 
     func setBrightness(deviceIDs: Set<String>, value: Double) {
         let lights = devices.filter { deviceIDs.contains($0.id) }
+        guard !lights.isEmpty else { return }
+        stopEffects(touching: deviceIDs)
         recordChange(lights)
-        for d in lights { d.brightness = value; sendBrightness(d, value: value) }
+        let clamped = min(1, max(0, value))
+        for d in lights { previewBrightness(d, value: clamped) }
     }
 
     /// One undo entry for a deliberate multi-fixture color edit.
@@ -910,7 +919,21 @@ final class LightManager: ObservableObject {
                          : "No lights in “\(scopeDisplayName(scope))” to theme.")
             return
         }
+        applyTheme(theme, to: targets, suffix: scope == .all ? "" : " in “\(scopeDisplayName(scope))”")
+    }
+
+    /// Palette distribution follows room order and respects an explicit selection.
+    func applyTheme(_ theme: LightingTheme, deviceIDs: Set<String>, in scope: LightScope) {
+        let targets = devices(in: scope).filter { deviceIDs.contains($0.id) }
+        guard !targets.isEmpty else { return }
+        applyTheme(theme, to: targets, suffix: "")
+    }
+
+    private func applyTheme(_ theme: LightingTheme, to targets: [LightDevice], suffix: String) {
         stopEffects(touching: Set(targets.map(\.id)))
+        // The plan sets each light's brightness; a slider send still in flight
+        // would land after it and override the theme.
+        cancelPendingBrightness(deviceIDs: Set(targets.map(\.id)))
         recordChange(targets)
 
         let plan = ThemePlanner.plan(theme, fixtures: targets.map(themeFixture))
@@ -921,7 +944,6 @@ final class LightManager: ObservableObject {
             applyThemePlan(fixturePlan, to: device)
         }
 
-        let suffix = scope == .all ? "" : " in “\(scopeDisplayName(scope))”"
         var message = "Applied “\(theme.name)” to \(targets.count) light\(targets.count == 1 ? "" : "s")\(suffix)."
         if let adaptation = plan.adaptationSummary { message += " \(adaptation)" }
         publishError(message)
@@ -1015,11 +1037,9 @@ final class LightManager: ObservableObject {
 
     func startEffect(_ effect: LightingEffect, scope: LightScope = .all) {
         if effect.id == "music-pulse" || effect.style == .musicPulse {
-            startMusicMode(
-                configuration: .configuration(for: .soundcheck),
-                scope: scope,
-                reducedMotion: false
-            )
+            // A favorite or scene card starts the same show as the Music
+            // screen: the saved configuration, under the system Reduce Motion.
+            startMusicMode(configuration: musicModeConfiguration, scope: scope)
             return
         }
         let targets = devices(in: scope)
@@ -1033,6 +1053,9 @@ final class LightManager: ObservableObject {
         // the new run later restores the true pre-effect state rather than a
         // mid-effect frame.
         let inherited = stopEffects(touching: Set(targets.map(\.id)))
+        // Frames carry brightness from here on; a slider send still in flight
+        // would land under the first frames and, on Govee, dim them twice.
+        cancelPendingBrightness(deviceIDs: Set(targets.map(\.id)))
         let startingSnapshot = targets.map { inherited[$0.id] ?? snapshot($0) }
         recordChange(targets)
         let run = EffectRun(effect: effect, scope: scope, snapshot: startingSnapshot)
@@ -1093,13 +1116,19 @@ final class LightManager: ObservableObject {
             return
         }
 
-        let normalized = configuration.normalized(reducedMotion: reducedMotion)
+        // The system setting applies whoever starts the show; a caller can
+        // only add restraint, never lift it.
+        let motionReduced = reducedMotion || reducesMotion
+        let normalized = configuration.normalized(reducedMotion: motionReduced)
         guard (isDemoMode && normalized.usesSyntheticDemoPattern)
                 || musicModeController.canStartCapture(capture, replacing: scope) else {
             publishError("Music Mode shares one audio source across rooms. Stop the other shows before selecting a different source.")
             return
         }
         let inherited = stopEffects(touching: Set(targets.map(\.id)))
+        // Frames carry brightness from here on; a slider send still in flight
+        // would land under the show and, on Govee, dim every frame twice.
+        cancelPendingBrightness(deviceIDs: Set(targets.map(\.id)))
         let startingSnapshot = targets.map { inherited[$0.id] ?? snapshot($0) }
         recordChange(targets)
         let run = EffectRun(
@@ -1107,7 +1136,7 @@ final class LightManager: ObservableObject {
             scope: scope,
             snapshot: startingSnapshot,
             restorePreviousState: normalized.restorePreviousState,
-            reducedMotion: reducedMotion
+            reducedMotion: motionReduced
         )
         effectRuns[scope] = run
         activeEffects[scope] = effect.id
@@ -1130,7 +1159,7 @@ final class LightManager: ObservableObject {
             configuration: normalized,
             topology: topology,
             fixtures: fixtures,
-            reducedMotion: reducedMotion,
+            reducedMotion: motionReduced,
             useSyntheticPattern: isDemoMode && normalized.usesSyntheticDemoPattern,
             capture: capture,
             onFrame: { [weak self, weak run] frame in
@@ -1566,6 +1595,7 @@ final class LightManager: ObservableObject {
     }
 
     private func apply(_ entry: [LightRuntimeSnapshot]) {
+        cancelPendingBrightness(deviceIDs: Set(entry.map(\.deviceID)))
         for snap in entry {
             guard let d = device(withID: snap.deviceID) else { continue }
             d.isOn = snap.isOn
@@ -1871,6 +1901,7 @@ extension LightManager {
     func requestShapesOrientation(_ degrees: Int, for device: LightDevice) {
         guard device.brand == .nanoleaf else { return }
         shapes.requestOrientation(degrees, for: device.id)
+        musicFixtureCache.removeAll()
         for scope in musicModeController.activeScopeIDs
             where effectRuns[scope]?.ownedDeviceIDs.contains(device.id) == true {
             musicModeController.update(scope: scope, configuration: musicModeConfiguration,
@@ -3265,14 +3296,57 @@ extension LightManager {
     var musicGoveeDispatch: MusicDispatchMetrics.Snapshot { govee?.musicMetrics.snapshot() ?? .init() }
     var musicRenderDiagnostics: MusicLightingRenderer.Diagnostics { musicLightingRenderer.diagnostics }
 
+    /// The platform's Reduce Motion switch.
+    static var systemReducesMotion: Bool {
+        #if os(macOS)
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        #else
+        UIAccessibility.isReduceMotionEnabled
+        #endif
+    }
+
+    /// Follows the system setting for the life of the manager, so a change
+    /// reaches running shows whether or not the Music screen is open.
+    private func observeSystemReduceMotion() {
+        #if os(macOS)
+        let center = NSWorkspace.shared.notificationCenter
+        let name = NSWorkspace.accessibilityDisplayOptionsDidChangeNotification
+        #else
+        let center = NotificationCenter.default
+        let name = UIAccessibility.reduceMotionStatusDidChangeNotification
+        #endif
+        reduceMotionObserver = center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                let enabled = LightManager.systemReducesMotion
+                if enabled != self.reducesMotion { self.setMusicReducedMotion(enabled) }
+            }
+        }
+    }
+
+    /// Applies Reduce Motion to every running show. The system observer calls
+    /// this; tests call it directly.
     func setMusicReducedMotion(_ enabled: Bool) {
+        reducesMotion = enabled
         for scope in musicModeController.activeScopeIDs { effectRuns[scope]?.reducedMotion = enabled }
-        setMusicModeConfiguration(musicModeConfiguration)
+        refreshMusicSessions()
     }
 
     func setMusicModeConfiguration(_ configuration: MusicModeConfiguration) {
-        musicModeConfiguration = configuration.normalized()
+        previewMusicModeConfiguration(configuration)
         persistApplicationState()
+    }
+
+    /// Applies a configuration to running shows without writing it to disk.
+    /// A fader drag reports dozens of values a second, and saving each one
+    /// rewrote the whole state file on the main thread that also runs the
+    /// lighting timer. The release commits with `setMusicModeConfiguration`.
+    func previewMusicModeConfiguration(_ configuration: MusicModeConfiguration) {
+        musicModeConfiguration = configuration.normalized()
+        refreshMusicSessions()
+    }
+
+    private func refreshMusicSessions() {
         for scope in musicModeController.activeScopeIDs {
             effectRuns[scope]?.restorePreviousState = musicModeConfiguration.restorePreviousState
             musicModeController.update(
@@ -3280,7 +3354,7 @@ extension LightManager {
                 configuration: musicModeConfiguration,
                 topology: fixtureTopology(for: scope),
                 fixtures: musicFixtureDescriptors(in: scope),
-                reducedMotion: effectRuns[scope]?.reducedMotion ?? false
+                reducedMotion: effectRuns[scope]?.reducedMotion ?? reducesMotion
             )
         }
     }
@@ -3383,10 +3457,22 @@ extension LightManager {
         }
     }
 
-    private func renderMusicFrame(_ frame: MusicLightingFrame, scope: LightScope) {
-        guard effectRuns[scope]?.effect.id == "music-pulse" else { return }
+    private func cachedMusicFixtures(in scope: LightScope, runID: UUID, at timestamp: TimeInterval) -> [MusicFixtureDescriptor] {
+        if let cached = musicFixtureCache[scope], cached.runID == runID,
+           timestamp >= cached.builtAt, timestamp - cached.builtAt < 1 {
+            return cached.fixtures
+        }
         let fixtures = musicFixtureDescriptors(in: scope)
-        let ownedIDs = effectRuns[scope]?.ownedDeviceIDs ?? []
+        musicFixtureCache[scope] = MusicFixtureCache(runID: runID, builtAt: timestamp, fixtures: fixtures)
+        return fixtures
+    }
+
+    private func renderMusicFrame(_ frame: MusicLightingFrame, scope: LightScope) {
+        guard let run = effectRuns[scope], run.effect.id == "music-pulse" else { return }
+        let fixtures = cachedMusicFixtures(in: scope, runID: run.id, at: frame.timestamp)
+        let ownedIDs = run.ownedDeviceIDs
+        // Ownership and reachability stay per frame: they are cheap, and a
+        // light that drops out must stop receiving frames at once.
         let activeFixtures = fixtures.filter { ownedIDs.contains($0.id) && device(withID: $0.id)?.isStale == false }
         let commands = musicLightingRenderer.enqueue(frame, fixtures: activeFixtures, at: ProcessInfo.processInfo.systemUptime)
         for command in commands {
@@ -3594,9 +3680,24 @@ extension LightManager {
         }
     }
 
+    /// Cancels debounced brightness sends so a later undo, scene, or schedule
+    /// write is not overwritten by a stale slider flush.
+    func cancelPendingBrightness(deviceIDs: Set<String>? = nil) {
+        if let deviceIDs {
+            for id in deviceIDs {
+                brightnessTasks[id]?.cancel()
+                brightnessTasks[id] = nil
+            }
+        } else {
+            brightnessTasks.values.forEach { $0.cancel() }
+            brightnessTasks = [:]
+        }
+    }
+
+    var pendingBrightnessDeviceIDsForTesting: Set<String> { Set(brightnessTasks.keys) }
+
     func commitBrightness(_ device: LightDevice, value: Double) {
-        brightnessTasks[device.id]?.cancel()
-        brightnessTasks[device.id] = nil
+        cancelPendingBrightness(deviceIDs: [device.id])
         device.brightness = value
         sendBrightness(device, value: value)
         logActivity(.command, title: "Brightness changed", detail: "\(device.label): \(Int(value * 100))%")
@@ -3836,13 +3937,44 @@ extension LightManager {
     }
 
     func testSchedule(_ entry: ScheduleEntry, in room: Room) {
-        let lights = devices(in: room)
-        switch entry.action {
-        case .turnOn, .atSunrise: setPower(deviceIDs: Set(lights.map(\.id)), on: true)
-        case .turnOff, .atSunset: setPower(deviceIDs: Set(lights.map(\.id)), on: false)
-        default: if let value = entry.action.brightnessValue { setBrightness(deviceIDs: Set(lights.map(\.id)), value: value) }
-        }
+        // A test is a user action standing in for the room controls, so it
+        // stays undoable the way those controls are.
+        applyScheduleAction(entry.action, to: devices(in: room), recordUndo: true)
         logActivity(.schedule, title: "Schedule tested", detail: "\(room.name): \(entry.action.displayName)")
+    }
+
+    /// Shared show-takeover path for real scheduled runs, tests, and missed
+    /// catch-up. Stops effects that would repaint over the change and sends
+    /// brightness immediately (not the slider debounce). A schedule acts on
+    /// the room as it stood before any show: lights taken from a show return
+    /// to their saved state first, so the action never freezes a random show
+    /// frame into the room or discards the look the show would have restored.
+    private func applyScheduleAction(_ action: ScheduleAction, to lights: [LightDevice], recordUndo: Bool = false) {
+        guard !lights.isEmpty else { return }
+        let ids = Set(lights.map(\.id))
+        let inherited = stopEffects(touching: ids)
+        cancelPendingBrightness(deviceIDs: ids)
+        restoreDeviceStates(lights.compactMap { inherited[$0.id] })
+        if recordUndo { recordChange(lights) }
+        switch action {
+        case .turnOn, .atSunrise:
+            for device in lights {
+                device.isOn = true
+                sendPower(device, on: true)
+            }
+        case .turnOff, .atSunset:
+            for device in lights {
+                device.isOn = false
+                sendPower(device, on: false)
+            }
+        default:
+            if let brightness = action.brightnessValue {
+                for device in lights {
+                    device.brightness = brightness
+                    sendBrightness(device, value: brightness)
+                }
+            }
+        }
     }
 
     func scenePreview(_ scene: LightingScene) -> SceneApplicationPreview {
@@ -3880,7 +4012,9 @@ extension LightManager {
             )
             return
         }
-        stopEffects(touching: Set(preview.affected.map(\.id)))
+        let affectedIDs = Set(preview.affected.map(\.id))
+        stopEffects(touching: affectedIDs)
+        cancelPendingBrightness(deviceIDs: affectedIDs)
         recordChange(preview.affected)
         var succeeded: [String] = [], failed: [String] = [], skipped: [String] = []
         for device in preview.affected {
@@ -4075,8 +4209,7 @@ extension LightManager {
 
     private func cancelWorkspaceTasks() {
         scanGeneration += 1
-        brightnessTasks.values.forEach { $0.cancel() }
-        brightnessTasks = [:]
+        cancelPendingBrightness()
         commandCoordinator.cancelAllTasks(clearPendingAndExpectations: true)
     }
 

@@ -1,4 +1,5 @@
 import XCTest
+import Combine
 import SwiftUI
 #if os(macOS)
 import AppKit
@@ -250,6 +251,123 @@ final class PlanLayoutTests: XCTestCase {
 
 
 final class RoomWorkspaceTests: XCTestCase {
+    @MainActor
+    func testRoomAggregateObservesIndividualDevicesAndIncludesStaleTargets() throws {
+        let manager = LightManager(defaults: UserDefaults(suiteName: UUID().uuidString)!,
+                                   persistenceStore: temporaryPersistenceStore())
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+        let a = try XCTUnwrap(manager.devices.first)
+        let b = try XCTUnwrap(manager.devices.last)
+        a.brightness = 0.2
+        b.brightness = 0.6
+        b.isStale = true
+        XCTAssertEqual(RoomOutputState.level(of: [a, b]), 0.4, accuracy: 0.001)
+        let aggregate = RoomOutputState(lights: [a, b])
+        var updates = 0
+        let token = aggregate.objectWillChange.sink { updates += 1 }
+        defer { token.cancel() }
+        a.brightness = 0.8
+        XCTAssertGreaterThan(updates, 0, "Device updates must invalidate the room readout")
+        XCTAssertEqual(RoomOutputState.level(of: [a, b]), 0.7, accuracy: 0.001)
+        // A narrower selection gets its own observer (the call sites key the
+        // view's identity on its targets), and it never hears other lights.
+        let narrowed = RoomOutputState(lights: [b])
+        var narrowedUpdates = 0
+        let narrowedToken = narrowed.objectWillChange.sink { narrowedUpdates += 1 }
+        defer { narrowedToken.cancel() }
+        a.brightness = 0.1
+        XCTAssertEqual(narrowedUpdates, 0, "A target set must not observe lights outside it")
+        b.brightness = 0.5
+        XCTAssertGreaterThan(narrowedUpdates, 0)
+        manager.setPower(deviceIDs: [a.id, b.id], on: true)
+        XCTAssertTrue(b.isOn, "Stale lights remain eligible for a recovery command")
+    }
+
+    @MainActor
+    func testRoomPowerAndBrightnessTakeOverShowsAndRestoreOtherLights() throws {
+        let manager = LightManager(defaults: UserDefaults(suiteName: UUID().uuidString)!,
+                                   persistenceStore: temporaryPersistenceStore())
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+        let a = try XCTUnwrap(manager.devices.first { !$0.isStale })
+        let b = try XCTUnwrap(manager.devices.last { !$0.isStale && $0.id != a.id })
+        a.isOn = true
+        b.brightness = 0.31
+        var config = MusicModeConfiguration.configuration(for: .balanced)
+        config.usesSyntheticDemoPattern = true
+        manager.startMusicMode(configuration: config, scope: .all)
+        XCTAssertEqual(manager.activeEffects[.all], "music-pulse")
+        manager.setPower(deviceIDs: [a.id], on: false)
+        manager.musicModeController.renderNowForTesting()
+        XCTAssertNil(manager.activeEffects[.all])
+        XCTAssertFalse(a.isOn)
+        XCTAssertEqual(b.brightness, 0.31, accuracy: 0.001)
+        manager.startMusicMode(configuration: config, scope: .all)
+        manager.setBrightness(deviceIDs: [a.id], value: 1.4)
+        manager.musicModeController.renderNowForTesting()
+        XCTAssertNil(manager.activeEffects[.all])
+        XCTAssertEqual(a.brightness, 1)
+        XCTAssertEqual(b.brightness, 0.31, accuracy: 0.001)
+        let room = try XCTUnwrap(manager.rooms.first { $0.lightIDs.contains(a.id) })
+        manager.startMusicMode(configuration: config, scope: .all)
+        manager.setBrightness(in: room, value: 0.42)
+        XCTAssertNil(manager.activeEffects[.all])
+        XCTAssertEqual(a.brightness, 0.42, accuracy: 0.001)
+        manager.startMusicMode(configuration: config, scope: .all)
+        manager.setPower(in: room, on: false)
+        manager.confirmationCoordinator.confirmPendingRequest()
+        XCTAssertNil(manager.activeEffects[.all])
+        XCTAssertFalse(a.isOn)
+        manager.startMusicMode(configuration: config, scope: .all)
+        manager.setAllBrightness(0.25)
+        XCTAssertTrue(manager.activeEffects.isEmpty)
+        manager.startMusicMode(configuration: config, scope: .all)
+        manager.setAllPower(on: false)
+        manager.confirmationCoordinator.confirmPendingRequest()
+        XCTAssertTrue(manager.activeEffects.isEmpty)
+        XCTAssertTrue(manager.devices.allSatisfy { !$0.isOn })
+    }
+
+    @MainActor
+    func testSelectedColorSchemeCannotReachUnselectedLightsOrAnotherRoom() throws {
+        let manager = LightManager(defaults: UserDefaults(suiteName: UUID().uuidString)!,
+                                   persistenceStore: temporaryPersistenceStore())
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+        let room = try XCTUnwrap(manager.rooms.first { manager.devices(in: $0).count >= 2 })
+        let a = try XCTUnwrap(manager.devices(in: room).first)
+        let b = try XCTUnwrap(manager.devices(in: room).last)
+        let outside = try XCTUnwrap(manager.devices.first { !room.lightIDs.contains($0.id) })
+        b.isOn = false
+        outside.isOn = false
+        let before = b.color
+        manager.applyTheme(try XCTUnwrap(LightingCatalog.themes.first),
+                           deviceIDs: [a.id, outside.id], in: .room(room.id))
+        XCTAssertTrue(a.isOn)
+        XCTAssertFalse(b.isOn)
+        XCTAssertFalse(outside.isOn)
+        XCTAssertEqual(b.color, before)
+        manager.undo()
+        XCTAssertFalse(outside.isOn)
+    }
+
+    @MainActor
+    func testRoomSelectionSurvivesEditorAndDestinationRecreation() {
+        let room = LightScope.room(UUID())
+        let otherRoom = LightScope.room(UUID())
+        let drafts = SpectrumDraftStore()
+        drafts.selections[room] = ["a", "b"]
+        drafts.selections[otherRoom] = ["c"]
+        _ = PlanWorkspaceView(scope: .constant(room), requestedDeviceID: .constant("a"), studioDrafts: drafts)
+        _ = PlanWorkspaceView(scope: .constant(otherRoom), studioDrafts: drafts)
+        _ = PlanWorkspaceView(scope: .constant(room), requestedDeviceID: .constant(nil), studioDrafts: drafts)
+        XCTAssertEqual(drafts.selections[room], ["a", "b"])
+        XCTAssertEqual(drafts.selections[otherRoom], ["c"])
+        drafts.retainDevices(["b", "c"])
+        XCTAssertEqual(drafts.selections[room], ["b"])
+    }
+
     func testSelectionNeverExpandsAStaleSelectionToTheWholeRoom() {
         XCTAssertEqual(RoomWorkspaceSelection.targets(selected: ["gone"], available: ["a", "b"]), [])
         XCTAssertEqual(RoomWorkspaceSelection.targets(selected: [], available: ["a", "b"]), ["a", "b"])
@@ -258,8 +376,111 @@ final class RoomWorkspaceTests: XCTestCase {
 
     func testSelectionDropsRemovedFixturesWithoutInventingMembers() {
         XCTAssertEqual(RoomWorkspaceSelection.reconciled(selected: ["a", "b"], available: ["b", "c"]), ["b"])
+        // A selection whose fixtures all left (moved to another room, forgotten)
+        // stays until cleared, so the next edit cannot widen to the whole room.
         let removed = RoomWorkspaceSelection.reconciled(selected: ["gone"], available: ["b", "c"])
+        XCTAssertEqual(removed, ["gone"])
         XCTAssertEqual(RoomWorkspaceSelection.targets(selected: removed, available: ["b", "c"]), [])
+    }
+
+    @MainActor
+    func testRetainDevicesReconcilesEveryScopeInOnePublication() {
+        let drafts = SpectrumDraftStore()
+        let room = LightScope.room(UUID())
+        drafts.selections = [.all: ["a", "b"], room: ["b", "c"]]
+        var changes = 0
+        let token = drafts.objectWillChange.sink { changes += 1 }
+        defer { token.cancel() }
+        drafts.retainDevices(["b"])
+        XCTAssertEqual(drafts.selections[.all], ["b"])
+        XCTAssertEqual(drafts.selections[room], ["b"])
+        // luna, govee and one selections write: never one publication per scope.
+        XCTAssertLessThanOrEqual(changes, 3)
+        drafts.retainDevices(["x"])
+        XCTAssertEqual(drafts.selections[.all], ["b"], "A dead selection waits to be cleared")
+    }
+
+    @MainActor
+    func testWorkspaceSwapClearsSelectionsAndDrafts() {
+        let drafts = SpectrumDraftStore()
+        drafts.selections = [.all: ["live-a"], .room(UUID()): ["live-b"]]
+        drafts.govee["live-a"] = GoveeSegmentState(colors: [.init(hex: 0xFF6600)])
+        drafts.clearAll()
+        XCTAssertTrue(drafts.selections.isEmpty)
+        XCTAssertTrue(drafts.govee.isEmpty)
+        XCTAssertTrue(drafts.luna.isEmpty)
+        // Demo lights share no IDs with live ones, so after the swap the room
+        // controls target the whole demo room instead of "0 of N selected".
+        XCTAssertEqual(RoomWorkspaceSelection.targets(selected: drafts.selections[.all] ?? [],
+                                                      available: ["demo-a", "demo-b"]),
+                       ["demo-a", "demo-b"])
+    }
+
+    @MainActor
+    func testUndoCancelsPendingDebouncedBrightness() throws {
+        let manager = LightManager(defaults: UserDefaults(suiteName: UUID().uuidString)!,
+                                   persistenceStore: temporaryPersistenceStore())
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+        let device = try XCTUnwrap(manager.devices.first { !$0.isStale })
+        let original = device.brightness
+        manager.setBrightness(deviceIDs: [device.id], value: 0.42)
+        XCTAssertEqual(device.brightness, 0.42, accuracy: 0.001)
+        XCTAssertTrue(manager.pendingBrightnessDeviceIDsForTesting.contains(device.id))
+        manager.undo()
+        XCTAssertEqual(device.brightness, original, accuracy: 0.001)
+        // The deferred send is the only thing that could overwrite the undo on
+        // the wire, so its cancellation is the assertion; no clock wait needed.
+        XCTAssertFalse(manager.pendingBrightnessDeviceIDsForTesting.contains(device.id),
+                       "Undo must cancel the deferred brightness send")
+    }
+
+    @MainActor
+    func testScheduleTakesOverAShowFromThePreShowLook() throws {
+        let manager = LightManager(defaults: UserDefaults(suiteName: UUID().uuidString)!,
+                                   persistenceStore: temporaryPersistenceStore())
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+        // A plain bulb, so restoring it is a colour rather than a matrix or zone layout.
+        let room = try XCTUnwrap(manager.rooms.first { room in
+            manager.devices(in: room).contains { !$0.isStale && $0.brand == .lifx && !$0.isLIFXLuna }
+        })
+        let light = try XCTUnwrap(manager.devices(in: room).first { !$0.isStale && $0.brand == .lifx && !$0.isLIFXLuna })
+        let preShowColor = Color(red: 0.2, green: 0.4, blue: 0.6)
+        light.isOn = true
+        light.brightness = 0.8
+        light.color = preShowColor
+        var config = MusicModeConfiguration.configuration(for: .balanced)
+        config.usesSyntheticDemoPattern = true
+        manager.startMusicMode(configuration: config, scope: .room(room.id))
+        XCTAssertEqual(manager.activeEffects[.room(room.id)], "music-pulse")
+        // A show frame on the light, plus a slider send still in flight. The
+        // room controls would stop the show themselves, so drive the
+        // debounce directly to keep the show running into the schedule.
+        light.color = Color(hue: 0.9, saturation: 1, brightness: 1)
+        manager.previewBrightness(light, value: 0.11)
+        XCTAssertTrue(manager.pendingBrightnessDeviceIDsForTesting.contains(light.id))
+        manager.testSchedule(ScheduleEntry(hour: 9, minute: 0, action: .dim50), in: room)
+        XCTAssertNil(manager.activeEffects[.room(room.id)], "Schedule must take over the show")
+        XCTAssertEqual(light.color, preShowColor, "The action starts from the pre-show look")
+        XCTAssertEqual(light.brightness, 0.5, accuracy: 0.001)
+        XCTAssertFalse(manager.pendingBrightnessDeviceIDsForTesting.contains(light.id),
+                       "Schedule brightness must not leave a deferred slider send")
+    }
+
+    @MainActor
+    func testRunTestScheduleIsUndoable() throws {
+        let manager = LightManager(defaults: UserDefaults(suiteName: UUID().uuidString)!,
+                                   persistenceStore: temporaryPersistenceStore())
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+        let room = try XCTUnwrap(manager.rooms.first { !manager.devices(in: $0).isEmpty })
+        let lights = manager.devices(in: room)
+        for light in lights { light.brightness = 0.3 }
+        manager.testSchedule(ScheduleEntry(hour: 9, minute: 0, action: .dim75), in: room)
+        XCTAssertTrue(lights.allSatisfy { abs($0.brightness - 0.75) < 0.001 })
+        manager.undo()
+        XCTAssertTrue(lights.allSatisfy { abs($0.brightness - 0.3) < 0.001 }, "Run Test is undoable")
     }
 
     @MainActor

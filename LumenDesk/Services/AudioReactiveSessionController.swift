@@ -33,6 +33,51 @@ enum MusicCapturePreference: Equatable {
     case midiClock
 }
 
+enum MusicInputHealth: Equatable {
+    case waiting, receiving, silent, stalled
+
+    var displayName: String {
+        switch self {
+        case .waiting: return "Waiting for audio"
+        case .receiving: return "Input active"
+        case .silent: return "Audio is silent"
+        case .stalled: return "No audio received"
+        }
+    }
+
+    /// Classifies input from the latest analysis snapshot and the source that
+    /// should be producing it.
+    ///
+    /// What a gap in buffers means depends on the source. ScreenCaptureKit can
+    /// stop sending system audio while nothing plays, so a gap there is quiet
+    /// and a successful start already proved the permission. A microphone or
+    /// a playing file never pauses, so a gap there means the capture died (a
+    /// call, Siri, a route change). MIDI clock only arrives while the
+    /// transport runs. `startedAt` is when the source last became active.
+    static func evaluate(_ snapshot: AudioReactiveSnapshot, source: MusicAudioSourceStatus,
+                         startedAt: TimeInterval, now: TimeInterval) -> MusicInputHealth {
+        let continuous: Bool
+        switch source {
+        case .unavailable:
+            return .stalled
+        case .microphone, .filePlayback:
+            continuous = true
+        case .systemAudio, .midiClock:
+            continuous = false
+        case .idle, .requestingPermission, .syntheticDemo, .permissionDenied:
+            return .waiting
+        }
+        guard let timestamp = snapshot.analysisTimestamp else {
+            return continuous && now - startedAt >= 3 ? .stalled : .waiting
+        }
+        if now - timestamp > max(snapshot.freshnessGrace + 1, 2) {
+            if continuous { return .stalled }
+            return source == .midiClock ? .waiting : .silent
+        }
+        return snapshot.level >= 0.025 || snapshot.energy >= 0.035 ? .receiving : .silent
+    }
+}
+
 struct MusicGroove: Equatable, Identifiable {
     let id: String
     let name: String
@@ -98,6 +143,7 @@ final class AudioReactiveSessionController: ObservableObject {
     @Published private(set) var activeScopeIDs: Set<LightScope> = []
     @Published private(set) var latestFrames: [LightScope: MusicLightingFrame] = [:]
     @Published private(set) var isAudioPlaying = false
+    @Published private(set) var inputHealth: MusicInputHealth = .waiting
     @Published var selectedGrooveID: String = MusicGroove.fourOnTheFloor.id
 
     private let captureService: AudioCaptureService
@@ -109,6 +155,10 @@ final class AudioReactiveSessionController: ObservableObject {
     private(set) var lastRenderInterval: TimeInterval = 0
     private var sequenceNumber: UInt64 = 0
     private var liveCaptureBeganAt: TimeInterval = 0
+    /// When the live source last reported it was running. Input health
+    /// measures "nothing arrived yet" from here, not from the request, so a
+    /// slow permission prompt is never read as a dead microphone.
+    private var sourceActiveSince: TimeInterval = 0
     private var analysisSnapshot = AudioReactiveSnapshot()
     private var lastSnapshotPublishedAt = -Double.greatestFiniteMagnitude
     private let previewPublicationInterval: TimeInterval = 0.1
@@ -119,17 +169,30 @@ final class AudioReactiveSessionController: ObservableObject {
     ) {
         self.captureService = captureService
         self.now = now
+        captureService.onCaptureFailure = { [weak self] in
+            // System capture reports failure on main, as it does start results.
+            // Handle it before a subsequent restart can change the generation.
+            MainActor.assumeIsolated {
+                guard let self, self.canRestartSystemAudio else { return }
+                self.sourceStatus = .unavailable
+                self.inputHealth = .stalled
+                self.publishPlaybackState(false)
+            }
+        }
+        captureService.onCaptureCanResume = { [weak self] in
+            // The iOS microphone is free again after a call, Siri or a route
+            // change. Rooms and their saved lighting never left; reconnect them.
+            MainActor.assumeIsolated {
+                guard let self, self.canRestartSystemAudio else { return }
+                self.restartSystemAudio()
+            }
+        }
         subscriptionToken = captureService.subscribe { [weak self] snapshot in
             Task { @MainActor in
                 guard let self, self.sessions.values.contains(where: { !$0.synthetic }) else { return }
                 guard snapshot.analysisTimestamp.map({ $0 >= self.liveCaptureBeganAt }) ?? true else { return }
                 self.analysisSnapshot = snapshot
-                let isPlaying = snapshot.confidence >= 0.025
-                    || snapshot.level >= 0.025
-                    || snapshot.energy >= 0.035
-                if self.isAudioPlaying != isPlaying {
-                    self.isAudioPlaying = isPlaying
-                }
+                self.publishPlaybackState(Self.isAudible(snapshot))
                 let timestamp = self.now()
                 if snapshot.beat > 0 || timestamp - self.lastSnapshotPublishedAt >= self.previewPublicationInterval {
                     self.latestSnapshot = snapshot
@@ -177,7 +240,7 @@ final class AudioReactiveSessionController: ObservableObject {
 
         if useSyntheticPattern {
             sourceStatus = .syntheticDemo
-            if !isAudioPlaying { isAudioPlaying = true }
+            publishPlaybackState(true)
             completion(.started)
             return
         }
@@ -190,6 +253,7 @@ final class AudioReactiveSessionController: ObservableObject {
                 switch result {
                 case .started:
                     self.sourceStatus = .filePlayback
+                    self.sourceActiveSince = self.now()
                 case .needsScreenRecording:
                     self.removeFailedSession(scope)
                     self.sourceStatus = .permissionDenied
@@ -205,6 +269,7 @@ final class AudioReactiveSessionController: ObservableObject {
                 switch result {
                 case .started:
                     self.sourceStatus = .midiClock
+                    self.sourceActiveSince = self.now()
                 default:
                     self.removeFailedSession(scope)
                     self.sourceStatus = .unavailable
@@ -214,20 +279,7 @@ final class AudioReactiveSessionController: ObservableObject {
         case .platformDefault:
             captureService.requestAccessAndStart { [weak self] result in
                 guard let self, self.sessions[scope] === session else { return }
-                switch result {
-                case .started:
-                    #if os(macOS)
-                    self.sourceStatus = .systemAudio
-                    #else
-                    self.sourceStatus = .microphone
-                    #endif
-                case .needsScreenRecording:
-                    self.removeFailedSession(scope)
-                    self.sourceStatus = .permissionDenied
-                case .unavailable:
-                    self.removeFailedSession(scope)
-                    self.sourceStatus = .unavailable
-                }
+                self.applyPlatformStartResult(result, removeSessionOnFailure: scope)
                 completion(result)
             }
         }
@@ -238,6 +290,27 @@ final class AudioReactiveSessionController: ObservableObject {
     func canStartCapture(_ capture: MusicCapturePreference, replacing scope: LightScope) -> Bool {
         sessions.allSatisfy { key, session in
             key == scope || session.synthetic || session.capture == capture
+        }
+    }
+
+    var canRestartSystemAudio: Bool {
+        sessions.values.contains { !$0.synthetic && $0.capture == .platformDefault }
+    }
+
+    /// Restart the shared source without replacing room ownership, configuration,
+    /// or the saved lighting that Stop & Restore will return to.
+    func restartSystemAudio() {
+        guard canRestartSystemAudio, sourceStatus != .requestingPermission else { return }
+        captureService.stop()
+        liveCaptureBeganAt = now()
+        analysisSnapshot = AudioReactiveSnapshot()
+        latestSnapshot = analysisSnapshot
+        inputHealth = .waiting
+        publishPlaybackState(false)
+        sourceStatus = .requestingPermission
+        captureService.requestAccessAndStart { [weak self] result in
+            guard let self, self.canRestartSystemAudio else { return }
+            self.applyPlatformStartResult(result, removeSessionOnFailure: nil)
         }
     }
 
@@ -291,6 +364,38 @@ final class AudioReactiveSessionController: ObservableObject {
         renderTick()
     }
 
+    /// One audible predicate for subscribe and render paths.
+    nonisolated static func isAudible(_ snapshot: AudioReactiveSnapshot) -> Bool {
+        snapshot.confidence >= 0.025
+            || snapshot.level >= 0.025
+            || snapshot.energy >= 0.035
+    }
+
+    private func publishPlaybackState(_ playing: Bool) {
+        if isAudioPlaying != playing { isAudioPlaying = playing }
+    }
+
+    private func applyPlatformStartResult(
+        _ result: AudioCaptureService.AudioStartResult,
+        removeSessionOnFailure scope: LightScope?
+    ) {
+        switch result {
+        case .started:
+            #if os(macOS)
+            sourceStatus = .systemAudio
+            #else
+            sourceStatus = .microphone
+            #endif
+            sourceActiveSince = now()
+        case .needsScreenRecording:
+            if let scope { removeFailedSession(scope) }
+            sourceStatus = .permissionDenied
+        case .unavailable:
+            if let scope { removeFailedSession(scope) }
+            sourceStatus = .unavailable
+        }
+    }
+
     private func startRenderTimerIfNeeded() {
         guard renderTimer == nil else { return }
         lastRenderAt = nil
@@ -298,10 +403,14 @@ final class AudioReactiveSessionController: ObservableObject {
         // Lighting and preview output do not benefit from display-refresh
         // cadence. Twenty frames per second remains fluid and cuts a third of
         // the choreography, allocation, and main-thread publication work.
-        renderTimer = Timer.scheduledTimer(withTimeInterval: 1 / 20, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.renderTick() }
+        let timer = Timer(timeInterval: 1 / 20, repeats: true) { [weak self] _ in
+            // The timer belongs to the main run loop, including slider/menu
+            // tracking. An actor task can itself wait for tracking to finish.
+            MainActor.assumeIsolated { self?.renderTick() }
         }
-        renderTimer?.tolerance = 0.01
+        timer.tolerance = 0.01
+        RunLoop.main.add(timer, forMode: .common)
+        renderTimer = timer
     }
 
     private func renderTick() {
@@ -311,7 +420,10 @@ final class AudioReactiveSessionController: ObservableObject {
         lastRenderAt = timestamp
         if sessions.values.contains(where: { !$0.synthetic }) {
             let fresh = analysisSnapshot.fresh(at: timestamp)
-            isAudioPlaying = fresh.level >= 0.025 || fresh.energy >= 0.035
+            let health = MusicInputHealth.evaluate(
+                analysisSnapshot, source: sourceStatus, startedAt: sourceActiveSince, now: timestamp)
+            if inputHealth != health { inputHealth = health }
+            publishPlaybackState(sourceStatus != .unavailable && Self.isAudible(fresh))
             if timestamp - lastSnapshotPublishedAt >= previewPublicationInterval {
                 latestSnapshot = fresh
                 lastSnapshotPublishedAt = timestamp
@@ -330,7 +442,7 @@ final class AudioReactiveSessionController: ObservableObject {
                     latestSnapshot = snapshot
                     lastSnapshotPublishedAt = timestamp
                 }
-                if !isAudioPlaying { isAudioPlaying = true }
+                publishPlaybackState(true)
             }
             let frame = session.engine.makeFrame(
                 snapshot: snapshot,
@@ -487,6 +599,7 @@ final class AudioReactiveSessionController: ObservableObject {
         latestSnapshot = AudioReactiveSnapshot()
         analysisSnapshot = AudioReactiveSnapshot()
         lastSnapshotPublishedAt = -Double.greatestFiniteMagnitude
-        isAudioPlaying = false
+        publishPlaybackState(false)
+        inputHealth = .waiting
     }
 }

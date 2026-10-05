@@ -1,5 +1,8 @@
 import SwiftUI
 import UniformTypeIdentifiers
+#if os(macOS)
+import AppKit
+#endif
 
 struct MusicModeView: View {
     @EnvironmentObject private var manager: LightManager
@@ -13,6 +16,8 @@ struct MusicModeView: View {
     @State private var showFileImporter = false
     @State private var audioStatus: MusicAudioSourceStatus = .idle
     @State private var inputChannels: Int?
+    /// A fader drag has reached the running show but not yet been saved.
+    @State private var hasUnsavedChanges = false
     /// Existing help preferences survive the workspace redesign.
     @AppStorage("LumenDesk.musicMode.quickStart.v1") private var showsQuickStart = true
     @AppStorage("LumenDesk.musicMode.plainHelp.v1") private var showsPlainHelp = true
@@ -45,10 +50,13 @@ struct MusicModeView: View {
             quickStart
         }
         .onAppear { reloadForScope() }
+        // A drag the system cancelled never reports its release.
+        .onDisappear { if hasUnsavedChanges { commitConfiguration() } }
         .onReceive(manager.musicModeController.$sourceStatus) { audioStatus = $0 }
         .onReceive(manager.musicModeController.$latestSnapshot.map(\.inputChannels).removeDuplicates()) { inputChannels = $0 }
         .onChange(of: scope) { _ in reloadForScope() }
-        .onChange(of: reduceMotion) { manager.setMusicReducedMotion($0) }
+        // Reduce Motion reaches running shows through LightManager, which
+        // observes the system setting whether or not this screen is open.
         .alert("Allow optional flashes?", isPresented: $showUnsafeWarning) {
             Button("Keep No-Flash Mode", role: .cancel) {}
             Button("Allow Flashes", role: .destructive) {
@@ -98,6 +106,18 @@ struct MusicModeView: View {
                  ? "Stopping restores the lighting from before the show."
                  : "Stopping keeps the last lighting output.")
                 .font(.caption).foregroundStyle(Lumen.meter)
+            #if os(macOS)
+            HStack(alignment: .top, spacing: 12) {
+                Text("Play a song in Apple Music, then start system audio. LumenDesk listens to audio playing on this Mac; no file import is needed. Other apps playing audio are included.")
+                    .font(.caption).foregroundStyle(Lumen.meter)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Open Apple Music") {
+                    if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Music") {
+                        NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
+                    }
+                }.buttonStyle(LumenSecondaryButtonStyle(compact: true))
+            }
+            #endif
             Toggle("Explain controls", isOn: $showsPlainHelp)
                 .toggleStyle(LumenRockerStyle())
         }
@@ -224,15 +244,15 @@ struct MusicModeView: View {
                     .foregroundStyle(Lumen.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            musicSlider("Master brightness", value: binding(\.masterBrightness), icon: "sun.max.fill",
+            musicSlider("Master brightness", value: liveBinding(\.masterBrightness), icon: "sun.max.fill",
                         help: MusicModeHelp.masterBrightness)
-            musicSlider("Effect intensity", value: binding(\.effectIntensity), icon: "waveform",
+            musicSlider("Effect intensity", value: liveBinding(\.effectIntensity), icon: "waveform",
                         help: MusicModeHelp.effectIntensity)
-            musicSlider("Beat sensitivity", value: binding(\.beatSensitivity), icon: "metronome.fill",
+            musicSlider("Beat sensitivity", value: liveBinding(\.beatSensitivity), icon: "metronome.fill",
                         help: MusicModeHelp.beatSensitivity)
-            musicSlider("Bass sensitivity", value: binding(\.bassSensitivity), icon: "speaker.wave.3.fill",
+            musicSlider("Bass sensitivity", value: liveBinding(\.bassSensitivity), icon: "speaker.wave.3.fill",
                         help: MusicModeHelp.bassSensitivity)
-            musicSlider("Percussion sensitivity", value: binding(\.percussionSensitivity), icon: "hands.clap.fill",
+            musicSlider("Percussion sensitivity", value: liveBinding(\.percussionSensitivity), icon: "hands.clap.fill",
                         help: MusicModeHelp.percussionSensitivity)
         }
         .padding(16)
@@ -407,11 +427,11 @@ struct MusicModeView: View {
                             .font(.caption2).foregroundStyle(.secondary).lineLimit(2)
                     }
                 }
-                musicSlider("Color-change intensity", value: binding(\.colorChangeIntensity), icon: "paintpalette.fill",
+                musicSlider("Color-change intensity", value: liveBinding(\.colorChangeIntensity), icon: "paintpalette.fill",
                             help: MusicModeHelp.colorChangeIntensity)
-                musicSlider("Movement amount", value: binding(\.movementAmount), icon: "arrow.left.and.right",
+                musicSlider("Movement amount", value: liveBinding(\.movementAmount), icon: "arrow.left.and.right",
                             help: MusicModeHelp.movementAmount)
-                musicSlider("Movement speed", value: binding(\.movementSpeed), icon: "speedometer",
+                musicSlider("Movement speed", value: liveBinding(\.movementSpeed), icon: "speedometer",
                             help: MusicModeHelp.movementSpeed)
                 Picker("Movement direction", selection: binding(\.movementDirection)) {
                     ForEach(MusicMovementDirection.allCases) { Text($0.displayName).tag($0) }
@@ -425,9 +445,9 @@ struct MusicModeView: View {
     private var advancedControls: some View {
         DisclosureGroup(isExpanded: $advancedExpanded) {
             VStack(alignment: .leading, spacing: 14) {
-                musicSlider("Minimum brightness", value: binding(\.minimumBrightness), icon: "sun.min",
+                musicSlider("Minimum brightness", value: liveBinding(\.minimumBrightness), icon: "sun.min",
                             help: MusicModeHelp.minimumBrightness)
-                musicSlider("Maximum brightness", value: binding(\.maximumBrightness), icon: "sun.max",
+                musicSlider("Maximum brightness", value: liveBinding(\.maximumBrightness), icon: "sun.max",
                             help: MusicModeHelp.maximumBrightness)
 
                 Divider().overlay(Lumen.hairline)
@@ -436,15 +456,16 @@ struct MusicModeView: View {
                     .disabled(configuration.photosensitivitySafeMode || reduceMotion)
                     .help(MusicModeHelp.allowsFlashes)
                 helpCaption(MusicModeHelp.allowsFlashes)
-                musicSlider("Flash intensity", value: binding(\.flashIntensity), icon: "bolt.fill",
+                musicSlider("Flash intensity", value: liveBinding(\.flashIntensity), icon: "bolt.fill",
                             help: MusicModeHelp.flashIntensity)
                     .disabled(configuration.photosensitivitySafeMode || !configuration.allowsFlashes || reduceMotion)
                 LumenFader(label: "Maximum flash frequency",
-                           value: frequencyBinding,
+                           value: liveBinding(\.maximumFlashFrequency),
                            range: 0...FlashSafetyLimiter.hardMaximumFrequency,
                            step: 0.25,
                            track: .tint(Lumen.warning),
-                           format: { String(format: "%.2f/s", $0) })
+                           format: { String(format: "%.2f/s", $0) },
+                           onEditingChanged: { editing in if !editing { commitConfiguration() } })
                 .disabled(configuration.photosensitivitySafeMode || !configuration.allowsFlashes || reduceMotion)
                 .help(MusicModeHelp.maximumFlashFrequency)
                 .accessibilityHint(MusicModeHelp.maximumFlashFrequency)
@@ -488,7 +509,7 @@ struct MusicModeView: View {
                 }
                 .help(configuration.timeFeel.plainSummary)
                 helpCaption(configuration.timeFeel.plainSummary)
-                musicSlider("Stereo image", value: binding(\.stereoImage), icon: "headphones",
+                musicSlider("Stereo image", value: liveBinding(\.stereoImage), icon: "headphones",
                             help: MusicModeHelp.stereoImage)
                     .disabled(stereoUnavailableReason != nil)
                 if let reason = stereoUnavailableReason {
@@ -546,7 +567,8 @@ struct MusicModeView: View {
                     .foregroundStyle(Lumen.beamDim)
                     .frame(width: 18)
                     .accessibilityHidden(true)
-                LumenFader(label: title, value: value, track: .spectrum, showsScale: false)
+                LumenFader(label: title, value: value, track: .spectrum, showsScale: false,
+                           onEditingChanged: { editing in if !editing { commitConfiguration() } })
                     .accessibilityHint(help)
             }
             if showsPlainHelp {
@@ -593,10 +615,18 @@ struct MusicModeView: View {
         )
     }
 
-    private var frequencyBinding: Binding<Double> {
+    /// For faders. Every value of a drag reaches the running show; the fader's
+    /// release (and a keyboard or VoiceOver step, which reports one) saves.
+    private func liveBinding(_ keyPath: WritableKeyPath<MusicModeConfiguration, Double>) -> Binding<Double> {
         Binding(
-            get: { configuration.maximumFlashFrequency },
-            set: { configuration.maximumFlashFrequency = $0; configuration.preset = .custom; commitConfiguration() }
+            get: { configuration[keyPath: keyPath] },
+            set: { value in
+                configuration[keyPath: keyPath] = value
+                configuration.preset = .custom
+                manager.previewMusicModeConfiguration(configuration)
+                configuration = manager.musicModeConfiguration
+                hasUnsavedChanges = true
+            }
         )
     }
 
@@ -649,6 +679,7 @@ struct MusicModeView: View {
     private func commitConfiguration() {
         manager.setMusicModeConfiguration(configuration)
         configuration = manager.musicModeConfiguration
+        hasUnsavedChanges = false
     }
 
     private func commitTopology() {
@@ -688,12 +719,11 @@ private struct MusicModeInputStatusView: View {
                     .font(LumenType.display(size: 15, weight: .semibold))
                     .foregroundStyle(statusColor)
                 Spacer()
-                if isRunning && !controller.isAudioPlaying {
-                    Label("No audio playing", systemImage: "speaker.slash.fill")
-                        .font(.caption.weight(.semibold)).foregroundStyle(Lumen.warning)
-                } else if isRunning {
-                    Label("Input active", systemImage: "checkmark.circle.fill")
-                        .font(.caption.weight(.semibold)).foregroundStyle(Lumen.success)
+                if isRunning {
+                    Label(controller.isAudioPlaying ? "Input active" : healthLabel,
+                          systemImage: controller.isAudioPlaying ? "checkmark.circle.fill" : "speaker.slash.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(controller.isAudioPlaying ? Lumen.success : Lumen.warning)
                 }
             }
             meter("Input", value: controller.latestSnapshot.level, color: Lumen.beamBright, segments: 32)
@@ -719,13 +749,30 @@ private struct MusicModeInputStatusView: View {
                     meter("Mids", value: controller.latestSnapshot.mids, color: Lumen.meter, segments: 12)
                     meter("Highs", value: controller.latestSnapshot.highs, color: Lumen.muted, segments: 12)
                 }.padding(.top, 12)
+                Text("\(controller.latestSnapshot.inputChannels ?? 0) input channels · \(controller.latestSnapshot.droppedBuffers) dropped buffers")
+                    .font(.caption.monospacedDigit()).foregroundStyle(Lumen.meter)
             }
             if controller.sourceStatus == .permissionDenied {
                 Text(permissionMessage)
                     .font(.caption).foregroundStyle(Lumen.warning)
             } else if controller.sourceStatus == .unavailable {
-                Text("The audio source is unavailable. Check permission and try starting Music Mode again.")
+                Text(unavailableMessage)
                     .font(.caption).foregroundStyle(Lumen.warning)
+            }
+            if isRunning && controller.canRestartSystemAudio {
+                #if os(macOS)
+                if !controller.isAudioPlaying && controller.sourceStatus == .systemAudio {
+                    // A started capture already proved the Screen Recording
+                    // permission, so silence here is about the music.
+                    Text(controller.inputHealth == .silent
+                         ? "Audio is quiet or paused. If music is playing on this Mac but this meter stays empty, restart system audio."
+                         : "Start playback in Apple Music and check that it is audible on this Mac. If music is playing but this meter stays empty, restart system audio.")
+                        .font(.caption).foregroundStyle(Lumen.meter)
+                }
+                #endif
+                Button(restartTitle) { controller.restartSystemAudio() }
+                    .buttonStyle(LumenSecondaryButtonStyle(compact: true))
+                    .disabled(controller.sourceStatus == .requestingPermission)
             }
             if showsPlainHelp {
                 Text("Input shows received audio level. Energy describes the music, not measured light output. A tempo appears only when the analyzer has a reliable pulse; generated lighting is shown separately below.")
@@ -768,6 +815,30 @@ private struct MusicModeInputStatusView: View {
         case .unavailable: return "exclamationmark.triangle.fill"
         case .idle, .requestingPermission: return "waveform"
         }
+    }
+
+    private var healthLabel: String {
+        controller.sourceStatus == .midiClock && controller.inputHealth == .waiting
+            ? "Waiting for MIDI clock" : controller.inputHealth.displayName
+    }
+
+    private var restartTitle: String {
+        #if os(macOS)
+        return "Restart system audio"
+        #else
+        return "Restart microphone"
+        #endif
+    }
+
+    /// After a failed start nothing is running, so there is nothing to
+    /// reconnect; while rooms are still running the source can be restarted.
+    private var unavailableMessage: String {
+        guard isRunning else { return "Audio capture is unavailable. Press Start to try again." }
+        #if os(macOS)
+        return "Audio capture was interrupted. Restart system audio to reconnect."
+        #else
+        return "The microphone was interrupted. LumenDesk reconnects when it is free again, or press Restart microphone."
+        #endif
     }
 
     private var permissionMessage: String {

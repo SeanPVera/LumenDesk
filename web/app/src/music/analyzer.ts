@@ -34,9 +34,19 @@ export class MusicFeatureAnalyzer {
   sourceDescription: string;
   private readonly fft = new RealFFT(WINDOW);
   private readonly hann = hannWindow(WINDOW);
-  private readonly ring = new Float64Array(WINDOW);
+  /** One ring per channel. Channels are analyzed separately and their power
+   * averaged, like the native analyzer: an (L + R) / 2 waveform downmix lets
+   * opposite-phase or wide material cancel out of an audible track. */
+  private readonly rings = [new Float64Array(WINDOW), new Float64Array(WINDOW)];
+  private channels = 0;
   private readonly windowed = new Float64Array(WINDOW);
   private readonly magnitudes = new Float64Array(WINDOW / 2);
+  private readonly channelMagnitudes = new Float64Array(WINDOW / 2);
+  private readonly power = new Float64Array(WINDOW / 2);
+  /** Hops left before the ring holds a whole window again. Until then a hop
+   * compares a partly empty window with an emptier one, which reads as a
+   * full-strength onset and inflates the onset gain for seconds. */
+  private warmupHops = WINDOW / HOP;
   private readonly logMagnitudes = new Float64Array(WINDOW / 2);
   private readonly previousLog = new Float64Array(WINDOW / 2);
   private readonly chroma = new Float64Array(12);
@@ -82,7 +92,8 @@ export class MusicFeatureAnalyzer {
 
   reset(sourceDescription?: string): void {
     if (sourceDescription) this.sourceDescription = sourceDescription;
-    this.ring.fill(0);
+    for (const ring of this.rings) ring.fill(0);
+    this.warmupHops = WINDOW / HOP;
     this.previousLog.fill(0);
     this.spectrum.fill(0);
     this.ringWrite = 0;
@@ -108,6 +119,12 @@ export class MusicFeatureAnalyzer {
   ): AudioReactiveSnapshot | null {
     if (!Number.isFinite(sampleRate) || sampleRate <= 0 || samples.length === 0) return null;
     if (this.sampleRate && sampleRate !== this.sampleRate) this.reset();
+    const channels = stereo ? 2 : 1;
+    if (channels !== this.channels) {
+      // Windows of a different channel layout cannot be compared.
+      if (this.channels) this.reset();
+      this.channels = channels;
+    }
     if (this.lastBufferEnd != null) {
       if (hostTime <= this.lastBufferEnd) return null;
       if (Math.abs(hostTime - this.lastBufferEnd - samples.length / sampleRate) > .03) this.reset();
@@ -128,7 +145,12 @@ export class MusicFeatureAnalyzer {
     left = Math.sqrt(left / samples.length); right = Math.sqrt(right / samples.length);
     const image = left + right < 1e-8 ? .5 : right / (left + right);
     for (let i = 0; i < samples.length; i++) {
-      this.ring[this.ringWrite] = stereo ? ((stereo.left[i] ?? 0) + (stereo.right[i] ?? 0)) / 2 : samples[i] ?? 0;
+      if (stereo) {
+        this.rings[0][this.ringWrite] = stereo.left[i] ?? 0;
+        this.rings[1][this.ringWrite] = stereo.right[i] ?? 0;
+      } else {
+        this.rings[0][this.ringWrite] = samples[i] ?? 0;
+      }
       this.ringWrite = (this.ringWrite + 1) % WINDOW;
       this.processedSamples++;
       if (--this.samplesUntilHop <= 0) {
@@ -141,16 +163,35 @@ export class MusicFeatureAnalyzer {
     return latest;
   }
 
-  private hop(stereo: number): AudioReactiveSnapshot {
+  /** Fills `windowed` from a channel's ring and returns its mean square. */
+  private windowChannel(ring: Float64Array): number {
     let square = 0;
     for (let i = 0; i < WINDOW; i++) {
-      const sample = this.ring[(this.ringWrite + i) % WINDOW];
+      const sample = ring[(this.ringWrite + i) % WINDOW];
       square += sample * sample;
       this.windowed[i] = sample * this.hann[i];
     }
-    const rms = Math.sqrt(square / WINDOW);
+    return square / WINDOW;
+  }
+
+  private hop(stereo: number): AudioReactiveSnapshot {
+    let meanSquare = 0;
+    if (this.channels <= 1) {
+      meanSquare = this.windowChannel(this.rings[0]);
+      this.fft.magnitudes(this.windowed, this.magnitudes);
+    } else {
+      // Average channel POWER, not waveforms, so opposite phase cannot cancel.
+      this.power.fill(0);
+      for (let c = 0; c < this.channels; c += 1) {
+        meanSquare += this.windowChannel(this.rings[c]);
+        this.fft.magnitudes(this.windowed, this.channelMagnitudes);
+        for (let k = 0; k < this.power.length; k += 1) this.power[k] += this.channelMagnitudes[k] * this.channelMagnitudes[k];
+      }
+      for (let k = 0; k < this.magnitudes.length; k += 1) this.magnitudes[k] = Math.sqrt(this.power[k] / this.channels);
+      meanSquare /= this.channels;
+    }
+    const rms = Math.sqrt(meanSquare);
     const level = clamp(Math.log1p(Math.max(0, rms - .001) * 20) / Math.log1p(10));
-    this.fft.magnitudes(this.windowed, this.magnitudes);
     for (let i = 1; i < this.logMagnitudes.length; i++) this.logMagnitudes[i] = Math.log1p(this.magnitudes[i] * LOG_COMPRESSION);
     const dt = HOP / this.sampleRate;
     const bassRaw = meanBins(this.magnitudes, this.bassBins);
@@ -160,12 +201,17 @@ export class MusicFeatureAnalyzer {
     this.bandPeak = loudest > this.bandPeak ? this.bandPeak + (loudest - this.bandPeak) * .3 : Math.max(.00002, this.bandPeak * Math.exp(-dt / 8));
     const scale = .9 / this.bandPeak * Math.sqrt(level);
     const bass = clamp(bassRaw * scale), mids = clamp(midsRaw * scale), highs = clamp(highsRaw * scale);
-    let fluxSum = 0;
-    for (const band of this.fluxBands) fluxSum += rectifiedBandFlux(this.logMagnitudes,this.previousLog,band);
-    const flux = fluxSum / Math.max(1,this.fluxBands.length);
-    const rawKick = rectifiedBandFlux(this.logMagnitudes,this.previousLog,this.kickBins);
-    const rawSnare = rectifiedBandFlux(this.logMagnitudes,this.previousLog,this.snareBins);
-    const rawHat = rectifiedBandFlux(this.logMagnitudes,this.previousLog,this.hatBins);
+    let flux = 0, rawKick = 0, rawSnare = 0, rawHat = 0;
+    if (this.warmupHops > 0) {
+      this.warmupHops -= 1;
+    } else {
+      let fluxSum = 0;
+      for (const band of this.fluxBands) fluxSum += rectifiedBandFlux(this.logMagnitudes,this.previousLog,band);
+      flux = fluxSum / Math.max(1,this.fluxBands.length);
+      rawKick = rectifiedBandFlux(this.logMagnitudes,this.previousLog,this.kickBins);
+      rawSnare = rectifiedBandFlux(this.logMagnitudes,this.previousLog,this.snareBins);
+      rawHat = rectifiedBandFlux(this.logMagnitudes,this.previousLog,this.hatBins);
+    }
     this.previousLog.set(this.logMagnitudes);
     const normalize = (value: number, key: 'odfScale'|'kickScale'|'snareScale'|'hatScale') => {
       this[key] = value > this[key] ? this[key] + (value - this[key]) * .3 : Math.max(MIN_ONSET_SCALE, this[key] * Math.exp(-dt / 6));

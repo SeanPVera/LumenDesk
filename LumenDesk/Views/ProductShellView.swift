@@ -36,7 +36,11 @@ struct LumenDeskShellView: View {
     @State private var showingSettings = false
     @State private var scope: LightScope = .all
     @State private var requestedDeviceID: String?
-    @StateObject private var studioDrafts = SpectrumDraftStore()
+    // Owned here so drafts and selections survive navigation, but held in
+    // @State rather than @StateObject: the shell never reads them, and
+    // observing the store redrew the split view and sidebar on every lane
+    // click. PlanWorkspaceView observes it instead.
+    @State private var studioDrafts = SpectrumDraftStore()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -51,7 +55,7 @@ struct LumenDeskShellView: View {
             }
         }
         .onChange(of: scope) { _ in requestedDeviceID = nil }
-        .onChange(of: manager.isDemoMode) { _ in studioDrafts.retainDevices([]) }
+        .onChange(of: manager.isDemoMode) { _ in studioDrafts.clearAll() }
         .tint(Lumen.studioAccent)
         .background(Lumen.stage)
         .sheet(isPresented: $showingSettings) {

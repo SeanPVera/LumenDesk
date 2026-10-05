@@ -528,13 +528,15 @@ struct FixtureTopology: Codable, Equatable {
     var roles: [String: FixtureRole] = [:]
 
     func orderedFixtures(_ fixtures: [MusicFixtureDescriptor]) -> [MusicFixtureDescriptor] {
-        let byID = Dictionary(uniqueKeysWithValues: fixtures.map { ($0.id, $0) })
+        // First occurrence wins, so a duplicated light ID can neither trap nor
+        // put the same light in the sweep twice.
+        let byID = Dictionary(fixtures.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         var seen = Set<String>()
         var ordered: [MusicFixtureDescriptor] = []
         for id in fixtureOrder where seen.insert(id).inserted {
             if let fixture = byID[id] { ordered.append(fixture) }
         }
-        ordered.append(contentsOf: fixtures.filter { !seen.contains($0.id) }.sorted {
+        ordered.append(contentsOf: fixtures.filter { seen.insert($0.id).inserted }.sorted {
             let lhs = $0.label.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "en_US_POSIX"))
             let rhs = $1.label.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "en_US_POSIX"))
             return lhs == rhs ? $0.id < $1.id : lhs < rhs

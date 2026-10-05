@@ -264,3 +264,22 @@ enum LightingCatalog {
         LightingEffect(id: id, name: name, summary: summary, icon: icon, style: style, colors: colors.map(CatalogColor.init), speed: speed, isAudioReactive: audio, isHighEnergy: energy)
     }
 }
+
+
+/// Shared per-mood theme submenu used by room menus and Spectrum Studio.
+struct LightingThemeCategoryMenuContent: View {
+    let action: (LightingTheme) -> Void
+
+    var body: some View {
+        ForEach(LightingTheme.Category.allCases, id: \.self) { category in
+            let themes = LightingCatalog.themes.filter { $0.category == category }
+            if !themes.isEmpty {
+                Menu(category.rawValue) {
+                    ForEach(themes) { theme in
+                        Button(theme.name) { action(theme) }
+                    }
+                }
+            }
+        }
+    }
+}

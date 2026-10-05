@@ -51,7 +51,10 @@ struct Room: Identifiable, Codable, Equatable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
         name = try container.decode(String.self, forKey: .name)
-        lightIDs = try container.decode([String].self, forKey: .lightIDs)
+        // A hand-edited or imported archive can list a light twice. Keep its
+        // first position: duplicate IDs trap the dictionaries built from rooms.
+        var seenLightIDs = Set<String>()
+        lightIDs = try container.decode([String].self, forKey: .lightIDs).filter { seenLightIDs.insert($0).inserted }
         schedules = (try? container.decode([ScheduleEntry].self, forKey: .schedules)) ?? []
         // Archives written before the plan existed simply have no layout; the
         // board is laid out lazily on first draw rather than by a migration.

@@ -389,13 +389,15 @@ The rest of this section is the plain-English guide. The technical description f
 2. **Pick a room and a preset.** Choose the room in the workspace header, then pick a preset. **Balanced** is the safe first choice.
 3. **Press Start system audio.** The first time, macOS asks for **Screen Recording** (or **Screen & System Audio Recording**) permission. Enable LumenDesk in System Settings, come back, and press Start again. Nothing is recorded or saved.
 
-The input card shows **Audio is silent** when the source is connected but quiet (including when system audio pauses buffer delivery during silence), and **No audio received** only when capture never starts delivering analysis or reports a failure. If Apple Music is audible on this Mac but the meter stays empty, use **Restart system audio** to reconnect without losing the room’s settings or its saved pre-show lighting. Capture interruptions are reported instead of leaving a connected label indefinitely. Audio diagnostics includes channel and dropped-buffer counts. LumenDesk measures stereo channel energy separately so wide or opposite-phase material cannot disappear in a mono downmix, and short callback bursts no longer reset beat analysis.
+The input card shows **Waiting for audio** until something plays and **Audio is silent** when playback is quiet or paused. System audio can stop delivering sound entirely while nothing plays, so neither one is treated as a fault. **No audio received** means the capture itself failed. If Apple Music is audible on this Mac but the meter stays empty, use **Restart system audio** to reconnect without losing the room’s settings or its saved pre-show lighting. Capture interruptions are reported instead of leaving a connected label indefinitely. Audio diagnostics includes channel and dropped-buffer counts. LumenDesk measures stereo channel energy separately so wide or opposite-phase material cannot disappear in a mono downmix, and short callback bursts no longer reset beat analysis.
 
 **On an iPhone or iPad**
 
 1. **Play the music out loud.** Music Mode listens through the microphone, so it has to be able to hear the room. Grant microphone access the first time you press Start.
 2. **Pick a room and a preset.**
 3. **Press Start Music Mode.** To follow a track the microphone cannot hear — headphones, or a noisy room — use **Open Audio File** and pick the song instead.
+
+A phone call, Siri, an alarm or a headphone change takes the microphone away. The input card says so, and Music Mode reconnects once the microphone is free again; **Restart microphone** retries straight away.
 
 Press **Stop** when you are done. Unless you turn it off, every light goes back exactly how it was before the show started.
 
@@ -471,7 +473,9 @@ Three switches are worth knowing:
 - **Restore previous state when stopped** puts every light back how it was when you press Stop. On by default.
 - **Sustained-energy lifts** follows slower changes in measured energy. It is not reliable chorus, phrase or drop recognition.
 
-If **Reduced Motion** is on in your system accessibility settings, LumenDesk keeps movement small and never flashes, whatever the preset says.
+If **Reduced Motion** is on in your system accessibility settings, LumenDesk keeps movement small and never flashes, whatever the preset says. That holds for shows started from a favorite or a scene card too, and switching the setting reaches a running show straight away, whichever screen is open.
+
+Moving a slider changes the running show as you drag; the setting is saved when you let go.
 
 #### Things that trip people up
 
@@ -536,6 +540,8 @@ Each room can have schedules. Schedule entries support:
 - Offset minutes for solar-style entries.
 - Actions such as turning on, turning off, or dimming to common brightness levels.
 - Sunrise and sunset style actions using configurable sunrise/sunset times.
+
+A schedule that reaches lights in a running show or effect stops it. Those lights first return to how they looked before the show, then the scheduled action applies, so a timed dim never leaves the room on a random show color. **Run Test** works the same way and can be undone.
 
 Automation controls include:
 

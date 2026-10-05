@@ -72,7 +72,6 @@ final class MusicChoreographyEngine {
     private var lastBeatCount = 0
     private var paletteProgress: Double = 0
     private var movementPhase: Double = 0
-    private var barsElapsed: Double = 0
     private var highEnergyBeganAt: TimeInterval?
     private var sustainedEnergyEvent = false
     private var lastTimestamp: TimeInterval?
@@ -94,7 +93,6 @@ final class MusicChoreographyEngine {
         lastBeatCount = 0
         paletteProgress = 0
         movementPhase = 0
-        barsElapsed = 0
         highEnergyBeganAt = nil
         sustainedEnergyEvent = false
         lastTimestamp = nil
@@ -513,7 +511,6 @@ final class MusicChoreographyEngine {
             let musicalRate = traversesPerBar * clock.barRate
             rate = wallClockRate + (musicalRate - wallClockRate) * clock.strength
         }
-        barsElapsed += (clock.barRate > 0 ? clock.barRate : 0.5) * dt
         if configuration.movementDirection == .alternating {
             // Reverse on the bar line while locked. Without a grid there are no
             // bars, so fall back to flipping every four detected beats.

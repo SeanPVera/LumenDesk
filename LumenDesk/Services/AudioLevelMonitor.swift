@@ -125,6 +125,15 @@ final class AudioCaptureService {
     var onLevel: ((Double) -> Void)?
     var onSnapshot: ((AudioReactiveSnapshot) -> Void)?
     var onCaptureFailure: (() -> Void)?
+    /// The platform source stopped for a reason that has now passed (an iOS
+    /// call or route change), so restarting it can succeed. Called on main.
+    var onCaptureCanResume: (() -> Void)?
+    #if os(iOS)
+    private var micTapInstalled = false
+    private var audioSessionObservers: [NSObjectProtocol] = []
+    /// Set while the system holds the microphone for a call, Siri or an alarm.
+    private var awaitingInterruptionEnd = false
+    #endif
 
     #if os(macOS)
     private var systemAudioCapture: SystemAudioCapturing?
@@ -307,10 +316,14 @@ final class AudioCaptureService {
     @discardableResult
     private func start(generation: Int) -> Bool {
         guard !engine.isRunning else { return true }
+        observeAudioSessionIfNeeded()
         let session = AVAudioSession.sharedInstance()
         try? session.setCategory(.playAndRecord, options: [.mixWithOthers, .defaultToSpeaker])
         try? session.setActive(true)
         let input = engine.inputNode
+        // A capture the system stopped (a call, a route change) leaves its tap
+        // behind, and installing a second tap on the bus raises an exception.
+        removeMicrophoneTap()
         let format = input.outputFormat(forBus: 0)
         guard format.channelCount > 0 else { return false }
 
@@ -318,14 +331,75 @@ final class AudioCaptureService {
             let end = time.isHostTimeValid ? AVAudioTime.seconds(forHostTime: time.hostTime) + Double(buffer.frameLength) / buffer.format.sampleRate : ProcessInfo.processInfo.systemUptime
             self?.consume(buffer, generation: generation, hostTime: end)
         }
+        micTapInstalled = true
 
         do {
             try engine.start()
             return true
         } catch {
-            input.removeTap(onBus: 0)
+            removeMicrophoneTap()
             return false
         }
+    }
+
+    private func removeMicrophoneTap() {
+        guard micTapInstalled else { return }
+        engine.inputNode.removeTap(onBus: 0)
+        micTapInstalled = false
+    }
+
+    private func deactivateAudioSession() {
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+
+    /// The system stops a running AVAudioEngine for a call, Siri, an alarm or
+    /// a route change, and nothing reaches the tap to say so. Report it the
+    /// way a failed system-audio capture is reported, then offer a restart as
+    /// soon as the microphone can run again.
+    private func observeAudioSessionIfNeeded() {
+        guard audioSessionObservers.isEmpty else { return }
+        let center = NotificationCenter.default
+        audioSessionObservers = [
+            center.addObserver(forName: AVAudioSession.interruptionNotification,
+                               object: AVAudioSession.sharedInstance(), queue: .main) { [weak self] note in
+                self?.handleAudioSessionInterruption(note)
+            },
+            center.addObserver(forName: .AVAudioEngineConfigurationChange,
+                               object: engine, queue: .main) { [weak self] _ in
+                self?.handleEngineStoppedBySystem()
+            },
+            center.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification,
+                               object: nil, queue: .main) { [weak self] _ in
+                self?.handleEngineStoppedBySystem()
+            }
+        ]
+    }
+
+    private func handleAudioSessionInterruption(_ note: Notification) {
+        guard let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
+        switch type {
+        case .began:
+            guard captureMode == .live, isRunning else { return }
+            awaitingInterruptionEnd = true
+            stop()
+            onCaptureFailure?()
+        case .ended:
+            guard awaitingInterruptionEnd else { return }
+            awaitingInterruptionEnd = false
+            onCaptureCanResume?()
+        @unknown default:
+            break
+        }
+    }
+
+    /// A route or format change stops the engine immediately, and it can
+    /// start again straight away on the new route.
+    private func handleEngineStoppedBySystem() {
+        guard captureMode == .live, isRunning, !engine.isRunning else { return }
+        stop()
+        onCaptureFailure?()
+        onCaptureCanResume?()
     }
     #endif
 
@@ -500,12 +574,18 @@ final class AudioCaptureService {
         switch mode {
         case .file:
             teardownFilePlayback()
+            #if os(iOS)
+            deactivateAudioSession()
+            #endif
         case .live:
             #if os(iOS)
-            if engine.isRunning {
-                engine.inputNode.removeTap(onBus: 0)
-                engine.stop()
-            }
+            // The tap goes even when the system already stopped the engine,
+            // or the next start would install a second one.
+            removeMicrophoneTap()
+            if engine.isRunning { engine.stop() }
+            // Hand the route back so other apps' playback leaves the
+            // play-and-record configuration the microphone needed.
+            deactivateAudioSession()
             #endif
             #if os(macOS)
             systemAudioCapture?.stop()
@@ -736,6 +816,11 @@ final class MusicFeatureAnalyzer {
     private var channelRings: [[Float]] = []
     private var ringWriteIndex = 0
     private var samplesUntilHop = MusicFeatureAnalyzer.hopSize
+    /// Hops left before the ring holds a whole window again. Until then each
+    /// hop compares a partly empty window with an emptier one, which reads as
+    /// a full-strength onset (and a flash, when flashes are allowed) and then
+    /// inflates the onset gain for seconds. Level and bands are still measured.
+    private var warmupHopsRemaining = MusicFeatureAnalyzer.windowSize / MusicFeatureAnalyzer.hopSize
     private var processedSamples: Int64 = 0
     private var chronologicalSamples = [Float](repeating: 0, count: MusicFeatureAnalyzer.windowSize)
     private var windowedSamples = [Float](repeating: 0, count: MusicFeatureAnalyzer.windowSize)
@@ -940,12 +1025,17 @@ final class MusicFeatureAnalyzer {
         // Onsets: rectified flux of log magnitudes. Each log-spaced band is
         // averaged and then weighted equally, so a kick occupying three bins
         // counts as much as cymbals spread over hundreds.
-        var bandFluxTotal = 0.0
-        for band in fluxBands { bandFluxTotal += positiveFlux(band) }
-        let rawOnset = fluxBands.isEmpty ? 0 : bandFluxTotal / Double(fluxBands.count)
-        let rawKick = positiveFlux(kickBins)
-        let rawSnare = positiveFlux(snareBins)
-        let rawHat = positiveFlux(hatBins)
+        var rawOnset = 0.0, rawKick = 0.0, rawSnare = 0.0, rawHat = 0.0
+        if warmupHopsRemaining > 0 {
+            warmupHopsRemaining -= 1
+        } else {
+            var bandFluxTotal = 0.0
+            for band in fluxBands { bandFluxTotal += positiveFlux(band) }
+            rawOnset = fluxBands.isEmpty ? 0 : bandFluxTotal / Double(fluxBands.count)
+            rawKick = positiveFlux(kickBins)
+            rawSnare = positiveFlux(snareBins)
+            rawHat = positiveFlux(hatBins)
+        }
         swap(&logMagnitudes, &previousLogMagnitudes)
 
         let onset = normalize(rawOnset, scale: &odfScale, dt: dt)
@@ -1184,6 +1274,7 @@ final class MusicFeatureAnalyzer {
     func resetStream() {
         channelRings = Array(repeating: Array(repeating: 0, count: Self.windowSize), count: channelRings.count)
         ringWriteIndex = 0; samplesUntilHop = Self.hopSize; processedSamples = 0
+        warmupHopsRemaining = Self.windowSize / Self.hopSize
         previousLogMagnitudes = Array(repeating: 0, count: Self.windowSize / 2)
         logMagnitudes = previousLogMagnitudes
         beatTracker.reset()

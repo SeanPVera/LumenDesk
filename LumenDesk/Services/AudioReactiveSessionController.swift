@@ -45,25 +45,34 @@ enum MusicInputHealth: Equatable {
         }
     }
 
-    /// Classifies input from the latest analysis snapshot.
+    /// Classifies input from the latest analysis snapshot and the source that
+    /// should be producing it.
     ///
-    /// ScreenCaptureKit often stops delivering buffers while nothing is
-    /// playing, so a stale or missing timestamp alone is not a capture
-    /// failure. Treat that as quiet/waiting. `.stalled` is reserved for
-    /// never receiving any analysis after a long wait, or when the caller
-    /// forces it after an explicit capture failure.
-    static func evaluate(_ snapshot: AudioReactiveSnapshot, startedAt: TimeInterval,
-                         now: TimeInterval, captureFailed: Bool = false) -> MusicInputHealth {
-        if captureFailed { return .stalled }
-        guard let timestamp = snapshot.analysisTimestamp else {
-            // No buffers yet. Stay waiting for a while; only then call it stalled.
-            return now - startedAt < 8 ? .waiting : .stalled
+    /// What a gap in buffers means depends on the source. ScreenCaptureKit can
+    /// stop sending system audio while nothing plays, so a gap there is quiet
+    /// and a successful start already proved the permission. A microphone or
+    /// a playing file never pauses, so a gap there means the capture died (a
+    /// call, Siri, a route change). MIDI clock only arrives while the
+    /// transport runs. `startedAt` is when the source last became active.
+    static func evaluate(_ snapshot: AudioReactiveSnapshot, source: MusicAudioSourceStatus,
+                         startedAt: TimeInterval, now: TimeInterval) -> MusicInputHealth {
+        let continuous: Bool
+        switch source {
+        case .unavailable:
+            return .stalled
+        case .microphone, .filePlayback:
+            continuous = true
+        case .systemAudio, .midiClock:
+            continuous = false
+        case .idle, .requestingPermission, .syntheticDemo, .permissionDenied:
+            return .waiting
         }
-        let age = now - timestamp
-        let quietGrace = max(snapshot.freshnessGrace + 1, 2)
-        if age > quietGrace {
-            // Had analysis before; buffer gaps during pause/silence are quiet.
-            return .silent
+        guard let timestamp = snapshot.analysisTimestamp else {
+            return continuous && now - startedAt >= 3 ? .stalled : .waiting
+        }
+        if now - timestamp > max(snapshot.freshnessGrace + 1, 2) {
+            if continuous { return .stalled }
+            return source == .midiClock ? .waiting : .silent
         }
         return snapshot.level >= 0.025 || snapshot.energy >= 0.035 ? .receiving : .silent
     }
@@ -146,6 +155,10 @@ final class AudioReactiveSessionController: ObservableObject {
     private(set) var lastRenderInterval: TimeInterval = 0
     private var sequenceNumber: UInt64 = 0
     private var liveCaptureBeganAt: TimeInterval = 0
+    /// When the live source last reported it was running. Input health
+    /// measures "nothing arrived yet" from here, not from the request, so a
+    /// slow permission prompt is never read as a dead microphone.
+    private var sourceActiveSince: TimeInterval = 0
     private var analysisSnapshot = AudioReactiveSnapshot()
     private var lastSnapshotPublishedAt = -Double.greatestFiniteMagnitude
     private let previewPublicationInterval: TimeInterval = 0.1
@@ -164,6 +177,14 @@ final class AudioReactiveSessionController: ObservableObject {
                 self.sourceStatus = .unavailable
                 self.inputHealth = .stalled
                 self.publishPlaybackState(false)
+            }
+        }
+        captureService.onCaptureCanResume = { [weak self] in
+            // The iOS microphone is free again after a call, Siri or a route
+            // change. Rooms and their saved lighting never left; reconnect them.
+            MainActor.assumeIsolated {
+                guard let self, self.canRestartSystemAudio else { return }
+                self.restartSystemAudio()
             }
         }
         subscriptionToken = captureService.subscribe { [weak self] snapshot in
@@ -232,6 +253,7 @@ final class AudioReactiveSessionController: ObservableObject {
                 switch result {
                 case .started:
                     self.sourceStatus = .filePlayback
+                    self.sourceActiveSince = self.now()
                 case .needsScreenRecording:
                     self.removeFailedSession(scope)
                     self.sourceStatus = .permissionDenied
@@ -247,6 +269,7 @@ final class AudioReactiveSessionController: ObservableObject {
                 switch result {
                 case .started:
                     self.sourceStatus = .midiClock
+                    self.sourceActiveSince = self.now()
                 default:
                     self.removeFailedSession(scope)
                     self.sourceStatus = .unavailable
@@ -363,6 +386,7 @@ final class AudioReactiveSessionController: ObservableObject {
             #else
             sourceStatus = .microphone
             #endif
+            sourceActiveSince = now()
         case .needsScreenRecording:
             if let scope { removeFailedSession(scope) }
             sourceStatus = .permissionDenied
@@ -396,12 +420,10 @@ final class AudioReactiveSessionController: ObservableObject {
         lastRenderAt = timestamp
         if sessions.values.contains(where: { !$0.synthetic }) {
             let fresh = analysisSnapshot.fresh(at: timestamp)
-            let captureFailed = sourceStatus == .unavailable
             let health = MusicInputHealth.evaluate(
-                analysisSnapshot, startedAt: liveCaptureBeganAt, now: timestamp,
-                captureFailed: captureFailed)
+                analysisSnapshot, source: sourceStatus, startedAt: sourceActiveSince, now: timestamp)
             if inputHealth != health { inputHealth = health }
-            publishPlaybackState(!captureFailed && Self.isAudible(fresh))
+            publishPlaybackState(sourceStatus != .unavailable && Self.isAudible(fresh))
             if timestamp - lastSnapshotPublishedAt >= previewPublicationInterval {
                 latestSnapshot = fresh
                 lastSnapshotPublishedAt = timestamp

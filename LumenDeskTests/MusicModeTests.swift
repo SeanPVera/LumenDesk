@@ -106,18 +106,29 @@ final class MusicModeTests: XCTestCase {
         capture.stop()
     }
 
-    func testInputHealthDistinguishesSilenceFromMissingCapture() {
-        XCTAssertEqual(MusicInputHealth.evaluate(AudioReactiveSnapshot(), startedAt: 100, now: 101), .waiting)
-        // Still waiting within the extended grace; only then stalled.
-        XCTAssertEqual(MusicInputHealth.evaluate(AudioReactiveSnapshot(), startedAt: 100, now: 104), .waiting)
-        XCTAssertEqual(MusicInputHealth.evaluate(AudioReactiveSnapshot(), startedAt: 100, now: 109), .stalled)
-        XCTAssertEqual(MusicInputHealth.evaluate(AudioReactiveSnapshot(), startedAt: 100, now: 104, captureFailed: true), .stalled)
+    func testInputHealthDependsOnWhetherTheSourcePausesInSilence() {
+        let empty = AudioReactiveSnapshot()
+        // System audio can send nothing until something plays: never a fault,
+        // however long nothing plays.
+        XCTAssertEqual(MusicInputHealth.evaluate(empty, source: .systemAudio, startedAt: 100, now: 160), .waiting)
+        // A microphone or a playing file delivers within moments, or it is broken.
+        XCTAssertEqual(MusicInputHealth.evaluate(empty, source: .microphone, startedAt: 100, now: 101), .waiting)
+        XCTAssertEqual(MusicInputHealth.evaluate(empty, source: .microphone, startedAt: 100, now: 104), .stalled)
+        XCTAssertEqual(MusicInputHealth.evaluate(empty, source: .filePlayback, startedAt: 100, now: 104), .stalled)
+        XCTAssertEqual(MusicInputHealth.evaluate(empty, source: .unavailable, startedAt: 100, now: 100), .stalled)
+        XCTAssertEqual(MusicInputHealth.evaluate(empty, source: .requestingPermission, startedAt: 100, now: 160), .waiting)
         var snapshot = AudioReactiveSnapshot(analysisTimestamp: 104)
-        XCTAssertEqual(MusicInputHealth.evaluate(snapshot, startedAt: 100, now: 104), .silent)
+        XCTAssertEqual(MusicInputHealth.evaluate(snapshot, source: .systemAudio, startedAt: 100, now: 104), .silent)
         snapshot.level = 0.5
-        XCTAssertEqual(MusicInputHealth.evaluate(snapshot, startedAt: 100, now: 104), .receiving)
-        // Stale buffers after we had analysis are quiet, not a broken capture.
-        XCTAssertEqual(MusicInputHealth.evaluate(snapshot, startedAt: 100, now: 110), .silent)
+        XCTAssertEqual(MusicInputHealth.evaluate(snapshot, source: .systemAudio, startedAt: 100, now: 104), .receiving)
+        // Buffers stopping after music played: quiet for system audio, a dead
+        // capture for the microphone (a call or Siri took it), and no clock
+        // yet for a stopped MIDI transport.
+        XCTAssertEqual(MusicInputHealth.evaluate(snapshot, source: .systemAudio, startedAt: 100, now: 110), .silent)
+        XCTAssertEqual(MusicInputHealth.evaluate(snapshot, source: .microphone, startedAt: 100, now: 110), .stalled)
+        XCTAssertEqual(MusicInputHealth.evaluate(snapshot, source: .midiClock, startedAt: 100, now: 110), .waiting)
+        let stopped = AudioReactiveSnapshot(sourceDescription: "MIDI clock stopped")
+        XCTAssertEqual(MusicInputHealth.evaluate(stopped, source: .midiClock, startedAt: 100, now: 160), .waiting)
     }
 
     func testAudiblePredicateIsSharedAcrossSubscribeAndRender() {
@@ -125,7 +136,7 @@ final class MusicModeTests: XCTestCase {
         XCTAssertFalse(AudioReactiveSessionController.isAudible(quiet))
         quiet.level = 0.05
         XCTAssertTrue(AudioReactiveSessionController.isAudible(quiet))
-        var confident = AudioReactiveSnapshot(confidence: 0.05)
+        let confident = AudioReactiveSnapshot(confidence: 0.05)
         XCTAssertTrue(AudioReactiveSessionController.isAudible(confident))
     }
 
@@ -157,11 +168,27 @@ final class MusicModeTests: XCTestCase {
         controller.stopAll()
     }
 
+    /// Which run-loop modes a timer fires in can only be observed on a real
+    /// run loop. The wait ends at the first frame; 0.4 s is only the ceiling.
     @MainActor
     func testLightingKeepsRenderingDuringMacControlTracking() {
-        // Injected clock + renderNowForTesting avoid waiting on the real Timer.
-        // Production still registers the timer in .common so AppKit tracking
-        // modes (eventTracking) continue to deliver frames.
+        let controller = AudioReactiveSessionController()
+        var frames = 0
+        controller.start(scope: .all, configuration: .configuration(for: .balanced),
+                         topology: FixtureTopology(), fixtures: [], reducedMotion: false,
+                         useSyntheticPattern: true, onFrame: { _ in frames += 1 }, completion: { _ in })
+        defer { controller.stopAll() }
+        let before = frames
+        // AppKit uses this mode while a slider or menu is tracking the pointer.
+        let deadline = Date().addingTimeInterval(0.4)
+        while frames == before && Date() < deadline {
+            RunLoop.main.run(mode: .eventTracking, before: deadline)
+        }
+        XCTAssertGreaterThan(frames, before)
+    }
+
+    @MainActor
+    func testRenderIntervalComesFromTheInjectedClock() {
         var time = 100.0
         let controller = AudioReactiveSessionController(now: { time })
         var frames = 0
@@ -174,8 +201,8 @@ final class MusicModeTests: XCTestCase {
         controller.renderNowForTesting()
         time = 100.10
         controller.renderNowForTesting()
-        XCTAssertGreaterThan(frames, before)
-        XCTAssertGreaterThan(controller.lastRenderInterval, 0)
+        XCTAssertEqual(frames, before + 2)
+        XCTAssertEqual(controller.lastRenderInterval, 0.05, accuracy: 0.0001)
     }
 
     func testMasterZeroAndLiveCeilingIncludeFlashes() {
@@ -250,6 +277,19 @@ final class MusicModeTests: XCTestCase {
         }
         XCTAssertFalse(input.fresh(at: 102).isTempoLocked)
         XCTAssertLessThan(brightness, 0.001)
+    }
+
+    func testDuplicateLightIDsCannotCrashMusicMode() throws {
+        let json = #"{"id":"\#(UUID().uuidString)","name":"Den","lightIDs":["a","b","a"]}"#
+        let room = try JSONDecoder().decode(Room.self, from: Data(json.utf8))
+        XCTAssertEqual(room.lightIDs, ["a", "b"])
+        let fixture = MusicFixtureDescriptor(id: "a", label: "A", transport: .lifxLAN)
+        XCTAssertEqual(FixtureTopology().orderedFixtures([fixture, fixture]).map(\.id), ["a"])
+        let frame = MusicLightingFrame(
+            states: [.init(fixtureID: "a", hue: 0, saturation: 1, brightness: 1, transitionDuration: 0.1)],
+            timestamp: 1, sequenceNumber: 1, sustainedEnergyEvent: false, flashApplied: false
+        )
+        XCTAssertEqual(MusicLightingRenderer().enqueue(frame, fixtures: [fixture, fixture], at: 1).count, 1)
     }
 
     func testRendererRejectsOldSequenceExpiredFramesAndResetPending() {
@@ -405,6 +445,59 @@ final class MusicModeTests: XCTestCase {
         manager.stopAllEffects()
     }
 
+    @MainActor
+    func testReduceMotionReachesShowsStartedOutsideTheMusicScreen() throws {
+        let manager = LightManager(persistenceStore: MusicModePersistenceSpy())
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+        var config = MusicModeConfiguration.configuration(for: .concert)
+        config.usesSyntheticDemoPattern = true
+        config.photosensitivitySafeMode = false
+        config.palette = MusicModeConfiguration.oceanPalette
+        manager.setMusicModeConfiguration(config)
+        // What the system observer delivers when Reduce Motion is switched on.
+        manager.setMusicReducedMotion(true)
+        let effect = try XCTUnwrap(LightingCatalog.effects.first { $0.id == "music-pulse" })
+        manager.startEffect(effect, scope: .all)
+        let effective = try XCTUnwrap(manager.musicModeController.effectiveConfiguration(for: .all))
+        XCTAssertLessThanOrEqual(effective.movementAmount, 0.18)
+        XCTAssertEqual(effective.flashIntensity, 0, "Reduce Motion blocks flashes on every entry point")
+        XCTAssertEqual(effective.palette, MusicModeConfiguration.oceanPalette,
+                       "A favorite starts the saved show rather than a fixed preset")
+        manager.stopAllEffects()
+    }
+
+    @MainActor
+    func testFaderPreviewReachesTheRunningShow() throws {
+        let manager = LightManager(persistenceStore: MusicModePersistenceSpy())
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+        var config = MusicModeConfiguration.configuration(for: .balanced)
+        config.usesSyntheticDemoPattern = true
+        manager.startMusicMode(configuration: config)
+        config.beatSensitivity = 0.13
+        manager.previewMusicModeConfiguration(config)
+        let effective = try XCTUnwrap(manager.musicModeController.effectiveConfiguration(for: .all))
+        XCTAssertEqual(effective.beatSensitivity, 0.13, accuracy: 0.0001)
+        manager.stopAllEffects()
+    }
+
+    @MainActor
+    func testOnlyAFaderReleaseWritesTheStateFile() {
+        let persistence = MusicModePersistenceSpy()
+        let manager = LightManager(persistenceStore: persistence)
+        var config = manager.musicModeConfiguration
+        let before = persistence.saves
+        for value in [0.2, 0.4, 0.6] {
+            config.masterBrightness = value
+            manager.previewMusicModeConfiguration(config)
+        }
+        XCTAssertEqual(persistence.saves, before, "Drag values must not rewrite the state file")
+        XCTAssertEqual(manager.musicModeConfiguration.masterBrightness, 0.6, accuracy: 0.0001)
+        manager.setMusicModeConfiguration(config)
+        XCTAssertEqual(persistence.saves, before + 1)
+    }
+
     func testSilenceProducesQuietBoundedFeatures() throws {
         let analyzer = MusicFeatureAnalyzer(sourceDescription: "Test")
         let snapshot = try XCTUnwrap(analyzer.analyze(buffer()))
@@ -414,8 +507,39 @@ final class MusicModeTests: XCTestCase {
         XCTAssertEqual(snapshot.sourceDescription, "Test")
     }
 
-    func testSteadyToneCreatesOneOnsetThenSettles() throws {
+    /// An analyzer that has heard enough silence to fill its window, so the
+    /// next buffer's onsets are measured against real (silent) history.
+    private func analyzerAfterSilence() -> MusicFeatureAnalyzer {
         let analyzer = MusicFeatureAnalyzer(sourceDescription: "Test")
+        for _ in 0..<2 { _ = analyzer.analyze(buffer()) }
+        return analyzer
+    }
+
+    func testStreamStartIsNotAnOnset() throws {
+        // A fresh analyzer's first hops compare a partly filled window with an
+        // empty one. Audio already playing when capture starts (or resumes
+        // after a gap) is not a hit, and it must not inflate the onset gain.
+        let analyzer = MusicFeatureAnalyzer(sourceDescription: "Test")
+        var sample = 0
+        var snapshots: [AudioReactiveSnapshot] = []
+        for _ in 0..<2 {
+            snapshots.append(try XCTUnwrap(analyzer.analyze(buffer(frequency: 880, amplitude: 0.5, startSample: sample))))
+            sample += 1024
+        }
+        for snapshot in snapshots {
+            XCTAssertEqual(snapshot.onset, 0)
+            XCTAssertEqual(snapshot.snare + snapshot.percussion + snapshot.kick, 0)
+            XCTAssertEqual(snapshot.beat, 0)
+            XCTAssertGreaterThan(snapshot.level, 0, "Loudness is still measured while the window fills")
+        }
+        // A real onset afterwards is still heard at full strength.
+        for _ in 0..<2 { _ = analyzer.analyze(buffer()) }
+        let impulse = try XCTUnwrap(analyzer.analyze(buffer(impulse: true)))
+        XCTAssertGreaterThan(max(impulse.kick, impulse.snare, impulse.percussion), 0.1)
+    }
+
+    func testSteadyToneCreatesOneOnsetThenSettles() throws {
+        let analyzer = analyzerAfterSilence()
         var sample = 0
         let first = try XCTUnwrap(analyzer.analyze(buffer(frequency: 880, amplitude: 0.5, startSample: sample)))
         var last = first
@@ -428,21 +552,21 @@ final class MusicModeTests: XCTestCase {
     }
 
     func testBassFrequencyDominatesHighBand() throws {
-        let analyzer = MusicFeatureAnalyzer(sourceDescription: "Test")
+        let analyzer = analyzerAfterSilence()
         let snapshot = try XCTUnwrap(analyzer.analyze(buffer(frequency: 94, amplitude: 0.65)))
         XCTAssertGreaterThan(snapshot.bass, snapshot.highs)
         XCTAssertGreaterThan(snapshot.kick, 0.1)
     }
 
     func testPercussiveImpulseProducesOnset() throws {
-        let analyzer = MusicFeatureAnalyzer(sourceDescription: "Test")
+        let analyzer = analyzerAfterSilence()
         let snapshot = try XCTUnwrap(analyzer.analyze(buffer(impulse: true)))
         XCTAssertGreaterThan(max(snapshot.kick, snapshot.snare, snapshot.percussion), 0.1)
         XCTAssertGreaterThan(snapshot.pulse, 0.1)
     }
 
     func testBeatCooldownRejectsRapidSecondImpulse() throws {
-        let analyzer = MusicFeatureAnalyzer(sourceDescription: "Test")
+        let analyzer = analyzerAfterSilence()
         let first = try XCTUnwrap(analyzer.analyze(buffer(impulse: true)))
         _ = analyzer.analyze(buffer())
         let tooSoon = try XCTUnwrap(analyzer.analyze(buffer(impulse: true)))
@@ -1242,6 +1366,42 @@ final class MusicModeTests: XCTestCase {
         XCTAssertEqual(slowLater.first?.sequenceNumber, 2)
     }
 
+    func testRendererKeepsTransportRatesThroughRenderClockJitter() {
+        let renderer = MusicLightingRenderer()
+        let fixtures = [
+            MusicFixtureDescriptor(id: "bulb", label: "Bulb", transport: .lifxLAN),
+            MusicFixtureDescriptor(id: "strip", label: "Strip", transport: .goveeRealtimeSegments, segmentCount: 1)
+        ]
+        var handoffs: [String: [TimeInterval]] = [:]
+        // Three seconds of a 20 Hz clock whose every third tick fires 9 ms
+        // late, as a timer with 10 ms of tolerance can, then snaps back.
+        for tick in 0..<60 {
+            let time = 100 + Double(tick) * 0.05 + (tick % 3 == 1 ? 0.009 : 0)
+            let frame = MusicLightingFrame(
+                states: [
+                    .init(fixtureID: "bulb", hue: 0, saturation: 1, brightness: 0.5, transitionDuration: 0.09),
+                    .init(fixtureID: "strip", segmentID: 0, hue: 0.5, saturation: 1, brightness: 0.5, transitionDuration: 0.04)
+                ],
+                timestamp: time, sequenceNumber: UInt64(tick + 1),
+                sustainedEnergyEvent: false, flashApplied: false
+            )
+            for command in renderer.enqueue(frame, fixtures: fixtures, at: time) {
+                handoffs[command.fixtureID, default: []].append(time)
+            }
+        }
+        // The segment stream keeps every frame through the jitter.
+        XCTAssertEqual(handoffs["strip"]?.count, 60)
+        // LIFX averages its 60 ms ceiling instead of halving to every other tick.
+        let bulb = handoffs["bulb"] ?? []
+        XCTAssertGreaterThanOrEqual(bulb.count, 45)
+        XCTAssertLessThanOrEqual(bulb.count, Int(3 / 0.06) + 1)
+        let average = ((bulb.last ?? 0) - (bulb.first ?? 0)) / Double(max(1, bulb.count - 1))
+        XCTAssertGreaterThanOrEqual(average, 0.059)
+        for (earlier, later) in zip(bulb, bulb.dropFirst()) {
+            XCTAssertGreaterThanOrEqual(later - earlier, 0.06 - 2 * MusicLightingRenderer.pacingTolerance - 0.000_001)
+        }
+    }
+
     @MainActor
     func testSyntheticSessionStartsStopsAndSupportsMultipleScopes() {
         var time: TimeInterval = 20
@@ -1736,8 +1896,9 @@ final class MusicModeTests: XCTestCase {
 
 private final class MusicModePersistenceSpy: ApplicationPersistence {
     private var state = PersistedApplicationState()
+    private(set) var saves = 0
     func load() -> PersistedApplicationState { state }
-    func save(_ state: PersistedApplicationState) throws { self.state = state }
+    func save(_ state: PersistedApplicationState) throws { self.state = state; saves += 1 }
     func exportConfiguration(from state: PersistedApplicationState) throws -> Data { try JSONEncoder().encode(state) }
     func importingConfiguration(from data: Data, into currentState: PersistedApplicationState) throws -> PersistedApplicationState {
         try JSONDecoder().decode(PersistedApplicationState.self, from: data)

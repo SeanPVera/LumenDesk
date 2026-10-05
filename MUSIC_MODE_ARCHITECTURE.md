@@ -22,7 +22,10 @@ control behavior. Nothing here establishes perceptual synchronization.
    stereo phase cannot cancel audible music; RMS also averages channel energy.
    The first two channels provide stereo balance. Per-channel rings support arbitrary buffer sizes, a 2048-sample
    Hann window and a 512-sample hop. Rate changes and capture discontinuities reset
-   FFT history, tracker and envelopes together. Duplicate/reversed end timestamps
+   FFT history, tracker and envelopes together, and onset flux is not measured
+   again until the window has refilled (four hops): comparing a partly empty
+   window with an emptier one read as a full-strength hit at every reset.
+   Loudness and bands are still measured meanwhile. Duplicate/reversed end timestamps
    are rejected. Ingress admits short capture bursts on a user-initiated serial
    queue, bounded by 250 ms of audio and 32 buffers (one oversized buffer may
    enter an empty queue). Overflow buffers are counted and the next accepted
@@ -44,16 +47,24 @@ control behavior. Nothing here establishes perceptual synchronization.
    frame callbacks. Demo grooves enter here as explicitly synthetic snapshots.
    The render timer runs in common run-loop modes so native control tracking
    does not pause lighting. Capture delegate failures surface as unavailable
-   and stalled. While the source is otherwise healthy, missing buffers (common
-   when nothing is playing) are treated as quiet/waiting rather than a broken
-   capture. Restart reconnects the shared system source while retaining scope
-   sessions and restore snapshots.
+   and stalled. Input health depends on the source: system audio can stop
+   delivering buffers while nothing plays, so a gap there is waiting or
+   silent; a microphone or a playing file never pauses, so a gap there is
+   stalled; MIDI clock waits for a running transport. iOS audio-session
+   interruptions, engine configuration changes and media-service resets are
+   reported as failures, and the microphone restarts when it is free again.
+   Restart reconnects the shared source while retaining scope sessions and
+   restore snapshots.
 5. **`MusicChoreographyEngine.makeFrame`** applies freshness, configuration, roles
    and topology to produce vendor-neutral HSB states, transition durations,
    timestamp and sequence. No vendor command or second audio pipeline lives here.
 6. **`MusicLightingRenderer`** rejects old sequences and frames older than 250 ms,
-   keeps at most the newest pending frame per fixture and paces handoffs. Reset
-   clears pending frames and sequence history for stopped fixtures.
+   keeps at most the newest pending frame per fixture and paces handoffs on a
+   per-fixture slot schedule. Slots advance by the transport interval from the
+   previous slot and may be taken up to 15 ms early, so render-clock jitter
+   neither drops frames nor halves a ceiling that falls between 50 ms ticks;
+   a late slot moves the schedule rather than banking a catch-up burst. Reset
+   clears pending frames, slots and sequence history for stopped fixtures.
 7. **`LightManager.renderMusicFrame`** validates active effect ownership and known
    reachability, applies real device capability masks, and hands commands to the
    existing LIFX/Govee transports. `musicCapabilityStates` is also used by the
@@ -114,9 +125,9 @@ cannot establish any of the last three or a visible light change.
 
 ## Capability and transport boundaries
 
-| Path | Renderer handoff ceiling | Actual command path / limits |
+| Path | Renderer handoff ceiling (average) | Actual command path / limits |
 |---|---:|---|
-| LIFX LAN | one / 60 ms | Combined HSBK including brightness and transition; local UDP submission and failures counted |
+| LIFX LAN | one / 60 ms (single gaps ≥ 30 ms; ≈ 16 Hz on the 20 Hz clock) | Combined HSBK including brightness and transition; local UDP submission and failures counted |
 | Ordinary Govee LAN | one / 100 ms | Global brightness opened once, per-frame brightness folded into RGB; volatile color queue coalesces and expires |
 | Supported Govee segment stream | one / 50 ms | Volatile Razer stream; the existing Govee sender still spaces **all datagrams by 100 ms per device**, so this is not measured 20 fps device delivery |
 | Browser bridge | at most 10 HTTP frames/s, one in flight | Solid color per fixture; explicit independent brightness and LIFX transition; bridge's existing per-device queue coalesces |
@@ -134,8 +145,10 @@ The existing `web/app/src/music` implementation remains the browser production
 path. The AudioWorklet batches continuous stereo PCM into 1024 samples, permits
 at most two unacknowledged messages, reports gaps and consumes each accepted batch
 once. Render ticks never re-analyze the last buffer. The analyzer now matches native
-band definitions, RMS mapping, flux averaging and time constants more closely;
-independent FFT implementations are not claimed bit-exact. Web MIDI derives tempo
+band definitions, RMS mapping, flux averaging and time constants more closely,
+analyzes stereo channels separately and averages their power, and skips onset
+flux while its window refills after a reset; independent FFT implementations are
+not claimed bit-exact. Web MIDI derives tempo
 from clock intervals and honors Stop/Continue/Start.
 
 `LatestMusicFrameSender` keeps one in-flight request and one latest pending frame,
@@ -156,7 +169,10 @@ is the reliable application action, still subject to network/device failure.
 
 No-flash mode is the UI name for the existing `photosensitivitySafeMode` saved key.
 It is enabled by default and blocks explicit flashes. Reduced Motion also disables
-flashes and caps movement; changes propagate to active native sessions. The hard
+flashes and caps movement. LightManager reads and observes the system setting
+itself, so every entry point (Music screen, favorites, scene cards, Demo Mode
+exit) starts under it and changes reach active native sessions whichever
+screen is open. Fader drags update sessions live and are saved on release. The hard
 three-request/s cap is **not a medical safety guarantee**. Ordinary brightness/color
 modulation also needs visual assessment. Neither presets nor this patch enable
 stronger default flashing.

@@ -21,6 +21,14 @@ final class SpectrumDraftStore: ObservableObject {
         }
         selections = next
     }
+
+    /// A different workspace (entering or leaving Demo Mode) shares no fixtures
+    /// with this one, so nothing here can be reconciled into it.
+    func clearAll() {
+        luna = [:]
+        govee = [:]
+        selections = [:]
+    }
 }
 
 struct PlanWorkspaceView: View {
@@ -274,6 +282,7 @@ struct PlanWorkspaceView: View {
     private var studioRoomInspector: some View {
         VStack(alignment: .leading, spacing: 18) {
             RoomOutputControls(lights: targets, title: selectedIDs.isEmpty ? "Room controls" : "\(targets.count) selected light\(targets.count == 1 ? "" : "s")")
+                .id(targets.map(ObjectIdentifier.init))
             roomColorSchemes
             if !selectedIDs.isEmpty {
                 Button("Clear selection — whole room") { selectedIDs.removeAll() }
@@ -497,7 +506,8 @@ struct PlanWorkspaceView: View {
             } else {
                 RoomOutputControls(lights: targets, title: selectedIDs.isEmpty
                                    ? manager.scopeDisplayName(scope)
-                                   : "\(targets.count) selected fixtures")
+                                   : "\(targets.count) selected fixture\(targets.count == 1 ? "" : "s")")
+                    .id(targets.map(ObjectIdentifier.init))
             }
             if !selectedIDs.isEmpty && targets.isEmpty {
                 Text("The selected fixtures are no longer in this room. Clear selection to control the room.")
@@ -903,24 +913,25 @@ struct RoomFixtureLine: View {
 
 /// A room aggregate must observe its children, not just membership on the manager.
 /// Discovery, device controls and show frames all publish through LightDevice.
+/// This only invalidates. Values are always read from the view's current lights.
 final class RoomOutputState: ObservableObject {
-    private(set) var lights: [LightDevice] = []
     private var observation: AnyCancellable?
 
-    init(lights: [LightDevice]) { observe(lights) }
-
-    func observe(_ lights: [LightDevice]) {
-        objectWillChange.send()
-        self.lights = lights
+    init(lights: [LightDevice]) {
         observation = Publishers.MergeMany(lights.map(\.objectWillChange)).sink { [weak self] _ in
             self?.objectWillChange.send()
         }
     }
 
-    var ids: Set<String> { Set(lights.map(\.id)) }
-    var level: Double { lights.isEmpty ? 0 : lights.reduce(0) { $0 + $1.brightness } / Double(lights.count) }
+    static func level(of lights: [LightDevice]) -> Double {
+        lights.isEmpty ? 0 : lights.reduce(0) { $0 + $1.brightness } / Double(lights.count)
+    }
 }
 
+/// Call sites give this view one identity per target set (`.id` over the
+/// lights' object identities), so a new selection or room builds a new
+/// observer. Re-pointing one from a one-argument `onChange` ran with the
+/// previous `lights` on every OS, which left the fader on the old selection.
 struct RoomOutputControls: View {
     @EnvironmentObject private var manager: LightManager
     let lights: [LightDevice]
@@ -933,10 +944,8 @@ struct RoomOutputControls: View {
         _output = StateObject(wrappedValue: RoomOutputState(lights: lights))
     }
 
-    /// Always derive command targets from the current `lights` prop. `output`
-    /// can lag behind on macOS 13 when the one-argument `onChange` closure
-    /// observes the previous light set.
     private var ids: Set<String> { Set(lights.map(\.id)) }
+    private var level: Double { RoomOutputState.level(of: lights) }
     private var owned: Bool { lights.contains { manager.animatingEffect(for: $0.id) != nil } }
 
     var body: some View {
@@ -956,7 +965,7 @@ struct RoomOutputControls: View {
             }
             .disabled(ids.isEmpty)
             LumenFader(label: "Brightness", value: Binding(
-                get: { output.level }, set: { manager.setBrightness(deviceIDs: ids, value: $0) }),
+                get: { level }, set: { manager.setBrightness(deviceIDs: ids, value: $0) }),
                        format: { value in
                            Set(lights.map { Int(($0.brightness * 100).rounded()) }).count > 1
                                ? "Mixed" : LumenFader.percent(value)
@@ -983,8 +992,6 @@ struct RoomOutputControls: View {
                     .font(.callout).foregroundStyle(Lumen.meter)
             }
         }
-        .onAppear { output.observe(lights) }
-        .onChange(of: lights.map(\.id)) { _ in output.observe(lights) }
     }
 }
 

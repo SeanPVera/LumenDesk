@@ -136,42 +136,81 @@ export class MusicFeatureAnalyzer {
     this.hasHostAnchor = true;
     let latest: AudioReactiveSnapshot | null = null;
     let strongestBeat = 0;
-    let left = 0, right = 0;
-    for (let i = 0; i < samples.length; i++) {
-      const l = stereo?.left[i] ?? samples[i] ?? 0;
-      const r = stereo?.right[i] ?? l;
-      left += l * l; right += r * r;
-    }
-    left = Math.sqrt(left / samples.length); right = Math.sqrt(right / samples.length);
-    const image = left + right < 1e-8 ? .5 : right / (left + right);
-    for (let i = 0; i < samples.length; i++) {
-      if (stereo) {
-        this.rings[0][this.ringWrite] = stereo.left[i] ?? 0;
-        this.rings[1][this.ringWrite] = stereo.right[i] ?? 0;
-      } else {
-        this.rings[0][this.ringWrite] = samples[i] ?? 0;
+
+    const numSamples = samples.length;
+    let image = 0.5;
+    if (stereo) {
+      const sLeft = stereo.left;
+      const sRight = stereo.right;
+      let leftSum = 0;
+      let rightSum = 0;
+      for (let i = 0; i < numSamples; i++) {
+        const l = sLeft[i] ?? 0;
+        const r = sRight[i] ?? 0;
+        leftSum += l * l;
+        rightSum += r * r;
       }
-      this.ringWrite = (this.ringWrite + 1) % WINDOW;
-      this.processedSamples++;
-      if (--this.samplesUntilHop <= 0) {
-        this.samplesUntilHop = HOP;
-        latest = this.hop(image);
-        strongestBeat = Math.max(strongestBeat, latest.beat);
+      const leftRMS = Math.sqrt(leftSum / numSamples);
+      const rightRMS = Math.sqrt(rightSum / numSamples);
+      image = leftRMS + rightRMS < 1e-8 ? 0.5 : rightRMS / (leftRMS + rightRMS);
+    }
+
+    const ring0 = this.rings[0];
+    const ring1 = this.rings[1];
+    const mask = WINDOW - 1;
+    let rw = this.ringWrite;
+
+    if (stereo) {
+      const sLeft = stereo.left;
+      const sRight = stereo.right;
+      for (let i = 0; i < numSamples; i++) {
+        ring0[rw] = sLeft[i] ?? 0;
+        ring1[rw] = sRight[i] ?? 0;
+        rw = (rw + 1) & mask;
+        this.processedSamples++;
+        if (--this.samplesUntilHop <= 0) {
+          this.samplesUntilHop = HOP;
+          this.ringWrite = rw;
+          latest = this.hop(image);
+          strongestBeat = Math.max(strongestBeat, latest.beat);
+        }
+      }
+    } else {
+      for (let i = 0; i < numSamples; i++) {
+        ring0[rw] = samples[i] ?? 0;
+        rw = (rw + 1) & mask;
+        this.processedSamples++;
+        if (--this.samplesUntilHop <= 0) {
+          this.samplesUntilHop = HOP;
+          this.ringWrite = rw;
+          latest = this.hop(0.5);
+          strongestBeat = Math.max(strongestBeat, latest.beat);
+        }
       }
     }
+    this.ringWrite = rw;
+
     if (latest) { latest.beat = strongestBeat; this.lastSnapshot = latest; }
     return latest;
   }
 
-  /** Fills `windowed` from a channel's ring and returns its mean square. */
+  /** Fills `windowed` from a channel's ring using fast bitwise masking and returns its mean square. */
   private windowChannel(ring: Float64Array): number {
     let square = 0;
+    const rw = this.ringWrite;
+    const mask = WINDOW - 1;
+    const hann = this.hann;
+    const windowed = this.windowed;
     for (let i = 0; i < WINDOW; i++) {
-      const sample = ring[(this.ringWrite + i) % WINDOW];
+      const sample = ring[(rw + i) & mask];
       square += sample * sample;
-      this.windowed[i] = sample * this.hann[i];
+      windowed[i] = sample * hann[i];
     }
     return square / WINDOW;
+  }
+
+  private updateScale(scale: number, value: number, expFactor: number): number {
+    return value > scale ? scale + (value - scale) * 0.3 : Math.max(MIN_ONSET_SCALE, scale * expFactor);
   }
 
   private hop(stereo: number): AudioReactiveSnapshot {
@@ -192,11 +231,13 @@ export class MusicFeatureAnalyzer {
     }
     const rms = Math.sqrt(meanSquare);
     const level = clamp(Math.log1p(Math.max(0, rms - .001) * 20) / Math.log1p(10));
-    for (let i = 1; i < this.logMagnitudes.length; i++) this.logMagnitudes[i] = Math.log1p(this.magnitudes[i] * LOG_COMPRESSION);
+    const logMags = this.logMagnitudes;
+    const mags = this.magnitudes;
+    for (let i = 1; i < logMags.length; i++) logMags[i] = Math.log1p(mags[i] * LOG_COMPRESSION);
     const dt = HOP / this.sampleRate;
-    const bassRaw = meanBins(this.magnitudes, this.bassBins);
-    const midsRaw = meanBins(this.magnitudes, this.midsBins);
-    const highsRaw = meanBins(this.magnitudes, this.highsBins);
+    const bassRaw = meanBins(mags, this.bassBins);
+    const midsRaw = meanBins(mags, this.midsBins);
+    const highsRaw = meanBins(mags, this.highsBins);
     const loudest = Math.max(bassRaw, midsRaw, highsRaw);
     this.bandPeak = loudest > this.bandPeak ? this.bandPeak + (loudest - this.bandPeak) * .3 : Math.max(.00002, this.bandPeak * Math.exp(-dt / 8));
     const scale = .9 / this.bandPeak * Math.sqrt(level);
@@ -206,19 +247,22 @@ export class MusicFeatureAnalyzer {
       this.warmupHops -= 1;
     } else {
       let fluxSum = 0;
-      for (const band of this.fluxBands) fluxSum += rectifiedBandFlux(this.logMagnitudes,this.previousLog,band);
+      for (const band of this.fluxBands) fluxSum += rectifiedBandFlux(logMags,this.previousLog,band);
       flux = fluxSum / Math.max(1,this.fluxBands.length);
-      rawKick = rectifiedBandFlux(this.logMagnitudes,this.previousLog,this.kickBins);
-      rawSnare = rectifiedBandFlux(this.logMagnitudes,this.previousLog,this.snareBins);
-      rawHat = rectifiedBandFlux(this.logMagnitudes,this.previousLog,this.hatBins);
+      rawKick = rectifiedBandFlux(logMags,this.previousLog,this.kickBins);
+      rawSnare = rectifiedBandFlux(logMags,this.previousLog,this.snareBins);
+      rawHat = rectifiedBandFlux(logMags,this.previousLog,this.hatBins);
     }
-    this.previousLog.set(this.logMagnitudes);
-    const normalize = (value: number, key: 'odfScale'|'kickScale'|'snareScale'|'hatScale') => {
-      this[key] = value > this[key] ? this[key] + (value - this[key]) * .3 : Math.max(MIN_ONSET_SCALE, this[key] * Math.exp(-dt / 6));
-      return clamp(value / this[key] * .9);
-    };
-    const onset = normalize(flux,'odfScale'), kick = normalize(rawKick,'kickScale');
-    const snare = normalize(rawSnare,'snareScale'), percussion = normalize(rawHat,'hatScale');
+    this.previousLog.set(logMags);
+    const expFactor = Math.exp(-dt / 6);
+    this.odfScale = this.updateScale(this.odfScale, flux, expFactor);
+    const onset = clamp((flux / this.odfScale) * 0.9);
+    this.kickScale = this.updateScale(this.kickScale, rawKick, expFactor);
+    const kick = clamp((rawKick / this.kickScale) * 0.9);
+    this.snareScale = this.updateScale(this.snareScale, rawSnare, expFactor);
+    const snare = clamp((rawSnare / this.snareScale) * 0.9);
+    this.hatScale = this.updateScale(this.hatScale, rawHat, expFactor);
+    const percussion = clamp((rawHat / this.hatScale) * 0.9);
     const energy = clamp(level * .4 + bass * .3 + mids * .16 + highs * .14);
     const sampleTime = this.processedSamples / this.sampleRate;
     const beatOnset = clamp(onset * .6 + kick * .4);
@@ -239,7 +283,8 @@ export class MusicFeatureAnalyzer {
     this.energyBaseline += (energy-this.energyBaseline)*(1-Math.exp(-dt/3.3));
     this.dropEnv = Math.max(this.dropEnv*Math.exp(-dt/.3),clamp((energy-.5)*2.4)*clamp((energy-this.energyBaseline)*4+.3));
     this.updateChroma(); this.updateSpectrum();
-    return {...emptySnapshot(),level,beat,kick,snare,percussion,bass,mids,highs,energy,
+    return {
+      level,beat,kick,snare,percussion,bass,mids,highs,energy,
       mood:clamp(.5+(highs-bass)*.6+mids*.05), confidence:clamp(level*1.8),pulse:clamp(this.pulseEnv),drop:clamp(this.dropEnv),
       beatCount:this.beatCount,tempo:grid.isLocked?grid.tempo:0,beatInterval:grid.isLocked?grid.interval:0,
       beatConfidence:grid.confidence,beatReferenceTime:grid.lastBeatTime>0?grid.lastBeatTime+this.hostOffset:0,
@@ -248,7 +293,8 @@ export class MusicFeatureAnalyzer {
       stereo,chroma:Array.from(this.chroma),spectrum:Array.from(this.spectrum),
       phrasePosition:Math.floor(this.beatCount/grid.metre)%8,energySlope:energy-this.lastSnapshot.energy,
       sourceDescription:this.sourceDescription,analysisTimestamp:sampleTime+this.hostOffset,
-      rawRMS:rms,onset,gridBeatPosition:grid.beatCount,analyzedSamples:this.processedSamples};
+      rawRMS:rms,onset,gridBeatPosition:grid.beatCount,analyzedSamples:this.processedSamples
+    };
   }
 
   latest(): AudioReactiveSnapshot { return this.lastSnapshot; }
@@ -256,13 +302,17 @@ export class MusicFeatureAnalyzer {
   private updateSpectrum(): void {
     const n = this.magnitudes.length;
     const peak = Math.max(this.bandPeak, 1e-6);
+    const mags = this.magnitudes;
+    const spec = this.spectrum;
     for (let i = 0; i < SPECTRUM_BINS; i += 1) {
-      const { first, end } = SPECTRUM_RANGES[i];
+      const range = SPECTRUM_RANGES[i];
+      const first = range.first;
+      const end = range.end;
       let sum = 0;
-      for (let k = first; k < end && k < n; k += 1) sum += this.magnitudes[k];
+      for (let k = first; k < end && k < n; k += 1) sum += mags[k];
       const mean = sum / (end - first);
       const target = Math.min(1, mean / peak);
-      this.spectrum[i] = this.spectrum[i] * 0.55 + target * 0.45;
+      spec[i] = spec[i] * 0.55 + target * 0.45;
     }
   }
 
@@ -333,8 +383,13 @@ function meanBins(magnitudes: Float64Array, range: BinRange): number {
 
 function rectifiedBandFlux(now: Float64Array, prev: Float64Array, range: BinRange): number {
   let sum = 0;
-  for (let i = range.first; i <= range.last; i += 1) sum += Math.max(0, now[i] - prev[i]);
-  return sum / Math.max(1, range.last - range.first + 1);
+  const first = range.first;
+  const last = range.last;
+  for (let i = first; i <= last; i += 1) {
+    const diff = now[i] - prev[i];
+    if (diff > 0) sum += diff;
+  }
+  return sum / Math.max(1, last - first + 1);
 }
 
 function clamp(value: number): number { return Math.max(0,Math.min(1,value)); }

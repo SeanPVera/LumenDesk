@@ -163,13 +163,24 @@ export class MusicFeatureAnalyzer {
     return latest;
   }
 
-  /** Fills `windowed` from a channel's ring and returns its mean square. */
+  /** Fills `windowed` from a channel's ring and returns its mean square.
+   * Splitting the ring buffer traversal into two contiguous loops eliminates
+   * the modulo operation (% WINDOW) on every iteration (2048 ops per channel per hop). */
   private windowChannel(ring: Float64Array): number {
     let square = 0;
-    for (let i = 0; i < WINDOW; i++) {
-      const sample = ring[(this.ringWrite + i) % WINDOW];
+    let winIdx = 0;
+    const write = this.ringWrite;
+    const hann = this.hann;
+    const windowed = this.windowed;
+    for (let i = write; i < WINDOW; i++, winIdx++) {
+      const sample = ring[i];
       square += sample * sample;
-      this.windowed[i] = sample * this.hann[i];
+      windowed[winIdx] = sample * hann[winIdx];
+    }
+    for (let i = 0; i < write; i++, winIdx++) {
+      const sample = ring[i];
+      square += sample * sample;
+      windowed[winIdx] = sample * hann[winIdx];
     }
     return square / WINDOW;
   }

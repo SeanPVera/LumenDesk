@@ -9,6 +9,8 @@ import {
 } from "./types";
 
 const WINDOW = 2048;
+/** Mask for power-of-two ring buffer indexing (`idx & WINDOW_MASK` vs `idx % WINDOW`). */
+const WINDOW_MASK = WINDOW - 1;
 const HOP = 512;
 const LOG_COMPRESSION = 1000;
 const MIN_ONSET_SCALE = 0.01;
@@ -151,7 +153,7 @@ export class MusicFeatureAnalyzer {
       } else {
         this.rings[0][this.ringWrite] = samples[i] ?? 0;
       }
-      this.ringWrite = (this.ringWrite + 1) % WINDOW;
+      this.ringWrite = (this.ringWrite + 1) & WINDOW_MASK;
       this.processedSamples++;
       if (--this.samplesUntilHop <= 0) {
         this.samplesUntilHop = HOP;
@@ -166,10 +168,15 @@ export class MusicFeatureAnalyzer {
   /** Fills `windowed` from a channel's ring and returns its mean square. */
   private windowChannel(ring: Float64Array): number {
     let square = 0;
+    const ringWrite = this.ringWrite;
+    const hann = this.hann;
+    const windowed = this.windowed;
+    // Replacing % WINDOW modulo with bitwise AND mask (& 2047) avoids expensive
+    // integer division in the innermost loop over 2048 samples per channel per hop.
     for (let i = 0; i < WINDOW; i++) {
-      const sample = ring[(this.ringWrite + i) % WINDOW];
+      const sample = ring[(ringWrite + i) & WINDOW_MASK];
       square += sample * sample;
-      this.windowed[i] = sample * this.hann[i];
+      windowed[i] = sample * hann[i];
     }
     return square / WINDOW;
   }

@@ -144,21 +144,40 @@ export class MusicFeatureAnalyzer {
     }
     left = Math.sqrt(left / samples.length); right = Math.sqrt(right / samples.length);
     const image = left + right < 1e-8 ? .5 : right / (left + right);
-    for (let i = 0; i < samples.length; i++) {
-      if (stereo) {
-        this.rings[0][this.ringWrite] = stereo.left[i] ?? 0;
-        this.rings[1][this.ringWrite] = stereo.right[i] ?? 0;
-      } else {
-        this.rings[0][this.ringWrite] = samples[i] ?? 0;
+    const ring0 = this.rings[0];
+    const ring1 = this.rings[1];
+    let ringWrite = this.ringWrite;
+    if (stereo) {
+      const left = stereo.left;
+      const right = stereo.right;
+      for (let i = 0; i < samples.length; i++) {
+        ring0[ringWrite] = left[i] ?? 0;
+        ring1[ringWrite] = right[i] ?? 0;
+        if (++ringWrite === WINDOW) ringWrite = 0;
+        this.processedSamples++;
+        if (--this.samplesUntilHop <= 0) {
+          this.ringWrite = ringWrite;
+          this.samplesUntilHop = HOP;
+          latest = this.hop(image);
+          strongestBeat = Math.max(strongestBeat, latest.beat);
+          ringWrite = this.ringWrite;
+        }
       }
-      this.ringWrite = (this.ringWrite + 1) % WINDOW;
-      this.processedSamples++;
-      if (--this.samplesUntilHop <= 0) {
-        this.samplesUntilHop = HOP;
-        latest = this.hop(image);
-        strongestBeat = Math.max(strongestBeat, latest.beat);
+    } else {
+      for (let i = 0; i < samples.length; i++) {
+        ring0[ringWrite] = samples[i] ?? 0;
+        if (++ringWrite === WINDOW) ringWrite = 0;
+        this.processedSamples++;
+        if (--this.samplesUntilHop <= 0) {
+          this.ringWrite = ringWrite;
+          this.samplesUntilHop = HOP;
+          latest = this.hop(image);
+          strongestBeat = Math.max(strongestBeat, latest.beat);
+          ringWrite = this.ringWrite;
+        }
       }
     }
+    this.ringWrite = ringWrite;
     if (latest) { latest.beat = strongestBeat; this.lastSnapshot = latest; }
     return latest;
   }
@@ -166,10 +185,21 @@ export class MusicFeatureAnalyzer {
   /** Fills `windowed` from a channel's ring and returns its mean square. */
   private windowChannel(ring: Float64Array): number {
     let square = 0;
-    for (let i = 0; i < WINDOW; i++) {
-      const sample = ring[(this.ringWrite + i) % WINDOW];
+    const r = this.ringWrite;
+    const windowed = this.windowed;
+    const hann = this.hann;
+    const len1 = WINDOW - r;
+
+    // Un-modded contiguous slice iteration through ring buffer
+    for (let i = 0; i < len1; i++) {
+      const sample = ring[r + i];
       square += sample * sample;
-      this.windowed[i] = sample * this.hann[i];
+      windowed[i] = sample * hann[i];
+    }
+    for (let i = 0; i < r; i++) {
+      const sample = ring[i];
+      square += sample * sample;
+      windowed[len1 + i] = sample * hann[len1 + i];
     }
     return square / WINDOW;
   }

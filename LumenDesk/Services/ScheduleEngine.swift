@@ -99,34 +99,12 @@ final class ScheduleEngine {
                         scheduledAt: scheduledAt
                     )
 
-                    if let automationOverride = activeOverride(for: room.id, at: currentDate).value {
-                        let consumesOverride = automationOverride.skipNextSchedule
-                        if consumesOverride {
-                            state.automationOverrides.removeValue(forKey: room.id)
-                        }
-                        decisions.append(.skipped(occurrence, consumedSkipOverride: consumesOverride))
-                        continue
-                    }
-
-                    if shouldRecordMissed {
-                        let isDuplicate = state.missedAutomations.contains {
-                            $0.entry.id == entry.id && abs($0.scheduledAt.timeIntervalSince(scheduledAt)) < 1
-                        }
-                        if !isDuplicate {
-                            let missed = MissedAutomation(
-                                roomID: room.id,
-                                roomName: room.name,
-                                entry: entry,
-                                scheduledAt: scheduledAt
-                            )
-                            state.missedAutomations.append(missed)
-                            decisions.append(.missed(missed))
-                        }
-                        continue
-                    }
-
-                    if claim(entry.id, at: currentDate) {
-                        decisions.append(.run(occurrence))
+                    if let decision = decision(
+                        for: occurrence,
+                        at: currentDate,
+                        shouldRecordMissed: shouldRecordMissed
+                    ) {
+                        decisions.append(decision)
                     }
                 }
             }
@@ -189,8 +167,7 @@ final class ScheduleEngine {
         var matches: [Date] = []
 
         while day <= finalDay {
-            let weekday = calendar.component(.weekday, from: day)
-            if (entry.weekdays.isEmpty || entry.weekdays.contains(weekday)),
+            if matchesWeekday(for: entry, on: day),
                let occurrence = occurrence(for: entry, relativeTo: day, solarTimes: solarTimes),
                occurrence > previous,
                occurrence <= currentDate {
@@ -203,18 +180,9 @@ final class ScheduleEngine {
     }
 
     func occurrence(for entry: ScheduleEntry, relativeTo date: Date, solarTimes: SolarTimes) -> Date? {
-        let totalMinutes: Int
-        switch entry.action {
-        case .atSunrise:
-            totalMinutes = solarTimes.sunriseMinutes + entry.offsetMinutes
-        case .atSunset:
-            totalMinutes = solarTimes.sunsetMinutes + entry.offsetMinutes
-        default:
-            totalMinutes = max(0, min(1_439, entry.hour * 60 + entry.minute))
-        }
-        return calendar.date(
+        calendar.date(
             byAdding: .minute,
-            value: totalMinutes,
+            value: minuteOffset(for: entry, solarTimes: solarTimes),
             to: calendar.startOfDay(for: date)
         )
     }
@@ -223,8 +191,7 @@ final class ScheduleEngine {
         let currentDate = now()
         var day = calendar.startOfDay(for: currentDate)
         for _ in 0..<8 {
-            let weekday = calendar.component(.weekday, from: day)
-            if (entry.weekdays.isEmpty || entry.weekdays.contains(weekday)),
+            if matchesWeekday(for: entry, on: day),
                let occurrence = occurrence(for: entry, relativeTo: day, solarTimes: solarTimes),
                occurrence > currentDate {
                 return occurrence
@@ -240,33 +207,80 @@ final class ScheduleEngine {
     }
 
     func scheduledMinute(for entry: ScheduleEntry, solarTimes: SolarTimes) -> Int {
-        switch entry.action {
-        case .atSunrise:
-            return max(0, min(1_439, solarTimes.sunriseMinutes + entry.offsetMinutes))
-        case .atSunset:
-            return max(0, min(1_439, solarTimes.sunsetMinutes + entry.offsetMinutes))
-        default:
-            return max(0, min(1_439, entry.hour * 60 + entry.minute))
-        }
+        clampedMinute(minuteOffset(for: entry, solarTimes: solarTimes))
     }
 
     func conflicts(in entries: [ScheduleEntry], solarTimes: SolarTimes) -> [Conflict] {
         let enabledEntries = entries.filter(\.isEnabled)
         guard enabledEntries.count > 1 else { return [] }
+        let minutes = enabledEntries.map { scheduledMinute(for: $0, solarTimes: solarTimes) }
         var conflicts: [Conflict] = []
         for firstIndex in 0..<(enabledEntries.count - 1) {
             for secondIndex in (firstIndex + 1)..<enabledEntries.count {
                 let first = enabledEntries[firstIndex]
                 let second = enabledEntries[secondIndex]
-                if abs(
-                    scheduledMinute(for: first, solarTimes: solarTimes)
-                        - scheduledMinute(for: second, solarTimes: solarTimes)
-                ) <= 5 {
+                if abs(minutes[firstIndex] - minutes[secondIndex]) <= 5 {
                     conflicts.append(Conflict(first: first, second: second))
                 }
             }
         }
         return conflicts
+    }
+
+    // Keep policy precedence explicit: a manual override wins over missed
+    // automation tracking, which wins over the normal per-minute claim.
+    private func decision(
+        for occurrence: Occurrence,
+        at currentDate: Date,
+        shouldRecordMissed: Bool
+    ) -> Decision? {
+        if let automationOverride = activeOverride(for: occurrence.roomID, at: currentDate).value {
+            let consumesOverride = automationOverride.skipNextSchedule
+            if consumesOverride {
+                state.automationOverrides.removeValue(forKey: occurrence.roomID)
+            }
+            return .skipped(occurrence, consumedSkipOverride: consumesOverride)
+        }
+
+        if shouldRecordMissed {
+            let isDuplicate = state.missedAutomations.contains {
+                $0.entry.id == occurrence.entry.id
+                    && abs($0.scheduledAt.timeIntervalSince(occurrence.scheduledAt)) < 1
+            }
+            guard !isDuplicate else { return nil }
+            let missed = MissedAutomation(
+                roomID: occurrence.roomID,
+                roomName: occurrence.roomName,
+                entry: occurrence.entry,
+                scheduledAt: occurrence.scheduledAt
+            )
+            state.missedAutomations.append(missed)
+            return .missed(missed)
+        }
+
+        return claim(occurrence.entry.id, at: currentDate) ? .run(occurrence) : nil
+    }
+
+    private func matchesWeekday(for entry: ScheduleEntry, on day: Date) -> Bool {
+        let weekday = calendar.component(.weekday, from: day)
+        return entry.weekdays.isEmpty || entry.weekdays.contains(weekday)
+    }
+
+    /// Solar offsets may cross midnight when resolving a date. Conflict
+    /// comparisons still clamp them to the day, as they did before.
+    private func minuteOffset(for entry: ScheduleEntry, solarTimes: SolarTimes) -> Int {
+        switch entry.action {
+        case .atSunrise:
+            return solarTimes.sunriseMinutes + entry.offsetMinutes
+        case .atSunset:
+            return solarTimes.sunsetMinutes + entry.offsetMinutes
+        default:
+            return clampedMinute(entry.hour * 60 + entry.minute)
+        }
+    }
+
+    private func clampedMinute(_ minute: Int) -> Int {
+        max(0, min(1_439, minute))
     }
 
     private func activeOverride(for roomID: UUID, at date: Date) -> OverrideLookup {

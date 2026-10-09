@@ -8,79 +8,83 @@ export function applyCommand({ device, command, registry, lifx, govee, nanoleaf 
   const client = { lifx, govee, nanoleaf }[device.brand]
   if (!client) return false
 
-  if (command.kind === 'power') {
-    const on = Boolean(command.on)
-    if (!client.setPower(device, on)) return false
-    registry.patch(device.id, { power: on })
-    return true
-  }
-
-  if (command.kind === 'brightness') {
-    const value = clampPercent(command.value)
-    const ok =
-      device.brand === 'lifx'
+  switch (command.kind) {
+    case 'power':
+      return applyPower(device, Boolean(command.on), client, registry)
+    case 'brightness': {
+      const value = clampPercent(command.value)
+      const ok = device.brand === 'lifx'
         ? lifx.setColor(device, { brightnessPercent: value })
         : client.setBrightness(device, value)
-    if (!ok) return false
-    registry.patch(device.id, { brightness: value })
-    return true
-  }
-
-  // Restore an entire captured state at once. Necessary for LIFX, whose
-  // SetColor packet carries hue, saturation, brightness and kelvin together:
-  // sending colour then brightness rebuilds the second packet from the
-  // device's *previous* HSBK and undoes the colour.
-  if (command.kind === 'state') {
-    const { isOn, brightness, color, kelvin } = command
-    if (!client.setPower(device, isOn)) return false
-    registry.patch(device.id, { power: isOn })
-    if (!isOn) return true
-
-    if (device.brand === 'lifx') {
-      if (command.hsbk) {
-        // Captured state, replayed exactly, with the scene's brightness.
-        lifx.setColor(device, {
-          hsbk: { ...command.hsbk, brightness: percentToU16(brightness) },
-        })
-      } else {
-        // A scene saved before HSBK was captured: colour wins, because a
-        // stored kelvin does not imply the light was white.
-        lifx.setColor(device, {
-          rgb: color ?? undefined,
-          brightnessPercent: brightness,
-          kelvin: color ? 0 : kelvin || 0,
-        })
-      }
-    } else if (device.brand === 'nanoleaf') {
-      // A Shapes wall's captured design goes back panel by panel; its master
-      // brightness stays a separate channel, applied once.
-      if (command.design) nanoleaf.displayPanels(device, command.design)
-      else if (kelvin) nanoleaf.setColor(device, { kelvin })
-      else if (color) nanoleaf.setColor(device, { rgb: color })
-      nanoleaf.setBrightness(device, brightness)
-    } else {
-      // Govee needs separate messages; the client paces and coalesces them.
-      if (kelvin) govee.setColor(device, { kelvin })
-      else if (color) govee.setColor(device, { rgb: color })
-      govee.setBrightness(device, brightness)
+      if (!ok) return false
+      registry.patch(device.id, { brightness: value })
+      return true
     }
-    registry.patch(device.id, {
-      brightness: clampPercent(brightness),
-      color: color ?? device.color,
-      kelvin: kelvin || null,
+    case 'state':
+      return restoreState({ device, command, registry, client, lifx, govee, nanoleaf })
+    case 'color': {
+      const kelvin = Number(command.kelvin) || 0
+      if (!client.setColor(device, { rgb: command.rgb, kelvin })) return false
+      registry.patch(device.id, { color: command.rgb ?? device.color, kelvin: kelvin || null })
+      return true
+    }
+    default:
+      return false
+  }
+}
+
+function applyPower(device, on, client, registry) {
+  if (!client.setPower(device, on)) return false
+  registry.patch(device.id, { power: on })
+  return true
+}
+
+// State restoration deliberately keeps its existing acceptance semantics:
+// power failure returns false; subsequent channel writes are best-effort.
+function restoreState({ device, command, registry, client, lifx, govee, nanoleaf }) {
+  const { isOn, brightness, color, kelvin } = command
+  if (!applyPower(device, isOn, client, registry)) return false
+  if (!isOn) return true
+
+  if (device.brand === 'lifx') {
+    restoreLIFXColor(lifx, device, command.hsbk, brightness, color, kelvin)
+  } else if (device.brand === 'nanoleaf') {
+    restoreSeparateChannels(nanoleaf, device, brightness, color, kelvin, command.design)
+  } else {
+    restoreSeparateChannels(govee, device, brightness, color, kelvin)
+  }
+  registry.patch(device.id, {
+    brightness: clampPercent(brightness),
+    color: color ?? device.color,
+    kelvin: kelvin || null,
+  })
+  return true
+}
+
+function restoreLIFXColor(client, device, hsbk, brightness, color, kelvin) {
+  // One SetColor packet must carry every channel. Separate colour and
+  // brightness commands would rebuild HSBK from the previous device state.
+  if (hsbk) {
+    client.setColor(device, {
+      hsbk: { ...hsbk, brightness: percentToU16(brightness) },
     })
-    return true
+  } else {
+    // Legacy scenes lack HSBK; a stored kelvin does not imply white mode.
+    client.setColor(device, {
+      rgb: color ?? undefined,
+      brightnessPercent: brightness,
+      kelvin: color ? 0 : kelvin || 0,
+    })
   }
+}
 
-  if (command.kind === 'color') {
-    const kelvin = Number(command.kelvin) || 0
-    const ok = client.setColor(device, { rgb: command.rgb, kelvin })
-    if (!ok) return false
-    registry.patch(device.id, { color: command.rgb ?? device.color, kelvin: kelvin || null })
-    return true
-  }
-
-  return false
+function restoreSeparateChannels(client, device, brightness, color, kelvin, design = null) {
+  // Shapes restores its panel design before master brightness. Without a
+  // design, both Shapes and Govee use the same white/colour precedence.
+  if (design) client.displayPanels(device, design)
+  else if (kelvin) client.setColor(device, { kelvin })
+  else if (color) client.setColor(device, { rgb: color })
+  client.setBrightness(device, brightness)
 }
 
 /** Capture the current state of the given devices as a scene snapshot. */

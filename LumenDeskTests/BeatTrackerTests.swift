@@ -43,6 +43,126 @@ final class BeatTrackerTests: XCTestCase {
         XCTAssertTrue(tracker.grid.isLocked)
     }
 
+    func testFractionalTemposStayOnPulseAtNativeCaptureHopRates() {
+        for tempo in [90.0, 120.0, 137.0, 150.0, 180.0, 200.0] {
+            let period = 60 / tempo
+            for sampleRate in [44_100.0, 48_000.0] {
+                let hopInterval = 512 / sampleRate
+                let tracker = BeatTracker(frameInterval: hopInterval)
+                var settledBeats = 0
+                for frame in 0..<Int(14 / hopInterval) {
+                    let time = Double(frame) * hopInterval
+                    let kick = click(at: time, period: period)
+                    let hats = click(at: time, period: period / 4, width: 0.015) * 0.35
+                    if tracker.process(onset: max(kick, hats), lowFrequencyOnset: kick, at: time) > 0,
+                       time > 10, tracker.grid.isLocked {
+                        settledBeats += 1
+                        let phase = tracker.grid.lastBeatTime.truncatingRemainder(dividingBy: period)
+                        XCTAssertLessThan(min(phase, period - phase), 0.06,
+                                          "\(tempo) BPM at \(sampleRate) Hz drifted away from the pulse")
+                    }
+                }
+                XCTAssertTrue(tracker.grid.isLocked, "\(sampleRate) Hz pulse did not lock")
+                XCTAssertEqual(tracker.grid.tempo, tempo, accuracy: 4)
+                XCTAssertGreaterThan(settledBeats, 3)
+                if tempo == 200 {
+                    XCTAssertGreaterThan(tracker.grid.confidence, 0.5,
+                                         "The tempo prior must not weaken a coherent 200 BPM pulse")
+                }
+            }
+        }
+    }
+
+    func testAlternatingWeakBeatsPreserveTheHalfTimePulse() {
+        for sampleRate in [44_100.0, 48_000.0] {
+            let hopInterval = 512 / sampleRate
+            let tracker = BeatTracker(frameInterval: hopInterval)
+            let period = 60.0 / 150
+            for frame in 0..<Int(16 / hopInterval) {
+                let time = Double(frame) * hopInterval
+                let beat = Int((time / period).rounded())
+                let onset = click(at: time, period: period) * (beat.isMultiple(of: 2) ? 1 : 0.12)
+                tracker.process(onset: onset, lowFrequencyOnset: onset, at: time)
+            }
+            XCTAssertTrue(tracker.grid.isLocked)
+            XCTAssertEqual(tracker.grid.tempo, 75, accuracy: 3)
+        }
+    }
+
+    func testFractionalPeriodsKeepPhaseAlignedAfterTheHistoryWraps() {
+        for tempo in [90.0, 137.0, 150.0, 180.0, 200.0] {
+            for sampleRate in [44_100.0, 48_000.0] {
+                for hasKick in [false, true] {
+                    let hopInterval = 512 / sampleRate
+                    let period = 60 / tempo
+                    let offset = 0.093
+                    let tracker = BeatTracker(frameInterval: hopInterval)
+                    var totalError = 0.0
+                    var observed = 0
+                    for frame in 0..<Int(18 / hopInterval) {
+                        let time = Double(frame) * hopInterval
+                        let onset = click(at: time - offset + period, period: period, width: 0.025)
+                        tracker.process(onset: onset, lowFrequencyOnset: hasKick ? onset : 0, at: time)
+                        guard time > 12, tracker.grid.isLocked else { continue }
+                        let phase = (tracker.grid.lastBeatTime - offset).truncatingRemainder(dividingBy: period)
+                        totalError += min(phase, period - phase)
+                        observed += 1
+                    }
+                    XCTAssertGreaterThan(observed, 400)
+                    if observed > 0 {
+                        XCTAssertLessThan(totalError / Double(observed), 0.003,
+                                          "\(tempo) BPM at \(sampleRate) Hz, kick=\(hasKick)")
+                    }
+                }
+            }
+        }
+    }
+
+    func testBroadbandPulseStaysOnTimeAfterHistoryWrapAndCaptureReconfiguration() {
+        let tracker = BeatTracker()
+        for (sampleRate, tempo) in [(48_000.0, 137.0), (44_100.0, 103.0)] {
+            let hopInterval = 512 / sampleRate
+            tracker.configure(frameInterval: hopInterval)
+            tracker.reset()
+            let period = 60 / tempo
+            var settledBeats = 0
+            for frame in 0..<Int(14 / hopInterval) {
+                let time = Double(frame) * hopInterval
+                let onset = click(at: time, period: period)
+                if tracker.process(onset: onset, lowFrequencyOnset: 0, at: time) > 0,
+                   time > 10, tracker.grid.isLocked {
+                    settledBeats += 1
+                    let phase = tracker.grid.lastBeatTime.truncatingRemainder(dividingBy: period)
+                    XCTAssertLessThan(min(phase, period - phase), 0.06,
+                                      "\(sampleRate) Hz broadband pulse drifted after history wrapped")
+                }
+            }
+            XCTAssertTrue(tracker.grid.isLocked)
+            XCTAssertEqual(tracker.grid.tempo, tempo, accuracy: 4)
+            XCTAssertGreaterThan(settledBeats, 5)
+        }
+    }
+
+    func testSlowPulseKeepsItsTempoAndPhaseThroughTheLongestCombLag() {
+        for sampleRate in [44_100.0, 48_000.0] {
+            let hopInterval = 512 / sampleRate
+            let tracker = BeatTracker(frameInterval: hopInterval)
+            var settledBeats = 0
+            for frame in 0..<Int(18 / hopInterval) {
+                let time = Double(frame) * hopInterval
+                let onset = click(at: time, period: 1)
+                if tracker.process(onset: onset, lowFrequencyOnset: onset, at: time) > 0, time > 12 {
+                    settledBeats += 1
+                    let phase = tracker.grid.lastBeatTime.truncatingRemainder(dividingBy: 1)
+                    XCTAssertLessThan(min(phase, 1 - phase), 0.03)
+                }
+            }
+            XCTAssertTrue(tracker.grid.isLocked)
+            XCTAssertEqual(tracker.grid.tempo, 60, accuracy: 0.3)
+            XCTAssertGreaterThan(settledBeats, 3)
+        }
+    }
+
     func testDoesNotLockOntoUnstructuredInput() {
         let tracker = BeatTracker(frameInterval: frameInterval)
         var noise = DeterministicNoise(seed: 7)
@@ -125,6 +245,47 @@ final class BeatTrackerTests: XCTestCase {
             tracker.observe(beatCount: beat, kick: 0.9, tempo: 128, locked: beat >= 12)
         }
         XCTAssertEqual(tracker.current().metre, 4)
+    }
+
+    func testHalfTimeFeelFollowsAlternatingWeightAtEitherBeatOffset() {
+        for strongParity in 0...1 {
+            let tracker = MetreTracker()
+            for beat in 0..<64 {
+                let kick = beat % 2 == strongParity ? 1.0 : 0.1
+                tracker.observe(beatCount: beat, kick: kick, tempo: 150, locked: true)
+                if beat >= 24 {
+                    XCTAssertEqual(tracker.current().feel, .half,
+                                   "Strong parity \(strongParity), beat \(beat)")
+                }
+            }
+        }
+    }
+
+    func testSlowAlternatingWeightDoesNotInventDoubleTimeAtEitherBeatOffset() {
+        for strongParity in 0...1 {
+            let tracker = MetreTracker()
+            for beat in 0..<64 {
+                let kick = beat % 2 == strongParity ? 1.0 : 0.1
+                tracker.observe(beatCount: beat, kick: kick, tempo: 78, locked: true)
+                if beat >= 24 {
+                    XCTAssertEqual(tracker.current().feel, .straight,
+                                   "Strong parity \(strongParity), beat \(beat)")
+                }
+            }
+        }
+    }
+
+    func testBalancedSlowPulseUsesDoubleTimeAtEitherBeatOffset() {
+        for offset in 0...1 {
+            let tracker = MetreTracker()
+            for index in 0..<64 {
+                tracker.observe(beatCount: index + offset, kick: 0.8, tempo: 78, locked: true)
+                if index >= 24 {
+                    XCTAssertEqual(tracker.current().feel, .double,
+                                   "Offset \(offset), beat \(index)")
+                }
+            }
+        }
     }
 
     // MARK: - Helpers

@@ -12,7 +12,7 @@ struct FlashSafetyLimiter {
         requestedIntensity: Double,
         configuration: MusicModeConfiguration
     ) -> Double {
-        let config = configuration.normalized()
+        let config = configuration
         guard !config.photosensitivitySafeMode,
               config.allowsFlashes,
               config.flashIntensity > 0,
@@ -26,7 +26,7 @@ struct FlashSafetyLimiter {
             return 0
         }
         lastFlashTimestamp = timestamp
-        return min(1, requestedIntensity) * config.flashIntensity
+        return min(1, requestedIntensity) * config.flashIntensity.clamped01
     }
 
     mutating func reset() {
@@ -89,6 +89,20 @@ final class MusicChoreographyEngine {
     private var paletteFadeTo: Double = 0
     private var paletteFadeBar: Double = 0
 
+    // Topology expansion includes fixture sorting, role resolution, and one
+    // target allocation per segment. Palette conversion is also independent
+    // of the audio frame. Reuse both until their complete inputs change.
+    private var cachedTopology: FixtureTopology?
+    private var cachedFixtures: [MusicFixtureDescriptor] = []
+    private var cachedTargets: [MusicSpatialTarget] = []
+    private var cachedEnvelopeKeys: [String] = []
+    private var hasHitTargets = false
+    private var hasAccentTargets = false
+    private var hasMotionTargets = false
+    private var hasWashTargets = false
+    private var cachedPaletteColors: [MusicPaletteColor] = []
+    private var cachedPalette: [HSB] = []
+
     func reset() {
         lastBeatCount = 0
         paletteProgress = 0
@@ -105,6 +119,16 @@ final class MusicChoreographyEngine {
         accentEnvelope = 0
         lastPaletteHold = nil
         paletteFadeFrom = 0; paletteFadeTo = 0; paletteFadeBar = 0
+        cachedTopology = nil
+        cachedFixtures.removeAll(keepingCapacity: true)
+        cachedTargets.removeAll(keepingCapacity: true)
+        cachedEnvelopeKeys.removeAll(keepingCapacity: true)
+        hasHitTargets = false
+        hasAccentTargets = false
+        hasMotionTargets = false
+        hasWashTargets = false
+        cachedPaletteColors.removeAll(keepingCapacity: true)
+        cachedPalette.removeAll(keepingCapacity: true)
     }
 
     func makeFrame(
@@ -118,7 +142,7 @@ final class MusicChoreographyEngine {
     ) -> MusicLightingFrame {
         let snapshot = input.fresh(at: timestamp)
         let config = configuration.normalized(reducedMotion: reducedMotion)
-        let targets = topology.expandedTargets(for: fixtures)
+        let targets = expandedTargets(for: topology, fixtures: fixtures)
         guard !targets.isEmpty else {
             return MusicLightingFrame(
                 states: [], timestamp: timestamp, sequenceNumber: sequenceNumber,
@@ -195,7 +219,7 @@ final class MusicChoreographyEngine {
         // Master scales both bounds. Final output is clamped AFTER envelopes/flash.
         let lowerBrightness = config.minimumBrightness * config.masterBrightness
         let upperBrightness = config.maximumBrightness * config.masterBrightness
-        let palette = config.palette.map(Self.hsb)
+        let palette = convertedPalette(for: config.palette)
         let phraseLift = config.phraseAware ? min(0.18, energyRise * 0.9) : 0
 
         // A room of two or three bulbs cannot show travel, so a sweep there is
@@ -207,9 +231,36 @@ final class MusicChoreographyEngine {
         let spatialFidelity: Double = resolution >= 8 ? 1 : (resolution >= 4 ? 0.6 : 0.3)
         let motionDepth = config.movementAmount * spatialFidelity
 
+        // Frame- and role-wide terms are independent of segment placement.
+        // Compute powers and envelope coefficients once even for long strips.
+        let bassBed = snapshot.bass * config.bassSensitivity * 0.1
+        let sustainedLift = config.phraseAware && sustainedEnergyEvent ? 0.06 + fastEnergy * 0.08 : 0
+        let commonBed = 0.1 + pow(dynamics.clamped01, 0.7) * 0.4 + bassBed + phraseLift + sustainedLift
+        let effectScale = 0.6 + config.effectIntensity * 0.5
+        let hitDepth = hasHitTargets ? 1 - exp(-max(0, baseDepth * 1.7
+            + snapshot.kick * config.bassSensitivity * 0.1 * config.effectIntensity * config.beatSensitivity) * 1.6) : 0
+        let accentDepth = hasAccentTargets ? 1 - exp(-max(0, baseDepth * 0.6
+            + accentEnvelope * 0.18 * config.effectIntensity * config.beatSensitivity) * 1.6) : 0
+        let motionSwellDepth = hasMotionTargets ? 1 - exp(-max(0, baseDepth * 0.92) * 1.6) : 0
+        let washDepth = hasWashTargets ? 1 - exp(-max(0, baseDepth * 1.15) * 1.6) : 0
+        let p = pulseDrive.clamped01
+        // Broaden only the crest for hit fixtures, preserving half-time gaps.
+        let hitPulse = min(1, p + 2 * max(0, p - 0.35) * (1 - p))
+        let attack = 1 - exp(-dt / Self.attackTime)
+        // Release stays a fraction of the felt beat, relaxed in quiet passages.
+        let musicalRelease = min(0.45, max(0.13, feltInterval * 0.26))
+        let quietStretch = 1 + max(0, 0.6 - dynamics.clamped01) * 1.2
+        let releaseTime = silence ? 0.8 : musicalRelease * quietStretch
+        let release = 1 - exp(-dt / releaseTime)
+        let brightnessFloor = silence && config.silenceBehavior == .fadeOut ? 0 : lowerBrightness
+        let spread = config.colorChangeIntensity * (0.35 + spatialFidelity * 0.65)
+        let paletteSpan = Double(max(1, palette.count - 1))
+        let paletteCount = Double(max(1, palette.count))
+        let transitionDuration = silence ? 0.55 : (flashIntensity > 0 ? 0.04 : 0.09)
+
         var states: [MusicLightingState] = []
         states.reserveCapacity(targets.count)
-        for target in targets {
+        for (index, target) in targets.enumerated() {
             let isHit = target.role == .hit
             let isAccent = target.role == .accent
             let isMotion = target.role == .motion
@@ -225,31 +276,16 @@ final class MusicChoreographyEngine {
                 * max(0.6, min(1.4, stereoBias))
 
             // The bed: where this fixture rests between accents.
-            let bassBed = snapshot.bass * config.bassSensitivity * 0.1
-            let sustainedLift = config.phraseAware && sustainedEnergyEvent ? 0.06 + fastEnergy * 0.08 : 0
-            var bedLevel = 0.1 + pow(dynamics.clamped01, 0.7) * 0.4 + bassBed + phraseLift + sustainedLift
+            var bedLevel = commonBed
             // A hit fixture rests darker so it has headroom to punch; a wash
             // sits in the room and only lifts.
             if isHit { bedLevel *= 0.76 } else if isAccent { bedLevel *= 0.85 }
-            bedLevel = (bedLevel * (0.6 + config.effectIntensity * 0.5) * spatialWeight).clamped01
+            bedLevel = (bedLevel * effectScale * spatialWeight).clamped01
 
             // The swell: an accent inside the headroom above the bed.
-            var depth = baseDepth
-            if isHit { depth *= 1.7 }
-            else if isWash { depth *= 1.15 }
-            else if isMotion { depth *= 0.92 }
-            else if isAccent { depth *= 0.6 }
-            if isAccent { depth += accentEnvelope * 0.18 * config.effectIntensity * config.beatSensitivity }
-            if isHit { depth += snapshot.kick * config.bassSensitivity * 0.1 * config.effectIntensity * config.beatSensitivity }
-            // Soft-limit accent depth to leave headroom without flat-topping
-            // every strong beat. The lit bed remains independent.
-            depth = 1 - exp(-max(0, depth) * 1.6)
-
+            let depth = isHit ? hitDepth : (isWash ? washDepth : (isMotion ? motionSwellDepth : accentDepth))
             let bed = lowerBrightness + (upperBrightness - lowerBrightness) * bedLevel
-            // Broaden only the crest on Hit fixtures; lifting the whole contour
-            // would fill in the intervening beat in half-time material.
-            let p = pulseDrive.clamped01
-            let rolePulse = isHit ? min(1, p + 2 * max(0, p - 0.35) * (1 - p)) : p
+            let rolePulse = isHit ? hitPulse : p
             var rawBrightness = bed + (upperBrightness - bed) * depth * rolePulse
 
             if silence {
@@ -264,26 +300,16 @@ final class MusicChoreographyEngine {
                 }
             }
             rawBrightness = max(
-                silence && config.silenceBehavior == .fadeOut ? 0 : lowerBrightness,
+                brightnessFloor,
                 min(upperBrightness, rawBrightness)
             )
 
-            let envelopeKey = "\(target.fixtureID)#\(target.segmentID ?? -1)"
+            let envelopeKey = cachedEnvelopeKeys[index]
             let previous = brightnessEnvelopes[envelopeKey] ?? rawBrightness
-            let attack = 1 - exp(-dt / Self.attackTime)
-            // Release is a fraction of the felt beat with a floor, so one
-            // accent finishes before the next arrives at any tempo without ever
-            // becoming a snap. The previous constant clamped to 60 ms for
-            // anything at or above 120 BPM, which turned every beat into a
-            // full-depth sawtooth. Quiet passages relax further still.
-            let musicalRelease = min(0.45, max(0.13, feltInterval * 0.26))
-            let quietStretch = 1 + max(0, 0.6 - dynamics.clamped01) * 1.2
-            let releaseTime = silence ? 0.8 : musicalRelease * quietStretch
-            let release = 1 - exp(-dt / releaseTime)
             let coefficient = rawBrightness > previous ? attack : release
             var brightness = previous + (rawBrightness - previous) * coefficient
             brightness += flashIntensity * max(0, upperBrightness - brightness)
-            brightness = max(silence && config.silenceBehavior == .fadeOut ? 0 : lowerBrightness,
+            brightness = max(brightnessFloor,
                              min(upperBrightness, brightness))
             brightnessEnvelopes[envelopeKey] = brightness
 
@@ -292,10 +318,9 @@ final class MusicChoreographyEngine {
             // so the room reads as one gradient. `paletteColor` takes a 0…1
             // position across the whole palette, so entries are converted at
             // the last moment.
-            let spread = config.colorChangeIntensity * (0.35 + spatialFidelity * 0.65)
-            let paletteMotion = target.position * spread * Double(max(1, palette.count - 1))
+            let paletteMotion = target.position * spread * paletteSpan
                 + paletteProgress + (isAccent && palette.count > 1 ? 1 : 0)
-            var color = Self.paletteColor(palette, position: paletteMotion / Double(max(1, palette.count)))
+            var color = Self.paletteColor(palette, position: paletteMotion / paletteCount)
 
             if flashIntensity > 0 {
                 color.saturation *= 1 - flashIntensity * 0.8
@@ -309,7 +334,7 @@ final class MusicChoreographyEngine {
                 brightness: brightness.clamped01,
                 // The transition covers the gap to the next frame, so a fixture
                 // interpolates between commands instead of stepping.
-                transitionDuration: silence ? 0.55 : (flashIntensity > 0 ? 0.04 : 0.09),
+                transitionDuration: transitionDuration,
                 priority: flashIntensity > 0 ? 3 : (isHit ? 2 : 1)
             ))
         }
@@ -321,6 +346,31 @@ final class MusicChoreographyEngine {
             sustainedEnergyEvent: sustainedEnergyEvent,
             flashApplied: flashIntensity > 0
         )
+    }
+
+    private func expandedTargets(
+        for topology: FixtureTopology,
+        fixtures: [MusicFixtureDescriptor]
+    ) -> [MusicSpatialTarget] {
+        if cachedTopology != topology || cachedFixtures != fixtures {
+            cachedTopology = topology
+            cachedFixtures = fixtures
+            cachedTargets = topology.expandedTargets(for: fixtures)
+            cachedEnvelopeKeys = cachedTargets.map { "\($0.fixtureID)#\($0.segmentID ?? -1)" }
+            hasHitTargets = cachedTargets.contains { $0.role == .hit }
+            hasAccentTargets = cachedTargets.contains { $0.role == .accent }
+            hasMotionTargets = cachedTargets.contains { $0.role == .motion }
+            hasWashTargets = cachedTargets.contains { $0.role == .wash || $0.role == .auto }
+        }
+        return cachedTargets
+    }
+
+    private func convertedPalette(for colors: [MusicPaletteColor]) -> [HSB] {
+        if cachedPaletteColors != colors {
+            cachedPaletteColors = colors
+            cachedPalette = colors.map(Self.hsb)
+        }
+        return cachedPalette
     }
 
     /// One-pole follower toward `target` over `timeConstant` seconds.

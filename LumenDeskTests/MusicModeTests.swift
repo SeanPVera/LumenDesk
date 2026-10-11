@@ -5,7 +5,231 @@ import XCTest
 import AppKit
 @testable import LumenDesk
 
+final class MusicCaptureTransientTests: XCTestCase {
+    func testUnrenderedHitsCannotCrossAResetSampleClockOrDroppedCapture() {
+        let hit = AudioReactiveSnapshot(snare: 1, analysisTimestamp: 100,
+                                       analyzedSamples: 2048, droppedBuffers: 0)
+        for (samples, dropped) in [(Int64(1024), 0), (Int64(2048), 0), (Int64(3072), 1)] {
+            let restarted = AudioReactiveSnapshot(analysisTimestamp: 100.02,
+                                                  analyzedSamples: samples, droppedBuffers: dropped)
+            XCTAssertEqual(restarted.retainingUnrenderedTransients(from: hit), restarted)
+        }
+        let continuing = AudioReactiveSnapshot(analysisTimestamp: 100.02,
+                                               analyzedSamples: 3072, droppedBuffers: 0)
+        XCTAssertGreaterThan(continuing.retainingUnrenderedTransients(from: hit).snare, 0.7)
+        let noClockHit = AudioReactiveSnapshot(snare: 1, analysisTimestamp: 100)
+        let noClockNext = AudioReactiveSnapshot(analysisTimestamp: 100.02)
+        XCTAssertGreaterThan(noClockNext.retainingUnrenderedTransients(from: noClockHit).snare, 0.7,
+                             "Default zero metadata must not disable explicit or MIDI snapshots")
+    }
+
+    func testHitsSurviveCapturePublicationAndRenderingWithTheirOriginalDecay() {
+        let hit = AudioReactiveSnapshot(level: 0.8, beat: 1, snare: 0.95,
+                                       percussion: 0.8, analysisTimestamp: 100.01, onset: 0.9)
+        let intermediate = AudioReactiveSnapshot(analysisTimestamp: 100.025)
+            .retainingUnrenderedTransients(from: hit)
+        let latest = AudioReactiveSnapshot(level: 0.2, beatCount: 7, analysisTimestamp: 100.032)
+        let twice = latest.retainingUnrenderedTransients(from: intermediate)
+        let once = latest.retainingUnrenderedTransients(from: hit)
+        XCTAssertEqual(twice.beat, once.beat, accuracy: 0.000000001)
+        XCTAssertEqual(twice.snare, once.snare, accuracy: 0.000000001)
+        XCTAssertEqual(twice.percussion, once.percussion, accuracy: 0.000000001)
+        XCTAssertEqual(twice.onset, once.onset, accuracy: 0.000000001)
+        XCTAssertEqual(twice.level, latest.level)
+        XCTAssertEqual(twice.beatCount, latest.beatCount)
+        XCTAssertEqual(twice.analysisTimestamp, latest.analysisTimestamp)
+        XCTAssertEqual(twice.fresh(at: 100.04).snare, 0.95 * exp(-0.03 / 0.08), accuracy: 0.000000001)
+        XCTAssertEqual(twice.fresh(at: 100.21).snare, 0.95 * exp(-0.20 / 0.08), accuracy: 0.000000001)
+        XCTAssertEqual(latest.retainingUnrenderedTransients(from: nil), latest,
+                       "The first capture after rendering must not inherit a consumed hit")
+        XCTAssertEqual(hit.retainingUnrenderedTransients(from: latest), hit,
+                       "Future evidence cannot be folded into earlier music")
+    }
+
+    func testAnEarlySnareStillFlashesAfterAQuietCaptureBeforeTheRenderTick() {
+        var config = MusicModeConfiguration.configuration(for: .concert)
+        config.photosensitivitySafeMode = false
+        config.allowsFlashes = true
+        config.flashIntensity = 1
+        config.maximumFlashFrequency = 3
+        config.percussionSensitivity = 1
+        let hit = AudioReactiveSnapshot(level: 0.4, snare: 0.95, energy: 0.4,
+                                       confidence: 1, analysisTimestamp: 100.01)
+        let latest = AudioReactiveSnapshot(level: 0.4, energy: 0.4, confidence: 1,
+                                          analysisTimestamp: 100.032)
+            .retainingUnrenderedTransients(from: hit)
+        let frame = MusicChoreographyEngine().makeFrame(snapshot: latest, configuration: config,
+            topology: FixtureTopology(), fixtures: [MusicFixtureDescriptor(id: "f", label: "Fixture", transport: .lifxLAN)],
+            timestamp: 100.04, sequenceNumber: 1)
+        XCTAssertTrue(frame.flashApplied)
+    }
+}
+
 final class MusicModeTests: XCTestCase {
+    func testCapturedTransientsDecayBeforeLoudnessFreshnessExpires() {
+        let input = AudioReactiveSnapshot(
+            level: 0.7, beat: 1, kick: 1, snare: 1, percussion: 1,
+            energy: 0.7, confidence: 1, pulse: 1, drop: 1,
+            tempo: 120, beatInterval: 0.5, beatConfidence: 1,
+            beatReferenceTime: 100, isTempoLocked: true,
+            analysisTimestamp: 100, onset: 1
+        )
+        XCTAssertEqual(input.fresh(at: 100), input)
+        let aged = input.fresh(at: 100.08)
+        XCTAssertEqual(aged.level, input.level)
+        XCTAssertEqual(aged.energy, input.energy)
+        XCTAssertEqual(aged.beat, exp(-1), accuracy: 0.000001)
+        XCTAssertEqual(aged.snare, exp(-1), accuracy: 0.000001)
+        XCTAssertEqual(aged.onset, exp(-1), accuracy: 0.000001)
+        XCTAssertEqual(aged.pulse, exp(-0.08 / 0.21), accuracy: 0.000001)
+        XCTAssertEqual(aged.drop, exp(-0.08 / 0.3), accuracy: 0.000001)
+        XCTAssertEqual(aged.beatReferenceTime, input.beatReferenceTime)
+        XCTAssertTrue(aged.isTempoLocked, "Aging transients must preserve the predictive grid")
+    }
+
+    func testOneCapturedSnareCannotFlashAgainWhenCaptureStalls() {
+        let engine = MusicChoreographyEngine()
+        let fixture = MusicFixtureDescriptor(id: "f", label: "Fixture", transport: .lifxLAN)
+        var config = MusicModeConfiguration.configuration(for: .concert)
+        config.photosensitivitySafeMode = false
+        config.allowsFlashes = true
+        config.flashIntensity = 1
+        config.maximumFlashFrequency = 3
+        config.percussionSensitivity = 1
+        let captured = AudioReactiveSnapshot(
+            level: 0.7, beat: 1, snare: 1, percussion: 1,
+            energy: 0.7, confidence: 1, pulse: 1, analysisTimestamp: 100
+        )
+        var flashes = 0
+        for index in 0...20 {
+            let frame = engine.makeFrame(snapshot: captured, configuration: config,
+                topology: FixtureTopology(), fixtures: [fixture],
+                timestamp: 100 + Double(index) * 0.05, sequenceNumber: UInt64(index))
+            if frame.flashApplied { flashes += 1 }
+        }
+        XCTAssertEqual(flashes, 1, "A held snapshot is one musical event")
+    }
+
+    func testSilentWindowsAdvanceTimingAndStillHearTheNextImpulse() throws {
+        let analyzer = MusicFeatureAnalyzer(sourceDescription: "Silence then impulse")
+        var silent: AudioReactiveSnapshot?
+        for index in 0..<100 {
+            silent = analyzer.analyze(buffer(frames: 1024),
+                hostTime: 100 + Double((index + 1) * 1024) / 48_000)
+        }
+        let snapshot = try XCTUnwrap(silent)
+        XCTAssertEqual(snapshot.analyzedSamples, 102_400)
+        XCTAssertEqual(snapshot.energy, 0)
+        XCTAssertEqual(snapshot.beatCount, 0)
+        XCTAssertTrue(snapshot.spectrum.allSatisfy { $0 == 0 })
+        XCTAssertTrue(snapshot.chroma.allSatisfy { $0 == 0 })
+        let impulse = try XCTUnwrap(analyzer.analyze(buffer(impulse: true),
+            hostTime: 100 + Double(103_424) / 48_000))
+        XCTAssertGreaterThan(impulse.onset, 0.1)
+        XCTAssertGreaterThan(impulse.beatCount, 0)
+    }
+
+    func testSeparateChannelTonesRetainTheirPowerInTheCombinedSpectrum() throws {
+        let format = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 2)!
+        let pcm = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 4096)!
+        pcm.frameLength = 4096
+        var expectedPower = 0.0
+        for index in 0..<4096 {
+            let time = Double(index) / 48_000
+            let left = Float(0.7 * sin(2 * .pi * 94 * time))
+            let right = Float(0.4 * sin(2 * .pi * 8000 * time))
+            pcm.floatChannelData![0][index] = left
+            pcm.floatChannelData![1][index] = right
+            if index >= 2048 { expectedPower += (Double(left) * Double(left) + Double(right) * Double(right)) / 2 }
+        }
+        let analyzed = try XCTUnwrap(MusicFeatureAnalyzer(sourceDescription: "Stereo").analyze(pcm, hostTime: 100))
+        XCTAssertEqual(analyzed.rawRMS, sqrt(expectedPower / 2048), accuracy: 0.00001)
+        XCTAssertGreaterThan(analyzed.bass, 0.1)
+        XCTAssertGreaterThan(analyzed.highs, 0.001)
+        XCTAssertGreaterThan(analyzed.spectrum[10], 0.25, "The independent 8 kHz channel must remain visible")
+    }
+
+    func testEarlyBufferTransientsKeepTheirOriginalAgeWhenTheLastHopIsQuiet() throws {
+        for sampleRate in [44_100.0, 48_000.0] {
+            let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1)!
+            func pcm(frames: Int, impulse: Bool = false) -> AVAudioPCMBuffer {
+                let result = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frames))!
+                result.frameLength = AVAudioFrameCount(frames)
+                let samples = result.floatChannelData![0]
+                for index in 0..<frames {
+                    samples[index] = impulse && index < 12 ? (index.isMultiple(of: 2) ? 1 : -1) : 0
+                }
+                return result
+            }
+            let batched = MusicFeatureAnalyzer(sourceDescription: "Batched")
+            let hopped = MusicFeatureAnalyzer(sourceDescription: "Hopped")
+            // Finish FFT warmup before placing a short hit in the first hop.
+            _ = batched.analyze(pcm(frames: 4096), hostTime: 100 + 4096 / sampleRate)
+            _ = hopped.analyze(pcm(frames: 4096), hostTime: 100 + 4096 / sampleRate)
+            let actual = try XCTUnwrap(batched.analyze(pcm(frames: 4096, impulse: true),
+                hostTime: 100 + 8192 / sampleRate))
+            var hops: [AudioReactiveSnapshot] = []
+            for offset in stride(from: 0, to: 4096, by: 512) {
+                hops.append(try XCTUnwrap(hopped.analyze(pcm(frames: 512, impulse: offset == 0),
+                    hostTime: 100 + Double(4096 + offset + 512) / sampleRate)))
+            }
+            let last = try XCTUnwrap(hops.last)
+            let lastTime = try XCTUnwrap(last.analysisTimestamp)
+            let fields: [KeyPath<AudioReactiveSnapshot, Double>] = [\.beat, \.kick, \.snare, \.percussion, \.onset]
+            for field in fields {
+                let expected = hops.map { $0.fresh(at: lastTime)[keyPath: field] }.max()!
+                XCTAssertGreaterThan(expected, 0, "The early hit must be measurable at \(sampleRate) Hz")
+                XCTAssertEqual(last[keyPath: field], 0, "The final silent hop should contain no new hit")
+                XCTAssertEqual(actual[keyPath: field], expected, accuracy: 0.000000001,
+                               "Buffering must preserve the hit's capture age")
+            }
+            XCTAssertEqual(try XCTUnwrap(actual.analysisTimestamp), lastTime, accuracy: 0.000000001)
+            XCTAssertEqual(actual.pulse, last.pulse, accuracy: 0.000000001)
+            XCTAssertEqual(actual.drop, last.drop, accuracy: 0.000000001)
+            XCTAssertEqual(actual.beatCount, last.beatCount)
+            XCTAssertEqual(actual.spectrum, last.spectrum)
+            XCTAssertEqual(actual.chroma, last.chroma)
+        }
+    }
+
+    func testPresentationVectorsAreIndependentOfBufferSize() throws {
+        let batched = MusicFeatureAnalyzer(sourceDescription: "Batched")
+        let hopped = MusicFeatureAnalyzer(sourceDescription: "Hopped")
+        for sample in stride(from: 0, to: 24_576, by: 4096) {
+            let combined = rhythmBuffer(startSample: sample, frames: 4096,
+                                        sampleRate: 48_000, beatPeriod: 0.5, includeHiHats: true)
+            let large = try XCTUnwrap(batched.analyze(combined, hostTime: 100 + Double(sample + 4096) / 48_000))
+            var small: AudioReactiveSnapshot?
+            for offset in stride(from: sample, to: sample + 4096, by: 512) {
+                let pcm = rhythmBuffer(startSample: offset, frames: 512,
+                                       sampleRate: 48_000, beatPeriod: 0.5, includeHiHats: true)
+                small = hopped.analyze(pcm, hostTime: 100 + Double(offset + 512) / 48_000)
+            }
+            let reference = try XCTUnwrap(small)
+            XCTAssertEqual(large.chroma, reference.chroma)
+            XCTAssertEqual(large.spectrum, reference.spectrum)
+            XCTAssertEqual(large.energy, reference.energy, accuracy: 0.000001)
+            XCTAssertEqual(large.beatCount, reference.beatCount)
+        }
+    }
+
+    func testChromaMappingRebuildsWhenSampleRateChanges() throws {
+        let reused = MusicFeatureAnalyzer(sourceDescription: "Reused")
+        _ = reused.analyze(buffer(frequency: 440, amplitude: 0.5, frames: 4096), hostTime: 100)
+        let fresh = MusicFeatureAnalyzer(sourceDescription: "Fresh")
+        let format = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1)!
+        let pcm = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 4096)!
+        pcm.frameLength = 4096
+        for index in 0..<4096 {
+            pcm.floatChannelData![0][index] = Float(0.5 * sin(2 * .pi * 440 * Double(index) / 44_100))
+        }
+        let actual = try XCTUnwrap(reused.analyze(pcm, hostTime: 101))
+        let expected = try XCTUnwrap(fresh.analyze(pcm, hostTime: 101))
+        XCTAssertEqual(actual.chroma, expected.chroma)
+        XCTAssertEqual(actual.spectrum, expected.spectrum)
+        XCTAssertEqual(actual.chroma.firstIndex(of: actual.chroma.max()!), 9, "440 Hz should remain A")
+    }
+
     func testStereoPhaseCannotCancelAudibleMusicOrItsPulse() throws {
         let reference = MusicFeatureAnalyzer(sourceDescription: "Mono")
         let stereo = MusicFeatureAnalyzer(sourceDescription: "Stereo")
@@ -1228,6 +1452,47 @@ final class MusicModeTests: XCTestCase {
         XCTAssertEqual(MusicModePreset.allCases.count, 9)
     }
 
+    func testMetreOverridesKeepTheLockedDownbeatAfterFallbackOnsets() {
+        for (preset, gridPosition, metre) in [(MusicModePreset.club, 8, 4), (.waltz, 6, 3)] {
+            var input = AudioReactiveSnapshot()
+            input.beatCount = 19 // Includes onsets heard before the grid locked.
+            input.gridBeatPosition = gridPosition
+            input.beatInBar = 2
+            input.metre = 7
+            input.tempo = 120
+            input.beatInterval = 0.5
+            input.beatReferenceTime = 100
+            input.isTempoLocked = true
+            let output = AudioReactiveSessionController.applyMusicalPolicy(
+                input, configuration: .configuration(for: preset))
+            XCTAssertEqual(output.metre, metre)
+            XCTAssertEqual(output.beatInBar, 0, "The preset's accent must stay on the locked downbeat")
+            XCTAssertEqual(output.beatCount, input.beatCount)
+            XCTAssertEqual(output.gridBeatPosition, input.gridBeatPosition)
+            XCTAssertEqual(output.beatReferenceTime, input.beatReferenceTime)
+
+            input.gridBeatPosition = nil
+            let synthetic = AudioReactiveSessionController.applyMusicalPolicy(
+                input, configuration: .configuration(for: preset))
+            XCTAssertEqual(synthetic.beatInBar, input.beatCount % metre)
+        }
+    }
+
+    func testMatchingMetreOverridePreservesTheLearnedBarOffset() {
+        for (preset, metre) in [(MusicModePreset.club, 4), (.waltz, 3)] {
+            var input = AudioReactiveSnapshot()
+            input.metre = metre
+            input.beatInBar = 0
+            input.gridBeatPosition = metre * 2 + 1
+            input.beatCount = 19
+            let output = AudioReactiveSessionController.applyMusicalPolicy(
+                input, configuration: .configuration(for: preset))
+            XCTAssertEqual(output.beatInBar, 0, "An already detected downbeat must keep its accent")
+            XCTAssertEqual(output.gridBeatPosition, input.gridBeatPosition)
+            XCTAssertEqual(output.beatCount, input.beatCount)
+        }
+    }
+
     func testLegacyMusicModeConfigurationDecodesWithoutNewKeys() throws {
         let legacyJSON = Data("""
         {"preset":"cinematic","masterBrightness":0.78,"effectIntensity":0.7,"beatSensitivity":0.48,"bassSensitivity":0.68,"percussionSensitivity":0.38,"colorChangeIntensity":0.54,"movementAmount":0.74,"movementDirection":"forward","movementSpeed":0.28,"minimumBrightness":0.08,"maximumBrightness":0.9,"allowsFlashes":true,"flashIntensity":0.34,"maximumFlashFrequency":0.75,"palette":[{"hex":16763914},{"hex":16743628},{"hex":14896243},{"hex":7682959}],"silenceBehavior":"holdPalette","photosensitivitySafeMode":true,"restorePreviousState":true}
@@ -1708,10 +1973,55 @@ final class MusicModeTests: XCTestCase {
         let first = tracker.receive(0xF8, at: 100)
         XCTAssertEqual(first?.beatInBar, 0)
         XCTAssertEqual(first?.beatReferenceTime, 100)
+        XCTAssertEqual(first?.isTempoLocked, false, "One tick cannot establish a tempo")
+        XCTAssertEqual(first?.tempo, 0)
         for tick in 1..<24 {
             XCTAssertNil(tracker.receive(0xF8, at: 100 + Double(tick) / 48))
         }
         XCTAssertEqual(tracker.receive(0xF8, at: 100.5)?.beatInBar, 1)
+    }
+
+    func testMIDIBatchedTicksAndAlternatingJitterPreserveTempo() throws {
+        for bpm in [60.0, 90, 120, 180] {
+            for batchSize in [1, 4, 12, 24] {
+                var tracker = MIDIBeatClockTracker()
+                var latest: AudioReactiveSnapshot?
+                for tick in 0...240 {
+                    let batch = tick / batchSize
+                    let timestamp = 100 + Double(batch * batchSize) * 60 / (bpm * 24)
+                    if let snapshot = tracker.receive(0xF8, at: timestamp) { latest = snapshot }
+                }
+                XCTAssertEqual(try XCTUnwrap(latest).tempo, bpm, accuracy: 0.000001)
+                XCTAssertEqual(latest?.beatCount, 10)
+            }
+            var tracker = MIDIBeatClockTracker()
+            var latest: AudioReactiveSnapshot?
+            for tick in 0...240 {
+                let jitter = tick.isMultiple(of: 2) ? 0.002 : -0.002
+                if let snapshot = tracker.receive(0xF8, at: 100 + Double(tick) * 60 / (bpm * 24) + jitter) {
+                    latest = snapshot
+                }
+            }
+            XCTAssertEqual(try XCTUnwrap(latest).tempo, bpm, accuracy: 0.000001)
+        }
+    }
+
+    func testMIDIReacquiresAfterDropoutAndRejectsOldTimestamps() throws {
+        var tracker = MIDIBeatClockTracker()
+        var latest: AudioReactiveSnapshot?
+        for tick in 0...48 {
+            if let snapshot = tracker.receive(0xF8, at: 100 + Double(tick) / 48) { latest = snapshot }
+        }
+        XCTAssertEqual(latest?.tempo ?? 0, 120, accuracy: 0.000001)
+        XCTAssertNil(tracker.receive(0xF8, at: 100), "Old packets must not advance the tick position")
+        for tick in 1...24 {
+            if let snapshot = tracker.receive(0xF8, at: 103 + Double(tick) / 48) { latest = snapshot }
+        }
+        XCTAssertFalse(try XCTUnwrap(latest).isTempoLocked)
+        for tick in 25...48 {
+            if let snapshot = tracker.receive(0xF8, at: 103 + Double(tick) / 48) { latest = snapshot }
+        }
+        XCTAssertEqual(latest?.tempo ?? 0, 120, accuracy: 0.000001)
     }
 
     func testMIDIReadsEveryPacketAndPreservesTimestamps() throws {

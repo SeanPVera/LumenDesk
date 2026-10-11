@@ -6,7 +6,7 @@ export class FlashSafetyLimiter {
   private lastFlashTimestamp: number | null = null;
 
   admit(timestamp: number, requestedIntensity: number, configuration: MusicModeConfiguration): number {
-    const config = normalizeConfiguration(configuration);
+    const config = configuration;
     if (
       config.photosensitivitySafeMode ||
       !config.allowsFlashes ||
@@ -22,7 +22,7 @@ export class FlashSafetyLimiter {
       return 0;
     }
     this.lastFlashTimestamp = timestamp;
-    return Math.min(1, requestedIntensity) * config.flashIntensity;
+    return Math.min(1, requestedIntensity) * clamp01(config.flashIntensity);
   }
 
   reset(): void {
@@ -79,6 +79,15 @@ export class MusicChoreographyEngine {
   private paletteFadeFrom = 0;
   private paletteFadeTo = 0;
   private paletteFadeBar = 0;
+  // Copy cache inputs: live controls may edit their arrays and descriptors in
+  // place, so reference identity alone cannot safely invalidate the show.
+  private cachedTopology: FixtureTopology | null = null;
+  private cachedFixtures: MusicFixtureDescriptor[] = [];
+  private cachedTargets: MusicSpatialTarget[] = [];
+  private cachedEnvelopeKeys: string[] = [];
+  private cachedRoles = new Set<FixtureRole>();
+  private cachedPaletteHex: number[] = [];
+  private cachedPalette: HSB[] = [];
 
   reset(): void {
     this.lastBeatCount = 0;
@@ -97,6 +106,13 @@ export class MusicChoreographyEngine {
     this.accentEnvelope = 0;
     this.lastPaletteHold = null;
     this.paletteFadeFrom = this.paletteFadeTo = this.paletteFadeBar = 0;
+    this.cachedTopology = null;
+    this.cachedFixtures = [];
+    this.cachedTargets = [];
+    this.cachedEnvelopeKeys = [];
+    this.cachedRoles.clear();
+    this.cachedPaletteHex = [];
+    this.cachedPalette = [];
   }
 
   makeFrame(
@@ -110,7 +126,7 @@ export class MusicChoreographyEngine {
   ): MusicLightingFrame {
     const snapshot = freshSnapshot(input, timestamp);
     const config = normalizeConfiguration(configuration, reducedMotion);
-    const targets = expandedTargets(topology, fixtures);
+    const targets = this.expandedTargets(topology, fixtures);
     if (targets.length === 0) {
       return { states: [], timestamp, sequenceNumber, sustainedEnergyEvent: false, flashApplied: false };
     }
@@ -172,7 +188,7 @@ export class MusicChoreographyEngine {
 
     const lowerBrightness = config.minimumBrightness * config.masterBrightness;
     const upperBrightness = config.maximumBrightness * config.masterBrightness;
-    const palette = config.palette.map(toHsb);
+    const palette = this.convertedPalette(config.palette);
     const phraseLift = config.phraseAware ? Math.min(0.18, energyRise * 0.9) : 0;
 
     // A room of two or three bulbs cannot show travel, so a sweep there is one
@@ -182,8 +198,33 @@ export class MusicChoreographyEngine {
     const spatialFidelity = resolution >= 8 ? 1 : resolution >= 4 ? 0.6 : 0.3;
     const motionDepth = config.movementAmount * spatialFidelity;
 
+    // These values depend on the frame or role, never on the segment. In a
+    // long strip this replaces hundreds of repeated exponentials and powers.
+    const bassBed = snapshot.bass * config.bassSensitivity * 0.1;
+    const sustainedLift = config.phraseAware && this.sustainedEnergyEvent ? 0.06 + this.fastEnergy * 0.08 : 0;
+    const commonBed = 0.1 + Math.pow(clamp01(this.dynamics), 0.7) * 0.4 + bassBed + phraseLift + sustainedLift;
+    const effectScale = 0.6 + config.effectIntensity * 0.5;
+    const hitDepth = this.cachedRoles.has("hit") ? 1 - Math.exp(-Math.max(0, baseDepth * 1.7 + snapshot.kick * config.bassSensitivity * 0.1 * config.effectIntensity * config.beatSensitivity) * 1.6) : 0;
+    const accentDepth = this.cachedRoles.has("accent") ? 1 - Math.exp(-Math.max(0, baseDepth * 0.6 + this.accentEnvelope * 0.18 * config.effectIntensity * config.beatSensitivity) * 1.6) : 0;
+    const motionSwellDepth = this.cachedRoles.has("motion") ? 1 - Math.exp(-Math.max(0, baseDepth * 0.92) * 1.6) : 0;
+    const washDepth = this.cachedRoles.has("wash") || this.cachedRoles.has("auto") ? 1 - Math.exp(-Math.max(0, baseDepth * 1.15) * 1.6) : 0;
+    const p = clamp01(pulseDrive);
+    const hitPulse = Math.min(1, p + 2 * Math.max(0, p - 0.35) * (1 - p));
+    const attack = 1 - Math.exp(-dt / MusicChoreographyEngine.attackTime);
+    // Release stays a fraction of the felt beat, relaxed in quiet passages.
+    const musicalRelease = Math.min(0.45, Math.max(0.13, feltInterval * 0.26));
+    const quietStretch = 1 + Math.max(0, 0.6 - clamp01(this.dynamics)) * 1.2;
+    const releaseTime = silence ? 0.8 : musicalRelease * quietStretch;
+    const release = 1 - Math.exp(-dt / releaseTime);
+    const brightnessFloor = silence && config.silenceBehavior === "fadeOut" ? 0 : lowerBrightness;
+    const spread = config.colorChangeIntensity * (0.35 + spatialFidelity * 0.65);
+    const paletteSpan = Math.max(1, palette.length - 1);
+    const paletteCount = Math.max(1, palette.length);
+    const transitionDuration = silence ? 0.55 : flashIntensity > 0 ? 0.04 : 0.09;
+
     const states: MusicLightingState[] = [];
-    for (const target of targets) {
+    for (let index = 0; index < targets.length; index += 1) {
+      const target = targets[index];
       const phase = spatialPhase(topology.layout === "circular" ? target.position : target.position * 0.75, config.movementDirection, this.movementPhase);
       const wave = 0.5 + 0.5 * Math.sin(phase * 2 * Math.PI);
       const stereoBias = 1 + (snapshot.stereo - 0.5) * 2 * config.stereoImage * (target.position - 0.5) * 2;
@@ -196,28 +237,16 @@ export class MusicChoreographyEngine {
       const isWash = target.role === "wash" || target.role === "auto";
 
       // The bed: where this fixture rests between accents.
-      const bassBed = snapshot.bass * config.bassSensitivity * 0.1;
-      const sustainedLift = config.phraseAware && this.sustainedEnergyEvent ? 0.06 + this.fastEnergy * 0.08 : 0;
-      let bedLevel = 0.1 + Math.pow(clamp01(this.dynamics), 0.7) * 0.4 + bassBed + phraseLift + sustainedLift;
+      let bedLevel = commonBed;
       // A hit fixture rests darker so it has headroom to punch.
       if (isHit) bedLevel *= 0.76;
       else if (isAccent) bedLevel *= 0.85;
-      bedLevel = clamp01(bedLevel * (0.6 + config.effectIntensity * 0.5) * spatialWeight);
+      bedLevel = clamp01(bedLevel * effectScale * spatialWeight);
 
       // The swell: an accent inside the headroom above the bed.
-      let depth = baseDepth;
-      if (isHit) depth *= 1.7;
-      else if (isWash) depth *= 1.15;
-      else if (isMotion) depth *= 0.92;
-      else if (isAccent) depth *= 0.6;
-      if (isAccent) depth += this.accentEnvelope * 0.18 * config.effectIntensity * config.beatSensitivity;
-      if (isHit) depth += snapshot.kick * config.bassSensitivity * 0.1 * config.effectIntensity * config.beatSensitivity;
-      // Same soft headroom curve as the native engine.
-      depth = 1 - Math.exp(-Math.max(0, depth) * 1.6);
-
+      const depth = isHit ? hitDepth : isWash ? washDepth : isMotion ? motionSwellDepth : accentDepth;
       const bed = lowerBrightness + (upperBrightness - lowerBrightness) * bedLevel;
-      const p = clamp01(pulseDrive);
-      const rolePulse = isHit ? Math.min(1, p + 2 * Math.max(0, p - 0.35) * (1 - p)) : p;
+      const rolePulse = isHit ? hitPulse : p;
       let rawBrightness = bed + (upperBrightness - bed) * depth * rolePulse;
 
       if (silence) {
@@ -229,33 +258,24 @@ export class MusicChoreographyEngine {
         } else rawBrightness = 0;
       }
       rawBrightness = Math.max(
-        silence && config.silenceBehavior === "fadeOut" ? 0 : lowerBrightness,
+        brightnessFloor,
         Math.min(upperBrightness, rawBrightness),
       );
 
-      const envelopeKey = `${target.fixtureID}#${target.segmentID ?? -1}`;
+      const envelopeKey = this.cachedEnvelopeKeys[index];
       const previous = this.brightnessEnvelopes.get(envelopeKey) ?? rawBrightness;
-      const attack = 1 - Math.exp(-dt / MusicChoreographyEngine.attackTime);
-      // Release is a fraction of the felt beat with a floor. The constant this
-      // replaces clamped to 60 ms for anything at or above 120 BPM, turning
-      // every beat into a full-depth sawtooth.
-      const musicalRelease = Math.min(0.45, Math.max(0.13, feltInterval * 0.26));
-      const quietStretch = 1 + Math.max(0, 0.6 - clamp01(this.dynamics)) * 1.2;
-      const releaseTime = silence ? 0.8 : musicalRelease * quietStretch;
-      const release = 1 - Math.exp(-dt / releaseTime);
       const coefficient = rawBrightness > previous ? attack : release;
       let brightness = previous + (rawBrightness - previous) * coefficient;
       brightness += flashIntensity * Math.max(0, upperBrightness - brightness);
-      brightness = Math.max(silence && config.silenceBehavior === "fadeOut" ? 0 : lowerBrightness, Math.min(upperBrightness, brightness));
+      brightness = Math.max(brightnessFloor, Math.min(upperBrightness, brightness));
       this.brightnessEnvelopes.set(envelopeKey, brightness);
 
       // A palette entry held for a whole number of bars and cross-faded over
       // one beat at the bar line, plus a spatial offset so the room reads as
       // one gradient.
-      const spread = config.colorChangeIntensity * (0.35 + spatialFidelity * 0.65);
       const paletteMotion =
-        target.position * spread * Math.max(1, palette.length - 1) + this.paletteProgress + (isAccent && palette.length > 1 ? 1 : 0);
-      const color = paletteColor(palette, paletteMotion / Math.max(1, palette.length));
+        target.position * spread * paletteSpan + this.paletteProgress + (isAccent && palette.length > 1 ? 1 : 0);
+      const color = paletteColor(palette, paletteMotion / paletteCount);
       if (flashIntensity > 0) color.saturation *= 1 - flashIntensity * 0.8;
 
       states.push({
@@ -266,7 +286,7 @@ export class MusicChoreographyEngine {
         brightness: clamp01(brightness),
         // The transition covers the gap to the next frame, so a fixture
         // interpolates between commands instead of stepping.
-        transitionDuration: silence ? 0.55 : flashIntensity > 0 ? 0.04 : 0.09,
+        transitionDuration,
         priority: flashIntensity > 0 ? 3 : isHit ? 2 : 1,
       });
     }
@@ -278,6 +298,34 @@ export class MusicChoreographyEngine {
       sustainedEnergyEvent: this.sustainedEnergyEvent,
       flashApplied: flashIntensity > 0,
     };
+  }
+
+  private expandedTargets(topology: FixtureTopology, fixtures: MusicFixtureDescriptor[]): MusicSpatialTarget[] {
+    const previous = this.cachedTopology;
+    if (!previous || previous.layout !== topology.layout ||
+        !sameStrings(previous.fixtureOrder, topology.fixtureOrder) ||
+        !sameStrings(previous.excludedFixtureIDs, topology.excludedFixtureIDs) ||
+        !sameFixtures(this.cachedFixtures, fixtures)) {
+      this.cachedTopology = {
+        layout: topology.layout,
+        fixtureOrder: [...topology.fixtureOrder],
+        excludedFixtureIDs: [...topology.excludedFixtureIDs],
+      };
+      this.cachedFixtures = fixtures.map(fixture => ({ ...fixture }));
+      this.cachedTargets = expandedTargets(topology, fixtures);
+      this.cachedEnvelopeKeys = this.cachedTargets.map(target => `${target.fixtureID}#${target.segmentID ?? -1}`);
+      this.cachedRoles = new Set(this.cachedTargets.map(target => target.role));
+    }
+    return this.cachedTargets;
+  }
+
+  private convertedPalette(colors: MusicPaletteColor[]): HSB[] {
+    if (colors.length !== this.cachedPaletteHex.length ||
+        colors.some((color, index) => color.hex !== this.cachedPaletteHex[index])) {
+      this.cachedPaletteHex = colors.map(color => color.hex);
+      this.cachedPalette = colors.map(toHsb);
+    }
+    return this.cachedPalette;
   }
 
   private musicalClock(snapshot: AudioReactiveSnapshot, timestamp: number): MusicalClock {
@@ -386,6 +434,23 @@ export class MusicChoreographyEngine {
     }
     this.movementPhase += rate * dt;
   }
+}
+
+function sameStrings(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let index = 0; index < a.length; index += 1) if (a[index] !== b[index]) return false;
+  return true;
+}
+
+function sameFixtures(a: MusicFixtureDescriptor[], b: MusicFixtureDescriptor[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let index = 0; index < a.length; index += 1) {
+    const previous = a[index], fixture = b[index];
+    if (previous.id !== fixture.id || previous.label !== fixture.label ||
+        previous.transport !== fixture.transport || previous.segmentCount !== fixture.segmentCount ||
+        previous.role !== fixture.role) return false;
+  }
+  return true;
 }
 
 export function expandedTargets(

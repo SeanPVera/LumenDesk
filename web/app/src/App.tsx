@@ -84,6 +84,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null)
   const [connectionError, setConnectionError] = useState<string | null>(null)
   const [hasConnected, setHasConnected] = useState(false)
+  const [supportsRooms, setSupportsRooms] = useState(true)
   const [toast, setToast] = useState<string | null>(null)
   const [scanning, setScanning] = useState(false)
   const [attempts, setAttempts] = useState(0)
@@ -121,6 +122,7 @@ export default function App() {
       setRooms(next.rooms)
       setRoomID(current => current === 'all' || next.rooms.some(r => r.id === current) ? current : 'all')
       setScenes(next.scenes)
+      setSupportsRooms(next.supportsRooms !== false)
       setState('connected')
       setHasConnected(true)
       setConnectionError(null)
@@ -160,8 +162,14 @@ export default function App() {
   }, [state, poll, hasConnected])
 
   useEffect(() => {
-    if (state === 'connected' && !rooms.length && !setupDismissed) setSetupOpen(true)
-  }, [state, rooms.length, setupDismissed])
+    if (state === 'connected' && supportsRooms && !rooms.length && !setupDismissed) setSetupOpen(true)
+  }, [state, supportsRooms, rooms.length, setupDismissed])
+
+  useEffect(() => {
+    if (supportsRooms) return
+    setSetupOpen(false)
+    if (destination !== 'home' && destination !== 'settings') setDestination('home')
+  }, [supportsRooms, destination])
 
   const connect = useCallback(async () => {
     setState('checking')
@@ -289,6 +297,7 @@ export default function App() {
   const scopeName = room?.name ?? 'All lights'
   const scopedDevices = room ? devices.filter(d => room.lightIDs.includes(d.id)) : devices
   const inWorkspace = ['home', 'library', 'music'].includes(destination)
+  const setupVisible = setupOpen && supportsRooms
 
   return (
     <div className="shell app">
@@ -298,7 +307,8 @@ export default function App() {
           <h1>LumenDesk</h1>
         </div>
         <ul>
-          {NAV.filter(item => !['library', 'music'].includes(item.id)).map(item => (
+          {NAV.filter(item => !['library', 'music'].includes(item.id) &&
+            (supportsRooms || item.id === 'home' || item.id === 'settings')).map(item => (
             <li key={item.id}>
               <button
                 className={(destination === item.id || (item.id === 'home' && inWorkspace)) ? 'nav active' : 'nav'}
@@ -336,12 +346,12 @@ export default function App() {
               {musicRunning && <p className="note">Stop Music Mode before changing rooms.</p>}
             </div>
             <div className="toolbar">
-              <button onClick={() => setSetupOpen(true)} disabled={musicRunning || state !== 'connected'}>Set up room</button>
+              {supportsRooms && <button onClick={() => setSetupOpen(true)} disabled={musicRunning || state !== 'connected'}>Set up room</button>}
               <button onClick={scan} disabled={scanning || state !== 'connected'}>{scanning ? 'Searching…' : 'Find lights'}</button>
             </div>
           </> : <h1>{NAV.find(n => n.id === destination)?.label}</h1>}
         </header>
-        {inWorkspace && <nav className="workspace-sections" aria-label="Room controls">
+        {inWorkspace && supportsRooms && <nav className="workspace-sections" aria-label="Room controls">
           {(['home', 'library', 'music'] as const).map(id => <button key={id}
             aria-current={destination === id ? 'page' : undefined}
             onClick={() => { setSetupOpen(false); setDestination(id) }}>{id === 'home' ? 'Light' : id === 'library' ? 'Scenes' : 'Music'}</button>)}
@@ -354,9 +364,11 @@ export default function App() {
         )}
 
         <fieldset className="workspace-controls" disabled={state !== 'connected'} aria-label="Lighting workspace">
-        {!setupOpen && <DiscoveryStatus scanning={scanning} result={discovery} answeredCount={scanAnswered}
-          problem={discoveryError} onPair={() => setSetupOpen(true)} onRetry={scan} />}
-        <RoomSetup open={setupOpen} devices={devices} rooms={rooms} scanning={scanning}
+        {!supportsRooms && <p className="note" role="status">This older bridge supports basic lighting controls.
+          Update it to use rooms, scenes, favorites, schedules and Music. <a href="https://github.com/SeanPVera/LumenDesk/releases">Get the current bridge</a>.</p>}
+        {!setupVisible && <DiscoveryStatus scanning={scanning} result={discovery} answeredCount={scanAnswered}
+          problem={discoveryError} onPair={supportsRooms ? () => setSetupOpen(true) : undefined} onRetry={scan} />}
+        <RoomSetup open={setupVisible} devices={devices} rooms={rooms} scanning={scanning}
           discovery={discovery} answeredCount={scanAnswered} discoveryError={discoveryError}
           onScan={scan}
           onCreateRoom={async name => {
@@ -388,7 +400,7 @@ export default function App() {
             setSetupDismissed(true)
             window.localStorage.setItem(SETUP_KEY, 'true')
           }} />
-        <div hidden={setupOpen}>
+        <div hidden={setupVisible}>
         {destination === 'home' && (
           <HomeView
             key={roomID}
@@ -399,7 +411,8 @@ export default function App() {
             onScan={scan}
             scanning={scanning}
             scopeName={scopeName}
-            onSetupRoom={() => setSetupOpen(true)}
+            onSetupRoom={supportsRooms ? () => setSetupOpen(true) : undefined}
+            supportsSavedLighting={supportsRooms}
             onSaveScene={name => mutate(() => saveScene(port, name, scopedDevices.map(d => d.id)), `Saved “${name}”`)}
           />
         )}

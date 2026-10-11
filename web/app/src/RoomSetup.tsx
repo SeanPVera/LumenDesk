@@ -40,11 +40,15 @@ export function RoomSetup({ open, devices, rooms, scanning, discovery, answeredC
   const [host, setHost] = useState('')
   const [port, setPort] = useState('16021')
   const pending = useRef(false)
+  const confirmedRoom = useRef<Room | null>(null)
   const heading = useRef<HTMLHeadingElement>(null)
   const titleID = useId()
   const nameID = useId()
   const levelID = useId()
-  const room = savedRoom ? rooms.find(candidate => candidate.id === savedRoom.id) ?? savedRoom : null
+  const canonicalRoom = savedRoom ? rooms.find(candidate => candidate.id === savedRoom.id) : undefined
+  // The create response may arrive before the next room collection. Once a
+  // room has appeared in that collection, only its current record is valid.
+  const room = canonicalRoom ?? (savedRoom && confirmedRoom.current?.id !== savedRoom.id ? savedRoom : null)
   const duplicate = rooms.find(candidate => candidate.name.trim().toLocaleLowerCase() === name.trim().toLocaleLowerCase())
   const roomDevices = room ? devices.filter(device => device.roomID === room.id || assignedIDs.includes(device.id) || room.lightIDs.includes(device.id)) : []
   const target = roomDevices.find(device => device.id === targetID) ?? roomDevices.find(device => device.reachable && !device.needsPairing) ?? roomDevices[0]
@@ -56,6 +60,28 @@ export function RoomSetup({ open, devices, rooms, scanning, discovery, answeredC
   useEffect(() => {
     if (target) setLevel(target.brightness)
   }, [target?.id])
+
+  useEffect(() => {
+    if (!savedRoom) return
+    if (canonicalRoom) {
+      confirmedRoom.current = canonicalRoom
+      return
+    }
+    const deleted = confirmedRoom.current
+    if (deleted?.id !== savedRoom.id || busy) return
+    // Let an in-flight assignment or command settle before recovering. Its
+    // completion must not advance the wizard after this reset.
+    confirmedRoom.current = null
+    setName(deleted.name)
+    setSavedRoom(null)
+    setExistingID('')
+    setSelectedIDs(previous => [...new Set([...previous, ...assignedIDs, ...deleted.lightIDs])])
+    setAssignedIDs([])
+    setTargetID('')
+    setMessage(null)
+    setProblem('This room was deleted. Create a new room or choose an existing room to continue. Your light choices are kept.')
+    setStage(1)
+  }, [savedRoom, canonicalRoom, busy, assignedIDs])
 
   const changeStage = (next: number) => {
     setProblem(null)
@@ -124,6 +150,7 @@ export function RoomSetup({ open, devices, rooms, scanning, discovery, answeredC
     setStage(0)
     setName('')
     setSavedRoom(null)
+    confirmedRoom.current = null
     setExistingID('')
     setSelectedIDs([])
     setAssignedIDs([])

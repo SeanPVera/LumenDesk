@@ -91,6 +91,8 @@ export interface BridgeState {
   rooms: Room[]
   scenes: Scene[]
   favorites: string[]
+  /** False only for the compatibility response from a pre-/state bridge. */
+  supportsRooms?: boolean
 }
 
 export interface DiscoveryProbeReport {
@@ -264,7 +266,7 @@ export async function fetchState(port: number): Promise<BridgeState> {
   } catch (err) {
     if (!(err instanceof BridgeError) || err.status !== 404) throw err
     const devices = await fetchDevices(port)
-    return { devices, rooms: [], scenes: [], favorites: [] }
+    return { devices, rooms: [], scenes: [], favorites: [], supportsRooms: false }
   }
 }
 

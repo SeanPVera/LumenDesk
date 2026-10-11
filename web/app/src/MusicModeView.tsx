@@ -159,13 +159,13 @@ export function MusicModeView({
       if(epoch!==transitionEpoch.current) return
       if (!connectedRef.current || !await flushPendingMusicCleanup(portRef.current, postRef.current)) return
       if(epoch!==transitionEpoch.current || !connectedRef.current) return
-      // Keep the original snapshot through Restart and failed capture attempts;
-      // only Stop ends this ownership lifecycle.
-      if (!baseline.current) {
-        baseline.current = reachable
-          .filter((d): d is Device & { color: RGB } => Boolean(d.color) && session.state.fixtures.find(f=>f.id===d.id)?.role !== 'off')
-          .map(d => ({ fixtureID: d.id, rgb: d.color, brightness:d.brightness/100,restoring:true,owner:owner.current,controlRevision:d.controlRevision ?? 0 }))
-      }
+      // Retain a previous show's starting output after a failed Restart. Idle
+      // setup can change rooms; capture newly included lights only on Start.
+      const capturedIDs = new Set(baseline.current?.map(command => command.fixtureID))
+      const includedIDs = new Set(session.state.fixtures.filter(fixture => fixture.role !== 'off').map(fixture => fixture.id))
+      baseline.current = [...(baseline.current ?? []), ...reachable
+        .filter((d): d is Device & { color: RGB } => Boolean(d.color) && includedIDs.has(d.id) && !capturedIDs.has(d.id))
+        .map(d => ({ fixtureID: d.id, rgb: d.color, brightness:d.brightness/100,restoring:true,owner:owner.current,controlRevision:d.controlRevision ?? 0 }))]
       session.patch({ grooveId: selectedGroove })
       await session.start(source, audio)
       if (session.state.running && epoch===transitionEpoch.current) {
@@ -216,9 +216,9 @@ export function MusicModeView({
   useEffect(() => {
     const memberIDs = new Set(session.state.fixtures.map(fixture => fixture.id))
     session.setDevices(reachable
-      .filter(device => !baseline.current || memberIDs.has(device.id))
+      .filter(device => (!starting && !state.running) || memberIDs.has(device.id))
       .map(d => ({ id: d.id, name: d.name, brand: d.brand, reachable: d.reachable })))
-  }, [session, state.running, reachable.map(d => d.id).join('|')])
+  }, [session, starting, state.running, reachable.map(d => d.id).join('|')])
 
   useEffect(() => {
     session.setOnFrame(frame => sender.enqueue(frame))

@@ -62,9 +62,11 @@ await page.route('**/*', async route => {
     const assignment = path.match(/^\/devices\/([^/]+)\/room$/)
     if (assignment) {
       const device = devices.find(candidate => candidate.id === decodeURIComponent(assignment[1]))
+      const assignedRoom = state.rooms.find(room => room.id === data.roomID)
+      if (!assignedRoom) return route.fulfill({ status: 404, json: { error: 'Room not found.' } })
       state.rooms.forEach(room => { room.lightIDs = room.lightIDs.filter(id => id !== device.id) })
       device.roomID = data.roomID
-      state.rooms.find(room => room.id === data.roomID)?.lightIDs.push(device.id)
+      assignedRoom.lightIDs.push(device.id)
       response = { devices, rooms: state.rooms }
     }
     const control = path.match(/^\/devices\/([^/]+)\/(power|brightness)$/)
@@ -82,6 +84,10 @@ await page.route('**/*', async route => {
 const count = path => commands.filter(command => command.path === path).length
 const controls = () => commands.filter(command => /\/(power|brightness|color)$/.test(command.path))
 const duplicateSubmit = form => form.evaluate(element => element.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
+const deleteRoomElsewhere = roomID => {
+  state.rooms = state.rooms.filter(room => room.id !== roomID)
+  devices.forEach(device => { if (device.roomID === roomID) device.roomID = null })
+}
 async function audit(name) {
   await page.setViewportSize({ width: 390, height: 844 })
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false, `${name} must fit a phone viewport`)
@@ -187,6 +193,63 @@ try {
   await expect(page.getByLabel('Control room', { exact: true })).toHaveValue(createdID)
   await expect(page.getByRole('heading', { name: 'Fixtures', exact: true })).toBeVisible()
   await audit('completed-room')
+
+  // A room deleted by another client must release the saved wizard target.
+  // Recover from Assign, keeping its name and previous fixture choices.
+  await page.getByRole('button', { name: 'Set up room', exact: true }).click()
+  await wizard.getByRole('button', { name: 'Continue to room', exact: true }).click()
+  await wizard.getByLabel(/^Or use an existing room/).selectOption(createdID)
+  await wizard.getByRole('button', { name: 'Use room', exact: true }).click()
+  await expect(wizard.getByRole('heading', { name: 'Assign lights', exact: true })).toBeVisible()
+  const assignmentsBeforeDeletion = commands.filter(command => command.path.endsWith('/room')).length
+  deleteRoomElsewhere(createdID)
+  await expect(wizard.getByRole('heading', { name: 'Create room', exact: true })).toBeVisible()
+  await expect(wizard.getByRole('alert')).toContainText('This room was deleted')
+  await expect(wizard.getByLabel('Room name', { exact: true })).toHaveValue('Living room')
+  await expect(wizard.getByRole('button', { name: 'Create room', exact: true })).toBeEnabled()
+  assert.equal(commands.filter(command => command.path.endsWith('/room')).length, assignmentsBeforeDeletion, 'deletion recovery must not assign lights to the stale room')
+  await wizard.getByRole('button', { name: 'Pause setup', exact: true }).click()
+  await page.getByRole('button', { name: 'Set up room', exact: true }).click()
+  await expect(wizard.getByRole('heading', { name: 'Create room', exact: true })).toBeVisible()
+  await expect(wizard.getByLabel('Room name', { exact: true })).toHaveValue('Living room')
+  await wizard.getByRole('button', { name: 'Create room', exact: true }).click()
+  await expect(wizard.getByRole('heading', { name: 'Assign lights', exact: true })).toBeVisible()
+  for (const name of ['Reading lamp', 'Bookshelf strip']) {
+    await expect(wizard.getByRole('checkbox', { name, exact: true })).toBeChecked()
+    await expect(wizard.getByRole('checkbox', { name, exact: true })).toBeEnabled()
+  }
+  await wizard.getByRole('button', { name: 'Save lights and continue', exact: true }).click()
+  await expect(wizard.getByRole('heading', { name: 'Try controls', exact: true })).toBeVisible()
+  const recreatedID = state.rooms[0].id
+  assert.notEqual(recreatedID, createdID, 'the same room name must resolve to a new saved ID')
+  assert.deepEqual(state.rooms[0].lightIDs.sort(), ['govee:two', 'lifx:one'])
+
+  // The same recovery also works from Try and while the wizard is paused.
+  const controlsBeforeDeletion = controls().length
+  deleteRoomElsewhere(recreatedID)
+  await expect(wizard.getByRole('heading', { name: 'Create room', exact: true })).toBeVisible()
+  await expect(wizard.getByRole('alert')).toContainText('This room was deleted')
+  await expect(wizard.getByLabel('Room name', { exact: true })).toHaveValue('Living room')
+  await audit('deleted-room-recovery')
+  await wizard.getByRole('button', { name: 'Create room', exact: true }).click()
+  await expect(wizard.getByRole('heading', { name: 'Assign lights', exact: true })).toBeVisible()
+  await wizard.getByRole('button', { name: 'Save lights and continue', exact: true }).click()
+  await expect(wizard.getByRole('heading', { name: 'Try controls', exact: true })).toBeVisible()
+  const pausedID = state.rooms[0].id
+  await wizard.getByRole('button', { name: 'Pause setup', exact: true }).click()
+  deleteRoomElsewhere(pausedID)
+  await expect(page.getByLabel('Control room', { exact: true }).locator('option', { hasText: 'Living room' })).toHaveCount(0)
+  await page.getByRole('button', { name: 'Set up room', exact: true }).click()
+  await expect(wizard.getByRole('heading', { name: 'Create room', exact: true })).toBeVisible()
+  await expect(wizard.getByLabel('Room name', { exact: true })).toHaveValue('Living room')
+  await wizard.getByRole('button', { name: 'Create room', exact: true }).click()
+  await expect(wizard.getByRole('heading', { name: 'Assign lights', exact: true })).toBeVisible()
+  await wizard.getByRole('button', { name: 'Save lights and continue', exact: true }).click()
+  await expect(wizard.getByRole('heading', { name: 'Try controls', exact: true })).toBeVisible()
+  assert.equal(controls().length, controlsBeforeDeletion, 'deleted-room recovery and recreation must not change lighting')
+  const recoveredID = state.rooms[0].id
+  await wizard.getByRole('button', { name: 'Done, open room', exact: true }).click()
+  await expect(page.getByLabel('Control room', { exact: true })).toHaveValue(recoveredID)
   assert.deepEqual(errors, [])
 
   // Editing a bridge port must leave the current connection alone until Connect.
@@ -217,7 +280,7 @@ try {
   assert.equal(connectedPort, true)
   assert.ok(healthRequests.includes('http://127.0.0.1:9387/health'))
   await portContext.close()
-  console.log('ROOM_SETUP_ASSERTIONS_PASS: fresh discovery diagnostics, vendor and network preparation, pairing draft retention, room failure and duplicate guards, pause/reopen, partial assignment retry, explicit control commands, completed room scope, Connect-only bridge port changes, 390px overflow and accessibility')
+  console.log('ROOM_SETUP_ASSERTIONS_PASS: fresh discovery diagnostics, vendor and network preparation, pairing draft retention, room failure and duplicate guards, pause/reopen, partial assignment retry, explicit control commands, completed room scope, deleted-room recovery from Assign, Try and Pause, same-name recreation and retained fixture choices, Connect-only bridge port changes, 390px overflow and accessibility')
 } finally {
   await browser.close()
   server.kill()

@@ -96,6 +96,8 @@ jobs:
           node scripts/schedule-name-review.mjs
           node scripts/scene-favorites-review.mjs
           node scripts/room-setup-review.mjs
+          node scripts/legacy-bridge-review.mjs
+          node scripts/music-setup-review.mjs
 
       - name: Upload web visual review
         if: always()

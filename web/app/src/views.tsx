@@ -50,6 +50,7 @@ export function LightCard({
   selected,
   onSelect,
   compact,
+  showFavorite = true,
 }: {
   device: Device
   controls: Controls
@@ -57,6 +58,7 @@ export function LightCard({
   selected?: boolean
   onSelect?: (id: string) => void
   compact?: boolean
+  showFavorite?: boolean
 }) {
   const disabled = !device.reachable || Boolean(device.needsPairing)
   const hex = rgbToHex(device.color ?? { r: 255, g: 255, b: 255 })
@@ -83,7 +85,7 @@ export function LightCard({
           </div>
         </div>
         <div className="card-actions">
-          <button
+          {showFavorite && <button
             className={`star${device.favorite ? ' active' : ''}`}
             onClick={() => controls.favorite(device)}
             aria-pressed={Boolean(device.favorite)}
@@ -91,7 +93,7 @@ export function LightCard({
             title={device.favorite ? 'Remove from favorites' : 'Add to favorites'}
           >
             {device.favorite ? '★' : '☆'}
-          </button>
+          </button>}
           <button
             className={`toggle${device.power ? ' active' : ''}`}
             onClick={() => controls.power(device, !device.power)}
@@ -162,22 +164,24 @@ export function LightCard({
 
 // MARK: Home
 
-export function HomeView({ devices, controls, onBulk, onScan, scanning, scopeName, onSaveScene, onSetupRoom }: {
+export function HomeView({ devices, controls, onBulk, onScan, scanning, scopeName, onSaveScene, onSetupRoom, supportsSavedLighting = true }: {
   devices: Device[]; rooms: Room[]; controls: Controls
   onBulk: (ids: string[], action: 'on' | 'off') => void
   onScan: () => void; scanning: boolean
   scopeName: string
   onSaveScene: (name: string) => Promise<boolean>
   onSetupRoom?: () => void
+  supportsSavedLighting?: boolean
 }) {
   const [selected, setSelected] = useState<string[]>([])
   const [query, setQuery] = useState('')
   const [favoritesOnly, setFavoritesOnly] = useState(false)
-  const visible = devices.filter(d => (!favoritesOnly || d.favorite) && d.name.toLowerCase().includes(query.trim().toLowerCase()))
+  const showingFavorites = supportsSavedLighting && favoritesOnly
+  const visible = devices.filter(d => (!showingFavorites || d.favorite) && d.name.toLowerCase().includes(query.trim().toLowerCase()))
   const inScopeSelection = selected.filter(id => devices.some(d => d.id === id))
   const active = inScopeSelection.filter(id => visible.some(d => d.id === id))
   const hiddenSelectionCount = inScopeSelection.length - active.length
-  const filtered = favoritesOnly || Boolean(query.trim())
+  const filtered = showingFavorites || Boolean(query.trim())
   const targets = (inScopeSelection.length ? visible.filter(d => active.includes(d.id)) : visible).filter(d => d.reachable && !d.needsPairing)
   const level = targets.length ? Math.round(targets.reduce((sum, d) => sum + d.brightness, 0) / targets.length) : 0
   const toggle = (id: string) => setSelected(ids => ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id])
@@ -185,12 +189,12 @@ export function HomeView({ devices, controls, onBulk, onScan, scanning, scopeNam
   const mixed = new Set(targets.map(d => rgbToHex(d.color ?? {r: 255, g: 255, b: 255}))).size > 1
   return <section className="room-workspace" aria-label="Room lighting">
     {!devices.length ? <EmptyLights scanning={scanning} onScan={onScan} onSetupRoom={onSetupRoom} /> : <>
-      <div className="filters" role="group" aria-label="Fixture filters">
+      {supportsSavedLighting && <div className="filters" role="group" aria-label="Fixture filters">
         <button className={`chip${favoritesOnly ? '' : ' active'}`} aria-pressed={!favoritesOnly}
           onClick={() => setFavoritesOnly(false)}>All fixtures ({devices.length})</button>
         <button className={`chip${favoritesOnly ? ' active' : ''}`} aria-pressed={favoritesOnly}
           onClick={() => setFavoritesOnly(true)}>★ Favorites ({devices.filter(d => d.favorite).length})</button>
-      </div>
+      </div>}
       <div className="light-field" aria-label="Fixtures in this room">
         <p className="field-caption">Fixture order · select to control{visible.length > 12 && ' · scroll for more fixtures'}</p>
         <div className="emitters">
@@ -218,12 +222,12 @@ export function HomeView({ devices, controls, onBulk, onScan, scanning, scopeNam
               <span><strong>{d.name}</strong><small>{d.brand.toUpperCase()} · {outputKind(d)}</small></span>
             </label>
             <span>{!d.reachable ? 'Offline' : d.power ? `${d.brightness}%` : 'Off'}</span>
-            <button className={`star${d.favorite ? ' active' : ''}`} onClick={() => controls.favorite(d)}
+            {supportsSavedLighting && <button className={`star${d.favorite ? ' active' : ''}`} onClick={() => controls.favorite(d)}
               aria-pressed={Boolean(d.favorite)}
               aria-label={`${d.favorite ? 'Remove' : 'Add'} ${d.name} ${d.favorite ? 'from' : 'to'} favorites`}
-              title={d.favorite ? 'Remove from favorites' : 'Add to favorites'}>{d.favorite ? '★' : '☆'}</button>
+              title={d.favorite ? 'Remove from favorites' : 'Add to favorites'}>{d.favorite ? '★' : '☆'}</button>}
           </li>)}</ul>
-          {!visible.length && <p>{favoritesOnly && !devices.some(d => d.favorite)
+          {!visible.length && <p>{showingFavorites && !devices.some(d => d.favorite)
             ? 'No favorites in this room yet. Choose All fixtures, then use a star beside a fixture.'
             : 'No fixtures match your filters.'}</p>}
         </div>
@@ -251,11 +255,11 @@ export function HomeView({ devices, controls, onBulk, onScan, scanning, scopeNam
           <p className="note">Color and white replace the current whole-fixture output, a Nanoleaf design or scene included. Hardware limits still apply.</p>
           {active.length !== 1 && targets.some(isShapesWall) && <p className="note">Select one Nanoleaf wall on its own to paint its panels.</p>}
           {active.length === 1 && <details><summary>Fixture details</summary>
-            <ul className="inspector-list"><LightCard device={devices.find(d => d.id === active[0])!} controls={controls} compact /></ul>
+            <ul className="inspector-list"><LightCard device={devices.find(d => d.id === active[0])!} controls={controls} compact showFavorite={supportsSavedLighting} /></ul>
           </details>}
-          <details className="scene-capture"><summary>Save current lighting</summary>
+          {supportsSavedLighting && <details className="scene-capture"><summary>Save current lighting</summary>
             <SceneCapture devices={devices} scopeName={scopeName} onSave={onSaveScene} showHeading={false} />
-          </details>
+          </details>}
         </section>
       </div>
       {active.length === 1 && (() => {

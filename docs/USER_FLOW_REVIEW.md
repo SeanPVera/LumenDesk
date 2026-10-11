@@ -30,7 +30,10 @@ device behavior or native UI behavior.
 | A saved scene contains an off light | Its preview shows the saved off state. |
 | A Nanoleaf controller scene is captured | Recalling the scene restores the controller scene by name. |
 | Music cannot restore lights on Stop | Cleanup keeps its original ownership information, retries across section navigation, and finishes before another show starts. New manual edits retain priority. |
+| Music capture is denied or a file cannot open | Setup remains editable, including room changes. A later Start captures newly included lights while preserving any previous show's original restoration snapshot. |
 | A room is deleted | Confirmation explains light reassignment and schedule deletion. |
+| Another client deletes the room being set up | Setup returns to Create or choose room and retains its name and light choices, including after Pause and reopen. |
+| An older bridge lacks rooms and saved lighting | Basic light controls stay available; unsupported setup and saved-lighting actions are hidden, with a link to update the bridge. |
 | A schedule is submitted repeatedly | Pending creation blocks duplicates. Native schedule creation also explains the 12-rule limit and retains rejected drafts. |
 | The bridge resumes after sleep | Missed schedules run in time order using each rule's latest occurrence. |
 | A native fixed-time schedule crosses daylight saving | Its local clock time stays correct; missing times move forward and repeated times run once. |
@@ -54,7 +57,7 @@ device behavior or native UI behavior.
 The production browser build, all 53 component tests and all 154 bridge tests pass locally. The theme catalog audit and whitespace checks also pass; CI repeats these checks. The main Chromium walkthrough covers
 27 rendered states, including phone widths, reduced motion, failures and recovery.
 Focused production-app regressions cover guided setup/discovery, scenes/favorites,
-schedule editing and explicit names. Each script checks browser errors, narrow
+schedule editing, explicit names, legacy bridges and Music capture recovery. Each script checks browser errors, narrow
 screen overflow and axe accessibility. Music checks verify source selection sends
 no frames and requests capture access only on Start.
 
@@ -64,11 +67,14 @@ The scripts are:
 - [`room-setup-review.mjs`](../web/app/scripts/room-setup-review.mjs)
 - [`scene-favorites-review.mjs`](../web/app/scripts/scene-favorites-review.mjs)
 - [`schedule-name-review.mjs`](../web/app/scripts/schedule-name-review.mjs)
+- [`legacy-bridge-review.mjs`](../web/app/scripts/legacy-bridge-review.mjs)
+- [`music-setup-review.mjs`](../web/app/scripts/music-setup-review.mjs)
 
 Screenshots and audit reports are written to `/tmp/LumenDesk-Web-QA` by default.
 Eleven native regressions cover scene retry, rehearsal cleanup, schedule capacity,
 daylight saving, saved scene scope and favorites ordering. They supplement the
 existing macOS test suite and iOS build; this Linux workspace cannot run Xcode.
+Pull-request CI has passed all 395 native tests, macOS analysis and the iOS build.
 The bridge packaging matrix builds and smoke-tests both Mac architectures,
 Windows x64 and Linux x64. Packages are preview artifacts until a release is
 published; Mac previews are ad-hoc signed and Windows previews are unsigned.

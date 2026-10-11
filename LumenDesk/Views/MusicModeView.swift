@@ -709,6 +709,7 @@ struct MusicModeView: View {
 
 private struct MusicModeInputStatusView: View {
     @ObservedObject var controller: AudioReactiveSessionController
+    @State private var diagnosticsExpanded = false
     let isRunning: Bool
     let showsPlainHelp: Bool
 
@@ -743,14 +744,16 @@ private struct MusicModeInputStatusView: View {
                         .font(.caption).foregroundStyle(Lumen.meter)
                 }
             }
-            DisclosureGroup("Audio diagnostics") {
-                HStack(spacing: 12) {
-                    meter("Bass", value: controller.latestSnapshot.bass, color: Lumen.chalk, segments: 12)
-                    meter("Mids", value: controller.latestSnapshot.mids, color: Lumen.meter, segments: 12)
-                    meter("Highs", value: controller.latestSnapshot.highs, color: Lumen.muted, segments: 12)
-                }.padding(.top, 12)
-                Text("\(controller.latestSnapshot.inputChannels ?? 0) input channels · \(controller.latestSnapshot.droppedBuffers) dropped buffers")
-                    .font(.caption.monospacedDigit()).foregroundStyle(Lumen.meter)
+            DisclosureGroup("Audio diagnostics", isExpanded: $diagnosticsExpanded) {
+                if diagnosticsExpanded {
+                    HStack(spacing: 12) {
+                        meter("Bass", value: controller.latestSnapshot.bass, color: Lumen.chalk, segments: 12)
+                        meter("Mids", value: controller.latestSnapshot.mids, color: Lumen.meter, segments: 12)
+                        meter("Highs", value: controller.latestSnapshot.highs, color: Lumen.muted, segments: 12)
+                    }.padding(.top, 12)
+                    Text("\(controller.latestSnapshot.inputChannels ?? 0) input channels · \(controller.latestSnapshot.droppedBuffers) dropped buffers")
+                        .font(.caption.monospacedDigit()).foregroundStyle(Lumen.meter)
+                }
             }
             if controller.sourceStatus == .permissionDenied {
                 Text(permissionMessage)

@@ -150,6 +150,52 @@ test('MIDI uses measured tempo, Stop suppresses ticks, Continue keeps position',
   midi(0xfb,103.2);midi(0xf8,103.3)
   assert.ok(session.inputSnapshot.beatCount>=position)
 })
+test('MIDI waits for a measured beat and handles clock batching at common tempos',()=>{
+  for(const bpm of [60,90,120,180]) for(const batch of [1,4,12,24]){
+    const session=new WebMusicSession(), tick=60/bpm/24
+    session.handleMidi({data:new Uint8Array([0xfa]),timeStamp:100000})
+    assert.equal(session.inputSnapshot.isTempoLocked,false)
+    for(let i=0;i<192;i+=batch){
+      session.handleMidi({data:new Uint8Array(batch).fill(0xf8),timeStamp:(100+(i+batch-1)*tick)*1000})
+      if(i+batch<=24) assert.equal(session.inputSnapshot.isTempoLocked,false,`${bpm}/${batch}: premature lock`)
+      if(i+batch>=48) assert.ok(Math.abs(session.inputSnapshot.tempo-bpm)<1e-7,`${bpm}/${batch}: ${session.inputSnapshot.tempo}`)
+    }
+    assert.equal(session.inputSnapshot.beatCount,7)
+  }
+})
+test('MIDI tempo resists alternating scheduling jitter without losing beat position',()=>{
+  const session=new WebMusicSession(), tempos=[]
+  session.handleMidi({data:new Uint8Array([0xfa]),timeStamp:100000})
+  for(let i=0;i<192;i++){
+    const time=100+i*.5/24+(i%2?-.006:.006)
+    session.handleMidi({data:new Uint8Array([0xf8]),timeStamp:time*1000})
+    if(i>=48) tempos.push(session.inputSnapshot.tempo)
+  }
+  assert.ok(tempos.every(bpm=>Math.abs(bpm-120)<1e-7))
+  assert.equal(session.inputSnapshot.beatCount,7)
+})
+test('MIDI Start, Continue and a clock dropout clear stale tempo measurements',()=>{
+  const session=new WebMusicSession()
+  const midi=(byte,time)=>session.handleMidi({data:new Uint8Array([byte]),timeStamp:time*1000})
+  midi(0xfa,100)
+  for(let i=0;i<49;i++)midi(0xf8,100+i*.5/24)
+  assert.equal(session.inputSnapshot.tempo,120)
+  const before=session.midiTicks
+  midi(0xf8,100.9)
+  assert.equal(session.midiTicks,before,'out-of-order clock cannot move the grid')
+  midi(0xf8,103)
+  assert.equal(session.inputSnapshot.isTempoLocked,false)
+  assert.equal(session.inputSnapshot.tempo,0)
+  for(let i=1;i<25;i++)midi(0xf8,103+i*(60/90)/24)
+  assert.ok(Math.abs(session.inputSnapshot.tempo-90)<1e-7)
+  const count=session.inputSnapshot.beatCount
+  midi(0xfc,104);midi(0xfb,105);midi(0xf8,105)
+  assert.equal(session.inputSnapshot.isTempoLocked,false)
+  assert.ok(session.inputSnapshot.beatCount>=count)
+  midi(0xfa,106);midi(0xf8,106)
+  assert.equal(session.inputSnapshot.isTempoLocked,false)
+  assert.equal(session.inputSnapshot.beatCount,0)
+})
 test('format change resets sample clock and stereo survives analysis',()=>{
   const analyzer=new MusicFeatureAnalyzer('Stereo')
   const left=Float32Array.from({length:2048},(_,i)=>.1*Math.sin(2*Math.PI*440*i/48000)),right=new Float32Array(2048)
@@ -176,6 +222,42 @@ test('opposite-phase stereo keeps the level and pulse of the same mono signal',(
   }
   assert.ok(b.beatCount>0)
   assert.equal(b.beatCount,a.beatCount)
+})
+test('buffer-sized snapshots preserve final-window analysis and earlier published arrays',()=>{
+  const byHop=new MusicFeatureAnalyzer('Stereo'),byBuffer=new MusicFeatureAnalyzer('Stereo')
+  const rate=48000,length=8192
+  const left=Float32Array.from({length},(_,i)=>.4*Math.sin(2*Math.PI*220*i/rate)+.2*Math.sin(2*Math.PI*880*i/rate))
+  const right=Float32Array.from({length},(_,i)=>.6*Math.sin(2*Math.PI*440*i/rate)-.1*Math.sin(2*Math.PI*220*i/rate))
+  let expected,first,priorData,expectedOnset=0
+  for(let offset=0;offset<length;offset+=512){
+    const l=left.subarray(offset,offset+512),r=right.subarray(offset,offset+512)
+    expected=byHop.analyze(l,100+(offset+512)/rate,{left:l,right:r},rate)
+    expectedOnset=Math.max(expectedOnset*Math.exp(-512/rate/.08),expected.onset)
+    if(offset===2048){first=expected;priorData=structuredClone(first)}
+  }
+  const actual=byBuffer.analyze(left,100+length/rate,{left,right},rate)
+  for(const key of ['rawRMS','energy','bass','mids','highs','analyzedSamples']) assert.ok(Math.abs(actual[key]-expected[key])<1e-10,key)
+  assert.ok(Math.abs(actual.onset-expectedOnset)<1e-10,'early onsets retain their capture age')
+  for(const key of ['spectrum','chroma']) assert.ok(actual[key].every((value,i)=>Math.abs(value-expected[key][i])<1e-10),key)
+  assert.deepEqual(first,priorData,'published arrays cannot mutate when more PCM arrives')
+})
+test('stream reset preserves beat progression while restarting sample timing and clearing lock',()=>{
+  const analyzer=new MusicFeatureAnalyzer('Reset'),rate=48000
+  for(let index=0;index<100;index++){
+    const pcm=Float32Array.from({length:1024},(_,i)=>{
+      const t=(index*1024+i)/rate,phase=t%.5
+      return .7*Math.sin(2*Math.PI*65*t)*Math.exp(-phase/.045)*(1-Math.exp(-phase/.002))
+    })
+    analyzer.analyze(pcm,100+(index+1)*1024/rate,undefined,rate)
+  }
+  const count=analyzer.latest().beatCount
+  assert.ok(count>0)
+  analyzer.reset()
+  const s=analyzer.analyze(new Float32Array(2048),200,undefined,rate)
+  assert.equal(s.beatCount,count)
+  assert.equal(s.analyzedSamples,2048)
+  assert.equal(s.isTempoLocked,false)
+  assert.equal(s.tempo,0)
 })
 test('stream start is not an onset, and a real one after it still is',()=>{
   const analyzer=new MusicFeatureAnalyzer('Test')
@@ -286,6 +368,13 @@ test('completion of an old audio close cannot stop a replacement session',async(
   finally { await session.stop() }
 })
 
+// Read the stored ring independently of production's direct traversal loops.
+function newestBeatHistory(tracker, buffer, ago) {
+  assert.ok(ago >= 0 && ago < Math.min(tracker.frameCount, tracker.capacity))
+  const index = ((tracker.writeIndex - 1 - ago) % tracker.capacity + tracker.capacity) % tracker.capacity
+  return tracker[buffer][index]
+}
+
 test('beat histories retain the newest frames across capacity boundaries',()=>{
   for(const capacity of [64,67,750,8000]) {
     const tracker=new BeatTracker(8/capacity)
@@ -294,8 +383,8 @@ test('beat histories retain the newest frames across capacity boundaries',()=>{
     const onsets=[],kicks=[]
     const checkpoints=new Set([1,capacity-1,capacity,capacity+1,2*capacity,2*capacity+1,3*capacity+11])
     assert.equal(tracker.capacity,capacity)
-    assert.equal(tracker.historyValue(0),0)
-    assert.equal(tracker.kickHistoryValue(0),0)
+    assert.ok(tracker.history.every(value=>value===0))
+    assert.ok(tracker.kickHistory.every(value=>value===0))
     for(let frame=1;frame<=3*capacity+11;frame++) {
       const onset=frame%53===0?-1:frame%59===0?2:(frame%997)/996
       const kick=frame%47===0?2:frame%61===0?-1:((frame*31)%991)/990
@@ -306,12 +395,8 @@ test('beat histories retain the newest frames across capacity boundaries',()=>{
       const available=Math.min(frame,capacity)
       assert.ok(tracker.writeIndex>=0&&tracker.writeIndex<capacity)
       for(let ago=0;ago<available;ago++) {
-        assert.equal(tracker.historyValue(ago),onsets[frame-1-ago],`${capacity}/${frame}: onset ${ago}`)
-        assert.equal(tracker.kickHistoryValue(ago),kicks[frame-1-ago],`${capacity}/${frame}: kick ${ago}`)
-      }
-      for(const ago of [-1,available,available+capacity]) {
-        assert.equal(tracker.historyValue(ago),0)
-        assert.equal(tracker.kickHistoryValue(ago),0)
+        assert.equal(newestBeatHistory(tracker,'history',ago),onsets[frame-1-ago],`${capacity}/${frame}: onset ${ago}`)
+        assert.equal(newestBeatHistory(tracker,'kickHistory',ago),kicks[frame-1-ago],`${capacity}/${frame}: kick ${ago}`)
       }
     }
   }
@@ -327,38 +412,38 @@ test('beat history reset and reconfiguration discard the previous ring',()=>{
   tracker.reset()
   assert.equal(tracker.frameCount,0)
   assert.equal(tracker.writeIndex,0)
-  assert.equal(tracker.historyValue(0),0)
-  assert.equal(tracker.kickHistoryValue(0),0)
   assert.ok(tracker.history.every(value=>value===0))
   assert.ok(tracker.kickHistory.every(value=>value===0))
   feed(1,.2,.3)
-  assert.equal(tracker.historyValue(0),.2)
-  assert.equal(tracker.kickHistoryValue(0),.3)
-  assert.equal(tracker.historyValue(1),0)
+  assert.equal(newestBeatHistory(tracker,'history',0),.2)
+  assert.equal(newestBeatHistory(tracker,'kickHistory',0),.3)
+  assert.equal(tracker.history[1],0)
   tracker.configure(tracker.frameInterval*1.005)
   assert.equal(tracker.frameCount,1,'a negligible interval change preserves history')
   tracker.configure(8/64)
   assert.equal(tracker.capacity,64)
   assert.equal(tracker.frameCount,0)
   assert.equal(tracker.writeIndex,0)
-  assert.equal(tracker.historyValue(0),0)
-  assert.equal(tracker.kickHistoryValue(0),0)
+  assert.equal(tracker.history.length,64)
+  assert.equal(tracker.kickHistory.length,64)
+  assert.ok(tracker.history.every(value=>value===0))
+  assert.ok(tracker.kickHistory.every(value=>value===0))
   feed(129,.4,.9)
-  assert.equal(tracker.historyValue(63),.4)
-  assert.equal(tracker.kickHistoryValue(63),.9)
-  assert.equal(tracker.historyValue(64),0)
+  assert.equal(newestBeatHistory(tracker,'history',63),.4)
+  assert.equal(newestBeatHistory(tracker,'kickHistory',63),.9)
 })
 
-test('beat tempo and phase match modulo history through wraps and reset',()=>{
+test('beat tempo and phase are independent of physical ring position through wraps and reset',()=>{
   const tracker=new BeatTracker(.025),reference=new BeatTracker(.025)
-  for(const [method,buffer] of [['historyValue','history'],['kickHistoryValue','kickHistory']]) {
-    // Preserve the former lookup as an independent reference for the full grid.
-    reference[method]=function(ago) {
-      if(ago<0||ago>=Math.min(this.frameCount,this.capacity))return 0
-      let index=this.writeIndex-1-ago
-      while(index<0)index+=this.capacity
-      return this[buffer][index%this.capacity]
+  const relinearize=()=>{
+    const start=reference.writeIndex
+    for(const buffer of ['history','kickHistory']) {
+      const stored=reference[buffer]
+      // Keep the same chronological history while forcing the next process
+      // call to traverse a different physical wrap from the ordinary tracker.
+      reference[buffer]=Float64Array.from({length:reference.capacity},(_,i)=>stored[(start+i)%reference.capacity])
     }
+    reference.writeIndex=0
   }
   for(const period of [20,16]) {
     tracker.reset();reference.reset()
@@ -369,6 +454,7 @@ test('beat tempo and phase match modulo history through wraps and reset',()=>{
       const time=100+frame*.025
       assert.equal(tracker.process(onset,kick,time),reference.process(onset,kick,time))
       assert.deepEqual(tracker.grid,reference.grid)
+      relinearize()
       if(frame>640&&tracker.grid.isLocked) {
         locked++
         assert.ok(Math.abs(tracker.grid.tempo-60/(period*.025))<3)

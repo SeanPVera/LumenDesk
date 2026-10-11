@@ -19,6 +19,12 @@ final class MusicLightingRenderer {
     }
 
     private var pendingByFixture: [String: PendingFrame] = [:]
+    // Fixture membership and deterministic dispatch order change with the
+    // room, not with the audio. Retain them across frame enqueues and flushes.
+    private var cachedFixtures: [MusicFixtureDescriptor] = []
+    private var transportsByFixture: [String: MusicTransportKind] = [:]
+    private var lastTransportByFixture: [String: MusicTransportKind] = [:]
+    private var orderedFixtureIDs: [String] = []
     struct Diagnostics {
         var generatedFrames = 0
         var coalescedStates = 0
@@ -45,11 +51,10 @@ final class MusicLightingRenderer {
         at timestamp: TimeInterval
     ) -> [MusicRenderCommand] {
         diagnostics.generatedFrames += 1
-        // A duplicated light ID (a hand-edited import) must not trap here.
-        let fixtureByID = Dictionary(fixtures.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        updateFixtures(fixtures)
         let grouped = Dictionary(grouping: frame.states, by: \.fixtureID)
         for (fixtureID, states) in grouped {
-            guard let fixture = fixtureByID[fixtureID] else { continue }
+            guard let transport = transportsByFixture[fixtureID] else { continue }
             guard timestamp - frame.timestamp <= Self.maximumFrameAge,
                   latestSequence[fixtureID].map({ frame.sequenceNumber > $0 }) ?? true else {
                 diagnostics.rejectedStates += 1
@@ -58,23 +63,31 @@ final class MusicLightingRenderer {
             latestSequence[fixtureID] = frame.sequenceNumber
             if pendingByFixture[fixtureID] != nil { diagnostics.coalescedStates += 1 }
             pendingByFixture[fixtureID] = PendingFrame(
-                transport: fixture.transport,
-                states: states.sorted { ($0.segmentID ?? -1) < ($1.segmentID ?? -1) },
+                transport: transport,
+                states: Self.orderedStates(states),
                 sequenceNumber: frame.sequenceNumber,
                 timestamp: frame.timestamp
             )
         }
-        return flush(fixtures: fixtures, at: timestamp)
+        return flush(at: timestamp)
     }
 
     func flush(fixtures: [MusicFixtureDescriptor], at timestamp: TimeInterval) -> [MusicRenderCommand] {
+        updateFixtures(fixtures)
+        return flush(at: timestamp)
+    }
+
+    private func flush(at timestamp: TimeInterval) -> [MusicRenderCommand] {
+        guard !pendingByFixture.isEmpty else { return [] }
+        // A renderer can be shared by independent room sessions. Expire every
+        // pending fixture, even when this flush receives only one room's list.
         for (id, pending) in pendingByFixture where timestamp - pending.timestamp > Self.maximumFrameAge {
             pendingByFixture.removeValue(forKey: id)
             diagnostics.rejectedStates += 1
         }
-        let availableIDs = Set(fixtures.map(\.id))
         var commands: [MusicRenderCommand] = []
-        for fixtureID in pendingByFixture.keys.sorted() where availableIDs.contains(fixtureID) {
+        commands.reserveCapacity(pendingByFixture.count)
+        for fixtureID in orderedFixtureIDs {
             guard let pending = pendingByFixture[fixtureID] else { continue }
             let interval = Self.minimumInterval(for: pending.transport)
             let tolerance = Self.pacingTolerance
@@ -95,6 +108,42 @@ final class MusicLightingRenderer {
             ))
         }
         return commands
+    }
+
+    private func updateFixtures(_ fixtures: [MusicFixtureDescriptor]) {
+        guard cachedFixtures != fixtures else { return }
+        cachedFixtures = fixtures
+        var transports: [String: MusicTransportKind] = [:]
+        transports.reserveCapacity(fixtures.count)
+        // A duplicated light ID in a hand-edited import must not trap here.
+        for fixture in fixtures where transports[fixture.id] == nil {
+            transports[fixture.id] = fixture.transport
+        }
+        // Lists may represent different room sessions. An absent ID therefore
+        // retains its own pacing slot; only an actual transport change revokes
+        // that fixture's queued output and transport-specific schedule.
+        for (id, transport) in transports {
+            if let previous = lastTransportByFixture[id], previous != transport {
+                pendingByFixture.removeValue(forKey: id)
+                nextDueAt.removeValue(forKey: id)
+                latestSequence.removeValue(forKey: id)
+            }
+            lastTransportByFixture[id] = transport
+        }
+        transportsByFixture = transports
+        orderedFixtureIDs = transports.keys.sorted()
+    }
+
+    private static func orderedStates(_ states: [MusicLightingState]) -> [MusicLightingState] {
+        // Choreography already emits ordered segments. Preserve its array
+        // unless an imported or external frame actually needs sorting.
+        guard states.count > 1 else { return states }
+        for index in 1..<states.count {
+            if (states[index - 1].segmentID ?? -1) > (states[index].segmentID ?? -1) {
+                return states.sorted { ($0.segmentID ?? -1) < ($1.segmentID ?? -1) }
+            }
+        }
+        return states
     }
 
     func reset(fixtureIDs: Set<String>? = nil) {

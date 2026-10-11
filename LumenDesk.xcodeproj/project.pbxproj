@@ -68,6 +68,7 @@
 		B20000000000000000000A /* BeatTrackerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000A /* BeatTrackerTests.swift */; };
 		B20000000000000000000B /* RoomPlanningTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000B /* RoomPlanningTests.swift */; };
 		B20000000000000000000C /* LightingThemeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000C /* LightingThemeTests.swift */; };
+		B20000000000000000000D /* MusicChoreographyCachingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000D /* MusicChoreographyCachingTests.swift */; };
 		B300000000000000000000 /* NanoleafProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000000 /* NanoleafProtocol.swift */; };
 		B300000000000000000001 /* NanoleafClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000001 /* NanoleafClient.swift */; };
 		B300000000000000000002 /* NanoleafCredentialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000002 /* NanoleafCredentialStore.swift */; };
@@ -165,6 +166,7 @@
 		A20000000000000000000A /* BeatTrackerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BeatTrackerTests.swift; sourceTree = "<group>"; };
 		A20000000000000000000B /* RoomPlanningTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomPlanningTests.swift; sourceTree = "<group>"; };
 		A20000000000000000000C /* LightingThemeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LightingThemeTests.swift; sourceTree = "<group>"; };
+		A20000000000000000000D /* MusicChoreographyCachingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicChoreographyCachingTests.swift; sourceTree = "<group>"; };
 		A200000000000000000099 /* LumenDeskTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LumenDeskTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A300000000000000000000 /* NanoleafProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/Nanoleaf/NanoleafProtocol.swift; sourceTree = "<group>"; };
 		A300000000000000000001 /* NanoleafClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/Nanoleaf/NanoleafClient.swift; sourceTree = "<group>"; };
@@ -365,6 +367,7 @@
 				A20000000000000000000A /* BeatTrackerTests.swift */,
 				A20000000000000000000B /* RoomPlanningTests.swift */,
 				A20000000000000000000C /* LightingThemeTests.swift */,
+				A20000000000000000000D /* MusicChoreographyCachingTests.swift */,
 			);
 			path = LumenDeskTests;
 			sourceTree = "<group>";
@@ -547,6 +550,7 @@
 				B20000000000000000000A /* BeatTrackerTests.swift in Sources */,
 				B20000000000000000000B /* RoomPlanningTests.swift in Sources */,
 				B20000000000000000000C /* LightingThemeTests.swift in Sources */,
+				B20000000000000000000D /* MusicChoreographyCachingTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

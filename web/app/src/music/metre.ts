@@ -58,7 +58,8 @@ export class MetreTracker {
 
     const even = this.evenEnergy.even;
     const odd = this.evenEnergy.odd;
-    const ratio = even / Math.max(0.0001, odd);
+    // An alternating pulse can begin on either parity of the tracked grid.
+    const ratio = Math.max(even, odd) / Math.max(0.0001, Math.min(even, odd));
     if (tempo >= 125 && ratio > 2.15) this.feel = "half";
     else if (tempo <= 88 && ratio < 1.25 && even + odd > 0.4) this.feel = "double";
     else this.feel = "straight";

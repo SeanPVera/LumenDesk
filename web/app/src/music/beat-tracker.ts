@@ -9,6 +9,9 @@ export class BeatTracker {
   private static readonly historyDuration = 8;
   private static readonly estimationInterval = 0.25;
   private static readonly minimumHistoryDuration = 3.5;
+  /** All interpolation breakpoints of the first three comb teeth. */
+  private static readonly periodSubdivisions = 6;
+  private static readonly octaveExclusionRatio = 2 ** .14;
 
   grid: BeatGrid = emptyGrid();
 
@@ -37,6 +40,9 @@ export class BeatTracker {
   private smoothedCorrelation: Float64Array = new Float64Array(0);
   private smoothedKickCorrelation: Float64Array = new Float64Array(0);
   private combScores: Float64Array = new Float64Array(0);
+  private tempoPriors: Float64Array = new Float64Array(0);
+  private phaseScores: Float64Array = new Float64Array(0);
+  private priorFrameInterval = 0;
   /** A period that disagrees with the current one has to win the same argument
    * several estimates running before the grid moves. */
   private challengerInterval = 0;
@@ -221,23 +227,35 @@ export class BeatTracker {
   }
 
   private estimatePhaseAnchor(interval: number): number | null {
-    const lagFrames = Math.max(2, Math.round(interval / this.frameInterval));
+    const lagFrames = Math.max(2, interval / this.frameInterval);
     const available = Math.min(this.frameCount, this.capacity);
     if (available <= lagFrames * 2) return null;
 
+    // Keep the measured period between history samples. Rounding it to a
+    // whole hop accumulates a timing error on every tooth of the phase comb.
+    const offsets = Math.ceil(lagFrames);
+    if (this.phaseScores.length < offsets) this.phaseScores = new Float64Array(offsets);
+    else this.phaseScores.fill(0, 0, offsets);
+    let weight = 1;
+    for (let framesAgo = 0; framesAgo < available && weight > .05; framesAgo += lagFrames) {
+      const first = Math.floor(framesAgo), fraction = framesAgo - first;
+      const count = Math.min(offsets, available - first - (fraction > 0 ? 1 : 0));
+      let index = this.writeIndex - 1 - first;
+      if (index < 0) index += this.capacity;
+      // Every integer offset shares the same interpolation fraction. Walking
+      // the ring backwards avoids division and bounds checks for each tooth.
+      for (let offset = 0; offset < count; offset += 1) {
+        const next = index === 0 ? this.capacity - 1 : index - 1;
+        this.phaseScores[offset] += (this.history[index] * (1 - fraction) + this.history[next] * fraction) * weight;
+        index = next;
+      }
+      weight *= .85;
+    }
     let bestOffset = 0;
     let bestScore = -1;
-    for (let offset = 0; offset < lagFrames; offset += 1) {
-      let score = 0;
-      let weight = 1;
-      let framesAgo = offset;
-      while (framesAgo < available && weight > 0.05) {
-        score += this.historyValue(framesAgo) * weight;
-        weight *= 0.85;
-        framesAgo += lagFrames;
-      }
-      if (score > bestScore) {
-        bestScore = score;
+    for (let offset = 0; offset < offsets; offset += 1) {
+      if (this.phaseScores[offset] > bestScore) {
+        bestScore = this.phaseScores[offset];
         bestOffset = offset;
       }
     }
@@ -311,31 +329,43 @@ export class BeatTracker {
     const available = Math.min(this.frameCount, this.capacity);
     if (available * this.frameInterval < BeatTracker.minimumHistoryDuration) return null;
 
-    if (this.scratch.length !== available) {
-      this.scratch = new Float64Array(available);
-      this.kickScratch = new Float64Array(available);
+    if (this.scratch.length !== this.capacity) {
+      this.scratch = new Float64Array(this.capacity);
+      this.kickScratch = new Float64Array(this.capacity);
     }
-    const variance = centre(this.scratch, available, (n) => this.historyValue(n));
-    if (variance <= 1e-9) return null;
-    const kickVariance = centre(this.kickScratch, available, (n) => this.kickHistoryValue(n));
-
-    // How peaky the onset function is over the window. Drums give a tall crest
-    // against a low floor; a held chord's analysis ripple does not. Only the
-    // first means there is a pulse to find.
-    let peak = 0;
-    let levelTotal = 0;
+    let total = 0, kickTotal = 0, peak = 0;
+    let historyIndex = this.writeIndex - available;
+    if (historyIndex < 0) historyIndex += this.capacity;
     for (let i = 0; i < available; i += 1) {
-      const value = this.historyValue(i);
+      const value = this.history[historyIndex], kick = this.kickHistory[historyIndex];
+      this.scratch[i] = value;
+      this.kickScratch[i] = kick;
+      total += value;
+      kickTotal += kick;
       if (value > peak) peak = value;
-      levelTotal += value;
+      if (++historyIndex === this.capacity) historyIndex = 0;
     }
-    const meanLevel = levelTotal / available;
-    const peakiness = meanLevel > 1e-6 ? peak / meanLevel : 0;
+    if (peak === 0) return null;
+    const mean = total / available, kickMean = kickTotal / available;
+    let variance = 0, kickVariance = 0;
+    for (let i = 0; i < available; i += 1) {
+      this.scratch[i] -= mean;
+      this.kickScratch[i] -= kickMean;
+      variance += this.scratch[i] * this.scratch[i];
+      kickVariance += this.kickScratch[i] * this.kickScratch[i];
+    }
+    variance /= available;
+    kickVariance /= available;
+    if (variance <= 1e-9) return null;
+
+    // Compute the onset crest in the same pass that copies the ring. Drums
+    // have a tall crest against a low floor; held-chord analysis ripple does not.
+    const peakiness = mean > 1e-6 ? peak / mean : 0;
 
     const minimumLag = Math.max(2, Math.floor(60 / BeatTracker.maximumTempo / this.frameInterval));
     const maximumLag = Math.min(
       Math.floor(available / 3) - 1,
-      Math.floor(60 / BeatTracker.minimumTempo / this.frameInterval),
+      Math.ceil(60 / BeatTracker.minimumTempo / this.frameInterval),
     );
     if (minimumLag + 2 >= maximumLag) return null;
     const combLimit = maximumLag * 3;
@@ -347,41 +377,84 @@ export class BeatTracker {
       this.smoothedCorrelation = new Float64Array(combLimit + 1);
       this.smoothedKickCorrelation = new Float64Array(combLimit + 1);
     }
-    correlate(this.autocorrelation, this.scratch, available, variance, combLimit);
-    smooth(this.smoothedCorrelation, this.autocorrelation, combLimit);
+    // The comb reads lag, 2*lag and 3*lag, each smoothed over its neighbours.
+    // Correlations below the smallest neighbour cannot affect any candidate.
+    const firstCorrelation = minimumLag - 1;
+    correlate(this.autocorrelation, this.scratch, available, variance, firstCorrelation, combLimit);
+    smooth(this.smoothedCorrelation, this.autocorrelation, minimumLag, combLimit);
     const hasKick = kickVariance > 1e-9;
     if (hasKick) {
-      correlate(this.kickAutocorrelation, this.kickScratch, available, kickVariance, combLimit);
-      smooth(this.smoothedKickCorrelation, this.kickAutocorrelation, combLimit);
+      correlate(this.kickAutocorrelation, this.kickScratch, available, kickVariance, firstCorrelation, combLimit);
+      smooth(this.smoothedKickCorrelation, this.kickAutocorrelation, minimumLag, combLimit);
     }
 
-    if (this.combScores.length !== maximumLag + 1) {
-      this.combScores = new Float64Array(maximumLag + 1);
+    // Test periods between hops as well. Rounding each comb tooth to whole
+    // hops rewards an octave that happens to line up with the sample grid:
+    // at 48 kHz, 150 BPM is 37.5 hops but its 75 BPM octave is exactly 75.
+    const subdivisions = BeatTracker.periodSubdivisions;
+    const minimumCandidate = minimumLag * subdivisions;
+    const maximumCandidate = maximumLag * subdivisions;
+    if (this.combScores.length !== maximumCandidate + 1) {
+      this.combScores = new Float64Array(maximumCandidate + 1);
     }
-    let bestLag = minimumLag;
+    if (this.tempoPriors.length !== maximumCandidate + 1 || this.priorFrameInterval !== this.frameInterval) {
+      this.tempoPriors = new Float64Array(maximumCandidate + 1);
+      this.priorFrameInterval = this.frameInterval;
+      for (let candidate = minimumCandidate; candidate <= maximumCandidate; candidate += 1) {
+        this.tempoPriors[candidate] = tempoPrior(60 / (candidate / subdivisions * this.frameInterval));
+      }
+    }
+    let bestCandidate = minimumCandidate;
     let bestScore = Number.NEGATIVE_INFINITY;
-    for (let lag = minimumLag; lag <= maximumLag; lag += 1) {
+    for (let candidate = minimumCandidate; candidate <= maximumCandidate; candidate += 1) {
+      const lag = candidate / subdivisions;
       const broad = comb(this.smoothedCorrelation, lag);
       // The kick band votes separately; material with no kick at all falls
       // back to the broadband term.
       const kick = hasKick ? comb(this.smoothedKickCorrelation, lag) : broad;
-      const bpm = 60 / (lag * this.frameInterval);
-      const score = Math.max(0, 0.55 * broad + 0.45 * kick) * tempoPrior(bpm);
-      this.combScores[lag] = score;
+      const score = Math.max(0, 0.55 * broad + 0.45 * kick) * this.tempoPriors[candidate];
+      this.combScores[candidate] = score;
       if (score > bestScore) {
         bestScore = score;
-        bestLag = lag;
+        bestCandidate = candidate;
       }
     }
     if (bestScore <= 0) return null;
 
+    // A faster pulse and its slower octave share most harmonic evidence. Only
+    // prefer the primitive pulse when BOTH bands directly support its shorter
+    // period nearly as strongly. A 90 BPM pulse has little correlation halfway
+    // between its beats, so this cannot turn it into 180 BPM just from the prior.
+    for (let pass = 0; pass < 2; pass += 1) {
+      const half = bestCandidate / 2;
+      const lower = Math.floor(half), upper = Math.ceil(half);
+      if (lower < minimumCandidate) break;
+      const candidate = this.combScores[upper] > this.combScores[lower] ? upper : lower;
+      const shortLag = candidate / subdivisions, longLag = bestCandidate / subdivisions;
+      const shortBroad = comb(this.smoothedCorrelation, shortLag);
+      const longBroad = comb(this.smoothedCorrelation, longLag);
+      const shortKick = hasKick ? comb(this.smoothedKickCorrelation, shortLag) : shortBroad;
+      const longKick = hasKick ? comb(this.smoothedKickCorrelation, longLag) : longBroad;
+      const shortFundamental = interpolate(this.smoothedCorrelation, shortLag);
+      const longFundamental = interpolate(this.smoothedCorrelation, longLag);
+      const shortKickFundamental = hasKick ? interpolate(this.smoothedKickCorrelation, shortLag) : shortFundamental;
+      const longKickFundamental = hasKick ? interpolate(this.smoothedKickCorrelation, longLag) : longFundamental;
+      if (shortBroad < longBroad * .9 || shortKick < longKick * .9 ||
+        shortFundamental < Math.max(.18, longFundamental * .85) ||
+        shortKickFundamental < Math.max(.18, longKickFundamental * .85)) break;
+      bestCandidate = candidate;
+      // This is another metrical level of the same evidenced pulse. Retain
+      // its winning group score for confidence: the prior's preference for
+      // 100 over 200 BPM is not evidence that the pulse became less clear.
+    }
+
     const refinedLag =
-      bestLag +
+      (bestCandidate +
       parabolicOffset(
-        bestLag > minimumLag ? this.combScores[bestLag - 1] : 0,
-        this.combScores[bestLag],
-        bestLag < maximumLag ? this.combScores[bestLag + 1] : 0,
-      );
+        bestCandidate > minimumCandidate ? this.combScores[bestCandidate - 1] : 0,
+        this.combScores[bestCandidate],
+        bestCandidate < maximumCandidate ? this.combScores[bestCandidate + 1] : 0,
+      )) / subdivisions;
     const interval = Math.min(
       60 / BeatTracker.minimumTempo,
       Math.max(60 / BeatTracker.maximumTempo, refinedLag * this.frameInterval),
@@ -391,19 +464,30 @@ export class BeatTracker {
     // own peak. Measured against the mean of every lag instead, confidence
     // reports near 1 even when a rival period is neck and neck.
     let rivalScore = 0;
-    for (let lag = minimumLag; lag <= maximumLag; lag += 1) {
+    const low = bestCandidate / BeatTracker.octaveExclusionRatio;
+    const high = bestCandidate * BeatTracker.octaveExclusionRatio;
+    const quarterLow = low * .25, quarterHigh = high * .25;
+    const halfLow = low * .5, halfHigh = high * .5;
+    const doubleLow = low * 2, doubleHigh = high * 2;
+    const quadrupleLow = low * 4, quadrupleHigh = high * 4;
+    for (let candidate = minimumCandidate; candidate <= maximumCandidate; candidate += 1) {
       // A periodic pulse correlates at every octave of its period, so half
       // and double are the same pulse at another metrical level, not a rival
       // reading. Counting the octave as a rival kept a clean 180 BPM pulse
       // below the lock threshold, because the 120-centred prior scores its
       // half at 90 slightly higher than 180 itself.
-      const octaves = Math.log2(lag / bestLag);
-      if (Math.abs(octaves - Math.round(octaves)) <= 0.14) continue;
-      if (this.combScores[lag] > rivalScore) rivalScore = this.combScores[lag];
+      // These ranges are exactly the previous ±.14-octave exclusion for
+      // the bounded 60–200 BPM search, with no per-candidate logarithm.
+      if ((candidate >= low && candidate <= high) ||
+        (candidate >= halfLow && candidate <= halfHigh) ||
+        (candidate >= doubleLow && candidate <= doubleHigh) ||
+        (candidate >= quarterLow && candidate <= quarterHigh) ||
+        (candidate >= quadrupleLow && candidate <= quadrupleHigh)) continue;
+      if (this.combScores[candidate] > rivalScore) rivalScore = this.combScores[candidate];
     }
     const separation = Math.max(0, (bestScore - rivalScore) / bestScore);
 
-    const coefficient = Math.max(0, this.smoothedCorrelation[bestLag]);
+    const coefficient = Math.max(0, interpolate(this.smoothedCorrelation, bestCandidate / subdivisions));
     const activity = Math.min(1, Math.sqrt(variance) * 6);
     const rhythmic = Math.min(1, Math.max(0, (peakiness - 2.2) / 3.5));
     // A pulse has to be strong, clearly ahead of its rivals, loud enough to
@@ -416,22 +500,6 @@ export class BeatTracker {
     return { interval, confidence: Math.max(0, Math.min(1, confidence)) };
   }
 
-  private kickHistoryValue(framesAgo: number): number {
-    const available = Math.min(this.frameCount, this.capacity);
-    if (framesAgo < 0 || framesAgo >= available) return 0;
-    let index = this.writeIndex - 1 - framesAgo;
-    // A valid lookback is less than capacity, so at most one wrap is needed.
-    if (index < 0) index += this.capacity;
-    return this.kickHistory[index];
-  }
-
-  private historyValue(framesAgo: number): number {
-    const available = Math.min(this.frameCount, this.capacity);
-    if (framesAgo < 0 || framesAgo >= available) return 0;
-    let index = this.writeIndex - 1 - framesAgo;
-    if (index < 0) index += this.capacity;
-    return this.history[index];
-  }
 }
 
 function emptyGrid(): BeatGrid {
@@ -463,31 +531,15 @@ function parabolicOffset(previous: number, peak: number, next: number): number {
   return Math.max(-0.5, Math.min(0.5, offset));
 }
 
-/** Mean-removes the newest `available` frames into `buffer`; returns variance. */
-function centre(buffer: Float64Array, available: number, read: (framesAgo: number) => number): number {
-  let total = 0;
-  for (let i = 0; i < available; i += 1) {
-    const value = read(available - 1 - i);
-    buffer[i] = value;
-    total += value;
-  }
-  const mean = total / available;
-  let variance = 0;
-  for (let i = 0; i < available; i += 1) {
-    buffer[i] -= mean;
-    variance += buffer[i] * buffer[i];
-  }
-  return variance / available;
-}
-
 function correlate(
   into: Float64Array,
   source: Float64Array,
   available: number,
   variance: number,
+  first: number,
   limit: number,
 ): void {
-  for (let lag = 1; lag <= limit; lag += 1) {
+  for (let lag = first; lag <= limit; lag += 1) {
     let sum = 0;
     for (let index = lag; index < available; index += 1) sum += source[index] * source[index - lag];
     into[lag] = sum / ((available - lag) * variance);
@@ -500,8 +552,8 @@ function correlate(
  * happens to land on one would otherwise win on bin alignment rather than on
  * the music.
  */
-function smooth(into: Float64Array, source: Float64Array, limit: number): void {
-  for (let lag = 1; lag <= limit; lag += 1) {
+function smooth(into: Float64Array, source: Float64Array, first: number, limit: number): void {
+  for (let lag = first; lag <= limit; lag += 1) {
     const previous = lag > 1 ? source[lag - 1] : source[lag];
     const next = lag < limit ? source[lag + 1] : source[lag];
     into[lag] = 0.25 * previous + 0.5 * source[lag] + 0.25 * next;
@@ -509,7 +561,12 @@ function smooth(into: Float64Array, source: Float64Array, limit: number): void {
 }
 
 function comb(table: Float64Array, lag: number): number {
-  return (table[lag] + 0.5 * table[lag * 2] + 0.25 * table[lag * 3]) / 1.75;
+  return (interpolate(table, lag) + 0.5 * interpolate(table, lag * 2) + 0.25 * interpolate(table, lag * 3)) / 1.75;
+}
+
+function interpolate(table: Float64Array, lag: number): number {
+  const first = Math.floor(lag), fraction = lag - first;
+  return fraction === 0 ? table[first] : table[first] * (1 - fraction) + table[first + 1] * fraction;
 }
 
 /**

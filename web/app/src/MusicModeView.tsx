@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { fetchState, type Device, type RGB } from './bridge'
 import { MUSIC_HELP, PRESET_COPY, ROLE_COPY, SOURCE_COPY, configurationFor } from './music/config'
 import { GROOVES } from './music/grooves'
 import { hsvToRgb } from './music/fixtures'
 import { WebMusicSession, LatestMusicFrameSender, setFixtureRole, type MusicFrameCommand } from './music/session'
-import { AURORA_PALETTE, SUNSET_PALETTE, OCEAN_PALETTE, CLUB_PALETTE, type FixtureRole, type MusicModePreset, type MusicModeConfiguration } from './music/types'
+import { AURORA_PALETTE, SUNSET_PALETTE, OCEAN_PALETTE, CLUB_PALETTE, type FixtureRole, type MusicModePreset, type MusicModeConfiguration, type MusicFixtureDescriptor } from './music/types'
 
 const PRESETS: Exclude<MusicModePreset, 'custom'>[] = [
   'ambient',
@@ -36,10 +36,11 @@ export function MusicModeView({
   const sessionRef = useRef<WebMusicSession | null>(null)
   if (!sessionRef.current) sessionRef.current = new WebMusicSession()
   const session = sessionRef.current
-  const version = useSyncExternalStore(
-    listener => session.subscribe(listener),
-    () => session.version,
-    () => session.version,
+  // Controls change on user actions, independently of the 20 Hz light frames.
+  useSyncExternalStore(
+    useCallback(listener => session.subscribeControls(listener), [session]),
+    () => session.controlsVersion,
+    () => session.controlsVersion,
   )
   const state = session.state
   const [reduceMotion, setReduceMotion] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches)
@@ -67,7 +68,6 @@ export function MusicModeView({
     session.patch({ topology: { ...state.topology, fixtureOrder: ids } })
   }
   useEffect(() => { onRunningChange?.(state.running); return () => onRunningChange?.(false) }, [state.running, onRunningChange])
-  void version
   const [file, setFile] = useState<File | null>(null)
   const reachable = devices.filter(d => d.reachable)
   const reachableRef = useRef(reachable)
@@ -76,12 +76,13 @@ export function MusicModeView({
   // Restore color and independent brightness only while this session still
   // owns the fixture. The bridge rejects restoration after a newer manual edit.
   const baseline = useRef<MusicFrameCommand[] | null>(null)
+  const baselineRevisions = useRef(new Map<string, number | undefined>())
   const senderRef = useRef<LatestMusicFrameSender | null>(null)
   const postRef = useRef(postFrame); postRef.current=postFrame
   const portRef = useRef(port); portRef.current=port
   const owner = useRef(crypto.randomUUID())
   if (!senderRef.current) senderRef.current = new LatestMusicFrameSender(states=>postRef.current(portRef.current,states.map(state=>({
-    ...state,owner:owner.current,controlRevision:baseline.current?.find(b=>b.fixtureID===state.fixtureID)?.controlRevision
+    ...state,owner:owner.current,controlRevision:baselineRevisions.current.get(state.fixtureID)
   }))))
   const sender=senderRef.current
   const transition = useRef(Promise.resolve())
@@ -140,6 +141,7 @@ export function MusicModeView({
           .filter(d => scope.has(d.id) && d.reachable)
           .filter((d): d is Device & { color: RGB } => Boolean(d.color) && session.state.fixtures.find(f=>f.id===d.id)?.role !== 'off')
           .map(d => ({ fixtureID: d.id, rgb: d.color, brightness:d.brightness/100,restoring:true,owner:owner.current,controlRevision:d.controlRevision ?? 0 }))
+        baselineRevisions.current = new Map(baseline.current.map(frame => [frame.fixtureID, frame.controlRevision]))
       }
       await session.start(source, audio)
       if (epoch !== transitionEpoch.current) return
@@ -147,6 +149,7 @@ export function MusicModeView({
       else {
         const previous = baseline.current
         baseline.current = null
+        baselineRevisions.current.clear()
         await restoreBaseline(previous, state.configuration.restorePreviousState)
       }
     })
@@ -157,6 +160,7 @@ export function MusicModeView({
     ++transitionEpoch.current
     const previous = baseline.current
     baseline.current = null
+    baselineRevisions.current.clear()
     const restore = state.configuration.restorePreviousState
     // Invalidate permission/capture work synchronously; serialize network restore
     // before any subsequent start. No old HTTP frame can follow the restore.
@@ -180,12 +184,7 @@ export function MusicModeView({
     return () => session.setOnFrame(null)
   }, [session, sender])
 
-  const snapshot = state.snapshot
   const presetCopyKey = state.configuration.preset === 'custom' ? 'balanced' : state.configuration.preset
-  const tempo =
-    snapshot.isTempoLocked && snapshot.tempo > 0 && snapshot.beatConfidence >= .4
-      ? `${Math.round(snapshot.feltTempo || snapshot.tempo)} · ${snapshot.metre}/${snapshot.metre === 6 ? 8 : 4}`
-      : 'Beat'
 
   return (
     <section className="music-desk">
@@ -286,17 +285,7 @@ export function MusicModeView({
 
       <div className="music-performance">
         <div className="music-output">
-      <div className="panel meters">
-        <Meter label="Input" value={snapshot.level} />
-        <Meter label="Energy" value={snapshot.energy} />
-        <div className="beat-readout">
-
-          <strong>{!state.running ? 'Stopped' : tempo === 'Beat' ? 'Finding a pulse' : tempo}</strong>
-          <span>{state.source === 'midi' ? 'Measured MIDI clock · ' : ''}Confidence {Math.round(snapshot.beatConfidence * 100)}%</span>
-        </div>
-        <p className="note">Audio input and musical interpretation. Generated colors below are not device confirmations.</p>
-        <details><summary>Audio diagnostics</summary><Meter label="Bass" value={snapshot.bass}/><Meter label="Mids" value={snapshot.mids}/><Meter label="Highs" value={snapshot.highs}/></details>
-      </div>
+      <MusicMeters session={session} />
 
       <div className="panel">
         <p className="eyebrow">Which light does what</p>
@@ -304,41 +293,7 @@ export function MusicModeView({
         {state.fixtures.length === 0 ? (
           <p>No lights yet. Use Find lights in Room, or run a demo groove to watch the lights move without any hardware.</p>
         ) : (
-          <ul className="fixture-list">
-            {orderedFixtures.map((fixture, index) => {
-              const stateFor = state.frame?.states.find(s => s.fixtureID === fixture.id)
-              const rgb = stateFor ? hsvToRgb(stateFor.hue, stateFor.saturation, stateFor.brightness) : null
-              return (
-                <li key={fixture.id}>
-                  <span
-                    className="fixture-swatch"
-                    style={rgb ? { background: `rgb(${rgb.r} ${rgb.g} ${rgb.b})` } : undefined}
-                  />
-                  <strong>{index + 1}. {fixture.label}</strong>
-                  <select
-                    aria-label={`Role for ${fixture.label}`}
-                    value={fixture.role}
-                    disabled={state.running && fixture.role === 'off'}
-                    title={ROLE_COPY[fixture.role].plain}
-                    onChange={event => {
-                      setFixtureRole(session, fixture.id, event.target.value as FixtureRole)
-                      session.patch({})
-                    }}
-                  >
-                    {ROLES.filter(role=>!state.running || role !== 'off' || fixture.role === 'off').map(role => (
-                      <option key={role} value={role}>
-                        {ROLE_COPY[role].name}
-                      </option>
-                    ))}
-                  </select>
-                  <div className="fixture-order">
-                    <button disabled={index === 0} aria-label={`Move ${fixture.label} earlier`} onClick={() => moveFixture(fixture.id,-1)}>↑</button>
-                    <button disabled={index === orderedFixtures.length - 1} aria-label={`Move ${fixture.label} later`} onClick={() => moveFixture(fixture.id,1)}>↓</button>
-                  </div>
-                </li>
-              )
-            })}
-          </ul>
+          <FixturePreview session={session} fixtures={orderedFixtures} moveFixture={moveFixture} />
         )}
         <details><summary>What the roles mean</summary><dl className="role-legend">
           {ROLES.map(role => (
@@ -375,19 +330,121 @@ export function MusicModeView({
       </div>
 
       </div>
-      <details className="panel">
-        <summary>Music diagnostics</summary>
-        <p>Source: {state.source} · snapshot age {session.diagnostics.snapshotAge.toFixed(3)} s · samples analyzed {session.diagnostics.analyzedSamples} · capture buffers dropped {session.diagnostics.droppedBuffers}</p>
-        <p>Onset {(snapshot.onset ?? 0).toFixed(2)} · beat count {snapshot.beatCount} · confidence {snapshot.beatConfidence.toFixed(2)} · preset {state.configuration.preset}</p>
-        <p>Grid phase now {snapshot.beatInterval > 0 ? (((performance.now()/1000-snapshot.beatReferenceTime)/snapshot.beatInterval)%1).toFixed(2) : "unlocked"} · last render interval {session.diagnostics.renderInterval.toFixed(3)} s (target 0.050 s) · effective brightness {state.configuration.masterBrightness.toFixed(2)} · intensity {state.configuration.effectIntensity.toFixed(2)}</p>
-        <p>Generated {session.diagnostics.framesGenerated} · HTTP submitted {sender.diagnostics.submitted} · accepted {sender.diagnostics.accepted} · coalesced {sender.diagnostics.coalesced} · expired {sender.diagnostics.expired} · errors {sender.diagnostics.failures}</p>
-        <p>Preview shows generated frames. HTTP acceptance does not establish device receipt or visible timing. Brightness modulation can still be uncomfortable with flashes disabled.</p>
-      </details>
+      <MusicDiagnostics session={session} sender={sender} />
       <p className="meta">
         {MUSIC_HELP.strips} Colours go to the bridge on port {port}.
       </p>
     </section>
   )
+}
+
+
+// Only the live readouts subscribe to the frame clock. Sliders, palettes and
+// fixture assignments remain stable while the lighting engine runs at 20 Hz.
+function useMusicFrame(session: WebMusicSession) {
+  useSyncExternalStore(
+    useCallback(listener => session.subscribe(listener), [session]),
+    () => session.version,
+    () => session.version,
+  )
+}
+
+function MusicMeters({ session }: { session: WebMusicSession }) {
+  useMusicFrame(session)
+  const { snapshot, running, source } = session.state
+  const [expanded, setExpanded] = useState(false)
+  const tempo = snapshot.isTempoLocked && snapshot.tempo > 0 && snapshot.beatConfidence >= .4
+    ? `${Math.round(snapshot.feltTempo || snapshot.tempo)} · ${snapshot.metre}/${snapshot.metre === 6 ? 8 : 4}`
+    : 'Beat'
+  return <div className="panel meters">
+    <Meter label="Input" value={snapshot.level} />
+    <Meter label="Energy" value={snapshot.energy} />
+    <div className="beat-readout">
+      <strong>{!running ? 'Stopped' : tempo === 'Beat' ? 'Finding a pulse' : tempo}</strong>
+      <span>{source === 'midi' ? 'Measured MIDI clock · ' : ''}Confidence {Math.round(snapshot.beatConfidence * 100)}%</span>
+    </div>
+    <p className="note">Audio input and musical interpretation. Generated colors below are not device confirmations.</p>
+    <details onToggle={event => setExpanded(event.currentTarget.open)}>
+      <summary>Audio diagnostics</summary>
+      {expanded && <><Meter label="Bass" value={snapshot.bass}/><Meter label="Mids" value={snapshot.mids}/><Meter label="Highs" value={snapshot.highs}/></>}
+    </details>
+  </div>
+}
+
+function FixturePreview({ session, fixtures, moveFixture }: {
+  session: WebMusicSession
+  fixtures: MusicFixtureDescriptor[]
+  moveFixture: (id: string, offset: number) => void
+}) {
+  const swatches = useRef(new Map<string, HTMLSpanElement>())
+  useEffect(() => {
+    const colors = new Map<string, string>()
+    const refresh = () => {
+      colors.clear()
+      // Match the first generated state per fixture without repeatedly scanning
+      // every segment, and update just the painted swatches between UI edits.
+      for (const state of session.state.frame?.states ?? []) {
+        if (colors.has(state.fixtureID)) continue
+        const rgb = hsvToRgb(state.hue, state.saturation, state.brightness)
+        colors.set(state.fixtureID, `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`)
+      }
+      for (const [id, swatch] of swatches.current) {
+        const color = colors.get(id) ?? ''
+        if (swatch.style.backgroundColor !== color) swatch.style.backgroundColor = color
+      }
+    }
+    refresh()
+    return session.subscribe(refresh)
+  }, [session])
+  const running = session.state.running
+  return <ul className="fixture-list">
+    {fixtures.map((fixture, index) => <li key={fixture.id}>
+      <span className="fixture-swatch" ref={element => {
+        if (element) swatches.current.set(fixture.id, element)
+        else swatches.current.delete(fixture.id)
+      }} />
+      <strong>{index + 1}. {fixture.label}</strong>
+      <select
+        aria-label={`Role for ${fixture.label}`}
+        value={fixture.role}
+        disabled={running && fixture.role === 'off'}
+        title={ROLE_COPY[fixture.role].plain}
+        onChange={event => {
+          setFixtureRole(session, fixture.id, event.target.value as FixtureRole)
+          session.patch({})
+        }}
+      >
+        {ROLES.filter(role => !running || role !== 'off' || fixture.role === 'off').map(role => (
+          <option key={role} value={role}>{ROLE_COPY[role].name}</option>
+        ))}
+      </select>
+      <div className="fixture-order">
+        <button disabled={index === 0} aria-label={`Move ${fixture.label} earlier`} onClick={() => moveFixture(fixture.id, -1)}>↑</button>
+        <button disabled={index === fixtures.length - 1} aria-label={`Move ${fixture.label} later`} onClick={() => moveFixture(fixture.id, 1)}>↓</button>
+      </div>
+    </li>)}
+  </ul>
+}
+
+function MusicDiagnostics({ session, sender }: { session: WebMusicSession; sender: LatestMusicFrameSender }) {
+  const [expanded, setExpanded] = useState(false)
+  return <details className="panel" onToggle={event => setExpanded(event.currentTarget.open)}>
+    <summary>Music diagnostics</summary>
+    {expanded && <MusicDiagnosticsReadout session={session} sender={sender} />}
+  </details>
+}
+
+function MusicDiagnosticsReadout({ session, sender }: { session: WebMusicSession; sender: LatestMusicFrameSender }) {
+  useMusicFrame(session)
+  const state = session.state
+  const snapshot = state.snapshot
+  return <>
+    <p>Source: {state.source} · snapshot age {session.diagnostics.snapshotAge.toFixed(3)} s · samples analyzed {session.diagnostics.analyzedSamples} · capture buffers dropped {session.diagnostics.droppedBuffers}</p>
+    <p>Onset {(snapshot.onset ?? 0).toFixed(2)} · beat count {snapshot.beatCount} · confidence {snapshot.beatConfidence.toFixed(2)} · preset {state.configuration.preset}</p>
+    <p>Grid phase now {snapshot.beatInterval > 0 ? (((performance.now()/1000-snapshot.beatReferenceTime)/snapshot.beatInterval)%1).toFixed(2) : "unlocked"} · last render interval {session.diagnostics.renderInterval.toFixed(3)} s (target 0.050 s) · effective brightness {state.configuration.masterBrightness.toFixed(2)} · intensity {state.configuration.effectIntensity.toFixed(2)}</p>
+    <p>Generated {session.diagnostics.framesGenerated} · HTTP submitted {sender.diagnostics.submitted} · accepted {sender.diagnostics.accepted} · coalesced {sender.diagnostics.coalesced} · expired {sender.diagnostics.expired} · errors {sender.diagnostics.failures}</p>
+    <p>Preview shows generated frames. HTTP acceptance does not establish device receipt or visible timing. Brightness modulation can still be uncomfortable with flashes disabled.</p>
+  </>
 }
 
 function Meter({ label, value }: { label: string; value: number }) {

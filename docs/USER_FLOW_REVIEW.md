@@ -66,7 +66,7 @@ The scripts are:
 - [`schedule-name-review.mjs`](../web/app/scripts/schedule-name-review.mjs)
 
 Screenshots and audit reports are written to `/tmp/LumenDesk-Web-QA` by default.
-Ten native regressions cover scene retry, rehearsal cleanup, schedule capacity,
+Eleven native regressions cover scene retry, rehearsal cleanup, schedule capacity,
 daylight saving, saved scene scope and favorites ordering. They supplement the
 existing macOS test suite and iOS build; this Linux workspace cannot run Xcode.
 The bridge packaging matrix builds and smoke-tests both Mac architectures,

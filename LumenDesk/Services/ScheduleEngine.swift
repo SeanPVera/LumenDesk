@@ -197,11 +197,13 @@ final class ScheduleEngine {
     /// Solar offsets are added after resolving the configured local base time.
     private func wallClockTime(at minute: Int, on date: Date) -> Date? {
         let clamped = clampedMinute(minute)
-        return calendar.date(
-            bySettingHour: clamped / 60,
-            minute: clamped % 60,
-            second: 0,
-            of: calendar.startOfDay(for: date),
+        // On Darwin, bySettingHour can resolve a nonexistent 02:30 to
+        // 03:00 despite the preserving policy. Match clock components via
+        // nextDate so the minute survives the missing hour. Starting just
+        // before midnight also keeps a 00:00 rule on the requested day.
+        return calendar.nextDate(
+            after: calendar.startOfDay(for: date).addingTimeInterval(-1),
+            matching: DateComponents(hour: clamped / 60, minute: clamped % 60, second: 0),
             matchingPolicy: .nextTimePreservingSmallerComponents,
             repeatedTimePolicy: .first,
             direction: .forward

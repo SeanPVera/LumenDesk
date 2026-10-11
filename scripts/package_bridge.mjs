@@ -169,11 +169,15 @@ Categories=Utility;
   // bundle: putting a hash of the executable inside its own signature seal
   // would create a circular dependency.
   const files = {}
+  let shippedBytes = 0
   async function visit(dir) {
     for (const entry of await fs.readdir(dir, { withFileTypes: true })) {
       const file = path.join(dir, entry.name)
       if (entry.isDirectory()) await visit(file)
-      else if (entry.isFile()) files[path.relative(stage, file).split(path.sep).join('/')] = await sha256(file)
+      else if (entry.isFile()) {
+        files[path.relative(stage, file).split(path.sep).join('/')] = await sha256(file)
+        shippedBytes += (await fs.stat(file)).size
+      }
     }
   }
   if (platform === 'darwin') {
@@ -192,7 +196,11 @@ Categories=Utility;
   if (platform === 'darwin') {
     bundle = path.join(output, `${basename}.dmg`)
     await fs.rm(bundle, { force: true })
-    await run('hdiutil', ['create', '-volname', 'LumenDesk Bridge', '-srcfolder', stage, '-ov', '-format', 'UDZO', bundle])
+    // hdiutil's automatic estimate can count a sparse/compressed runtime by
+    // its allocated blocks, then run out of image space copying logical bytes.
+    // Size from actual file lengths and leave room for filesystem metadata.
+    const imageMiB = Math.ceil(shippedBytes * 1.3 / (1024 * 1024)) + 64
+    await run('hdiutil', ['create', '-volname', 'LumenDesk Bridge', '-srcfolder', stage, '-size', `${imageMiB}m`, '-ov', '-format', 'UDZO', bundle])
   } else if (platform === 'win32') {
     bundle = path.join(output, `${basename}.zip`)
     await fs.rm(bundle, { force: true })

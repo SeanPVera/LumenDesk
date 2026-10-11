@@ -232,6 +232,21 @@ final class ScheduleEngineTests: XCTestCase {
         XCTAssertEqual(calendar.component(.minute, from: occurrence), 30)
     }
 
+    func testMidnightRuleStaysOnTheRequestedLocalDay() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "America/New_York"))
+        let engine = ScheduleEngine(calendar: calendar)
+        let entry = ScheduleEntry(hour: 0, minute: 0, action: .turnOn)
+
+        for (month, day) in [(7, 13), (3, 8), (11, 1)] {
+            let reference = try date(2026, month, day, 12, 0, calendar: calendar)
+            XCTAssertEqual(
+                engine.occurrence(for: entry, relativeTo: reference, solarTimes: solarTimes),
+                try date(2026, month, day, 0, 0, calendar: calendar)
+            )
+        }
+    }
+
     func testFixedMorningTimeStaysAtNineAcrossBothDaylightSavingTransitions() throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "America/New_York"))

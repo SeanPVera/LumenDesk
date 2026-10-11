@@ -264,6 +264,162 @@ final class ScheduleEngineTests: XCTestCase {
         )
     }
 
+    func testSolarDatesCrossMidnightButConflictMinutesStayClamped() throws {
+        let calendar = utcCalendar()
+        let reference = try date(2026, 7, 13, 12, 0, calendar: calendar)
+        let engine = ScheduleEngine(calendar: calendar)
+        let sunrise = ScheduleEntry(hour: 0, minute: 0, offsetMinutes: -420, action: .atSunrise)
+        let sunset = ScheduleEntry(hour: 0, minute: 0, offsetMinutes: 240, action: .atSunset)
+
+        XCTAssertEqual(engine.occurrence(for: sunrise, relativeTo: reference, solarTimes: solarTimes),
+                       try date(2026, 7, 12, 23, 30, calendar: calendar))
+        XCTAssertEqual(engine.occurrence(for: sunset, relativeTo: reference, solarTimes: solarTimes),
+                       try date(2026, 7, 14, 0, 30, calendar: calendar))
+        XCTAssertEqual(engine.scheduledMinute(for: sunrise, solarTimes: solarTimes), 0)
+        XCTAssertEqual(engine.scheduledMinute(for: sunset, solarTimes: solarTimes), 1_439)
+    }
+
+    func testOutOfRangeFixedTimesStayWithinTheirReferenceDay() throws {
+        let calendar = utcCalendar()
+        let reference = try date(2026, 7, 13, 12, 0, calendar: calendar)
+        let engine = ScheduleEngine(calendar: calendar)
+        for (hour, expectedHour, expectedMinute) in [(-1, 0, 0), (25, 23, 59)] {
+            let entry = ScheduleEntry(hour: hour, minute: 0, action: .turnOn)
+            XCTAssertEqual(engine.occurrence(for: entry, relativeTo: reference, solarTimes: solarTimes),
+                           try date(2026, 7, 13, expectedHour, expectedMinute, calendar: calendar))
+            XCTAssertEqual(engine.scheduledMinute(for: entry, solarTimes: solarTimes),
+                           expectedHour * 60 + expectedMinute)
+        }
+    }
+
+    func testEmptyWeekdaysMatchInBothOccurrenceQueries() throws {
+        let calendar = utcCalendar()
+        let previous = try date(2026, 7, 13, 8, 59, calendar: calendar)
+        let scheduledAt = try date(2026, 7, 13, 9, 0, calendar: calendar)
+        let entry = ScheduleEntry(hour: 9, minute: 0, action: .turnOn, weekdays: [])
+        let engine = ScheduleEngine(now: { previous }, calendar: calendar)
+
+        XCTAssertEqual(engine.occurrences(for: entry, after: previous,
+                                          through: scheduledAt, solarTimes: solarTimes), [scheduledAt])
+        XCTAssertEqual(engine.nextOccurrence(for: entry, solarTimes: solarTimes), scheduledAt)
+    }
+
+    func testOccurrenceWindowIsOpenAtStartAndClosedAtEnd() throws {
+        let calendar = utcCalendar()
+        let scheduledAt = try date(2026, 7, 13, 9, 0, calendar: calendar)
+        let entry = ScheduleEntry(hour: 9, minute: 0, action: .turnOn)
+        let engine = ScheduleEngine(now: { scheduledAt }, calendar: calendar)
+
+        XCTAssertEqual(engine.occurrences(for: entry, after: scheduledAt.addingTimeInterval(-1),
+                                          through: scheduledAt, solarTimes: solarTimes), [scheduledAt])
+        XCTAssertTrue(engine.occurrences(for: entry, after: scheduledAt,
+                                         through: scheduledAt.addingTimeInterval(1), solarTimes: solarTimes).isEmpty)
+        XCTAssertTrue(engine.occurrences(for: entry, after: scheduledAt,
+                                         through: scheduledAt, solarTimes: solarTimes).isEmpty)
+        XCTAssertEqual(engine.nextOccurrence(for: entry, solarTimes: solarTimes),
+                       try date(2026, 7, 14, 9, 0, calendar: calendar))
+    }
+
+    func testConflictPairsPreserveInputOrderAndInclusiveFiveMinuteThreshold() {
+        let engine = ScheduleEngine(calendar: utcCalendar())
+        let first = ScheduleEntry(hour: 9, minute: 5, action: .turnOn, weekdays: [2])
+        let second = ScheduleEntry(hour: 9, minute: 0, action: .turnOff, weekdays: [3])
+        let third = ScheduleEntry(hour: 9, minute: 6, action: .dim50)
+        let disabled = ScheduleEntry(isEnabled: false, hour: 9, minute: 4, action: .turnOn)
+
+        // Conflict reporting historically compares times, not weekday overlap.
+        XCTAssertEqual(engine.conflicts(in: [first, disabled, second, third], solarTimes: solarTimes), [
+            .init(first: first, second: second),
+            .init(first: first, second: third)
+        ])
+        XCTAssertTrue(engine.conflicts(in: [first, disabled], solarTimes: solarTimes).isEmpty)
+    }
+
+    func testSkipNextIsConsumedInEntryOrderBeforeMissedTracking() throws {
+        let calendar = utcCalendar()
+        let previous = try date(2026, 7, 13, 8, 0, calendar: calendar)
+        let currentDate = try date(2026, 7, 13, 9, 10, calendar: calendar)
+        let first = ScheduleEntry(hour: 9, minute: 5, action: .turnOn)
+        let second = ScheduleEntry(hour: 9, minute: 0, action: .turnOff)
+        let room = Room(name: "Office", schedules: [first, second])
+        let engine = ScheduleEngine(now: { currentDate }, calendar: calendar,
+                                    state: .init(lastCheck: previous))
+        engine.setOverride(for: room.id, duration: .nextSchedule)
+
+        let result = engine.evaluate(rooms: [room], solarTimes: solarTimes)
+        XCTAssertEqual(result.decisions.count, 2)
+        guard result.decisions.count == 2,
+              case let .skipped(skipped, consumed) = result.decisions[0],
+              case let .missed(missed) = result.decisions[1] else {
+            return XCTFail("Entry order and override precedence must remain unchanged")
+        }
+        XCTAssertEqual(skipped.entry.id, first.id)
+        XCTAssertTrue(consumed)
+        XCTAssertEqual(missed.entry.id, second.id)
+        XCTAssertTrue(result.didChangeOverrides)
+        XCTAssertTrue(result.didChangeMissedAutomations)
+        XCTAssertNil(engine.automationOverrides[room.id])
+    }
+
+    func testMissedThresholdIsStrictlyGreaterThanTwoMinutes() throws {
+        let calendar = utcCalendar()
+        let previous = try date(2026, 7, 13, 8, 59, calendar: calendar)
+        let entry = ScheduleEntry(hour: 9, minute: 0, action: .turnOn)
+        let room = Room(name: "Office", schedules: [entry])
+        for gap in [120.0, 120.001] {
+            let engine = ScheduleEngine(now: { previous.addingTimeInterval(gap) }, calendar: calendar,
+                                        state: .init(lastCheck: previous))
+            let result = engine.evaluate(rooms: [room], solarTimes: solarTimes)
+            XCTAssertEqual(result.decisions.count, 1)
+            if gap == 120 {
+                guard case .run? = result.decisions.first else {
+                    return XCTFail("Exactly two minutes must still run")
+                }
+                XCTAssertFalse(result.didChangeMissedAutomations)
+            } else {
+                guard case .missed? = result.decisions.first else {
+                    return XCTFail("A gap over two minutes must be recorded as missed")
+                }
+                XCTAssertTrue(result.didChangeMissedAutomations)
+            }
+        }
+    }
+
+    func testMissedDeduplicationKeepsItsEntryIDAndOneSecondRules() throws {
+        let calendar = utcCalendar()
+        let scheduledAt = try date(2026, 7, 13, 9, 0, calendar: calendar)
+        let entry = ScheduleEntry(hour: 9, minute: 0, action: .turnOn)
+        let room = Room(name: "Office", schedules: [entry])
+        for offset in [0.5, 1.0] {
+            // The existing key is entry ID plus time, even across rooms.
+            let existing = MissedAutomation(roomID: UUID(), roomName: "Other", entry: entry,
+                                           scheduledAt: scheduledAt.addingTimeInterval(-offset))
+            let engine = ScheduleEngine(now: { scheduledAt.addingTimeInterval(300) }, calendar: calendar,
+                                        state: .init(missedAutomations: [existing],
+                                                     lastCheck: scheduledAt.addingTimeInterval(-3_600)))
+            let result = engine.evaluate(rooms: [room], solarTimes: solarTimes)
+            XCTAssertEqual(result.decisions.count, offset < 1 ? 0 : 1)
+            XCTAssertEqual(engine.missedAutomations.count, offset < 1 ? 1 : 2)
+            XCTAssertEqual(result.didChangeMissedAutomations, offset >= 1)
+        }
+    }
+
+    func testEmptyEvaluationStillAdvancesClockAndPrunesOldClaims() throws {
+        let calendar = utcCalendar()
+        let currentDate = try date(2026, 7, 13, 9, 0, calendar: calendar)
+        let currentID = UUID()
+        let staleID = UUID()
+        let engine = ScheduleEngine(now: { currentDate }, calendar: calendar,
+                                    state: .init(firedThisMinute: [currentID: "09:00", staleID: "08:59"]))
+
+        let result = engine.evaluate(rooms: [], solarTimes: solarTimes)
+        XCTAssertEqual(engine.state.lastCheck, currentDate)
+        XCTAssertEqual(engine.state.firedThisMinute, [currentID: "09:00"])
+        XCTAssertTrue(result.decisions.isEmpty)
+        XCTAssertFalse(result.didChangeOverrides)
+        XCTAssertFalse(result.didChangeMissedAutomations)
+    }
+
     private func utcCalendar() -> Calendar {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!

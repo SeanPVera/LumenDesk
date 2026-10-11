@@ -13,11 +13,39 @@ const sha256 = async file => crypto.createHash('sha256').update(await fs.readFil
 const psQuote = value => `'${value.replaceAll("'", "''")}'`
 function run(command, args, options = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { stdio: 'inherit', ...options })
+    const { captureStderr = false, ...spawnOptions } = options
+    const child = spawn(command, args, { stdio: captureStderr ? ['inherit', 'inherit', 'pipe'] : 'inherit', ...spawnOptions })
+    let stderr = ''
+    child.stderr?.on('data', data => {
+      stderr = (stderr + data).slice(-8_192)
+      process.stderr.write(data)
+    })
     const timeout = setTimeout(() => { child.kill(); reject(new Error(`${command} timed out`)) }, 40_000)
     child.on('error', err => { clearTimeout(timeout); reject(err) })
-    child.on('exit', code => { clearTimeout(timeout); code === 0 ? resolve() : reject(new Error(`${command} exited with ${code}`)) })
+    child.on('close', code => {
+      clearTimeout(timeout)
+      if (code === 0) return resolve()
+      const error = new Error(`${command} exited with ${code}`)
+      error.stderr = stderr
+      reject(error)
+    })
   })
+}
+
+async function attachDiskImage(root) {
+  // DiskImages can briefly hold its device after creating a fresh image.
+  // Retry only its explicit temporary-resource error; invalid images and
+  // every launcher/hash failure retain their normal immediate failure.
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
+    try {
+      await run('hdiutil', ['attach', '-readonly', '-nobrowse', '-mountpoint', root, bundle], { captureStderr: true })
+      return
+    } catch (err) {
+      if (attempt === 4 || err.stderr?.trim() !== 'hdiutil: attach failed - Resource temporarily unavailable') throw err
+      console.error(`DiskImages device is still releasing; retrying attachment (${attempt + 1}/4).`)
+      await new Promise(resolve => setTimeout(resolve, 1_000))
+    }
+  }
 }
 
 let mounted = false
@@ -28,7 +56,7 @@ try {
   if (process.platform === 'darwin') {
     root = path.join(work, 'mount')
     await fs.mkdir(root)
-    await run('hdiutil', ['attach', '-readonly', '-nobrowse', '-mountpoint', root, bundle])
+    await attachDiskImage(root)
     mounted = true
     await run('codesign', ['--verify', '--deep', '--strict', path.join(root, 'LumenDesk Bridge.app')])
   } else {

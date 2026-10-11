@@ -85,26 +85,27 @@ export const ROLE_COPY: Record<FixtureRole, { name: string; plain: string }> = {
 export const SOURCE_COPY: Record<string, { name: string; plain: string }> = {
   microphone: {
     name: "Microphone",
-    plain: "Starts the show listening to the room, so the music has to be audible. The browser asks for microphone access the first time.",
+    plain: "Listen to music playing in the room. Microphone access is requested when you press Start, never when you select this source.",
   },
   file: {
     name: "Audio file",
-    plain: "Pick a song from this computer and the show starts on it. The page plays the track and lights to it, which is the most reliable option.",
+    plain: "Choose a song from this computer, then press Start. The page plays the track and lights to it, which is the most reliable option.",
   },
   midi: {
     name: "MIDI clock",
-    plain: "Starts the show on a beat sent by DJ software, a drum machine, or recording software over MIDI.",
+    plain: "Follow a beat sent by DJ software, a drum machine, or recording software over MIDI. MIDI access is requested when you press Start.",
   },
   demo: {
     name: "Demo groove",
-    plain: "Starts the show on a built-in rhythm with no audio at all. Use it to see what the lights do before you commit to a track.",
+    plain: "Try a built-in rhythm without audio or permission prompts. Choose a groove, then press Start to see the response.",
   },
 };
 
 export const MUSIC_HELP = {
   steps: [
-    "Pick a preset from the panel below. Soundcheck is the default first choice, and you can change it while the show runs.",
-    "Choose where the sound comes from. Each source button starts the show as soon as you pick it, and the microphone or a file may ask for permission first. Start then restarts whatever source you last chose.",
+    "Choose a source. Selecting a source or file prepares the show without starting it.",
+    "Pick a preset and choose which lights take part. Soundcheck is the default first choice. Turn lights on in Room before starting.",
+    "Press Start when you are ready. Microphone and MIDI permissions are requested at this point. Source changes wait for Restart; presets and show balance can change live.",
     "Stop ends the show and restores the starting colour and brightness while this show still owns the lights. A newer manual change takes priority.",
   ],
   readout:

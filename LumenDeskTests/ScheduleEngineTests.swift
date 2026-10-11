@@ -218,7 +218,7 @@ final class ScheduleEngineTests: XCTestCase {
         )
     }
 
-    func testDaylightSavingSpringForwardPreservesExistingElapsedMinuteBehavior() throws {
+    func testMissingSpringForwardTimePreservesMinutes() throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "America/New_York"))
         let reference = try date(2026, 3, 8, 12, 0, calendar: calendar)
@@ -230,6 +230,57 @@ final class ScheduleEngineTests: XCTestCase {
 
         XCTAssertEqual(calendar.component(.hour, from: occurrence), 3)
         XCTAssertEqual(calendar.component(.minute, from: occurrence), 30)
+    }
+
+    func testFixedMorningTimeStaysAtNineAcrossBothDaylightSavingTransitions() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "America/New_York"))
+        let engine = ScheduleEngine(calendar: calendar)
+        let entry = ScheduleEntry(hour: 9, minute: 0, action: .turnOn)
+
+        for (month, day) in [(3, 8), (11, 1)] {
+            let reference = try date(2026, month, day, 12, 0, calendar: calendar)
+            XCTAssertEqual(
+                engine.occurrence(for: entry, relativeTo: reference, solarTimes: solarTimes),
+                try date(2026, month, day, 9, 0, calendar: calendar)
+            )
+        }
+    }
+
+    func testRepeatedFallBackTimeUsesFirstOccurrenceAndRunsOnce() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "America/New_York"))
+        let formatter = ISO8601DateFormatter()
+        let firstOccurrence = try XCTUnwrap(formatter.date(from: "2026-11-01T05:30:00Z"))
+        var currentDate = firstOccurrence.addingTimeInterval(60)
+        let engine = ScheduleEngine(now: { currentDate }, calendar: calendar,
+                                    state: .init(lastCheck: firstOccurrence.addingTimeInterval(-60)))
+        let entry = ScheduleEntry(hour: 1, minute: 30, action: .turnOn)
+        let room = Room(name: "Bedroom", schedules: [entry])
+
+        XCTAssertEqual(engine.occurrence(for: entry, relativeTo: currentDate, solarTimes: solarTimes), firstOccurrence)
+        XCTAssertEqual(engine.evaluate(rooms: [room], solarTimes: solarTimes).decisions.count, 1)
+
+        // The second 01:31 is one hour later in absolute time.
+        currentDate = currentDate.addingTimeInterval(3_600)
+        XCTAssertTrue(engine.evaluate(rooms: [room], solarTimes: solarTimes).decisions.isEmpty)
+        XCTAssertTrue(engine.missedAutomations.isEmpty)
+    }
+
+    func testSolarOffsetsUseConfiguredLocalBaseTimesOnTransitionDays() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "America/New_York"))
+        let engine = ScheduleEngine(calendar: calendar)
+        let sunrise = ScheduleEntry(hour: 0, minute: 0, offsetMinutes: 15, action: .atSunrise)
+        let sunset = ScheduleEntry(hour: 0, minute: 0, offsetMinutes: -30, action: .atSunset)
+
+        for (month, day) in [(3, 8), (11, 1)] {
+            let reference = try date(2026, month, day, 12, 0, calendar: calendar)
+            XCTAssertEqual(engine.occurrence(for: sunrise, relativeTo: reference, solarTimes: solarTimes),
+                           try date(2026, month, day, 6, 45, calendar: calendar))
+            XCTAssertEqual(engine.occurrence(for: sunset, relativeTo: reference, solarTimes: solarTimes),
+                           try date(2026, month, day, 20, 0, calendar: calendar))
+        }
     }
 
     func testDefaultCalendarTracksSystemTimeZoneChanges() throws {

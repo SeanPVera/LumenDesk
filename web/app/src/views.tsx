@@ -3,24 +3,14 @@ import {
   type Device,
   type Room,
   type Scene,
-  type Schedule,
-  type ScheduleAction,
   hexToRGB,
   rgbToHex,
 } from './bridge'
 import { ShapesEditor, ShapesMiniWall, wallProductName, type ShapesActions } from './ShapesEditor'
+import { SceneCapture } from './SceneCapture'
+import { DeviceName } from './DeviceName'
 
-export const ACTION_LABELS: Record<ScheduleAction, string> = {
-  turnOn: 'Turn on',
-  turnOff: 'Turn off',
-  dim10: 'Dim to 10%',
-  dim25: 'Dim to 25%',
-  dim50: 'Dim to 50%',
-  dim75: 'Dim to 75%',
-  applyScene: 'Apply scene',
-}
-
-const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+export { AutomationView, ACTION_LABELS } from './SchedulesView'
 
 export const PRESETS = [
   { label: 'Warm', rgb: { r: 255, g: 176, b: 92 } },
@@ -37,7 +27,7 @@ export interface Controls {
   color: (d: Device, rgb: { r: number; g: number; b: number }) => void
   kelvin: (d: Device, k: number) => void
   favorite: (d: Device) => void
-  rename: (d: Device, name: string) => void
+  rename: (d: Device, name: string) => Promise<boolean>
   assign: (d: Device, roomID: string | null) => void
   /** Panel-resolved commands for a paired Nanoleaf Shapes or Aurora wall. */
   shapes: (d: Device) => ShapesActions
@@ -68,7 +58,7 @@ export function LightCard({
   onSelect?: (id: string) => void
   compact?: boolean
 }) {
-  const disabled = !device.reachable
+  const disabled = !device.reachable || Boolean(device.needsPairing)
   const hex = rgbToHex(device.color ?? { r: 255, g: 255, b: 255 })
 
   return (
@@ -97,7 +87,8 @@ export function LightCard({
             className={`star${device.favorite ? ' active' : ''}`}
             onClick={() => controls.favorite(device)}
             aria-pressed={Boolean(device.favorite)}
-            title={device.favorite ? 'Remove from favourites' : 'Add to favourites'}
+            aria-label={`${device.favorite ? 'Remove' : 'Add'} ${device.name} ${device.favorite ? 'from' : 'to'} favorites`}
+            title={device.favorite ? 'Remove from favorites' : 'Add to favorites'}
           >
             {device.favorite ? '★' : '☆'}
           </button>
@@ -171,26 +162,39 @@ export function LightCard({
 
 // MARK: Home
 
-export function HomeView({ devices, controls, onBulk, onScan, scanning }: {
+export function HomeView({ devices, controls, onBulk, onScan, scanning, scopeName, onSaveScene, onSetupRoom }: {
   devices: Device[]; rooms: Room[]; controls: Controls
   onBulk: (ids: string[], action: 'on' | 'off') => void
   onScan: () => void; scanning: boolean
+  scopeName: string
+  onSaveScene: (name: string) => Promise<boolean>
+  onSetupRoom?: () => void
 }) {
   const [selected, setSelected] = useState<string[]>([])
   const [query, setQuery] = useState('')
-  const visible = devices.filter(d => d.name.toLowerCase().includes(query.trim().toLowerCase()))
-  const active = selected.filter(id => devices.some(d => d.id === id))
-  const targets = (selected.length ? devices.filter(d => active.includes(d.id)) : devices).filter(d => d.reachable)
+  const [favoritesOnly, setFavoritesOnly] = useState(false)
+  const visible = devices.filter(d => (!favoritesOnly || d.favorite) && d.name.toLowerCase().includes(query.trim().toLowerCase()))
+  const inScopeSelection = selected.filter(id => devices.some(d => d.id === id))
+  const active = inScopeSelection.filter(id => visible.some(d => d.id === id))
+  const hiddenSelectionCount = inScopeSelection.length - active.length
+  const filtered = favoritesOnly || Boolean(query.trim())
+  const targets = (inScopeSelection.length ? visible.filter(d => active.includes(d.id)) : visible).filter(d => d.reachable && !d.needsPairing)
   const level = targets.length ? Math.round(targets.reduce((sum, d) => sum + d.brightness, 0) / targets.length) : 0
   const toggle = (id: string) => setSelected(ids => ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id])
   const color = rgbToHex(targets[0]?.color ?? {r: 255, g: 255, b: 255})
   const mixed = new Set(targets.map(d => rgbToHex(d.color ?? {r: 255, g: 255, b: 255}))).size > 1
   return <section className="room-workspace" aria-label="Room lighting">
-    {!devices.length ? <EmptyLights scanning={scanning} onScan={onScan} /> : <>
+    {!devices.length ? <EmptyLights scanning={scanning} onScan={onScan} onSetupRoom={onSetupRoom} /> : <>
+      <div className="filters" role="group" aria-label="Fixture filters">
+        <button className={`chip${favoritesOnly ? '' : ' active'}`} aria-pressed={!favoritesOnly}
+          onClick={() => setFavoritesOnly(false)}>All fixtures ({devices.length})</button>
+        <button className={`chip${favoritesOnly ? ' active' : ''}`} aria-pressed={favoritesOnly}
+          onClick={() => setFavoritesOnly(true)}>★ Favorites ({devices.filter(d => d.favorite).length})</button>
+      </div>
       <div className="light-field" aria-label="Fixtures in this room">
-        <p className="field-caption">Fixture order · select to control{devices.length > 12 && ' · scroll for more fixtures'}</p>
+        <p className="field-caption">Fixture order · select to control{visible.length > 12 && ' · scroll for more fixtures'}</p>
         <div className="emitters">
-          {devices.map(d => <button key={d.id} className="emitter"
+          {visible.map(d => <button key={d.id} className="emitter"
             title={d.name} aria-pressed={active.includes(d.id)} onClick={() => toggle(d.id)}
             aria-label={`${d.name}, ${!d.reachable ? 'not responding' : d.power ? `${d.brightness}% on` : 'off'}`}>
             {isShapesWall(d) ? <ShapesMiniWall device={d} /> : <span className="emission" style={{
@@ -206,21 +210,27 @@ export function HomeView({ devices, controls, onBulk, onScan, scanning }: {
       </div>
       <div className="room-editing">
         <div className="fixture-directory">
-          <div className="section-line"><h2>Fixtures</h2><button onClick={() => setSelected(visible.map(d => d.id))}>Select visible</button></div>
+          <div className="section-line"><h2>Fixtures</h2><button disabled={!visible.length} onClick={() => setSelected(visible.map(d => d.id))}>Select visible</button></div>
           <input type="search" aria-label="Find a fixture" placeholder="Find a fixture" value={query} onChange={e => setQuery(e.target.value)} />
-          {active.some(id => !visible.some(d => d.id === id)) && <p className="note">Your selection includes fixtures hidden by this search.</p>}
+          {hiddenSelectionCount > 0 && <p className="note">{hiddenSelectionCount} selected fixture{hiddenSelectionCount === 1 ? ' is' : 's are'} hidden by your filters and excluded from changes.</p>}
           <ul className="fixture-rows">{visible.map(d => <li key={d.id}>
             <label><input type="checkbox" checked={active.includes(d.id)} onChange={() => toggle(d.id)} />
               <span><strong>{d.name}</strong><small>{d.brand.toUpperCase()} · {outputKind(d)}</small></span>
             </label>
             <span>{!d.reachable ? 'Offline' : d.power ? `${d.brightness}%` : 'Off'}</span>
+            <button className={`star${d.favorite ? ' active' : ''}`} onClick={() => controls.favorite(d)}
+              aria-pressed={Boolean(d.favorite)}
+              aria-label={`${d.favorite ? 'Remove' : 'Add'} ${d.name} ${d.favorite ? 'from' : 'to'} favorites`}
+              title={d.favorite ? 'Remove from favorites' : 'Add to favorites'}>{d.favorite ? '★' : '☆'}</button>
           </li>)}</ul>
-          {!visible.length && <p>No fixtures match this search.</p>}
+          {!visible.length && <p>{favoritesOnly && !devices.some(d => d.favorite)
+            ? 'No favorites in this room yet. Choose All fixtures, then use a star beside a fixture.'
+            : 'No fixtures match your filters.'}</p>}
         </div>
         <section className="output-controls" aria-label="Selected output controls">
-          <div className="section-line"><h2>{selected.length ? `${active.length} selected` : 'Room output'}</h2>
-            {selected.length > 0 && <button onClick={() => setSelected([])}>Clear</button>}</div>
-          <p className="meta">{targets.length} available · changes apply to {selected.length ? 'your selection' : 'this room'}</p>
+          <div className="section-line"><h2>{inScopeSelection.length ? `${active.length} selected` : filtered ? 'Filtered output' : 'Room output'}</h2>
+            {inScopeSelection.length > 0 && <button onClick={() => setSelected([])}>Clear</button>}</div>
+          <p className="meta">{targets.length} available · changes apply to {inScopeSelection.length ? 'your visible selection' : filtered ? 'visible fixtures only' : scopeName}</p>
           <div className="toolbar">
             <button className="primary" disabled={!targets.length} onClick={() => onBulk(targets.map(d => d.id), 'on')}>On</button>
             <button disabled={!targets.length} onClick={() => onBulk(targets.map(d => d.id), 'off')}>Off</button>
@@ -243,6 +253,9 @@ export function HomeView({ devices, controls, onBulk, onScan, scanning }: {
           {active.length === 1 && <details><summary>Fixture details</summary>
             <ul className="inspector-list"><LightCard device={devices.find(d => d.id === active[0])!} controls={controls} compact /></ul>
           </details>}
+          <details className="scene-capture"><summary>Save current lighting</summary>
+            <SceneCapture devices={devices} scopeName={scopeName} onSave={onSaveScene} showHeading={false} />
+          </details>
         </section>
       </div>
       {active.length === 1 && (() => {
@@ -265,7 +278,9 @@ function Group({ title, count, children }: { title: string; count?: number; chil
   )
 }
 
-function EmptyLights({ scanning, onScan }: { scanning: boolean; onScan: () => void }) {
+function EmptyLights({ scanning, onScan, onSetupRoom }: {
+  scanning: boolean; onScan: () => void; onSetupRoom?: () => void
+}) {
   return (
     <div className="panel">
       <h2>No lights found yet</h2>
@@ -277,6 +292,7 @@ function EmptyLights({ scanning, onScan }: { scanning: boolean; onScan: () => vo
       <button className="primary" onClick={onScan} disabled={scanning}>
         {scanning ? 'Scanning…' : 'Scan for lights'}
       </button>
+      {onSetupRoom && <button onClick={onSetupRoom}>Set up a room</button>}
     </div>
   )
 }
@@ -286,46 +302,26 @@ function EmptyLights({ scanning, onScan }: { scanning: boolean; onScan: () => vo
 export function LibraryView({
   scenes,
   devices,
+  allDevices,
+  rooms,
+  scopeName,
   onSave,
   onApply,
   onDelete,
 }: {
   scenes: Scene[]
   devices: Device[]
-  onSave: (name: string) => void
+  allDevices: Device[]
+  rooms: Room[]
+  scopeName: string
+  onSave: (name: string) => Promise<boolean>
   onApply: (scene: Scene) => void
   onDelete: (scene: Scene) => void
 }) {
-  const [name, setName] = useState('')
-
   return (
     <section>
       <div className="panel">
-        <h2>Save the current lighting</h2>
-        <p>
-          Captures this room's power, brightness and colour right now, so you can bring it back
-          in one click. {devices.length} light{devices.length === 1 ? '' : 's'} will be included.
-        </p>
-        <form
-          className="inline-form"
-          onSubmit={e => {
-            e.preventDefault()
-            if (!name.trim()) return
-            onSave(name.trim())
-            setName('')
-          }}
-        >
-          <input
-            type="text"
-            placeholder="Scene name, e.g. Evening"
-            value={name}
-            onChange={e => setName(e.target.value)}
-            maxLength={60}
-          />
-          <button className="primary" type="submit" disabled={!name.trim() || devices.length === 0}>
-            Save scene
-          </button>
-        </form>
+        <SceneCapture devices={devices} scopeName={scopeName} onSave={onSave} />
       </div>
 
       {scenes.length === 0 ? (
@@ -344,9 +340,10 @@ export function LibraryView({
                 </div>
               </div>
               <SceneScore scene={scene} />
-              <p className="note">Recalls its saved fixtures, including any outside the current room.</p>
+              <SceneScope scene={scene} devices={allDevices} rooms={rooms}
+                currentDevices={devices} scopeName={scopeName} />
               <div className="whites">
-                <button className="primary" onClick={() => onApply(scene)}>
+                <button className="primary" onClick={() => onApply(scene)} disabled={!Object.keys(scene.snapshots ?? {}).length}>
                   Apply
                 </button>
                 <button className="ghost" onClick={() => { if (window.confirm(`Delete “${scene.name}”? This cannot be undone in the browser.`)) onDelete(scene) }}>
@@ -361,167 +358,62 @@ export function LibraryView({
   )
 }
 
-function SceneScore({ scene }: { scene: Scene }) {
-  return <div className="scene-score" aria-label="Saved fixture color and level">
-    {Object.keys(scene.snapshots ?? {}).sort().map(id => {
-      const s = scene.snapshots[id] as { power?: boolean; brightness?: number; color?: {r:number;g:number;b:number} }
-      return <span key={id} style={{
-        background: s.color ? rgbToHex(s.color) : 'var(--secondary)',
-        height: s.power === false ? 3 : 8 + Math.max(0, Math.min(100, s.brightness ?? 50)) * 0.3,
-        opacity: s.power === false ? 0.25 : 1,
-      }} />
-    })}
+function SceneScope({ scene, devices, rooms, currentDevices, scopeName }: {
+  scene: Scene; devices: Device[]; rooms: Room[]; currentDevices: Device[]; scopeName: string
+}) {
+  const currentIDs = new Set(currentDevices.map(device => device.id))
+  const saved = Object.keys(scene.snapshots ?? {}).map(id => {
+    const device = devices.find(candidate => candidate.id === id)
+    const room = device && rooms.find(candidate => candidate.lightIDs.includes(id))
+    return {
+      id,
+      name: device?.name ?? `Unavailable fixture (${id})`,
+      room: room?.name ?? (device ? 'No room' : 'Unknown room'),
+      missing: !device,
+      unavailable: !device || !device.reachable || Boolean(device.needsPairing),
+      outside: Boolean(device) && !currentIDs.has(id),
+    }
+  })
+  const unavailable = saved.filter(fixture => fixture.unavailable).length
+  const outside = saved.filter(fixture => fixture.outside).length
+  const missing = saved.some(fixture => fixture.missing)
+  const roomCounts = new Map<string, number>()
+  saved.forEach(fixture => roomCounts.set(fixture.room, (roomCounts.get(fixture.room) ?? 0) + 1))
+
+  return <div className="scene-scope">
+    <p className="note">Saved fixtures: {saved.length
+      ? saved.slice(0, 3).map(fixture => fixture.name).join(', ') + (saved.length > 3 ? ` and ${saved.length - 3} more` : '')
+      : 'None'}.</p>
+    {saved.length > 0 && <>
+      <p className="note">Current rooms: {Array.from(roomCounts, ([room, count]) => `${room} (${count})`).join(', ')}.</p>
+      <p className={outside || unavailable ? 'note warn' : 'note'}>
+        {outside ? `${outside} saved fixture${outside === 1 ? '' : 's'} outside ${scopeName} will also be recalled. `
+          : missing ? 'Recall uses the saved fixtures shown below. ' : `All saved fixtures are in ${scopeName}. `}
+        {unavailable ? `${unavailable} unavailable fixture${unavailable === 1 ? '' : 's'} may be skipped.` : 'All are available.'}
+      </p>
+      <details><summary>View all {saved.length} saved fixture{saved.length === 1 ? '' : 's'}</summary>
+        <ul className="scene-fixture-list">{saved.map(fixture => <li key={fixture.id}>
+          <strong>{fixture.name}</strong> · {fixture.room}
+          {fixture.outside && <span> · Outside {scopeName}</span>}
+          {fixture.unavailable && <span className="warn"> · Unavailable</span>}
+        </li>)}</ul>
+      </details>
+    </>}
   </div>
 }
 
-// MARK: Automation (schedules)
-
-export function AutomationView({
-  rooms,
-  scenes,
-  onAdd,
-  onUpdate,
-  onDelete,
-}: {
-  rooms: Room[]
-  scenes: Scene[]
-  onAdd: (roomID: string, entry: Partial<Schedule>) => void
-  onUpdate: (roomID: string, scheduleID: string, patch: Partial<Schedule>) => void
-  onDelete: (roomID: string, scheduleID: string) => void
-}) {
-  if (rooms.length === 0) {
-    return (
-      <div className="panel">
-        <h2>Create a room first</h2>
-        <p>
-          Schedules act on a room's lights, so add a room in <strong>Devices</strong> and assign
-          some lights to it.
-        </p>
-      </div>
-    )
-  }
-
-  return (
-    <section>
-      <p className="note wide-note">
-        Schedules run in the bridge, so they fire whether or not this page is open — as long as the
-        bridge is running.
-      </p>
-      {rooms.map(room => (
-        <div className="group" key={room.id}>
-          <h2 className="group-title">
-            {room.name}
-            <span className="count">{room.schedules.length}</span>
-          </h2>
-          <ul className="rows">
-            {room.schedules.map(s => (
-              <li key={s.id} className={`row${s.isEnabled ? '' : ' muted'}`}>
-                <label className="row-toggle">
-                  <input
-                    type="checkbox"
-                    checked={s.isEnabled}
-                    onChange={e => onUpdate(room.id, s.id, { isEnabled: e.target.checked })}
-                    aria-label={`Enable ${ACTION_LABELS[s.action]}`}
-                  />
-                </label>
-                <strong className="row-time">
-                  {String(s.hour).padStart(2, '0')}:{String(s.minute).padStart(2, '0')}
-                </strong>
-                <span className="row-action">
-                  {ACTION_LABELS[s.action]}
-                  {s.action === 'applyScene' &&
-                    ` — ${scenes.find(x => x.id === s.sceneID)?.name ?? 'missing scene'}`}
-                </span>
-                <span className="row-days">
-                  {s.weekdays.length === 7 ? 'Every day' : s.weekdays.map(d => DAYS[d - 1]).join(' ')}
-                </span>
-                <button className="ghost" onClick={() => onDelete(room.id, s.id)}>
-                  Delete
-                </button>
-              </li>
-            ))}
-          </ul>
-          <ScheduleForm room={room} scenes={scenes} onAdd={onAdd} />
-        </div>
-      ))}
-    </section>
-  )
-}
-
-function ScheduleForm({
-  room,
-  scenes,
-  onAdd,
-}: {
-  room: Room
-  scenes: Scene[]
-  onAdd: (roomID: string, entry: Partial<Schedule>) => void
-}) {
-  const [time, setTime] = useState('07:30')
-  const [action, setAction] = useState<ScheduleAction>('turnOn')
-  const [sceneID, setSceneID] = useState('')
-  const [weekdays, setWeekdays] = useState<number[]>([1, 2, 3, 4, 5, 6, 7])
-
-  const toggleDay = (day: number) =>
-    setWeekdays(days => (days.includes(day) ? days.filter(d => d !== day) : [...days, day].sort()))
-
-  return (
-    <form
-      className="inline-form"
-      onSubmit={e => {
-        e.preventDefault()
-        const [hour, minute] = time.split(':').map(Number)
-        onAdd(room.id, {
-          hour,
-          minute,
-          action,
-          weekdays,
-          sceneID: action === 'applyScene' ? sceneID || null : null,
-        })
-      }}
-    >
-      <input type="time" value={time} onChange={e => setTime(e.target.value)} required />
-      <select value={action} onChange={e => setAction(e.target.value as ScheduleAction)}>
-        {(Object.keys(ACTION_LABELS) as ScheduleAction[]).map(a => (
-          <option key={a} value={a}>
-            {ACTION_LABELS[a]}
-          </option>
-        ))}
-      </select>
-      {action === 'applyScene' && (
-        <select value={sceneID} onChange={e => setSceneID(e.target.value)} required>
-          <option value="">Choose a scene…</option>
-          {scenes.map(s => (
-            <option key={s.id} value={s.id}>
-              {s.name}
-            </option>
-          ))}
-        </select>
-      )}
-      <div className="days" role="group" aria-label="Days">
-        {DAYS.map((label, index) => {
-          const day = index + 1
-          return (
-            <button
-              key={label}
-              type="button"
-              className={`chip day${weekdays.includes(day) ? ' active' : ''}`}
-              aria-pressed={weekdays.includes(day)}
-              onClick={() => toggleDay(day)}
-            >
-              {label}
-            </button>
-          )
-        })}
-      </div>
-      <button
-        type="submit"
-        disabled={(action === 'applyScene' && !sceneID) || weekdays.length === 0}
-      >
-        Add schedule
-      </button>
-    </form>
-  )
+function SceneScore({ scene }: { scene: Scene }) {
+  return <div className="scene-score" role="img" aria-label="Saved fixture color and level">
+    {Object.keys(scene.snapshots ?? {}).sort().map(id => {
+      const s = scene.snapshots[id] as { isOn?: boolean; power?: boolean; brightness?: number; color?: {r:number;g:number;b:number} }
+      const isOn = s.isOn ?? s.power
+      return <span key={id} style={{
+        background: s.color ? rgbToHex(s.color) : 'var(--secondary)',
+        height: isOn === false ? 3 : 8 + Math.max(0, Math.min(100, s.brightness ?? 50)) * 0.3,
+        opacity: isOn === false ? 0.25 : 1,
+      }} />
+    })}
+  </div>
 }
 
 // MARK: Devices
@@ -535,9 +427,9 @@ function ShapesPairing({ onPair }: { onPair: (host: string, port: number) => Pro
     <div className="panel">
       <h2>Pair a Nanoleaf Shapes or Aurora wall</h2>
       <ol className="steps">
-        <li>Find the controller’s IP address in your router’s list of connected devices.</li>
+        <li>Find the controller’s IP address in your router’s list of connected devices and enter it below.</li>
         <li>Hold the controller’s power button for 5–7 seconds, until its LED flashes.</li>
-        <li>Within 30 seconds, enter the address and choose Pair.</li>
+        <li>Within 30 seconds, choose Pair.</li>
       </ol>
       <form
         className="schedule-form"
@@ -587,7 +479,7 @@ export function DevicesView({
   devices: Device[]
   rooms: Room[]
   controls: Controls
-  onAddRoom: (name: string) => void
+  onAddRoom: (name: string) => Promise<boolean>
   onDeleteRoom: (room: Room) => void
   onPairShapes: (host: string, port: number) => Promise<void>
   onForgetShapes: (d: Device) => void
@@ -595,6 +487,7 @@ export function DevicesView({
   scanning: boolean
 }) {
   const [roomName, setRoomName] = useState('')
+  const [addingRoom, setAddingRoom] = useState(false)
 
   return (
     <section>
@@ -603,22 +496,28 @@ export function DevicesView({
         <p>Group lights so scenes and schedules can act on them together.</p>
         <form
           className="inline-form"
-          onSubmit={e => {
+          onSubmit={async e => {
             e.preventDefault()
-            if (!roomName.trim()) return
-            onAddRoom(roomName.trim())
-            setRoomName('')
+            if (addingRoom || !roomName.trim()) return
+            setAddingRoom(true)
+            try {
+              if (await onAddRoom(roomName.trim())) setRoomName('')
+            } finally {
+              setAddingRoom(false)
+            }
           }}
         >
           <input
             type="text"
+            aria-label="Room name"
             placeholder="Room name, e.g. Studio"
             value={roomName}
             onChange={e => setRoomName(e.target.value)}
             maxLength={60}
+            disabled={addingRoom}
           />
-          <button className="primary" type="submit" disabled={!roomName.trim()}>
-            Add room
+          <button className="primary" type="submit" disabled={addingRoom || !roomName.trim()}>
+            {addingRoom ? 'Adding…' : 'Add room'}
           </button>
         </form>
         {rooms.length > 0 && (
@@ -626,7 +525,11 @@ export function DevicesView({
             {rooms.map(r => (
               <li key={r.id} className="pill">
                 {r.name} <span className="count">{r.lightIDs.length}</span>
-                <button className="pill-x" onClick={() => onDeleteRoom(r)} aria-label={`Delete ${r.name}`}>
+                <button className="pill-x" onClick={() => {
+                  const lights = r.lightIDs.length ? ` ${r.lightIDs.length} light${r.lightIDs.length === 1 ? '' : 's'} will be moved to No room.` : ''
+                  const schedules = r.schedules.length ? ` ${r.schedules.length} schedule${r.schedules.length === 1 ? '' : 's'} will be deleted.` : ''
+                  if (window.confirm(`Delete “${r.name}”?${lights}${schedules} This cannot be undone in the browser.`)) onDeleteRoom(r)
+                }} aria-label={`Delete ${r.name}`}>
                   ×
                 </button>
               </li>
@@ -652,15 +555,7 @@ export function DevicesView({
             {devices.map(d => (
               <li key={d.id} className={`row${d.reachable ? '' : ' muted'}`}>
                 <span className={`badge ${d.brand}`}>{d.brand.toUpperCase()}</span>
-                <input
-                  className="rename"
-                  defaultValue={d.name}
-                  aria-label={`Rename ${d.name}`}
-                  onBlur={e => {
-                    const value = e.target.value.trim()
-                    if (value && value !== d.name) controls.rename(d, value)
-                  }}
-                />
+                <DeviceName device={d} onRename={controls.rename} />
                 <span className="row-days mono">{d.ip ?? '—'}</span>
                 <select
                   value={d.roomID ?? ''}

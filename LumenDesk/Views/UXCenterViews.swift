@@ -310,6 +310,8 @@ struct ScenePreviewView: View {
         VStack(alignment: .leading, spacing: 14) {
             sheetHeader("Preview — \(scene.name)", icon: "eye", dismiss: dismiss)
             Text("Review the exact scope, then preview it temporarily before applying.").font(.callout).foregroundStyle(.secondary)
+            Text(manager.sceneScopeSummary(scene).description)
+                .font(.callout).foregroundStyle(.secondary)
             HStack { previewMetric("Available", availableIDs.count, .blue); previewMetric("Unchanged", preview.unchanged.count, .secondary); previewMetric("Offline", preview.unreachable.count, Lumen.warning); previewMetric("Missing", preview.missingIDs.count, .red) }
             Toggle("Allow this scene to turn lights off", isOn: $allowTurningOff)
                 .disabled(availableIDs.isEmpty)
@@ -334,7 +336,7 @@ struct ScenePreviewView: View {
                     if device.isStale { Text("Offline").foregroundStyle(Lumen.warning) }
                 }
             }.listStyle(.inset).frame(minHeight: 180)
-            if let result = manager.lastSceneResult, result.sceneName == scene.name, !result.failedIDs.isEmpty {
+            if let result = manager.lastSceneResult, result.scene.id == scene.id, !result.failedIDs.isEmpty {
                 HStack { Label("\(result.failedIDs.count) light(s) need retry", systemImage: "wifi.slash").foregroundStyle(Lumen.warning); Spacer(); Button("Retry Failed Lights") { manager.retryLastSceneFailures() } }
             }
             HStack {
@@ -579,6 +581,9 @@ struct SceneEditorView: View {
         .padding(20).sheetFrame(minWidth: 650, idealWidth: 760, minHeight: 460, idealHeight: 600)
         .onAppear { if let recovered = manager.recoveredDraft(for: original.id), recovered != original { draft = recovered } }
         .onChange(of: draft) { value in if value != original { manager.autosaveSceneDraft(value) } }
+        .onDisappear {
+            if manager.rehearsalSceneID == original.id { manager.stopSceneRehearsal(restore: true) }
+        }
         .confirmationDialog("Discard unsaved scene changes?", isPresented: $showingDiscard) { Button("Discard Changes", role: .destructive) { manager.discardSceneDraft(for: original.id); manager.stopSceneRehearsal(); dismiss() } }
         .sheet(isPresented: $showingHistory) { SceneHistoryView(sceneID: draft.id).environmentObject(manager) }
     }

@@ -88,6 +88,8 @@ export function ShapesEditor({ device, actions }: { device: Device; actions: Sha
   const [startHex, setStartHex] = useState('#ffffff')
   const [hexText, setHexText] = useState('')
   const [message, setMessage] = useState<string | null>(null)
+  const [painting, setPainting] = useState(false)
+  const [orienting, setOrienting] = useState(false)
   const refs = useRef(new Map<number, SVGGElement>())
   const stage = useRef<HTMLDivElement>(null)
   // Drawn one unit per CSS pixel, so labels and edges stay legible on a phone.
@@ -179,7 +181,7 @@ export function ShapesEditor({ device, actions }: { device: Device; actions: Sha
   }
 
   const onEditorKey = (event: KeyboardEvent<HTMLElement>) => {
-    if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'z' || !draft) return
+    if (painting || !(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'z' || !draft) return
     // A field keeps its own undo; only the wall and its buttons undo the draft.
     const target = event.target
     if (target instanceof HTMLTextAreaElement) return
@@ -287,7 +289,7 @@ export function ShapesEditor({ device, actions }: { device: Device; actions: Sha
         </div>
 
         <div className="shapes-tools">
-          <fieldset>
+          <fieldset disabled={orienting}>
             <legend>Orientation</legend>
             <p className="note">
               {shapes.orientationPending !== null ? `${shapes.orientationPending}° requested, waiting for the controller to confirm`
@@ -302,19 +304,28 @@ export function ShapesEditor({ device, actions }: { device: Device; actions: Sha
               <button onClick={() => setDraftDegrees(normalizeDegrees(degrees + 90))} aria-label="Turn 90 degrees clockwise">↻ 90°</button>
             </div>
             <div className="toolbar">
-              <button className="primary" disabled={offline || draftDegrees === null || draftDegrees === reported}
-                onClick={() => {
-                  report(actions.orientation(degrees), 'Orientation sent. It counts once the controller reports it back.')
-                  setDraftDegrees(null)
+              <button className="primary" disabled={offline || orienting || draftDegrees === null || draftDegrees === reported}
+                onClick={async () => {
+                  if (orienting) return
+                  setOrienting(true)
+                  try {
+                    await actions.orientation(degrees)
+                    setMessage('Orientation sent. It counts once the controller reports it back.')
+                    setDraftDegrees(null)
+                  } catch (err) {
+                    setMessage(err instanceof Error ? err.message : String(err))
+                  } finally {
+                    setOrienting(false)
+                  }
                 }}>
-                Apply orientation
+                {orienting ? 'Applying…' : 'Apply orientation'}
               </button>
               <button className="ghost" disabled={draftDegrees === null} onClick={() => setDraftDegrees(null)}>Reset</button>
             </div>
             <p className="note">Turn the drawing until it matches the wall. Orientation aims spatial output and the controller’s own gestures; the panels never move.</p>
           </fieldset>
 
-          <fieldset>
+          <fieldset disabled={painting}>
             <legend>Paint panels</legend>
             {!draft ? (
               shown ? (
@@ -367,11 +378,19 @@ export function ShapesEditor({ device, actions }: { device: Device; actions: Sha
                   <button onClick={redoStep} disabled={!redo.length}>Redo</button>
                 </div>
                 <div className="toolbar">
-                  <button className="primary" disabled={offline} onClick={() => {
-                    report(actions.paint(Object.fromEntries(ids.map(id => [id, toRGB(draft[id] ?? toTone(BLACK))]))),
-                      'Applied. The wall confirms it on its next reading.')
-                    setDraft(null)
-                  }}>Apply to wall</button>
+                  <button className="primary" disabled={offline || painting} onClick={async () => {
+                    if (painting) return
+                    setPainting(true)
+                    try {
+                      await actions.paint(Object.fromEntries(ids.map(id => [id, toRGB(draft[id] ?? toTone(BLACK))])))
+                      setMessage('Applied. The wall confirms it on its next reading.')
+                      setDraft(null)
+                    } catch (err) {
+                      setMessage(err instanceof Error ? err.message : String(err))
+                    } finally {
+                      setPainting(false)
+                    }
+                  }}>{painting ? 'Applying…' : 'Apply to wall'}</button>
                   <button className="ghost" onClick={() => setDraft(null)}>Discard draft</button>
                 </div>
               </>

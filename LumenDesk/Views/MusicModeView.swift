@@ -5,6 +5,23 @@ import AppKit
 #endif
 
 struct MusicModeView: View {
+    private enum InputSource: String, CaseIterable, Identifiable {
+        case platformAudio, file, midiClock
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .platformAudio:
+                #if os(macOS)
+                return "System audio"
+                #else
+                return "Microphone"
+                #endif
+            case .file: return "Audio file"
+            case .midiClock: return "MIDI clock"
+            }
+        }
+    }
+
     @EnvironmentObject private var manager: LightManager
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Binding var scope: LightScope
@@ -14,6 +31,8 @@ struct MusicModeView: View {
     @State private var advancedExpanded = false
     @State private var showUnsafeWarning = false
     @State private var showFileImporter = false
+    @State private var selectedSource: InputSource = .platformAudio
+    @State private var selectedFile: URL?
     @State private var audioStatus: MusicAudioSourceStatus = .idle
     @State private var inputChannels: Int?
     /// A fader drag has reached the running show but not yet been saved.
@@ -28,7 +47,10 @@ struct MusicModeView: View {
 
     private var stereoUnavailableReason: String? {
         if topology.expandedTargets(for: fixtures).count < 2 { return "Stereo image needs at least two fixture or segment positions." }
-        if audioStatus == .midiClock { return "MIDI clock has timing only, with no stereo audio." }
+        let usesMIDIClock = isRunning ? audioStatus == .midiClock : selectedSource == .midiClock
+        if usesMIDIClock {
+            return "MIDI clock has timing only, with no stereo audio."
+        }
         if isRunning && inputChannels == 1 { return "This source is mono; stereo image needs a stereo source." }
         return nil
     }
@@ -36,8 +58,13 @@ struct MusicModeView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             intro
+            VStack(alignment: .leading, spacing: 16) {
+                sourcePicker
+                presetPicker
+                topologyEditor
+                if !isRunning { transportControls }
+            }
             sourceAndInput
-            presetPicker
             MusicModeVisualizerView(
                 controller: manager.musicModeController,
                 scope: scope,
@@ -45,7 +72,6 @@ struct MusicModeView: View {
             )
             primaryControls
             paletteAndMovement
-            topologyEditor
             advancedControls
             quickStart
         }
@@ -68,14 +94,17 @@ struct MusicModeView: View {
             Text("Music Mode will still enforce its absolute 3 flashes-per-second ceiling and your selected frequency, but flashing can affect people with photosensitivity. No-flash mode is recommended. Ordinary brightness changes can still be uncomfortable; no setting guarantees medical safety.")
         }
         .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.audio], allowsMultipleSelection: false) { result in
-            guard case .success(let urls) = result, let url = urls.first else { return }
-            commitConfiguration()
-            manager.startMusicMode(
-                configuration: configuration,
-                scope: scope,
-                reducedMotion: reduceMotion,
-                capture: .file(url)
-            )
+            switch result {
+            case .success(let urls):
+                guard let url = urls.first else { return }
+                selectedFile = url
+                selectedSource = .file
+            case .failure(let error):
+                let failure = error as NSError
+                if failure.domain != NSCocoaErrorDomain || failure.code != NSUserCancelledError {
+                    manager.publishError("Could not choose an audio file: \(error.localizedDescription)")
+                }
+            }
         }
     }
 
@@ -94,10 +123,7 @@ struct MusicModeView: View {
             }
             Text("\(includedFixtures.count) fixtures · \(configuration.preset.displayName) · \(configuration.photosensitivitySafeMode || reduceMotion ? "Flashes blocked" : "Controlled flashes permitted")")
                 .font(.callout).foregroundStyle(Lumen.meter)
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 12) { transportControls }
-                VStack(alignment: .leading, spacing: 10) { transportControls }
-            }
+            if isRunning { transportControls }
             if includedFixtures.isEmpty {
                 Text("Include a fixture below, or choose a room with lights.")
                     .font(.callout).foregroundStyle(Lumen.warn)
@@ -108,7 +134,7 @@ struct MusicModeView: View {
                 .font(.caption).foregroundStyle(Lumen.meter)
             #if os(macOS)
             HStack(alignment: .top, spacing: 12) {
-                Text("Play a song in Apple Music, then start system audio. LumenDesk listens to audio playing on this Mac; no file import is needed. Other apps playing audio are included.")
+                Text("For system audio, play a song in Apple Music, then press Start Music Mode. LumenDesk listens to audio playing on this Mac, including other apps.")
                     .font(.caption).foregroundStyle(Lumen.meter)
                     .fixedSize(horizontal: false, vertical: true)
                 Button("Open Apple Music") {
@@ -129,24 +155,67 @@ struct MusicModeView: View {
                 .buttonStyle(LumenPrimaryButtonStyle())
         } else {
             Button {
-                commitConfiguration()
-                manager.startMusicMode(configuration: configuration, scope: scope, reducedMotion: reduceMotion)
-            } label: {
-                #if os(macOS)
-                Label("Start system audio", systemImage: "play.fill")
-                #else
-                Label("Start microphone", systemImage: "mic")
-                #endif
-            }
-            .buttonStyle(LumenPrimaryButtonStyle()).disabled(includedFixtures.isEmpty)
-            Button("Open audio file…") { showFileImporter = true }
-                .buttonStyle(LumenSecondaryButtonStyle()).disabled(includedFixtures.isEmpty)
-            Button("MIDI clock") {
+                guard let capture = capturePreference else { return }
                 commitConfiguration()
                 manager.startMusicMode(configuration: configuration, scope: scope,
-                                       reducedMotion: reduceMotion, capture: .midiClock)
+                                       reducedMotion: reduceMotion, capture: capture)
+            } label: {
+                Label("Start Music Mode", systemImage: "play.fill")
             }
-            .buttonStyle(LumenSecondaryButtonStyle()).disabled(includedFixtures.isEmpty)
+            .buttonStyle(LumenPrimaryButtonStyle())
+            .disabled(includedFixtures.isEmpty || capturePreference == nil)
+            .accessibilityHint("Start \(selectedSource.title) with the selected preset and included lights")
+        }
+    }
+
+    private var capturePreference: MusicCapturePreference? {
+        switch selectedSource {
+        case .platformAudio: return .platformDefault
+        case .file: return selectedFile.map { .file($0) }
+        case .midiClock: return .midiClock
+        }
+    }
+
+    private var sourcePicker: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            LumenEyebrow(text: "Input source", tint: Lumen.beamDim, size: 10)
+            if isRunning {
+                Text(audioStatus.displayName).font(.callout)
+                Text("Stop the show before choosing a different source.")
+                    .font(.caption).foregroundStyle(Lumen.meter)
+            } else {
+                Picker("Input source", selection: $selectedSource) {
+                    ForEach(InputSource.allCases) { source in Text(source.title).tag(source) }
+                }
+                .pickerStyle(.segmented)
+                if selectedSource == .file {
+                    Button(selectedFile == nil ? "Choose audio file…" : "Change audio file…") {
+                        showFileImporter = true
+                    }
+                    .buttonStyle(LumenSecondaryButtonStyle(compact: true))
+                    Text(selectedFile?.lastPathComponent ?? "Choose a file before starting the show.")
+                        .font(.caption).foregroundStyle(Lumen.meter)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if showsPlainHelp {
+                    Text(selectedSourceHelp)
+                        .font(.caption).foregroundStyle(Lumen.meter)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Text("Choose a source, preset and lights, then press Start. Audio permission and lighting changes begin when you start the show.")
+                    .font(.caption).foregroundStyle(Lumen.meter)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(16)
+        .lumenCard()
+    }
+
+    private var selectedSourceHelp: String {
+        switch selectedSource {
+        case .platformAudio: return MusicModeHelp.systemAudioSource
+        case .file: return "Choose an audio file now. LumenDesk plays it and follows it when you press Start Music Mode."
+        case .midiClock: return MusicModeHelp.midiSource
         }
     }
 

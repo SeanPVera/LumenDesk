@@ -93,6 +93,9 @@ jobs:
           npm install --no-save --package-lock=false @playwright/test@1.56.1 @axe-core/playwright@4.10.2
           npx playwright install --with-deps chromium
           node scripts/visual-review.mjs
+          node scripts/schedule-name-review.mjs
+          node scripts/scene-favorites-review.mjs
+          node scripts/room-setup-review.mjs
 
       - name: Upload web visual review
         if: always()

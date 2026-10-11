@@ -54,6 +54,7 @@ small, .note, .meta, .count { font-size: .86rem; color: var(--secondary); }
 .workspace-nav .nav.active { color: var(--text); border-bottom: 2px solid var(--text); }
 .sidebar-foot { margin-left: auto; font-size: .8rem; color: var(--secondary); }
 .content { padding-top: 28px; min-width: 0; }
+.workspace-controls { border: 0; padding: 0; margin: 0; min-width: 0; }
 .content-head { display: flex; gap: 20px; justify-content: space-between; align-items: center; margin-bottom: 20px; }
 .scope-label { display: block; margin-bottom: 3px; }
 .room-scope { font-size: 1.5rem; font-weight: 600; border-color: transparent; padding-left: 0; background: var(--canvas); }
@@ -189,8 +190,8 @@ meter { width: 100%; height: 12px; accent-color: var(--text); }
 .music-performance { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(300px, 1fr); gap: 32px; }
 .music-output { min-width: 0; }
 .music-performance .music-adjustments { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.music-performance .fixture-list li { flex-wrap: wrap; }
-.music-performance .fixture-list strong { flex: 1 1 180px; }
+.music-desk .fixture-list li { flex-wrap: wrap; }
+.music-desk .fixture-list strong { flex: 1 1 180px; }
 .music-performance .meters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .music-performance .beat-readout, .music-performance .meters > p, .music-performance .meters > details { grid-column: 1 / -1; }
 @media (max-width: 899px) { .music-performance { grid-template-columns: minmax(0, 1fr); gap: 0; } }
@@ -232,4 +233,31 @@ label.inline input[type=number] { width: 84px; }
 @media (forced-colors: active) {
   .shapes-panel.selected polygon { stroke: Highlight; }
   .shapes-panel:focus-visible polygon { stroke: CanvasText; }
+}
+
+.room-setup, .discovery-status { margin-bottom: 24px; }
+.setup-progress { display: flex; flex-wrap: wrap; gap: 12px 28px; padding-left: 24px; color: var(--secondary); }
+.setup-progress [aria-current=step] { color: var(--text); font-weight: 600; }
+.room-setup .inline-form { align-items: end; }
+.room-setup label { max-width: 100%; }
+.room-setup input:not([type=checkbox]):not([type=range]) { max-width: 100%; }
+.scene-scope { grid-column: 1 / -1; }
+.scene-fixture-list { overflow-wrap: anywhere; }
+.scene-capture-form { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.scene-capture-form input { min-width: 0; max-width: 100%; }
+.fixture-rows .star { flex: none; }
+.device-name { display: flex; flex: 1 1 220px; flex-direction: column; gap: 8px; min-width: 0; }
+.device-name input { width: 100%; }
+.name-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.schedule-entry { border-bottom: 1px solid var(--soft-rule); }
+.schedule-entry > .row { border-bottom: 0; }
+.schedule-edit { padding: 12px 0 20px; }
+.bridge-install { display: flex; flex-direction: column; gap: 12px; }
+.download-link { display: inline-flex; align-self: start; align-items: center; min-height: 44px; padding: 8px 14px; background: var(--text); color: var(--canvas); border-radius: 4px; }
+.music-desk .music-transport { padding: 16px; background: var(--surface); border: 1px solid var(--rule); }
+.music-desk.is-running .music-transport { position: sticky; top: 12px; z-index: 2; }
+@media (max-width: 540px) {
+  .setup-progress { gap: 8px 24px; }
+  .scene-capture-form > input { width: 100%; }
+  .room-setup .inline-form > label { width: 100%; }
 }

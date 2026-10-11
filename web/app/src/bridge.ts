@@ -38,6 +38,8 @@ export interface Device {
   name: string
   ip: string | null
   reachable: boolean
+  /** Timestamp of a real device reply, used to distinguish a scan from stale readings. */
+  lastSeen?: number
   power: boolean
   brightness: number
   controlRevision?: number
@@ -91,6 +93,23 @@ export interface BridgeState {
   favorites: string[]
 }
 
+export interface DiscoveryProbeReport {
+  interfaces?: string[]
+  sent?: number
+  unoccupied?: number
+  failed?: number
+  lastError?: string | null
+  error?: string
+  /** Nanoleaf refreshes paired controllers rather than discovering them over UDP. */
+  paired?: number
+}
+
+export interface DiscoveryResponse {
+  ok: boolean
+  /** Absent when using a bridge from before probe diagnostics were exposed. */
+  probes?: Partial<Record<Brand, DiscoveryProbeReport | null>>
+}
+
 export const DEFAULT_PORT = 8765
 
 // When the bridge serves this page itself, the API is on the very same origin,
@@ -142,10 +161,10 @@ export class BridgeError extends Error {
 // call is bounded instead of leaving the UI waiting forever.
 const TIMEOUT_MS = 5000
 
-async function request<T>(port: number, path: string, init?: RequestInit): Promise<T> {
+async function request<T>(port: number, path: string, init?: RequestInit, timeoutMS = TIMEOUT_MS): Promise<T> {
   const response = await fetch(`${bridgeURL(port)}${path}`, {
     ...init,
-    signal: AbortSignal.timeout(TIMEOUT_MS),
+    signal: AbortSignal.timeout(timeoutMS),
     headers: init?.body ? { 'Content-Type': 'application/json' } : undefined,
   })
   if (!response.ok) {
@@ -166,7 +185,10 @@ export function fetchDevices(port: number) {
 }
 
 export function startDiscovery(port: number) {
-  return request<{ ok: boolean }>(port, '/discover', { method: 'POST' })
+  // A paced scan can wait for the operating system to resolve many previously
+  // unseen addresses. Keep the reports instead of discarding them after the
+  // short timeout used by direct lighting commands.
+  return request<DiscoveryResponse>(port, '/discover', { method: 'POST' }, 60_000)
 }
 
 const command = (port: number, id: string, action: string, body: unknown) =>

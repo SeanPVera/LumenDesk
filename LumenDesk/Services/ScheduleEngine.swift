@@ -180,10 +180,31 @@ final class ScheduleEngine {
     }
 
     func occurrence(for entry: ScheduleEntry, relativeTo date: Date, solarTimes: SolarTimes) -> Date? {
-        calendar.date(
-            byAdding: .minute,
-            value: minuteOffset(for: entry, solarTimes: solarTimes),
-            to: calendar.startOfDay(for: date)
+        switch entry.action {
+        case .atSunrise:
+            guard let sunrise = wallClockTime(at: solarTimes.sunriseMinutes, on: date) else { return nil }
+            return calendar.date(byAdding: .minute, value: entry.offsetMinutes, to: sunrise)
+        case .atSunset:
+            guard let sunset = wallClockTime(at: solarTimes.sunsetMinutes, on: date) else { return nil }
+            return calendar.date(byAdding: .minute, value: entry.offsetMinutes, to: sunset)
+        default:
+            return wallClockTime(at: entry.hour * 60 + entry.minute, on: date)
+        }
+    }
+
+    /// Clock times remain local clock times on 23- and 25-hour days. A missing
+    /// 02:30 advances to 03:30, and a repeated 01:30 uses its first occurrence.
+    /// Solar offsets are added after resolving the configured local base time.
+    private func wallClockTime(at minute: Int, on date: Date) -> Date? {
+        let clamped = clampedMinute(minute)
+        return calendar.date(
+            bySettingHour: clamped / 60,
+            minute: clamped % 60,
+            second: 0,
+            of: calendar.startOfDay(for: date),
+            matchingPolicy: .nextTimePreservingSmallerComponents,
+            repeatedTimePolicy: .first,
+            direction: .forward
         )
     }
 

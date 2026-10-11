@@ -4,6 +4,7 @@ import {
   type Room,
   type Scene,
   type Schedule,
+  type DiscoveryResponse,
   DEFAULT_PORT,
   addSchedule,
   applyScene,
@@ -42,13 +43,16 @@ import {
   LibraryView,
   SettingsView,
 } from './views'
-import { MusicModeView } from './MusicModeView'
+import { MusicModeView, flushPendingMusicCleanup } from './MusicModeView'
+import { RoomSetup } from './RoomSetup'
+import { DiscoveryStatus } from './DiscoveryStatus'
+import { countDiscoveryReplies } from './discovery'
 
 type Destination = 'home' | 'library' | 'music' | 'automation' | 'devices' | 'settings'
 
 const NAV: { id: Destination; label: string; icon: string }[] = [
   { id: 'home', label: 'Room', icon: '⌂' },
-  { id: 'library', label: 'Compositions', icon: '' },
+  { id: 'library', label: 'Scenes', icon: '' },
   { id: 'music', label: 'Music', icon: '♩' },
   { id: 'automation', label: 'Schedules', icon: '◷' },
   { id: 'devices', label: 'Devices', icon: '⌁' },
@@ -58,6 +62,7 @@ const NAV: { id: Destination; label: string; icon: string }[] = [
 const PORT_KEY = 'LumenDesk.bridgePort.v1'
 const NAV_KEY = 'LumenDesk.destination.v1'
 const POLL_MS = 1500
+const SETUP_KEY = 'LumenDesk.roomSetupDismissed.v1'
 
 function readStoredPort(): number {
   const value = Number(window.localStorage.getItem(PORT_KEY))
@@ -77,15 +82,22 @@ export default function App() {
   const [rooms, setRooms] = useState<Room[]>([])
   const [scenes, setScenes] = useState<Scene[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [connectionError, setConnectionError] = useState<string | null>(null)
+  const [hasConnected, setHasConnected] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
   const [scanning, setScanning] = useState(false)
   const [attempts, setAttempts] = useState(0)
   const [servedByBridge, setServedByBridge] = useState(false)
   const [roomID, setRoomID] = useState('all')
   const [musicRunning, setMusicRunning] = useState(false)
+  const [setupOpen, setSetupOpen] = useState(false)
+  const [setupDismissed, setSetupDismissed] = useState(() => window.localStorage.getItem(SETUP_KEY) === 'true')
+  const [discovery, setDiscovery] = useState<DiscoveryResponse | null>(null)
+  const [scanAnswered, setScanAnswered] = useState<number | null>(null)
+  const [discoveryError, setDiscoveryError] = useState<string | null>(null)
   // Ids with a command in flight, so a poll cannot overwrite an optimistic
   // value with a reading taken before the command landed.
-  const inFlight = useRef(new Set<string>())
+  const inFlight = useRef(new Map<string, number>())
 
   useEffect(() => window.localStorage.setItem(PORT_KEY, String(port)), [port])
   useEffect(() => window.localStorage.setItem(NAV_KEY, destination), [destination])
@@ -110,10 +122,14 @@ export default function App() {
       setRoomID(current => current === 'all' || next.rooms.some(r => r.id === current) ? current : 'all')
       setScenes(next.scenes)
       setState('connected')
-      setError(null)
+      setHasConnected(true)
+      setConnectionError(null)
+      void flushPendingMusicCleanup(port, postMusicFrame)
+      return next
     } catch (err) {
       setState('unavailable')
-      setError(describeFailure(err))
+      setConnectionError(describeFailure(err))
+      return null
     }
   }, [port])
 
@@ -138,20 +154,24 @@ export default function App() {
   }, [port, poll])
 
   useEffect(() => {
-    if (state !== 'connected') return undefined
-    const timer = window.setInterval(poll, POLL_MS)
+    if (state !== 'connected' && !hasConnected) return undefined
+    const timer = window.setInterval(poll, state === 'connected' ? POLL_MS : 3000)
     return () => window.clearInterval(timer)
-  }, [state, poll])
+  }, [state, poll, hasConnected])
+
+  useEffect(() => {
+    if (state === 'connected' && !rooms.length && !setupDismissed) setSetupOpen(true)
+  }, [state, rooms.length, setupDismissed])
 
   const connect = useCallback(async () => {
     setState('checking')
-    setError(null)
+    setConnectionError(null)
     try {
       await checkHealth(port)
       await poll()
     } catch (err) {
       setState('unavailable')
-      setError(describeFailure(err))
+      setConnectionError(describeFailure(err))
       setAttempts(n => n + 1)
     }
   }, [port, poll])
@@ -159,18 +179,23 @@ export default function App() {
   /** Optimistic device command: patch locally, send, reconcile, release. */
   const run = useCallback(
     async (device: Device, patch: Partial<Device>, action: () => Promise<Device>) => {
-      inFlight.current.add(device.id)
+      inFlight.current.set(device.id, (inFlight.current.get(device.id) ?? 0) + 1)
+      setError(null)
       setDevices(list => list.map(d => (d.id === device.id ? { ...d, ...patch } : d)))
+      let succeeded = false
       try {
         const updated = await action()
         setDevices(list => list.map(d => (d.id === device.id ? { ...d, ...updated } : d)))
-        setError(null)
+        succeeded = true
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err))
-        poll()
       } finally {
-        inFlight.current.delete(device.id)
+        const remaining = (inFlight.current.get(device.id) ?? 1) - 1
+        if (remaining) inFlight.current.set(device.id, remaining)
+        else inFlight.current.delete(device.id)
+        if (!succeeded) void poll()
       }
+      return succeeded
     },
     [poll],
   )
@@ -178,12 +203,15 @@ export default function App() {
   /** Store-changing calls return the whole collection, so just adopt it. */
   const mutate = useCallback(
     async (action: () => Promise<unknown>, message?: string) => {
+      setError(null)
       try {
         await action()
         await poll()
         if (message) setToast(message)
+        return true
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err))
+        return false
       }
     },
     [poll],
@@ -198,12 +226,16 @@ export default function App() {
 
   const scan = useCallback(async () => {
     setScanning(true)
+    setDiscoveryError(null)
+    setScanAnswered(null)
+    const startedAt = Date.now()
     try {
-      await startDiscovery(port)
+      setDiscovery(await startDiscovery(port))
       await new Promise(r => setTimeout(r, 1500))
-      await poll()
+      const next = await poll()
+      if (next) setScanAnswered(countDiscoveryReplies(next.devices, startedAt))
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setDiscoveryError(err instanceof Error ? err.message : String(err))
     } finally {
       setScanning(false)
     }
@@ -228,20 +260,22 @@ export default function App() {
   const bulk = useCallback(
     async (ids: string[], action: 'on' | 'off') => {
       const targets = devices.filter(d => ids.includes(d.id) && d.reachable)
-      await Promise.all(
+      const results = await Promise.all(
         targets.map(d => run(d, { power: action === 'on' }, () => setPower(port, d.id, action === 'on'))),
       )
-      setToast(`${targets.length} light${targets.length === 1 ? '' : 's'} turned ${action}`)
+      const sent = results.filter(Boolean).length
+      const failed = results.length - sent
+      setToast(`${action === 'on' ? 'On' : 'Off'} sent to ${sent} light${sent === 1 ? '' : 's'}${failed ? ` · ${failed} failed` : ''}`)
     },
     [devices, port, run],
   )
 
-  if (state !== 'connected') {
+  if (state !== 'connected' && !hasConnected) {
     return (
       <BridgeSetup
         state={state}
         port={port}
-        error={error}
+        error={connectionError}
         attempts={attempts}
         servedByBridge={servedByBridge}
         onPort={setPort}
@@ -252,6 +286,7 @@ export default function App() {
 
   const reachable = devices.filter(d => d.reachable).length
   const room = rooms.find(r => r.id === roomID)
+  const scopeName = room?.name ?? 'All lights'
   const scopedDevices = room ? devices.filter(d => room.lightIDs.includes(d.id)) : devices
   const inWorkspace = ['home', 'library', 'music'].includes(destination)
 
@@ -267,7 +302,7 @@ export default function App() {
             <li key={item.id}>
               <button
                 className={(destination === item.id || (item.id === 'home' && inWorkspace)) ? 'nav active' : 'nav'}
-                onClick={() => setDestination(item.id)}
+                onClick={() => { setSetupOpen(false); setDestination(item.id) }}
                 aria-current={(destination === item.id || (item.id === 'home' && inWorkspace)) ? 'page' : undefined}
               >
                 {item.label}
@@ -283,6 +318,11 @@ export default function App() {
       </nav>
 
       <main className="content">
+        {state !== 'connected' && <div className="diagnostic" role="status">
+          <p>{state === 'checking' ? 'Reconnecting to the bridge…' : `${connectionError ?? 'Bridge disconnected.'} Reconnecting automatically.`}</p>
+          <p>Your edits are kept here. Light readings may be out of date; controls will return when the bridge reconnects.</p>
+          <button onClick={connect} disabled={state === 'checking'}>Reconnect now</button>
+        </div>}
         <header className="content-head">
           {inWorkspace ? <>
             <div>
@@ -295,13 +335,16 @@ export default function App() {
               <p className="meta">{scopedDevices.filter(d => d.power && d.reachable).length} lit · {scopedDevices.length} fixtures · {scopedDevices.filter(d => !d.reachable).length} not responding</p>
               {musicRunning && <p className="note">Stop Music Mode before changing rooms.</p>}
             </div>
-            <button onClick={scan} disabled={scanning}>{scanning ? 'Searching…' : 'Find lights'}</button>
+            <div className="toolbar">
+              <button onClick={() => setSetupOpen(true)} disabled={musicRunning || state !== 'connected'}>Set up room</button>
+              <button onClick={scan} disabled={scanning || state !== 'connected'}>{scanning ? 'Searching…' : 'Find lights'}</button>
+            </div>
           </> : <h1>{NAV.find(n => n.id === destination)?.label}</h1>}
         </header>
         {inWorkspace && <nav className="workspace-sections" aria-label="Room controls">
           {(['home', 'library', 'music'] as const).map(id => <button key={id}
             aria-current={destination === id ? 'page' : undefined}
-            onClick={() => setDestination(id)}>{id === 'home' ? 'Light' : id === 'library' ? 'Compositions' : 'Music'}</button>)}
+            onClick={() => { setSetupOpen(false); setDestination(id) }}>{id === 'home' ? 'Light' : id === 'library' ? 'Scenes' : 'Music'}</button>)}
         </nav>}
 
         {error && (
@@ -310,6 +353,42 @@ export default function App() {
           </p>
         )}
 
+        <fieldset className="workspace-controls" disabled={state !== 'connected'} aria-label="Lighting workspace">
+        {!setupOpen && <DiscoveryStatus scanning={scanning} result={discovery} answeredCount={scanAnswered}
+          problem={discoveryError} onPair={() => setSetupOpen(true)} onRetry={scan} />}
+        <RoomSetup open={setupOpen} devices={devices} rooms={rooms} scanning={scanning}
+          discovery={discovery} answeredCount={scanAnswered} discoveryError={discoveryError}
+          onScan={scan}
+          onCreateRoom={async name => {
+            let created: Room | null = null
+            const saved = await mutate(async () => {
+              const response = await createRoom(port, name)
+              created = response.room
+              setRooms(list => list.some(item => item.id === response.room.id) ? list : [...list, response.room])
+            }, `Added ${name}`)
+            return saved ? created : null
+          }}
+          onAssign={(device, targetRoomID) => mutate(() => assignRoom(port, device.id, targetRoomID))}
+          onPower={(device, on) => run(device, { power: on }, () => setPower(port, device.id, on))}
+          onBrightness={(device, value) => run(device, { brightness: value }, () => setBrightness(port, device.id, value))}
+          onPairShapes={async (host, controllerPort) => {
+            let paired: Device | null = null
+            const saved = await mutate(async () => { paired = await pairShapes(port, host, controllerPort) })
+            return saved ? paired : null
+          }}
+          onDone={targetRoomID => {
+            setRoomID(targetRoomID)
+            setDestination('home')
+            setSetupOpen(false)
+            setSetupDismissed(true)
+            window.localStorage.setItem(SETUP_KEY, 'true')
+          }}
+          onCancel={() => {
+            setSetupOpen(false)
+            setSetupDismissed(true)
+            window.localStorage.setItem(SETUP_KEY, 'true')
+          }} />
+        <div hidden={setupOpen}>
         {destination === 'home' && (
           <HomeView
             key={roomID}
@@ -319,36 +398,35 @@ export default function App() {
             onBulk={bulk}
             onScan={scan}
             scanning={scanning}
+            scopeName={scopeName}
+            onSetupRoom={() => setSetupOpen(true)}
+            onSaveScene={name => mutate(() => saveScene(port, name, scopedDevices.map(d => d.id)), `Saved “${name}”`)}
           />
         )}
         {destination === 'library' && (
           <LibraryView
             scenes={scenes}
             devices={scopedDevices}
+            allDevices={devices}
+            rooms={rooms}
+            scopeName={scopeName}
             onSave={name => mutate(() => saveScene(port, name, scopedDevices.map(d => d.id)), `Saved “${name}”`)}
-            onApply={scene => mutate(() => applyScene(port, scene.id), `Applied “${scene.name}”`)}
+            onApply={scene => mutate(async () => {
+              const result = await applyScene(port, scene.id)
+              setToast(`“${scene.name}”: sent to ${result.applied.length} light${result.applied.length === 1 ? '' : 's'}${result.skipped.length ? ` · ${result.skipped.length} skipped` : ''}`)
+            })}
             onDelete={scene => mutate(() => deleteScene(port, scene.id), `Deleted “${scene.name}”`)}
           />
         )}
         {destination === 'music' && (
-          <MusicModeView devices={scopedDevices} port={port} postFrame={postMusicFrame} onRunningChange={setMusicRunning} />
+          <MusicModeView devices={scopedDevices} port={port} connected={state === 'connected'} postFrame={postMusicFrame} onRunningChange={setMusicRunning} />
         )}
         {destination === 'automation' && (
           <AutomationView
             rooms={rooms}
             scenes={scenes}
             onAdd={(roomID, entry) => mutate(() => addSchedule(port, roomID, entry), 'Schedule added')}
-            onUpdate={(roomID, id, patch) => {
-              // Reflect the toggle immediately; the poll reconciles it.
-              setRooms(list =>
-                list.map(r =>
-                  r.id === roomID
-                    ? { ...r, schedules: r.schedules.map(s => (s.id === id ? { ...s, ...patch } : s)) }
-                    : r,
-                ),
-              )
-              return mutate(() => updateSchedule(port, roomID, id, patch))
-            }}
+            onUpdate={(roomID, id, patch) => mutate(() => updateSchedule(port, roomID, id, patch), 'Schedule saved')}
             onDelete={(roomID, id) => mutate(() => deleteSchedule(port, roomID, id), 'Schedule removed')}
           />
         )}
@@ -378,6 +456,8 @@ export default function App() {
             scanning={scanning}
           />
         )}
+        </div>
+        </fieldset>
       </main>
 
       {toast && (

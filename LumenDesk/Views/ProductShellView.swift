@@ -575,15 +575,15 @@ struct LibraryWorkspaceView: View {
     private var libraryContent: some View {
         VStack(alignment: .leading, spacing: 20) {
             if !embedded {
-                PageHeader(eyebrow: "Lighting compositions", title: "Compositions",
+                PageHeader(eyebrow: "Saved lighting", title: "Scenes",
                            subtitle: "Saved scenes recall their fixtures. Themes and effects use the selected room.")
             }
 
             if !embedded && !manager.activeEffects.isEmpty { runningEffects }
 
-            TextField("Find a composition", text: $searchText)
+            TextField("Find a scene, theme or effect", text: $searchText)
                 .textFieldStyle(.roundedBorder)
-                .accessibilityLabel("Find a composition")
+                .accessibilityLabel("Find a scene, theme or effect")
 
             LumenSelector(
                 label: "Library section",
@@ -668,7 +668,7 @@ struct LibraryWorkspaceView: View {
                     .textFieldStyle(.roundedBorder)
                     .onSubmit(captureScene)
                 Button { captureScene() } label: {
-                    Label("Save room lighting", systemImage: "plus")
+                    Label("Save current lighting", systemImage: "plus")
                 }
                 .buttonStyle(LumenPrimaryButtonStyle())
                 .disabled(newSceneName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || manager.devices(in: scope).isEmpty)
@@ -733,6 +733,12 @@ struct LibraryWorkspaceView: View {
                     Text(scene.name).font(.headline)
                     Text("\(scene.snapshots.count) saved fixtures · \(manager.availableDeviceIDs(for: scene).count) available")
                         .font(.caption).foregroundStyle(Lumen.meter)
+                    Text(manager.sceneScopeSummary(scene, selectedScope: scope).description)
+                        .font(.caption).foregroundStyle(Lumen.meter)
+                    if let message = manager.sceneScopeSummary(scene, selectedScope: scope).outsideSelectedRoomMessage {
+                        Label(message, systemImage: "arrow.up.right")
+                            .font(.caption).foregroundStyle(Lumen.warn)
+                    }
                 }
                 Spacer(minLength: 8)
                 Button("Apply") { manager.applyScene(scene) }

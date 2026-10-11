@@ -37,6 +37,7 @@ struct PlanWorkspaceView: View {
     @Binding var requestedDeviceID: String?
     @State private var section: RoomWorkspaceSection = .control
     @State private var showingSetup = false
+    @State private var showingNanoleafPairing = false
     @State private var showingNewRoom = false
     @State private var showingPlan = false
     @State private var configurationRoom: Room?
@@ -109,12 +110,14 @@ struct PlanWorkspaceView: View {
                 #else
                 VStack(alignment: .leading, spacing: LumenToken.Spacing.s6) {
                     scopeHeader
+                    FavoritesStripView()
                     runningOutput
                     if lights.isEmpty {
                         emptyState
                     } else {
                         RoomLightField(lights: lights, room: room, selectedIDs: selectionBinding,
                                        showsSpatialPlacement: geometry.size.width >= max(720, CGFloat(lights.count) * 155))
+                        saveRoomSceneButton
                         sectionPicker
                         switch section {
                         case .control:
@@ -170,10 +173,11 @@ struct PlanWorkspaceView: View {
             if case .room(let id) = scope, !ids.contains(id) { scope = .all }
         }
         .sheet(isPresented: $showingSetup) { RoomSetupView().environmentObject(manager) }
+        .sheet(isPresented: $showingNanoleafPairing) { NanoleafPairingView().environmentObject(manager) }
         .sheet(isPresented: $showingNewRoom) { NewRoomSheet().environmentObject(manager) }
         .sheet(isPresented: $showingPlan) { RoomArrangementSheet().environmentObject(manager) }
         .sheet(item: $configurationRoom) { RoomConfigurationView(room: $0).environmentObject(manager) }
-        .alert("Save room scene", isPresented: $savingScene) {
+        .alert("Save current lighting", isPresented: $savingScene) {
             TextField("Scene name", text: $sceneName)
             Button("Save") { manager.captureScene(name: sceneName, scope: scope) }
                 .disabled(sceneName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -183,10 +187,17 @@ struct PlanWorkspaceView: View {
         }
     }
 
+    private var saveRoomSceneButton: some View {
+        Button("Save current lighting…") { sceneName = ""; savingScene = true }
+            .buttonStyle(LumenSecondaryButtonStyle(compact: true))
+            .fixedSize().disabled(lights.isEmpty)
+    }
+
     #if os(macOS)
     private func studioWorkspace(width: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 20) {
             scopeHeader
+            FavoritesStripView()
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 16) { studioViewPicker; Spacer(minLength: 0); saveRoomSceneButton }
                 VStack(alignment: .leading, spacing: 12) { studioViewPicker; saveRoomSceneButton }
@@ -226,12 +237,6 @@ struct PlanWorkspaceView: View {
             Text("Device detail").tag(SpectrumWorkspaceMode.detail)
         }
         .labelsHidden().pickerStyle(.segmented).frame(width: 270)
-    }
-
-    private var saveRoomSceneButton: some View {
-        Button("Save room scene…") { sceneName = ""; savingScene = true }
-            .buttonStyle(LumenSecondaryButtonStyle(compact: true))
-            .fixedSize().disabled(lights.isEmpty)
     }
 
     @ViewBuilder private func studioOverview(wide: Bool) -> some View {
@@ -335,7 +340,7 @@ struct PlanWorkspaceView: View {
             Divider()
             Text("Saved room scenes").font(.headline)
             if scenes.isEmpty {
-                Text("Capture this room’s lighting with Save room scene.").font(.callout).foregroundStyle(Lumen.meter)
+                Text("Capture this room’s lighting with Save current lighting.").font(.callout).foregroundStyle(Lumen.meter)
             } else {
                 ScrollView(.horizontal) {
                     HStack(spacing: 12) {
@@ -355,6 +360,11 @@ struct PlanWorkspaceView: View {
                                     Text(scene.name).font(.callout.weight(.medium)).lineLimit(1)
                                     Text("Apply to \(scene.snapshots.count) saved lights")
                                         .font(.caption).foregroundStyle(Lumen.meter)
+                                    Text(manager.sceneScopeSummary(scene, selectedScope: scope).description)
+                                        .font(.caption).foregroundStyle(Lumen.meter)
+                                    if let message = manager.sceneScopeSummary(scene, selectedScope: scope).outsideSelectedRoomMessage {
+                                        Text(message).font(.caption).foregroundStyle(Lumen.warn)
+                                    }
                                 }.padding(12).frame(width: 190).background(Lumen.deck, in: RoundedRectangle(cornerRadius: 6))
                             }
                             .buttonStyle(.plain)
@@ -468,7 +478,7 @@ struct PlanWorkspaceView: View {
         HStack(spacing: 20) {
             ForEach(RoomWorkspaceSection.allCases) { item in
                 Button { section = item } label: {
-                    Text(item.rawValue)
+                    Text(item.title)
                         .font(.body.weight(section == item ? .semibold : .regular))
                         .foregroundStyle(section == item ? Lumen.lit : Lumen.meter)
                         .padding(.vertical, 12)
@@ -583,6 +593,13 @@ struct PlanWorkspaceView: View {
                     Button("Assign fixtures") { showingSetup = true }
                         .buttonStyle(LumenSecondaryButtonStyle())
                 }
+            }
+            if manager.devices.isEmpty {
+                Button("Pair Nanoleaf Shapes or Aurora") { showingNanoleafPairing = true }
+                    .buttonStyle(LumenSecondaryButtonStyle())
+            }
+            if !manager.isScanning && manager.lastScanDate != nil && manager.scanResponseCount == 0 {
+                DiscoveryDiagnosticsCard()
             }
             if manager.isScanning { Text(manager.scanPhase).font(.callout) }
             if !manager.statusMessage.isEmpty {
@@ -735,6 +752,7 @@ private struct SpectrumSegmentPreview: View {
 enum RoomWorkspaceSection: String, CaseIterable, Identifiable {
     case control = "Light", compositions = "Compositions", music = "Music"
     var id: String { rawValue }
+    var title: String { self == .compositions ? "Scenes" : rawValue }
 }
 
 /// Relative fixture placement uses the existing Room anchors. All-lights and

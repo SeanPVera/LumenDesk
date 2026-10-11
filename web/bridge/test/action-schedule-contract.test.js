@@ -22,7 +22,7 @@ function harness(brand = 'lifx', failures = []) {
     get(id) { return devices.get(id) },
   }
   function client(name) {
-    return Object.fromEntries(['setPower', 'setColor', 'setBrightness', 'displayPanels'].map(method => [
+    return Object.fromEntries(['setPower', 'setColor', 'setBrightness', 'displayPanels', 'selectEffect'].map(method => [
       method,
       function (target, payload) {
         assert.strictEqual(this, context[name], 'client method receiver must be preserved')
@@ -132,21 +132,21 @@ test('disabled entries, absent schedules, and empty or missing weekdays remain i
   assert.deepEqual(result, [])
 }))
 
-test('schedule results preserve room/entry order, not chronological order', () => withTimeZone('UTC', () => {
+test('schedule results run chronologically, retaining room/entry order for ties', () => withTimeZone('UTC', () => {
   const later = entry({ id: 'later', minute: 5 })
   const earlier = entry({ id: 'earlier' })
   const rooms = [roomWith(later, earlier), { ...roomWith(entry({ id: 'other' })), id: 'other-room' }]
   const result = due({ rooms, previous: new Date(2026, 6, 13, 8, 59), now: new Date(2026, 6, 13, 9, 10) })
   assert.deepEqual(result.map(x => [x.room.id, x.schedule.id]), [
-    ['room', 'later'], ['room', 'earlier'], ['other-room', 'other'],
+    ['room', 'earlier'], ['other-room', 'other'], ['room', 'later'],
   ])
 }))
 
-test('a multi-day window still fires each bridge schedule only once', () => withTimeZone('UTC', () => {
+test('a multi-day window fires only the latest occurrence of each bridge schedule', () => withTimeZone('UTC', () => {
   const result = due({ rooms: [roomWith(entry())], previous: new Date(2026, 6, 13, 8, 59),
     now: new Date(2026, 6, 16, 10, 0) })
   assert.equal(result.length, 1)
-  assert.deepEqual(result[0].at, new Date(2026, 6, 13, 9, 0))
+  assert.deepEqual(result[0].at, new Date(2026, 6, 16, 9, 0))
 }))
 
 test('spring-forward skips nonexistent local times and keeps the next real minute', () => withTimeZone('America/New_York', () => {
@@ -230,14 +230,22 @@ for (const brand of ['lifx', 'govee', 'nanoleaf']) {
     assert.deepEqual(h.events, [['claim', h.device.id], [brand, 'setPower', h.device.id, true]])
   })
 
-  test(`${brand}: state restore keeps best-effort channel failures and final patch semantics`, () => {
-    const h = harness(brand, ['setColor', 'setBrightness'])
-    const command = state()
-    assert.equal(apply(h, command), true)
-    assert.deepEqual(h.events.at(-1), ['patch', h.device.id, {
-      brightness: 25, color: command.color, kelvin: 3000,
-    }])
-    assert.equal(h.events.filter(x => x[1] === 'setColor').length, 1)
+  test(`${brand}: state restore rejects channel failures without patching the complete state`, () => {
+    const refusals = [{ method: 'setColor', command: state() }]
+    if (brand !== 'lifx') refusals.push({ method: 'setBrightness', command: state() })
+    if (brand === 'nanoleaf') {
+      refusals.push({ method: 'displayPanels', command: state({ design: { panels: [] } }) },
+        { method: 'selectEffect', command: state({ effect: 'Evening' }) })
+    }
+    for (const { method, command } of refusals) {
+      const h = harness(brand, [method])
+      assert.equal(apply(h, command), false, method)
+      assert.deepEqual(h.events.filter(x => x[0] === 'patch'), [
+        ['patch', h.device.id, { power: true }],
+      ])
+      assert.equal(h.device.brightness, 50)
+      assert.equal(h.events.filter(x => x[1] === method).length, 1)
+    }
   })
 }
 
@@ -321,25 +329,26 @@ test('claimControl remains optional and client exceptions still propagate', () =
   assert.throws(() => apply(h, { kind: 'power', on: false }), error => error === failure)
 })
 
-test('snapshot shape and retained vendor object references stay unchanged', () => {
+test('snapshot retains vendor object references and includes the optional controller effect', () => {
   const h = harness('nanoleaf')
   const design = { panels: [] }
   const hsbk = { hue: 1 }
   h.device.shapes = { output: 'design', design }
   h.device.hsbk = hsbk
   const captured = snapshot([h.device])[h.device.id]
-  assert.deepEqual(Object.keys(captured), ['isOn', 'brightness', 'color', 'kelvin', 'hsbk', 'design'])
+  assert.deepEqual(Object.keys(captured), ['isOn', 'brightness', 'color', 'kelvin', 'hsbk', 'design', 'effect'])
   assert.strictEqual(captured.design, design)
   assert.strictEqual(captured.hsbk, hsbk)
+  assert.equal(captured.effect, null)
   h.device.shapes.output = 'stream'
   assert.equal(snapshot([h.device])[h.device.id].design, null)
 })
 
-test('scene results retain resolved-device counting even when command dispatch fails', () => {
+test('scene results skip resolved devices when command dispatch fails', () => {
   const h = harness('lifx', ['setPower'])
   const scene = { snapshots: { [h.device.id]: state(), missing: state(), outside: state() } }
   const result = applyScene({ ...h.context, scene, onlyDeviceIDs: [h.device.id, 'missing'] })
-  assert.deepEqual(result, { applied: [h.device.id], skipped: ['missing'] })
+  assert.deepEqual(result, { applied: [], skipped: [h.device.id, 'missing'] })
   assert.equal(h.events.filter(x => x[0] === 'claim').length, 1)
   assert.deepEqual(applyScene({ ...h.context, scene, onlyDeviceIDs: [] }), { applied: [], skipped: [] })
 })

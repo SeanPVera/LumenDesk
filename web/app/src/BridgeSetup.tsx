@@ -1,4 +1,5 @@
-import { DEFAULT_PORT, healthURL } from './bridge'
+import { useEffect, useState } from 'react'
+import { healthURL } from './bridge'
 
 export type BridgeState = 'checking' | 'connected' | 'unavailable'
 
@@ -29,16 +30,31 @@ export function BridgeSetup({
   onRetry: () => void
 }) {
   const checking = state === 'checking'
+  const [portText, setPortText] = useState(String(port))
+  useEffect(() => setPortText(String(port)), [port])
+  const requestedPort = Number(portText)
+  const validPort = Number.isInteger(requestedPort) && requestedPort >= 1 && requestedPort <= 65535
   return (
     <main className="shell centered">
       <div className="panel wide">
         <span className="eyebrow">Local control only</span>
         <h1>{checking ? 'Connecting to your lights' : 'Connect your local lights'}</h1>
-        <p>LumenDesk needs a local bridge to reach your LIFX and Govee lights.
+        <p>LumenDesk needs a local bridge to reach your LIFX, Govee and Nanoleaf lights.
           Start it on this computer, then open its local address. No account is required.</p>
         <p className="note">Connecting checks the bridge without changing your lights. You can safely retry.</p>
 
 
+        <div className="bridge-install">
+          <h2>Launch the browser bridge</h2>
+          <p>Choose the LumenDesk Bridge package for Mac, Windows or Linux, unpack it,
+            and open its launcher. It includes everything it needs and opens this app
+            automatically. Keep the launcher running while you use your lights.</p>
+          <a className="download-link" href="https://github.com/SeanPVera/LumenDesk/releases">Get bridge packages</a>
+          <p className="note">If your release does not list a bridge package yet, use the source setup below.</p>
+        </div>
+
+        <details className="alt">
+          <summary>Set up from source</summary>
         <ol className="steps">
           <li>
             Install <a href="https://nodejs.org/">Node.js 20 or newer</a>, if you do not have it.
@@ -74,26 +90,32 @@ npm run app`}</code>
           <pre>
             <code>{`curl -L https://github.com/SeanPVera/LumenDesk/archive/refs/heads/main.tar.gz | tar xz
 cd LumenDesk-main/web/bridge
-npm start`}</code>
+npm run app`}</code>
           </pre>
         </details>
+        </details>
 
-        <div className="setup-actions">
+        <form className="setup-actions" onSubmit={event => {
+          event.preventDefault()
+          if (!validPort || checking) return
+          if (requestedPort !== port) onPort(requestedPort)
+          else onRetry()
+        }}>
           <label className="port">
             Bridge port
             <input
               type="number"
-              value={port}
+              value={portText}
               min={1}
               max={65535}
-              disabled={checking}
-              onChange={event => onPort(Number(event.target.value) || DEFAULT_PORT)}
+              required
+              onChange={event => setPortText(event.target.value)}
             />
           </label>
-          <button className="primary" onClick={onRetry} disabled={checking}>
+          <button className="primary" type="submit" disabled={checking || !validPort}>
             {checking ? 'Connecting…' : 'Connect'}
           </button>
-        </div>
+        </form>
 
         {attempts > 0 && !checking && (
           <div className="diagnostic" role="alert">

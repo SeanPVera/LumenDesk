@@ -14,7 +14,45 @@ the smallest thing that closes that gap without giving up local-only control.
 Nothing leaves your network: there is no account, no cloud call, and no
 telemetry. The bridge binds loopback only (`127.0.0.1`) by default.
 
-## Run it
+## Install the browser app
+
+The **Package browser bridge** workflow builds self-contained previews for
+macOS Apple silicon and Intel, Windows x64, and Linux x64. Download an artifact
+from a successful [workflow run](https://github.com/SeanPVera/LumenDesk/actions/workflows/bridge-packages.yml)
+and unpack the Actions artifact first. Tagged releases attach the resulting
+`LumenDesk-Bridge-<version>-<platform>-<architecture>` packages alongside the
+native macOS app. Existing releases made before this packaging change do not
+contain bridge downloads.
+
+- **macOS:** open the `.dmg`, drag **LumenDesk Bridge** into Applications and
+  open it. Its **LD** menu-bar icon offers **Open LumenDesk** and **Quit LumenDesk
+  Bridge**. Requires macOS 13.5 or newer; choose arm64 for Apple silicon or x64
+  for Intel. Preview bundles are ad-hoc signed and not notarized. If a download
+  is blocked, attempt to open it once, then use **System Settings → Privacy &
+  Security → Open Anyway**.
+- **Windows:** extract the whole `.zip` and double-click **LumenDesk Bridge.exe**.
+  Its tray icon opens the page or quits the bridge. Keep the runtime, launcher
+  and web folders next to the executable. Requires Windows 10 or newer, x64.
+  Preview launchers are unsigned, so SmartScreen may ask about the download.
+- **Linux:** extract the `.tar.gz` and run **Install LumenDesk.sh** with the file
+  manager's **Run as Program** action. This copies the bundle into your home
+  folder and adds **LumenDesk Bridge** and **Stop LumenDesk Bridge** to the
+  applications menu. You can also run **Start LumenDesk.sh** directly. Requires
+  x64, glibc 2.28 or newer, and a desktop with `xdg-open`.
+
+The packages include the Node runtime and built web app. Opening the launcher
+opens `http://127.0.0.1:8765` in your browser, without installing Node, cloning
+the repository or setting up a terminal. There is no account or cloud service.
+Closing the browser leaves the bridge running so schedules can run. **Quit**
+or **Stop** shuts it down. Open it again after restarting your computer; the
+installer does not create a startup service or launch at login. Quit before
+updating or removing the bundle. Saved rooms and Nanoleaf pairings stay in
+`~/.lumendesk`, so an update preserves them.
+
+Allow network access on your private home network if the operating system asks.
+Govee still needs LAN Control enabled; Nanoleaf still needs local pairing.
+
+## Run from source
 
 Requires [Node.js](https://nodejs.org/) 20 or newer — check with
 `node --version`.
@@ -60,6 +98,7 @@ bridge itself has no dependencies.
 --allow-origin <url>  additional browser origin allowed to connect
 --allow-any-origin    allow any origin (development only)
 --quiet               suppress discovery logging
+--no-network          serve without opening device sockets (development tests)
 ```
 
 Govee lights only answer the LAN API when **LAN Control** is enabled for each
@@ -187,6 +226,32 @@ Two layers, both run in CI:
   documented animData and v2 stream bytes), and a fake controller over real
   HTTP on loopback for pairing, orientation readback, painting, scenes,
   identify, music pacing and restore, and forgetting.
+- **Launcher** — startup from paths with spaces, graceful Quit, parent closure,
+  reuse of an existing bridge, port conflicts, unexpected bridge exits and
+  Linux desktop Open/Stop. These use a loopback-only fixture with no discovery.
+
+To build and verify a self-contained package on its target OS:
+
+```sh
+node scripts/package_bridge.mjs --version 1.1.0
+node scripts/smoke_bridge_package.mjs dist/LumenDesk-Bridge-1.1.0-Linux-x64.tar.gz
+```
+
+Run these commands from the repository root, choosing the produced `.dmg` or
+`.zip` instead on macOS or Windows. The packager uses `npm ci` and a local-base
+React production build, downloads an official Node LTS archive, checks its
+committed SHA256 from `launcher/node-runtime.json`, and includes license notices
+and a `BUILD-MANIFEST.json` with shipped file hashes. It never installs a system
+Node runtime. To upgrade the bundled runtime, review the official Node release
+and replace its version and all platform hashes together.
+
+The smoke check extracts the actual archive into a path with spaces, validates
+all hashes and runs the shipped launcher against the actual bridge. It checks
+health, the bundled HTML/JS/CSS, state and shutdown using an isolated home folder
+and `--no-network`; it does not send LAN discovery probes. The matrix workflow
+runs this on both Mac architectures, Windows and Linux. A tagged release waits
+for these artifacts and attaches them in the existing release job, without a
+second competing release publication.
 
 To drive the web app against fake lights with no hardware:
 

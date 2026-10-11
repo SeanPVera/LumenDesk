@@ -102,6 +102,36 @@ test('a long gap still runs a missed schedule exactly once', () => {
   assert.equal(decisions[0].schedule.id, 's1')
 })
 
+test('missed schedules run chronologically after an overnight sleep', () => {
+  const weekdays = [1, 2, 3, 4, 5, 6, 7]
+  const rooms = [{
+    id: 'r', lightIDs: [], schedules: [
+      { id: 'wake', isEnabled: true, hour: 7, minute: 0, action: 'turnOn', weekdays },
+      { id: 'sleep', isEnabled: true, hour: 22, minute: 0, action: 'turnOff', weekdays },
+    ],
+  }]
+  const decisions = due({ rooms, previous: new Date(2026, 0, 5, 21), now: new Date(2026, 0, 6, 8) })
+  assert.deepEqual(decisions.map(d => d.schedule.action), ['turnOff', 'turnOn'])
+  assert.deepEqual(decisions.map(d => d.at), [new Date(2026, 0, 5, 22), new Date(2026, 0, 6, 7)])
+})
+
+test('several days asleep use the latest occurrence of each entry once', () => {
+  const weekdays = [1, 2, 3, 4, 5, 6, 7]
+  const rooms = [{
+    id: 'r', lightIDs: [], schedules: [
+      { id: 'wake', isEnabled: true, hour: 7, minute: 0, action: 'turnOn', weekdays },
+      { id: 'sleep', isEnabled: true, hour: 22, minute: 0, action: 'turnOff', weekdays },
+    ],
+  }]
+  const previous = new Date(2026, 0, 5, 21)
+  const morning = due({ rooms, previous, now: new Date(2026, 0, 8, 8) })
+  assert.deepEqual(morning.map(d => d.at), [new Date(2026, 0, 7, 22), new Date(2026, 0, 8, 7)])
+  assert.deepEqual(morning.map(d => d.schedule.action), ['turnOff', 'turnOn'])
+  const night = due({ rooms, previous, now: new Date(2026, 0, 8, 23) })
+  assert.deepEqual(night.map(d => d.at), [new Date(2026, 0, 8, 7), new Date(2026, 0, 8, 22)])
+  assert.deepEqual(night.map(d => d.schedule.action), ['turnOn', 'turnOff'])
+})
+
 test('disabled entries and non-matching weekdays never fire', () => {
   const base = { id: 's', hour: 7, minute: 30, action: 'turnOn' }
   const monday = { previous: new Date(2026, 0, 5, 7, 29), now: new Date(2026, 0, 5, 7, 31) }
@@ -150,6 +180,40 @@ test('a scene captures and restores device state, skipping ones that vanished', 
   assert.ok(sent.some(([id, kind, v]) => id === 'lifx:a' && kind === 'power' && v === true))
   // An off device is not given a colour or brightness it cannot show.
   assert.ok(!sent.some(([id, kind]) => id === 'govee:b' && kind === 'brightness'))
+})
+
+test('scene application skips commands the client cannot accept', () => {
+  const registry = new Registry()
+  for (const suffix of ['power-refused', 'color-refused', 'accepted']) {
+    registry.upsert(`lifx:${suffix}`, { ip: '127.0.0.1', power: true, brightness: 60, color: { r: 255, g: 0, b: 0 } })
+  }
+  const scene = { snapshots: snapshot(registry.list()) }
+  const lifx = {
+    setPower: d => d.id !== 'lifx:power-refused',
+    setColor: d => d.id !== 'lifx:color-refused',
+  }
+  const result = applyScene({ scene, registry, lifx, govee: lifx })
+  assert.deepEqual(result.applied, ['lifx:accepted'])
+  assert.deepEqual(result.skipped.sort(), ['lifx:color-refused', 'lifx:power-refused'])
+})
+
+test('an unavailable captured Nanoleaf controller scene is skipped', () => {
+  const registry = new Registry()
+  registry.upsert('nanoleaf:wall', { ip: '127.0.0.1', power: true, brightness: 70 })
+  const scene = { snapshots: { 'nanoleaf:wall': { isOn: true, brightness: 70, effect: 'Deleted scene' } } }
+  const nanoleaf = { setPower: () => true, selectEffect: () => false }
+  assert.deepEqual(applyScene({ scene, registry, nanoleaf }), { applied: [], skipped: ['nanoleaf:wall'] })
+})
+
+test('older Nanoleaf snapshots still restore their recorded colour', () => {
+  const registry = new Registry()
+  registry.upsert('nanoleaf:wall', { ip: '127.0.0.1', power: true, brightness: 70 })
+  const color = { r: 0, g: 255, b: 0 }
+  const scene = { snapshots: { 'nanoleaf:wall': { isOn: true, brightness: 70, color } } }
+  const sent = []
+  const nanoleaf = { setPower: () => true, setColor: (_d, value) => (sent.push(value), true), setBrightness: () => true }
+  assert.deepEqual(applyScene({ scene, registry, nanoleaf }), { applied: ['nanoleaf:wall'], skipped: [] })
+  assert.deepEqual(sent, [{ rgb: color }])
 })
 
 // --- regressions from the review of the full-shell change ---

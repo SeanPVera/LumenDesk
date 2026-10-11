@@ -437,7 +437,7 @@ struct RoomSetupView: View {
 
     private var doneStep: some View {
         VStack(alignment: .leading, spacing: 18) {
-            stepHeading("Ready to control", "Choose a room at the top of the workspace. Light, Compositions and Music all use that scope.")
+            stepHeading("Ready to control", "Choose a room at the top of the workspace. Light and Music use that scope. Scenes recall their saved lights.")
             Text("\(manager.rooms.count) rooms · \(manager.devices.count - manager.unplacedDevices.count) assigned fixtures")
                 .font(.headline)
             if !skipped.isEmpty {

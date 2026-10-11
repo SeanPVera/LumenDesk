@@ -84,7 +84,7 @@ struct ScenesView: View {
         HStack(spacing: 12) {
             LumenIconTile(systemName: "wand.and.stars", tint: Lumen.beamBright, size: 38)
             VStack(alignment: .leading, spacing: 4) {
-                Text("Looks")
+                Text("Scenes")
                     .font(LumenType.display(size: 19, weight: .bold))
                 SpectrumRule(height: 2, tapered: true).frame(width: 110)
                 Text("Color and motion designed for both LIFX and Govee bulbs.")
@@ -345,7 +345,7 @@ struct ScenesView: View {
                     .textFieldStyle(.roundedBorder).onSubmit(capture)
                 if let warning = manager.duplicateSceneNameMessage(newSceneName) { Text(warning).font(.caption2).foregroundStyle(Lumen.warning) }
             }
-            Button("Capture Current State", action: capture)
+            Button("Save current lighting", action: capture)
                 .buttonStyle(LumenPrimaryButtonStyle())
                 .disabled(newSceneName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || manager.devices.isEmpty)
         }
@@ -363,7 +363,7 @@ struct ScenesView: View {
     }
 
     private var noResults: some View {
-        Text("No lighting looks match your search.")
+        Text("No scenes, themes or effects match your search.")
             .font(.callout).foregroundStyle(.secondary)
             .frame(maxWidth: .infinity).padding(32)
     }
@@ -393,6 +393,8 @@ struct ScenesView: View {
                     }
                 }
                 Text("\(scene.snapshots.count) light\(scene.snapshots.count == 1 ? "" : "s") · captured \(scene.createdAt.formatted(.relative(presentation: .named)))")
+                    .font(.caption).foregroundStyle(.secondary)
+                Text(manager.sceneScopeSummary(scene).description)
                     .font(.caption).foregroundStyle(.secondary)
             }
             Spacer()

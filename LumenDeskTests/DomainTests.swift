@@ -578,6 +578,205 @@ final class DomainTests: XCTestCase {
     }
 
     @MainActor
+    func testScheduleLimitReportsRejectionAndAllowsAddingAfterDeletion() throws {
+        let manager = LightManager(defaults: isolatedDefaults(), persistenceStore: temporaryPersistenceStore())
+        manager.createRoom(name: "Office")
+        let room = try XCTUnwrap(manager.rooms.first)
+        for hour in 0..<LightManager.maximumSchedulesPerRoom {
+            XCTAssertTrue(manager.addSchedule(ScheduleEntry(hour: hour, minute: 0, action: .turnOn), to: room.id))
+        }
+        let rejected = ScheduleEntry(hour: 20, minute: 0, action: .turnOff)
+        XCTAssertFalse(manager.addSchedule(rejected, to: room.id))
+        XCTAssertEqual(manager.schedules(for: room.id).count, LightManager.maximumSchedulesPerRoom)
+        XCTAssertFalse(manager.schedules(for: room.id).contains { $0.id == rejected.id })
+
+        manager.deleteSchedule(try XCTUnwrap(manager.schedules(for: room.id).first?.id), from: room.id)
+        XCTAssertTrue(manager.addSchedule(rejected, to: room.id))
+        XCTAssertTrue(manager.schedules(for: room.id).contains { $0.id == rejected.id })
+        XCTAssertFalse(manager.addSchedule(ScheduleEntry(hour: 21, minute: 0, action: .turnOff), to: UUID()))
+    }
+
+    @MainActor
+    func testSceneFailureRetryKeepsSuccessfulLightsOffProtectionAndOriginalVersion() throws {
+        let manager = LightManager(defaults: isolatedDefaults(), persistenceStore: temporaryPersistenceStore())
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+        let successful = try XCTUnwrap(manager.devices.first { $0.id == "demo:2" })
+        let failed = try XCTUnwrap(manager.devices.first { $0.id == "demo:4" })
+        let protected = try XCTUnwrap(manager.devices.first { $0.id == "demo:0" })
+        protected.isOn = true
+        manager.captureScene(name: "Evening")
+        var original = try XCTUnwrap(manager.scenes.last)
+        original.snapshots = [
+            successful.id: DeviceSnapshot(isOn: true, brightness: 0.42, hue: 0.2, saturation: 0.7),
+            failed.id: DeviceSnapshot(isOn: true, brightness: 0.37, hue: 0.6, saturation: 0.8),
+            protected.id: DeviceSnapshot(isOn: false, brightness: 0.1, hue: 0, saturation: 0)
+        ]
+        manager.updateScene(original)
+        manager.captureScene(name: original.name)
+        // Store another scene with the same name. Retry must use the applied
+        // value and UUID, rather than looking up whichever name matches first.
+        manager.applyScene(original, allowTurningOff: false, reviewed: true)
+        XCTAssertEqual(manager.lastSceneResult?.failedIDs, [failed.id])
+        XCTAssertEqual(manager.lastSceneResult?.skippedOffIDs, [protected.id])
+
+        successful.brightness = 0.91
+        protected.brightness = 0.77
+        failed.brightness = 0.92
+        failed.isStale = false
+        var edited = original
+        edited.name = "Renamed Evening"
+        edited.snapshots[failed.id]?.brightness = 0.13
+        edited.snapshots[failed.id]?.isOn = false
+        // The library may change or no longer contain this version at all.
+        // The duplicate captured above also has different device snapshots.
+        manager.updateScene(edited)
+
+        manager.retryLastSceneFailures()
+
+        XCTAssertEqual(successful.brightness, 0.91, accuracy: 0.0001)
+        XCTAssertEqual(protected.brightness, 0.77, accuracy: 0.0001)
+        XCTAssertTrue(protected.isOn)
+        XCTAssertEqual(failed.brightness, 0.37, accuracy: 0.0001)
+        XCTAssertTrue(failed.isOn)
+        let result = try XCTUnwrap(manager.lastSceneResult)
+        XCTAssertEqual(result.scene, original)
+        XCTAssertFalse(result.allowTurningOff)
+        XCTAssertTrue(result.failedIDs.isEmpty)
+        XCTAssertEqual(Set(result.succeededIDs), [successful.id, failed.id])
+        XCTAssertEqual(result.skippedOffIDs, [protected.id])
+
+        manager.undo()
+        XCTAssertEqual(failed.brightness, 0.92, accuracy: 0.0001)
+        XCTAssertEqual(successful.brightness, 0.91, accuracy: 0.0001)
+        XCTAssertTrue(protected.isOn)
+    }
+
+    @MainActor
+    func testSceneScopeSummaryIncludesOtherRoomsUnassignedAndUndiscoveredFixtures() throws {
+        let manager = LightManager(defaults: isolatedDefaults(), persistenceStore: temporaryPersistenceStore())
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+        manager.createRoom(name: "Study")
+        manager.createRoom(name: "Bedroom")
+        let study = try XCTUnwrap(manager.rooms.first { $0.name == "Study" })
+        let bedroom = try XCTUnwrap(manager.rooms.first { $0.name == "Bedroom" })
+        manager.assign(lightID: "demo:0", toRoom: study.id)
+        manager.assign(lightID: "demo:1", toRoom: nil)
+        manager.assign(lightID: "missing:assigned", toRoom: bedroom.id)
+        let snapshot = DeviceSnapshot(isOn: true, brightness: 0.5, hue: 0.2, saturation: 0.7)
+        let scene = LightingScene(name: "Evening", snapshots: [
+            "demo:0": snapshot, "demo:1": snapshot,
+            "missing:assigned": snapshot, "missing:unassigned": snapshot
+        ])
+
+        let summary = manager.sceneScopeSummary(scene, selectedScope: .room(study.id))
+
+        XCTAssertEqual(summary.description, "Saved fixtures: Bedroom (1), Study (1), Unassigned (1), Undiscovered (1)")
+        XCTAssertEqual(summary.outsideSelectedRoomCount, 3)
+        XCTAssertEqual(summary.outsideSelectedRoomMessage, "Includes 3 saved lights outside Study.")
+        XCTAssertNil(manager.sceneScopeSummary(scene).outsideSelectedRoomMessage)
+        XCTAssertEqual(scene.snapshots.count, 4, "Displaying a selected room must never filter the saved scene")
+    }
+
+    @MainActor
+    func testSceneScopeSummaryFollowsReassignmentWithoutChangingSavedFixtureIdentity() throws {
+        let manager = LightManager(defaults: isolatedDefaults(), persistenceStore: temporaryPersistenceStore())
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+        manager.createRoom(name: "Study")
+        manager.createRoom(name: "Bedroom")
+        let study = try XCTUnwrap(manager.rooms.first { $0.name == "Study" })
+        let bedroom = try XCTUnwrap(manager.rooms.first { $0.name == "Bedroom" })
+        manager.assign(lightID: "demo:0", toRoom: study.id)
+        let scene = LightingScene(name: "Reading", snapshots: [
+            "demo:0": DeviceSnapshot(isOn: true, brightness: 0.5, hue: 0.2, saturation: 0.7)
+        ])
+        XCTAssertEqual(manager.sceneScopeSummary(scene, selectedScope: .room(study.id)).outsideSelectedRoomCount, 0)
+
+        manager.assign(lightID: "demo:0", toRoom: bedroom.id)
+
+        let summary = manager.sceneScopeSummary(scene, selectedScope: .room(study.id))
+        XCTAssertEqual(summary.description, "Saved fixtures: Bedroom (1)")
+        XCTAssertEqual(summary.outsideSelectedRoomMessage, "Includes 1 saved light outside Study.")
+        XCTAssertEqual(manager.availableDeviceIDs(for: scene), ["demo:0"])
+        XCTAssertEqual(Set(scene.snapshots.keys), ["demo:0"])
+    }
+
+    @MainActor
+    func testFavoriteShelfUpdatesAfterAddingMoreFavoritesWithoutReopeningTheView() throws {
+        let manager = LightManager(defaults: isolatedDefaults(), persistenceStore: temporaryPersistenceStore())
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+        manager.reconcileFavoriteOrder()
+        let originalOrder = manager.favoriteOrder
+        let first = FavoriteReference(kind: .light, rawID: "demo:1")
+        let second = FavoriteReference(kind: .light, rawID: "demo:2")
+        XCTAssertFalse(manager.isFavorite(first.rawID))
+        XCTAssertFalse(manager.isFavorite(second.rawID))
+
+        manager.toggleFavorite(first.rawID)
+        manager.toggleFavorite(second.rawID)
+
+        XCTAssertEqual(Array(manager.favoriteOrder.prefix(originalOrder.count)), originalOrder)
+        XCTAssertEqual(Array(manager.favoriteOrder.suffix(2)), [first, second])
+
+        manager.toggleFavorite(first.rawID)
+
+        XCTAssertFalse(manager.favoriteOrder.contains(first))
+        XCTAssertTrue(manager.favoriteOrder.contains(second))
+        XCTAssertEqual(Array(manager.favoriteOrder.prefix(originalOrder.count)), originalOrder)
+    }
+
+    @MainActor
+    func testDeletingAFavoriteRoomRemovesItsOrganizerEntryAndUndoRestoresIt() throws {
+        let manager = LightManager(defaults: isolatedDefaults(), persistenceStore: temporaryPersistenceStore())
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+        let room = try XCTUnwrap(manager.favoriteRooms.first)
+        manager.reconcileFavoriteOrder()
+        let reference = FavoriteReference(kind: .room, rawID: room.id.uuidString)
+        let retainedFavorites = manager.favoriteOrder.filter { $0 != reference }
+        XCTAssertTrue(manager.favoriteOrder.contains(reference))
+
+        manager.deleteRoom(room.id)
+        manager.confirmationCoordinator.confirmPendingRequest()
+
+        XCTAssertFalse(manager.rooms.contains { $0.id == room.id })
+        XCTAssertFalse(manager.favoriteOrder.contains(reference))
+        XCTAssertEqual(manager.favoriteOrder, retainedFavorites)
+
+        manager.undoDeleteRoom()
+
+        XCTAssertTrue(manager.favoriteRooms.contains { $0.id == room.id })
+        XCTAssertTrue(manager.favoriteOrder.contains(reference))
+        XCTAssertEqual(Array(manager.favoriteOrder.prefix(retainedFavorites.count)), retainedFavorites)
+    }
+
+    @MainActor
+    func testSavingRehearsedSceneRestoresLightingAndRetainsRevision() throws {
+        let manager = LightManager(defaults: isolatedDefaults(), persistenceStore: temporaryPersistenceStore())
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+        let device = try XCTUnwrap(manager.devices.first { $0.id == "demo:2" })
+        manager.captureScene(name: "Room scene", scope: .all)
+        let original = try XCTUnwrap(manager.scenes.last)
+        let priorBrightness = device.brightness
+        var draft = original
+        draft.snapshots[device.id]?.brightness = 0.17
+        manager.startSceneRehearsal(draft, deviceIDs: [device.id])
+        XCTAssertEqual(device.brightness, 0.17, accuracy: 0.0001)
+
+        manager.updateScene(draft)
+
+        XCTAssertNil(manager.rehearsalSceneID)
+        XCTAssertEqual(device.brightness, priorBrightness, accuracy: 0.0001)
+        XCTAssertEqual(manager.scenes.last, draft)
+        XCTAssertEqual(manager.revisions(for: original.id).first?.snapshots, original.snapshots)
+        XCTAssertEqual(manager.lastActionSummary, "Saved Room scene — restore previous versions from scene History")
+    }
+
+    @MainActor
     func testAFailedConfigurationExportIsReportedRatherThanSwallowed() throws {
         let manager = LightManager(
             defaults: isolatedDefaults(),
@@ -782,7 +981,10 @@ final class DomainTests: XCTestCase {
         second.isStale = false
         manager.retryLastSceneFailures()
         XCTAssertTrue(second.isOn, "Retry must not turn off a light when the original apply prohibited that")
-        XCTAssertTrue(try XCTUnwrap(manager.lastSceneResult).skippedOffIDs.contains(second.id))
+        let result = try XCTUnwrap(manager.lastSceneResult)
+        XCTAssertFalse(result.allowTurningOff)
+        XCTAssertTrue(result.succeededIDs.contains(second.id), "Retry must apply the original snapshot even if the library scene was edited")
+        XCTAssertFalse(result.skippedOffIDs.contains(second.id))
     }
 
     @MainActor

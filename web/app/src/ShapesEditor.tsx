@@ -89,6 +89,7 @@ export function ShapesEditor({ device, actions }: { device: Device; actions: Sha
   const [hexText, setHexText] = useState('')
   const [message, setMessage] = useState<string | null>(null)
   const [applying, setApplying] = useState(false)
+  const [orienting, setOrienting] = useState(false)
   const refs = useRef(new Map<number, SVGGElement>())
   const stage = useRef<HTMLDivElement>(null)
   // Drawn one unit per CSS pixel, so labels and edges stay legible on a phone.
@@ -304,7 +305,7 @@ export function ShapesEditor({ device, actions }: { device: Device; actions: Sha
         </div>
 
         <div className="shapes-tools">
-          <fieldset>
+          <fieldset disabled={orienting}>
             <legend>Orientation</legend>
             <p className="note">
               {shapes.orientationPending !== null ? `${shapes.orientationPending}° requested, waiting for the controller to confirm`
@@ -319,12 +320,21 @@ export function ShapesEditor({ device, actions }: { device: Device; actions: Sha
               <button onClick={() => setDraftDegrees(normalizeDegrees(degrees + 90))} aria-label="Turn 90 degrees clockwise">↻ 90°</button>
             </div>
             <div className="toolbar">
-              <button className="primary" disabled={offline || draftDegrees === null || draftDegrees === reported}
-                onClick={() => {
-                  report(actions.orientation(degrees), 'Orientation sent. It counts once the controller reports it back.')
-                  setDraftDegrees(null)
+              <button className="primary" disabled={offline || orienting || draftDegrees === null || draftDegrees === reported}
+                onClick={async () => {
+                  if (orienting) return
+                  setOrienting(true)
+                  try {
+                    await actions.orientation(degrees)
+                    setMessage('Orientation sent. It counts once the controller reports it back.')
+                    setDraftDegrees(null)
+                  } catch (err) {
+                    setMessage(err instanceof Error ? err.message : String(err))
+                  } finally {
+                    setOrienting(false)
+                  }
                 }}>
-                Apply orientation
+                {orienting ? 'Applying…' : 'Apply orientation'}
               </button>
               <button className="ghost" disabled={draftDegrees === null} onClick={() => setDraftDegrees(null)}>Reset</button>
             </div>

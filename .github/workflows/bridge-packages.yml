@@ -1,0 +1,93 @@
+name: Package browser bridge
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - web/**
+      - scripts/package_bridge.mjs
+      - scripts/smoke_bridge_package.mjs
+      - .github/workflows/bridge-packages.yml
+      - .github/workflows/release.yml
+  push:
+    branches: [main]
+    paths:
+      - web/**
+      - scripts/package_bridge.mjs
+      - scripts/smoke_bridge_package.mjs
+      - .github/workflows/bridge-packages.yml
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      version:
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS arm64
+            runner: macos-15
+            arch: arm64
+            extension: dmg
+            artifact: macOS-arm64
+          - name: macOS x64
+            runner: macos-15-intel
+            arch: x64
+            extension: dmg
+            artifact: macOS-x64
+          - name: Windows x64
+            runner: windows-2025
+            arch: x64
+            extension: zip
+            artifact: Windows-x64
+          - name: Linux x64
+            runner: ubuntu-latest
+            arch: x64
+            extension: tar.gz
+            artifact: Linux-x64
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.19.0'
+          cache: npm
+          cache-dependency-path: web/app/package-lock.json
+      - name: Build bundle
+        env:
+          PACKAGE_VERSION: ${{ inputs.version }}
+          PACKAGE_ARCH: ${{ matrix.arch }}
+        shell: bash
+        run: |
+          if [[ -n "$PACKAGE_VERSION" ]]; then
+            node scripts/package_bridge.mjs --arch "$PACKAGE_ARCH" --version "${PACKAGE_VERSION#v}"
+          else
+            node scripts/package_bridge.mjs --arch "$PACKAGE_ARCH"
+          fi
+      - name: Smoke test shipped launcher without device networking
+        env:
+          PACKAGE_EXTENSION: ${{ matrix.extension }}
+        shell: bash
+        run: |
+          for bundle in dist/*.$PACKAGE_EXTENSION; do
+            node scripts/smoke_bridge_package.mjs "$bundle"
+          done
+      - name: Upload installable preview
+        uses: actions/upload-artifact@v4
+        with:
+          name: LumenDesk-Bridge-${{ matrix.artifact }}
+          path: |
+            dist/*.${{ matrix.extension }}
+            dist/*.sha256
+          if-no-files-found: error
+          retention-days: 14

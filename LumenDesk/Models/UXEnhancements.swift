@@ -69,14 +69,39 @@ struct SceneApplicationPreview {
     let unchanged: [LightDevice]
 }
 
+struct SceneScopeSummary {
+    let description: String
+    let outsideSelectedRoomCount: Int
+    let selectedRoomName: String?
+
+    var outsideSelectedRoomMessage: String? {
+        guard outsideSelectedRoomCount > 0, let selectedRoomName else { return nil }
+        return "Includes \(outsideSelectedRoomCount) saved light\(outsideSelectedRoomCount == 1 ? "" : "s") outside \(selectedRoomName)."
+    }
+}
+
 struct SceneApplicationResult: Identifiable, Equatable {
     let id = UUID()
-    let sceneID: UUID
+    /// Retain the applied version: a retry must not resolve a renamed or edited
+    /// scene by its display name, or pick another scene with the same name.
+    let scene: LightingScene
     let sceneName: String
+    let allowTurningOff: Bool
     let succeededIDs: [String]
     let failedIDs: [String]
     let skippedOffIDs: [String]
-    let allowTurningOff: Bool
+
+    var sceneID: UUID { scene.id }
+
+    init(scene: LightingScene, allowTurningOff: Bool, succeededIDs: [String],
+         failedIDs: [String], skippedOffIDs: [String], sceneName: String? = nil) {
+        self.scene = scene
+        self.sceneName = sceneName ?? scene.name
+        self.allowTurningOff = allowTurningOff
+        self.succeededIDs = succeededIDs
+        self.failedIDs = failedIDs
+        self.skippedOffIDs = skippedOffIDs
+    }
 }
 
 struct FavoriteReference: Codable, Hashable, Identifiable {

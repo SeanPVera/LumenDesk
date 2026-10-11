@@ -125,9 +125,11 @@ private struct FavoriteSceneTile: View {
                     .foregroundStyle(Lumen.violetBright)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(scene.name).lineLimit(1).help(scene.name)
-                    Text("\(scene.snapshots.count) lights")
+                    Text(manager.sceneScopeSummary(scene).description)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .frame(maxWidth: 220, alignment: .leading)
                 }
             }
         }

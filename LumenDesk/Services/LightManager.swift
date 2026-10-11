@@ -15,6 +15,8 @@ enum NapPhase: Equatable {
 
 @MainActor
 final class LightManager: ObservableObject {
+    static let maximumSchedulesPerRoom = 12
+
     @Published private(set) var devices: [LightDevice] = []
     @Published private(set) var rooms: [Room] = [] {
         // Room membership decides which lights a show's frames may reach.
@@ -92,6 +94,7 @@ final class LightManager: ObservableObject {
     private var napSnapshotBrightness: [String: Double] = [:]
     private var scanGeneration: Int = 0     // incremented each scan; clears isScanning safely
     private var hasStarted = false
+    private var hasStartedBackgroundServices = false
     private var scanStartingIDs: Set<String> = []
     private var scanStartingAddresses: [String: String] = [:]
     private var devicesByID: [String: LightDevice] = [:]
@@ -309,7 +312,13 @@ final class LightManager: ObservableObject {
         )
     }
 
-    func start() {
+    func start(discover: Bool = true) {
+        // A first-run demo still evaluates schedules and refreshes simulated
+        // fixtures, but must not initialize live discovery sockets.
+        if isDemoMode {
+            startBackgroundServices()
+            return
+        }
         guard !hasStarted else { return }
         hasStarted = true
         do {
@@ -326,10 +335,16 @@ final class LightManager: ObservableObject {
         } catch {
             statusMessage = "Govee init failed: \(error). Is another app already bound to UDP 4002?"
         }
-        scan()
+        if discover { scan() }
+        startBackgroundServices()
+        logActivity(.system, title: "LumenDesk started", detail: "Local automation and discovery services are active.")
+    }
+
+    private func startBackgroundServices() {
+        guard !hasStartedBackgroundServices else { return }
+        hasStartedBackgroundServices = true
         scheduleRefresh()
         startScheduleTimer()
-        logActivity(.system, title: "LumenDesk started", detail: "Local automation and discovery services are active.")
     }
 
     func scan() {
@@ -2644,7 +2659,7 @@ extension LightManager {
         let deleted = rooms[idx]
         lastDeletedRoom = (room: deleted, index: idx)
         rooms.remove(at: idx)
-        persistApplicationState()
+        reconcileFavoriteOrder()
         publishError("\u{201C}\(deleted.name)\u{201D} deleted.") {
             self.undoDeleteRoom()
         }
@@ -2655,7 +2670,7 @@ extension LightManager {
         let insertAt = min(index, rooms.count)
         rooms.insert(room, at: insertAt)
         lastDeletedRoom = nil
-        persistApplicationState()
+        reconcileFavoriteOrder()
         commandError = nil
         commandErrorUndo = nil
     }
@@ -2885,7 +2900,7 @@ extension LightManager {
         } else {
             favoriteIDs.insert(deviceID)
         }
-        persistApplicationState()
+        reconcileFavoriteOrder()
     }
 
     var favoriteDevices: [LightDevice] {
@@ -2898,14 +2913,14 @@ extension LightManager {
 
     func toggleFavoriteRoom(_ roomID: UUID) {
         if favoriteRoomIDs.contains(roomID) { favoriteRoomIDs.remove(roomID) } else { favoriteRoomIDs.insert(roomID) }
-        persistApplicationState()
+        reconcileFavoriteOrder()
     }
 
     func isFavoriteScene(_ sceneID: UUID) -> Bool { favoriteSceneIDs.contains(sceneID) }
 
     func toggleFavoriteScene(_ sceneID: UUID) {
         if favoriteSceneIDs.contains(sceneID) { favoriteSceneIDs.remove(sceneID) } else { favoriteSceneIDs.insert(sceneID) }
-        persistApplicationState()
+        reconcileFavoriteOrder()
     }
 
     var favoriteRooms: [Room] { rooms.filter { favoriteRoomIDs.contains($0.id) } }
@@ -2975,7 +2990,7 @@ extension LightManager {
         lastDeletedScene = (scene: deleted, index: idx)
         scenes.remove(at: idx)
         favoriteSceneIDs.remove(sceneID)
-        persistApplicationState()
+        reconcileFavoriteOrder()
         publishError("Scene “\(deleted.name)” deleted.") { self.undoDeleteScene() }
     }
 
@@ -2997,12 +3012,13 @@ extension LightManager {
 
     func updateScene(_ draft: LightingScene, revisionLabel: String = "Before edit") {
         guard let index = scenes.firstIndex(where: { $0.id == draft.id }) else { return }
+        if rehearsalSceneID == draft.id { stopSceneRehearsal(restore: true) }
         sceneRevisions.insert(SceneRevision(scene: scenes[index], label: revisionLabel), at: 0)
         sceneRevisions = Array(sceneRevisions.prefix(60))
         scenes[index] = draft
         sceneDrafts.removeValue(forKey: draft.id)
         persistApplicationState()
-        lastActionSummary = "Saved \(draft.name) — Undo restores the previous version"
+        lastActionSummary = "Saved \(draft.name) — restore previous versions from scene History"
     }
 
     func revisions(for sceneID: UUID) -> [SceneRevision] { sceneRevisions.filter { $0.sceneID == sceneID } }
@@ -3107,9 +3123,10 @@ extension LightManager {
         rooms.first(where: { $0.id == roomID })?.schedules ?? []
     }
 
-    func addSchedule(_ entry: ScheduleEntry, to roomID: UUID) {
+    @discardableResult
+    func addSchedule(_ entry: ScheduleEntry, to roomID: UUID) -> Bool {
         guard let idx = rooms.firstIndex(where: { $0.id == roomID }),
-              rooms[idx].schedules.count < 12 else { return }
+              rooms[idx].schedules.count < Self.maximumSchedulesPerRoom else { return false }
         rooms[idx].schedules.append(entry)
         // Sort by resolved clock-minute so the list is always chronological.
         rooms[idx].schedules.sort { lhs, rhs in
@@ -3117,6 +3134,7 @@ extension LightManager {
                 < scheduleEngine.scheduledMinute(for: rhs, solarTimes: scheduleSolarTimes)
         }
         persistApplicationState()
+        return true
     }
 
     func deleteSchedule(_ entryID: UUID, from roomID: UUID) {
@@ -3975,7 +3993,8 @@ extension LightManager {
     }
 
     func duplicateSchedule(_ entry: ScheduleEntry, in roomID: UUID) {
-        guard let roomIndex = rooms.firstIndex(where: { $0.id == roomID }), rooms[roomIndex].schedules.count < 12 else { return }
+        guard let roomIndex = rooms.firstIndex(where: { $0.id == roomID }),
+              rooms[roomIndex].schedules.count < Self.maximumSchedulesPerRoom else { return }
         let copy = ScheduleEntry(hour: entry.hour, minute: entry.minute, offsetMinutes: entry.offsetMinutes, action: entry.action, weekdays: entry.weekdays)
         rooms[roomIndex].schedules.append(copy); persistApplicationState()
         logActivity(.schedule, title: "Schedule duplicated", detail: rooms[roomIndex].name)
@@ -4035,6 +4054,33 @@ extension LightManager {
         return SceneApplicationPreview(scene: scene, affected: affected, unreachable: unreachable, missingIDs: missing, unchanged: unchanged)
     }
 
+    /// Scenes recall fixture IDs, even when the selected room changes. Use
+    /// current room membership to make those targets visible before Apply.
+    func sceneScopeSummary(_ scene: LightingScene, selectedScope: LightScope = .all) -> SceneScopeSummary {
+        let savedIDs = Set(scene.snapshots.keys)
+        var remaining = savedIDs
+        var groups: [String] = []
+        for room in rooms.sorted(by: { $0.name.localizedStandardCompare($1.name) == .orderedAscending }) {
+            let ids = remaining.intersection(room.lightIDs)
+            guard !ids.isEmpty else { continue }
+            groups.append("\(room.name) (\(ids.count))")
+            remaining.subtract(ids)
+        }
+        let knownIDs = Set(devices.map(\.id))
+        let unassigned = remaining.intersection(knownIDs).count
+        if unassigned > 0 { groups.append("Unassigned (\(unassigned))") }
+        let undiscovered = remaining.subtracting(knownIDs).count
+        if undiscovered > 0 { groups.append("Undiscovered (\(undiscovered))") }
+        let selectedRoom: Room?
+        if case .room(let id) = selectedScope { selectedRoom = rooms.first { $0.id == id } }
+        else { selectedRoom = nil }
+        return SceneScopeSummary(
+            description: groups.isEmpty ? "No saved lights" : "Saved fixtures: " + groups.joined(separator: ", "),
+            outsideSelectedRoomCount: selectedRoom.map { savedIDs.subtracting($0.lightIDs).count } ?? 0,
+            selectedRoomName: selectedRoom?.name
+        )
+    }
+
     func availableDeviceIDs(for scene: LightingScene) -> Set<String> {
         Set(devices.lazy.filter { scene.snapshots[$0.id] != nil && !$0.isStale }.map(\.id))
     }
@@ -4052,46 +4098,66 @@ extension LightManager {
             confirmationCoordinator.request(
                 .init(
                     title: "Apply “\(scene.name)”?",
-                    message: "This scene will change \(availableCount) available light\(availableCount == 1 ? "" : "s")\(preview.unreachable.isEmpty ? "." : "; \(preview.unreachable.count) offline light\(preview.unreachable.count == 1 ? "" : "s") may need retry.") You can undo the change afterward.",
+                    message: "\(sceneScopeSummary(scene).description). This scene will change \(availableCount) available light\(availableCount == 1 ? "" : "s")\(preview.unreachable.isEmpty ? "." : "; \(preview.unreachable.count) offline light\(preview.unreachable.count == 1 ? "" : "s") may need retry.") You can undo the change afterward.",
                     confirmTitle: "Apply Scene"
                 ),
                 action: { [weak self] in self?.applyScene(scene, allowTurningOff: allowTurningOff, reviewed: true) }
             )
             return
         }
-        let affectedIDs = Set(preview.affected.map(\.id))
+        let result = applySceneSnapshots(scene, to: preview.affected, allowTurningOff: allowTurningOff)
+        lastSceneResult = SceneApplicationResult(scene: scene, allowTurningOff: allowTurningOff,
+                                                succeededIDs: result.succeeded, failedIDs: result.failed,
+                                                skippedOffIDs: result.skipped)
+        logActivity(.scene, title: "Scene applied", detail: "\(scene.name): \(result.succeeded.count) succeeded, \(result.failed.count) need retry", isFailure: !result.failed.isEmpty)
+    }
+
+    private func applySceneSnapshots(_ scene: LightingScene, to lights: [LightDevice], allowTurningOff: Bool)
+        -> (succeeded: [String], failed: [String], skipped: [String]) {
+        let targets = lights.filter { device in
+            guard let snap = scene.snapshots[device.id] else { return false }
+            return allowTurningOff || snap.isOn
+        }
+        let affectedIDs = Set(targets.map(\.id))
         stopEffects(touching: affectedIDs)
         cancelPendingBrightness(deviceIDs: affectedIDs)
-        recordChange(preview.affected)
+        recordChange(targets)
         var succeeded: [String] = [], failed: [String] = [], skipped: [String] = []
-        for device in preview.affected {
+        for device in lights {
             guard let snap = scene.snapshots[device.id] else { continue }
             if !allowTurningOff && !snap.isOn { skipped.append(device.id); continue }
             if device.isStale { failed.append(device.id) } else { succeeded.append(device.id) }
             applySceneSnapshot(snap, to: device)
         }
-        lastSceneResult = SceneApplicationResult(sceneID: scene.id, sceneName: scene.name,
-                                                succeededIDs: succeeded, failedIDs: failed,
-                                                skippedOffIDs: skipped, allowTurningOff: allowTurningOff)
-        logActivity(.scene, title: "Scene applied", detail: "\(scene.name): \(succeeded.count) succeeded, \(failed.count) need retry", isFailure: !failed.isEmpty)
+        return (succeeded, failed, skipped)
     }
 
     func retryLastSceneFailures() {
-        guard let result = lastSceneResult,
-              let scene = scenes.first(where: { $0.id == result.sceneID }) else { return }
+        guard let result = lastSceneResult, !result.failedIDs.isEmpty else { return }
         let failedIDs = Set(result.failedIDs)
-        let retryScene = LightingScene(id: scene.id, name: scene.name,
-                                       snapshots: scene.snapshots.filter { failedIDs.contains($0.key) },
-                                       createdAt: scene.createdAt)
-        for device in devices where failedIDs.contains(device.id) { refresh(device) }
-        applyScene(retryScene, allowTurningOff: result.allowTurningOff, reviewed: true,
-                   allowUnavailableTargets: true)
+        let failed = devices.filter { failedIDs.contains($0.id) }
+        guard !failed.isEmpty else {
+            publishError("The failed lights for “\(result.sceneName)” have not been rediscovered yet.")
+            return
+        }
+        for device in failed { refresh(device) }
+        let retried = applySceneSnapshots(result.scene, to: failed, allowTurningOff: result.allowTurningOff)
+        let succeeded = Set(result.succeededIDs).union(retried.succeeded).sorted()
+        let remainingFailures = Set(result.failedIDs).subtracting(retried.succeeded).subtracting(retried.skipped).sorted()
+        let skipped = Set(result.skippedOffIDs).union(retried.skipped).sorted()
+        // A rename may update the displayed title, but retry always applies
+        // the saved version of the scene that produced these failures.
+        let sceneName = scenes.first { $0.id == result.sceneID }?.name ?? result.sceneName
+        lastSceneResult = SceneApplicationResult(scene: result.scene, allowTurningOff: result.allowTurningOff,
+                                                succeededIDs: succeeded, failedIDs: remainingFailures,
+                                                skippedOffIDs: skipped, sceneName: sceneName)
+        logActivity(.scene, title: "Scene failures retried", detail: "\(sceneName): \(failed.count) retried, \(remainingFailures.count) need retry", isFailure: !remainingFailures.isEmpty)
     }
 
     func reconcileFavoriteOrder() {
         let active = Set(favoriteIDs.map { FavoriteReference(kind: .light, rawID: $0) }
-            + favoriteRoomIDs.map { FavoriteReference(kind: .room, rawID: $0.uuidString) }
-            + favoriteSceneIDs.map { FavoriteReference(kind: .scene, rawID: $0.uuidString) })
+            + favoriteRooms.map { FavoriteReference(kind: .room, rawID: $0.id.uuidString) }
+            + favoriteScenes.map { FavoriteReference(kind: .scene, rawID: $0.id.uuidString) })
         favoriteOrder = favoriteOrder.filter(active.contains)
         favoriteOrder.append(contentsOf: active.filter { !favoriteOrder.contains($0) }.sorted { $0.id < $1.id })
         persistApplicationState()

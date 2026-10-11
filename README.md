@@ -39,7 +39,9 @@ The same `LumenDesk` target is multiplatform and can be built for Mac or iPhone 
 
 There is also a web client at <https://seanpvera.github.io/LumenDesk/> that controls the same LIFX, Govee and Nanoleaf Shapes and Aurora lights.
 
-Browsers cannot open the raw UDP sockets these protocols need, so the web client pairs with a small local bridge that does the networking for you. It needs [Node.js](https://nodejs.org/) 20 or newer:
+Browsers cannot open the raw UDP sockets these protocols need, so the web client pairs with a small local bridge that does the networking for you. Download the **LumenDesk Bridge** package for your computer from [Releases](https://github.com/SeanPVera/LumenDesk/releases). The package includes the runtime and browser app; open the launcher to start the bridge and your browser, and keep it running while using lights or schedules. The macOS menu and Windows tray offer Open and Quit; Linux includes Start and Stop shortcuts. See [bridge packaging](docs/BRIDGE_DISTRIBUTION.md) for first-run instructions.
+
+Bridge packages are produced by this change and become release downloads when the next release is published. If your release does not list them yet, build from source with [Node.js](https://nodejs.org/) 20 or newer:
 
 ```sh
 git clone --depth 1 https://github.com/SeanPVera/LumenDesk.git
@@ -49,7 +51,7 @@ npm run app
 
 That serves the app from the bridge itself at <http://127.0.0.1:8765> — one origin for the page and the lights, so no browser permission is involved. Leave the terminal open while you use it.
 
-The web client opens on **Room**, with one selected scope shared by **Light**, **Compositions** and **Music**. Light offers fixture selection and grouped power, brightness, color and white controls; Compositions captures that room and applies saved scenes to their original fixtures. **Schedules**, **Devices** and **Settings** stay separate. Govee RGBIC segment editing and LIFX matrix control remain native-app features. Browser Music sends one color per fixture; it does not invent segment transport. See [the redesign report](REDESIGN_REPORT.md) for implementation and validation evidence.
+First-time setup guides you through finding lights, creating a room, assigning lights and trying its controls. Discovery reports include Govee LAN Control and Nanoleaf pairing instructions. The web client opens on **Room**, with one selected scope shared by **Light**, **Scenes** and **Music**. Light offers fixture selection and grouped power, brightness, color and white controls; Scenes captures that room and applies saved scenes to their original fixtures. **Favorites** filters starred fixtures. Saved scenes show their fixture and room targets before recall, including lights outside the selected room. **Schedules** supports Edit, and **Devices** names use explicit Save and Cancel. **Settings** stays separate. Govee RGBIC segment editing and LIFX matrix control remain native-app features. Browser Music sends one color per fixture; it does not invent segment transport. See [the redesign report](REDESIGN_REPORT.md) for implementation and validation evidence.
 
 The published page at <https://seanpvera.github.io/LumenDesk/> can also drive the bridge (`npm start`, API only), but current browsers gate a website's access to your local network behind a permission prompt, so that route may be blocked. Everything still stays on your own network — the page talks only to the bridge on `127.0.0.1`, with no account and no cloud. The web client currently covers discovery, power, brightness, colour and white, scenes, schedules, Music Mode, and Nanoleaf pairing, orientation and panel painting; segment control and per-panel streaming remain native. See [`web/README.md`](web/README.md) for details.
 
@@ -319,10 +321,14 @@ Scene features include:
   applying would put on each light, including captured Govee segment layouts and
   LIFX Luna matrix layouts, and ending it restores the prior state.
 - Apply scenes with options around whether devices may be turned off.
+- Retry only failed lights, preserving the applied scene version and its option
+  around turning lights off. Lights that already succeeded stay untouched.
 - Track scene revisions and drafts.
 - Undo recent scene-related changes where supported.
 
-Open the Lighting Library with **⇧⌘S**.
+Saving or leaving a scene editor ends its rehearsal and restores the starting
+lighting. Previous saved versions are restored through scene History. On Mac,
+open **Scenes** from the sidebar; on iPhone, open **Room → Scenes**.
 
 ### Lighting themes
 
@@ -389,7 +395,7 @@ The rest of this section is the plain-English guide. The technical description f
 
 1. **Play a song in Apple Music.** Use **Open Apple Music** in Music Mode, or open it yourself. No track import is needed. Other apps playing audio on this Mac are included too.
 2. **Pick a room and a preset.** Choose the room in the workspace header, then pick a preset. **Balanced** is the safe first choice.
-3. **Press Start system audio.** The first time, macOS asks for **Screen Recording** (or **Screen & System Audio Recording**) permission. Enable LumenDesk in System Settings, come back, and press Start again. Nothing is recorded or saved.
+3. **Choose System audio, a preset and lights, then press Start Music Mode.** The first time, macOS asks for **Screen Recording** (or **Screen & System Audio Recording**) permission. Enable LumenDesk in System Settings, come back, and press Start again. Nothing is recorded or saved.
 
 The input card shows **Waiting for audio** until something plays and **Audio is silent** when playback is quiet or paused. System audio can stop delivering sound entirely while nothing plays, so neither one is treated as a fault. **No audio received** means the capture itself failed. If Apple Music is audible on this Mac but the meter stays empty, use **Restart system audio** to reconnect without losing the room’s settings or its saved pre-show lighting. Capture interruptions are reported instead of leaving a connected label indefinitely. Audio diagnostics includes channel and dropped-buffer counts. LumenDesk measures stereo channel energy separately so wide or opposite-phase material cannot disappear in a mono downmix, and short callback bursts no longer reset beat analysis.
 
@@ -397,7 +403,7 @@ The input card shows **Waiting for audio** until something plays and **Audio is 
 
 1. **Play the music out loud.** Music Mode listens through the microphone, so it has to be able to hear the room. Grant microphone access the first time you press Start.
 2. **Pick a room and a preset.**
-3. **Press Start Music Mode.** To follow a track the microphone cannot hear — headphones, or a noisy room — use **Open Audio File** and pick the song instead.
+3. **Press Start Music Mode.** To follow a track the microphone cannot hear — headphones, or a noisy room — choose **Audio file**, use **Choose audio file** to pick the song, then press **Start Music Mode**.
 
 A phone call, Siri, an alarm or a headphone change takes the microphone away. The input card says so, and Music Mode reconnects once the microphone is free again; **Restart microphone** retries straight away.
 
@@ -511,7 +517,7 @@ Rooms share one live audio source. Start additional rooms with the same source; 
 
 During a show, you can change an included fixture between wash, hit, accent, motion, and auto. Stop first to change inclusion or move a fixture into or out of Off. The restore-on-stop preference can be changed while the show runs. Half-time pulses span two detected beats while palette and movement timing retain the detected bar length.
 
-On macOS the default source is system audio and requires Screen Recording permission. On iPhone and iPad the default source is the microphone. Open Audio File uses the existing user-selected file grant so iOS can follow a track the microphone cannot hear. MIDI clock needs a MIDI interface or IAC bus. See [Music Mode architecture](MUSIC_MODE_ARCHITECTURE.md), [production evidence](MUSIC_MODE_EVIDENCE.md), and the [control audit](CONTROLS_AUDIT.md) for tested behavior and limitations. The diagnostics disclosure distinguishes generated frames from local transport submission. The 45 ms timing bias remains unmeasured, and an installed app must be matched to its source revision before comparing behavior.
+On macOS the default source is system audio and requires Screen Recording permission. On iPhone and iPad the default source is the microphone. The Audio file source uses the existing user-selected file grant so iOS can follow a track the microphone cannot hear. MIDI clock needs a MIDI interface or IAC bus. See [Music Mode architecture](MUSIC_MODE_ARCHITECTURE.md), [production evidence](MUSIC_MODE_EVIDENCE.md), and the [control audit](CONTROLS_AUDIT.md) for tested behavior and limitations. The diagnostics disclosure distinguishes generated frames from local transport submission. The 45 ms timing bias remains unmeasured, and an installed app must be matched to its source revision before comparing behavior.
 
 ### Animated effects
 
@@ -534,7 +540,8 @@ Soundcheck now lives inside Music Mode as a built-in compatibility preset.
 
 ### Schedules and automation
 
-Each room can have schedules. Schedule entries support:
+Each room can have up to 12 schedules. The editor shows the limit and keeps a
+rejected draft open. Schedule entries support:
 
 - Enable/disable per entry.
 - Weekday selection.
@@ -554,6 +561,9 @@ Automation controls include:
 - Review missed automations.
 
 LumenDesk checks schedules periodically while the app is running.
+Fixed times follow the local clock across daylight-saving changes. A missing
+02:30 moves to 03:30; a repeated time runs once. Solar offsets apply before or
+after the configured local sunrise or sunset time.
 
 Fixed times keep their local wall-clock hour on daylight-saving transition days. A nonexistent time moves forward by the daylight-saving gap, and a repeated time runs at its first occurrence. Solar offsets can cross midnight; weekday selection applies to the sunrise or sunset's base day.
 
@@ -628,7 +638,7 @@ Demo Mode is useful for screenshots, testing UI flows, or learning the app befor
 
 ### Interface
 
-The native Mac app uses **Spectrum Studio**: a room and device sidebar, a room overview with a lane for each light, and an integrated device editor. Graphite surfaces and amber controls frame actual fixture colors. A scene shelf recalls scenes to their saved fixture IDs; Save room scene captures current output, excluding unapplied drafts.
+The native Mac app uses **Spectrum Studio**: a room and device sidebar, a room overview with a lane for each light, and an integrated device editor. Graphite surfaces and amber controls frame actual fixture colors. A scene shelf recalls scenes to their saved fixture IDs; Save current lighting captures current output, excluding unapplied drafts.
 
 The room overview identifies **Entire room** or the selected light count. Selections persist per room during navigation and opening a device editor does not replace them. Room power, brightness, color, white temperature and **Color schemes** act on those targets, including an attempt to reach lights marked stale. A manual change stops any show touching those lights; other lights in that show return to their saved state. Color schemes use each fixture’s supported panels and zones. Saved scenes still recall their original saved fixture IDs.
 
@@ -933,7 +943,7 @@ If LumenDesk reports a bind failure for Govee, another app may already be listen
 
 ### Music Mode does not respond
 
-- On **macOS**, Music Mode reacts to **system audio from any app**. Make sure something is actually playing; there is no musical input to analyze during silence. **Open Audio File** and **MIDI Clock** are the other sources when the system mix is not what you want.
+- On **macOS**, Music Mode reacts to **system audio from any app**. Make sure something is actually playing; there is no musical input to analyze during silence. **Audio file** and **MIDI clock** are the other sources when the system mix is not what you want.
 - Grant **Screen Recording** to LumenDesk (macOS) or **microphone** access (iOS) when prompted. MIDI clock needs the MIDI entitlement and a connected interface or IAC bus.
 - Open **Room → Music**, choose a room and preset, then select **Start**.
 - Confirm the audio is loud enough for the input being monitored.
@@ -957,7 +967,7 @@ On macOS, Music Mode analyzes the **system-audio mix** as its **default** source
 
 > **Note (developer builds):** Debug builds disable Xcode's automatic Launch Services registration so test products in temporary DerivedData folders do not become permission-relaunch candidates. Music Mode refreshes the currently running bundle's registration immediately before asking for access. A Screen Recording grant is also tied to the app's code signature. An unsigned or ad-hoc-signed build can still be re-prompted after rebuilding, so `project.yml` and the committed project both set `DEVELOPMENT_TEAM` to `SW2N54YNK3` for a stable signing identity. If you are not on that team, pick your own in **Signing & Capabilities** (a free personal team is enough); Xcode opens `LumenDesk.xcodeproj`, so editing `project.yml` on its own changes nothing unless you also run `xcodegen generate`.
 
-On **iOS**, Music Mode uses the **microphone** by default (there is no system-audio capture on iOS); grant microphone access when prompted. **Open Audio File** is the path for a track the microphone cannot hear.
+On **iOS**, Music Mode uses the **microphone** by default (there is no system-audio capture on iOS); grant microphone access when prompted. **Audio file → Choose audio file → Start Music Mode** is the path for a track the microphone cannot hear.
 
 ## Protocol references
 

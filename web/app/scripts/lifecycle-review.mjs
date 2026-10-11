@@ -36,6 +36,7 @@ function initialState() {
 
 async function mockApp(browser, origin, { crossOrigin = false, prepareState } = {}) {
   const context = await browser.newContext()
+  await context.addInitScript(() => window.localStorage.setItem('LumenDesk.roomSetupDismissed.v1', 'true'))
   const page = await context.newPage()
   const errors = []
   page.on('pageerror', error => errors.push(error.message))
@@ -90,6 +91,7 @@ const baseline = state => state.devices.map(device => ({
 
 async function startDemo(app) {
   await app.page.getByRole('button', { name: 'Demo groove', exact: true }).click()
+  await app.page.getByRole('button', { name: /^(Start|Restart)$/ }).click()
   await app.page.getByText(/Running · Demo groove/).waitFor()
   const before = frames(app).length
   await app.page.clock.runFor(300)
@@ -101,6 +103,7 @@ async function pendingMidi(page) {
     navigator.requestMIDIAccess = () => new Promise((_, reject) => { window.rejectMidi = reject })
   })
   await page.getByRole('button', { name: 'MIDI clock', exact: true }).click()
+  await page.getByRole('button', { name: /^(Start|Restart)$/ }).click()
   await page.waitForFunction(() => typeof window.rejectMidi === 'function')
 }
 
@@ -159,14 +162,18 @@ async function reviewMusic(browser, origin) {
     const gate = deferred(), restoring = deferred()
     handlers.restore = async () => { restoring.resolve(); await gate.promise }
     await page.getByRole('button', { name: 'MIDI clock', exact: true }).click()
+    assert.equal(restores(app).length, 0, 'selecting a source must not stop or restore the running show')
+    await page.getByRole('button', { name: 'Restart', exact: true }).click()
     await page.getByText('MIDI denied', { exact: true }).waitFor()
     await restoring.promise
     assert.deepEqual(restores(app)[0].data.states.map(({ fixtureID, rgb, brightness }) => ({ fixtureID, rgb, brightness })), previous)
     const atRestore = frames(app).length
     await page.getByRole('button', { name: 'Demo groove', exact: true }).click()
+    await expect(page.getByRole('button', { name: 'Start', exact: true })).toBeDisabled()
     await page.clock.runFor(500)
-    assert.equal(frames(app).length, atRestore, 'a restart waits for failed-source restoration')
+    assert.equal(frames(app).length, atRestore, 'starting a new show waits for failed-source restoration')
     gate.resolve()
+    await page.getByRole('button', { name: 'Start', exact: true }).click()
     await page.getByText(/Running · Demo groove/).waitFor()
     await page.clock.runFor(300)
     await expect.poll(() => frames(app).length).toBeGreaterThan(atRestore)
@@ -185,7 +192,8 @@ async function reviewMusic(browser, origin) {
     await expect(page.getByRole('button', { name: 'Stop', exact: true })).toBeEnabled()
     assert.equal(restores(app).length, beforeStop + 1, 'the cancelled source cannot restore over a newer show')
 
-    // A queued newer source retains the first baseline if the old source fails.
+    // Stop cancels an unresolved source before an explicit newer Start. Its
+    // late failure cannot replace the fresh show's starting-light snapshot.
     await page.getByRole('button', { name: 'Stop', exact: true }).click()
     await expect.poll(() => restores(app).length).toBe(beforeStop + 2)
     await page.clock.runFor(1500)
@@ -194,11 +202,15 @@ async function reviewMusic(browser, origin) {
     await page.clock.runFor(1500) // Poll the show output before the source change.
     await pendingMidi(page)
     await page.getByRole('button', { name: 'Demo groove', exact: true }).click()
+    await expect(page.getByRole('button', { name: 'Starting…', exact: true })).toBeDisabled()
+    await page.getByRole('button', { name: 'Stop', exact: true }).click()
+    await expect.poll(() => restores(app).length).toBe(beforeStop + 3)
+    await startDemo(app)
     await page.evaluate(() => { window.rejectMidi(new Error('Superseded MIDI rejection')) })
     await page.getByText(/Running · Demo groove/).waitFor()
     await page.clock.runFor(300)
     await page.getByRole('button', { name: 'Stop', exact: true }).click()
-    await expect.poll(() => restores(app).length).toBe(beforeStop + 3)
+    await expect.poll(() => restores(app).length).toBe(beforeStop + 4)
     assert.deepEqual(restores(app).at(-1).data.states.map(({ fixtureID, rgb, brightness }) => ({ fixtureID, rgb, brightness })), currentBaseline)
     assert.deepEqual(app.errors, [])
   } finally { await app.context.close() }
@@ -241,18 +253,21 @@ async function reviewPolling(browser, origin) {
     await expect(page.getByRole('button', { name: /^Fresh lamp, / })).toBeVisible()
     handlers.poll = route => route.abort('connectionrefused')
     await page.clock.runFor(1500)
-    await page.getByRole('heading', { name: 'Connect your local lights', exact: true }).waitFor()
+    await page.getByText(/Reconnecting automatically/).waitFor()
+    await expect(page.getByRole('button', { name: /^Fresh lamp, / })).toBeVisible()
+    await expect(page.getByRole('button', { name: /^Fresh lamp, / })).toBeDisabled()
     assert.deepEqual(app.errors, [])
   } finally { await app.context.close() }
 
-  // A prior connection's success cannot populate a newly selected bridge.
+  // A prior connection's success cannot replace the state read after an
+  // explicit reconnect. The retained workspace keeps edits during the outage.
   const next = await mockApp(browser, origin, { crossOrigin: true })
   try {
     const { page, handlers } = next
     const gate = deferred(), started = deferred(), completed = deferred()
-    let oldCount = 0
-    handlers.poll = async (route, url) => {
-      if (url.port === '8765') {
+    let oldCount = 0, oldConnection = true
+    handlers.poll = async route => {
+      if (oldConnection) {
         if (++oldCount === 1) {
           started.resolve()
           await gate.promise
@@ -266,8 +281,9 @@ async function reviewPolling(browser, origin) {
     }
     await page.clock.runFor(1500); await started.promise
     await page.clock.runFor(1500)
-    await page.getByRole('heading', { name: 'Connect your local lights', exact: true }).waitFor()
-    await page.getByRole('spinbutton', { name: 'Bridge port', exact: true }).fill('8766')
+    await page.getByText(/Reconnecting automatically/).waitFor()
+    oldConnection = false
+    await page.getByRole('button', { name: 'Reconnect now', exact: true }).click()
     await page.getByRole('button', { name: /^New bridge lamp, / }).waitFor()
     gate.resolve(); await completed.promise
     await page.clock.runFor(300)
@@ -288,20 +304,43 @@ async function reviewPendingScope(browser, origin) {
     const { page, handlers } = app
     await page.getByLabel('Control room').selectOption('lampRoom')
     await page.getByRole('button', { name: 'Music', exact: true }).click()
-    const gate = deferred(), started = deferred()
-    handlers.poll = async route => { started.resolve(); await gate.promise; await route.fulfill({ json: app.state }) }
+    const gate = deferred(), started = deferred(), completed = deferred()
+    const old = structuredClone(app.state)
+    old.devices[1].controlRevision = 99
+    let reads = 0
+    handlers.poll = async route => {
+      if (++reads === 1) {
+        started.resolve()
+        await gate.promise
+        await route.fulfill({ json: old })
+        completed.resolve()
+        return
+      }
+      return route.fulfill({ json: app.state })
+    }
     await page.getByRole('button', { name: 'Demo groove', exact: true }).click()
+    await page.getByRole('button', { name: 'Start', exact: true }).click()
     await started.promise
+    await expect(page.getByLabel('Control room')).toBeDisabled()
+    assert.equal(frames(app).length, 0, 'a pending baseline read must not render lighting')
+    await page.getByRole('button', { name: 'Stop', exact: true }).click()
+    await expect(page.getByLabel('Control room')).toBeEnabled()
     await page.getByLabel('Control room').selectOption('wallRoom')
-    gate.resolve()
+    // The bridge's new reading differs from the cached UI and the old request.
+    Object.assign(app.state.devices[1], { color: { r: 15, g: 25, b: 35 }, brightness: 37, controlRevision: 4 })
+    const expectedBaseline = baseline(app.state).filter(state => state.fixtureID === 'nanoleaf:TEST')
+    await startDemo(app)
+    gate.resolve(); await completed.promise
     await page.getByText(/Running · Demo groove/).waitFor()
     await page.clock.runFor(300)
     await expect.poll(() => frames(app).length).toBeGreaterThan(0)
-    assert.ok(frames(app).every(command => command.data.states.every(state => state.fixtureID === 'nanoleaf:TEST' && state.controlRevision === 0)),
-      'a pending start snapshots and renders the room selected when it begins')
+    assert.ok(frames(app).every(command => command.data.states.every(state => state.fixtureID === 'nanoleaf:TEST' && state.controlRevision === 4)),
+      'a cancelled baseline read cannot revive the old room or overwrite the new room’s fresh control revisions')
     await page.getByRole('button', { name: 'Stop', exact: true }).click()
     await expect.poll(() => restores(app).length).toBe(1)
     assert.deepEqual(restores(app)[0].data.states.map(state => state.fixtureID), ['nanoleaf:TEST'])
+    assert.deepEqual(restores(app)[0].data.states.map(({ fixtureID, rgb, brightness }) => ({ fixtureID, rgb, brightness })), expectedBaseline,
+      'Start must restore the bridge’s fresh light output, not a stale UI snapshot')
     assert.deepEqual(app.errors, [])
   } finally { await app.context.close() }
 }
@@ -311,7 +350,7 @@ export async function reviewLifecycles(browser, origin) {
   await reviewMusic(browser, origin)
   await reviewPendingScope(browser, origin)
   await reviewPolling(browser, origin)
-  console.log('LIFECYCLE_ASSERTIONS_PASS: rejected painting/retry, pending edits, failed-source restore, restart/cancellation, pending room scope, stale polling and bridge generation')
+  console.log('LIFECYCLE_ASSERTIONS_PASS: rejected painting/retry, pending edits, explicit source Start/Restart, failed-source restore, restart/cancellation, pending room lock and cancellation, fresh baseline and revisions, stale polling and reconnect generation')
 }
 
 // Also runnable on its own with the optional Playwright packages used by CI.
@@ -323,7 +362,8 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     for (let attempt = 0; attempt < 80; attempt++) {
       try { await fetch(origin); break } catch { await new Promise(resolve => setTimeout(resolve, 100)) }
     }
-    browser = await chromium.launch({ executablePath: process.env.LUMENDESK_CHROMIUM_PATH })
+    const executablePath = process.env.LUMENDESK_CHROMIUM_EXECUTABLE ?? process.env.LUMENDESK_CHROMIUM_PATH
+    browser = await chromium.launch(executablePath ? { executablePath } : {})
     await reviewLifecycles(browser, origin)
   } finally { await browser?.close(); server.kill() }
 }

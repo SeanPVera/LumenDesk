@@ -149,6 +149,23 @@ test('power, brightness and colour use the shared controls', async () => {
   assert.equal(registry.get(WALL).shapes.design, null)
 })
 
+test('a saved scene restores a controller scene by name instead of stale colour', async () => {
+  assert.equal((await api(`/devices/${WALL}/effect`, { name: 'Northern Lights' })).status, 202)
+  await waitFor(() => registry.get(WALL).shapes.effect === 'Northern Lights')
+  const captured = await api('/scenes', { name: 'Controller show', deviceIDs: [WALL] })
+  assert.equal(captured.status, 200)
+  assert.equal(captured.body.scene.snapshots[WALL].effect, 'Northern Lights')
+
+  assert.equal((await api(`/devices/${WALL}/color`, { rgb: { r: 0, g: 0, b: 255 } })).status, 200)
+  await waitFor(() => registry.get(WALL).shapes.output === 'solid')
+  const applied = await api(`/scenes/${captured.body.scene.id}/apply`, {})
+  assert.equal(applied.status, 200)
+  assert.deepEqual(applied.body.applied, [WALL])
+  assert.deepEqual(applied.body.skipped, [])
+  await waitFor(() => controller.select === 'Northern Lights' && registry.get(WALL).shapes.effect === 'Northern Lights')
+  assert.equal(controller.state.colorMode, 'effect')
+})
+
 test('browser music follows as one paced colour, and a restore brings the design back', async () => {
   const painted = await api(`/devices/${WALL}/panels`, { colors: { 9: { r: 255, g: 0, b: 0 }, 1204: { r: 0, g: 255, b: 0 } } })
   assert.equal(painted.status, 202)

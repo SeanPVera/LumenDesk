@@ -63,14 +63,18 @@ struct OnboardingView: View {
 
     private var topBar: some View {
         HStack(spacing: 10) {
-            ForEach(Step.allCases, id: \.self) { s in
-                Rectangle()
-                    .fill(s.rawValue <= step.rawValue
-                          ? AnyShapeStyle(Lumen.beamBright)
-                          : AnyShapeStyle(Lumen.hairlineStrong))
-                    .frame(width: s == step ? 30 : 16, height: 3)
-                    .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: step)
+            HStack(spacing: 10) {
+                ForEach(Step.allCases, id: \.self) { s in
+                    Rectangle()
+                        .fill(s.rawValue <= step.rawValue
+                              ? AnyShapeStyle(Lumen.beamBright)
+                              : AnyShapeStyle(Lumen.hairlineStrong))
+                        .frame(width: s == step ? 30 : 16, height: 3)
+                        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: step)
+                }
             }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Step \(step.rawValue + 1) of \(Step.allCases.count)")
             Spacer()
             if step != .done {
                 Button("Skip setup") { onFinish() }
@@ -79,8 +83,6 @@ struct OnboardingView: View {
                     .foregroundStyle(Lumen.textTertiary)
             }
         }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Step \(step.rawValue + 1) of \(Step.allCases.count)")
     }
 
     // MARK: - Step 1: Welcome
@@ -128,13 +130,16 @@ struct OnboardingView: View {
             VStack(spacing: 12) {
                 checklistCard("wifi", Lumen.cyan,
                               "Same Wi-Fi network",
-                              "Your Mac and every bulb must share one network and subnet. Many routers isolate “IoT” Wi-Fi — if so, join the same one.")
+                              "This device and every light must share one network and subnet. Many routers isolate “IoT” Wi-Fi — if so, join the same one.")
                 checklistCard("network", Lumen.copper,
                               "Govee: enable LAN Control",
                               "In the Govee Home app: Device → Settings → LAN Control. Only certain Govee models support it.")
                 checklistCard("dot.radiowaves.left.and.right", Lumen.signal,
                               "LIFX: powered & paired",
                               "Make sure each LIFX bulb is switched on and already set up in the LIFX app.")
+                checklistCard("hexagon", Lumen.signal,
+                              "Nanoleaf: pair locally",
+                              "Set up Shapes or Aurora in the Nanoleaf app, then use Pair Nanoleaf in the next step to authorize local control.")
             }
 
             HStack(spacing: 10) {
@@ -217,12 +222,15 @@ struct OnboardingView: View {
             }
         }
         .sheet(isPresented: $showingNanoleafPairing) { NanoleafPairingView().environmentObject(manager) }
-        .onAppear { manager.scan() }
+        .onAppear {
+            manager.start(discover: false)
+            manager.scan()
+        }
     }
 
     private var discoverSubtitle: String {
         let n = manager.devices.count
-        return n == 0 ? "Scanning your network…"
+        return n == 0 ? "No lights responded. Review the checks below, then scan again."
                       : "Found \(n) light\(n == 1 ? "" : "s")."
     }
 
@@ -341,11 +349,15 @@ struct OnboardingView: View {
                 .foregroundStyle(Lumen.textSecondary)
                 .multilineTextAlignment(.center)
 
+            if let room = trialRoom {
+                OnboardingRoomTrial(room: room)
+            }
+
             HStack(spacing: 10) {
                 Image(systemName: "wand.and.stars")
                     .foregroundStyle(Lumen.gold)
                     .accessibilityHidden(true)
-                Text("Tip: arrange your lights just right, then press **⇧⌘S** to save it as a Scene.")
+                Text("Tip: arrange your lights, then choose **Save current lighting** in Room. Find that lighting again in **Scenes**.")
                     .font(.callout)
                     .foregroundStyle(Lumen.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -354,6 +366,12 @@ struct OnboardingView: View {
             .lumenCard(fill: Lumen.surfaceRaised)
             Spacer(minLength: 12)
         }
+    }
+
+    private var trialRoom: Room? {
+        if let id = activeRoomID, let room = manager.rooms.first(where: { $0.id == id }),
+           !manager.devices(in: room).isEmpty { return room }
+        return manager.rooms.first { !manager.devices(in: $0).isEmpty }
     }
 
     private var doneRecap: String {
@@ -435,6 +453,34 @@ struct OnboardingView: View {
 
     private func go(_ next: Step) {
         withAnimation(.spring(duration: 0.4)) { step = next }
+    }
+}
+
+/// The final setup step gives the user one small, real control trial.
+private struct OnboardingRoomTrial: View {
+    @EnvironmentObject private var manager: LightManager
+    let room: Room
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Try \(room.name)").font(.headline)
+            Text("Turn the room on, then try a brightness level.")
+                .font(.callout).foregroundStyle(Lumen.textSecondary)
+            ViewThatFits(in: .horizontal) {
+                HStack { trialActions }
+                VStack(alignment: .leading, spacing: 10) { trialActions }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .lumenCard(fill: Lumen.surfaceRaised)
+    }
+
+    @ViewBuilder private var trialActions: some View {
+        Button("Turn on") { manager.setPower(in: room, on: true) }
+            .buttonStyle(LumenPrimaryButtonStyle())
+        Button("50% brightness") { manager.setBrightness(in: room, value: 0.5) }
+            .buttonStyle(LumenSecondaryButtonStyle())
     }
 }
 

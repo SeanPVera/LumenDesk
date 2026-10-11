@@ -24,19 +24,22 @@ export function due({ rooms, previous, now }) {
     for (const schedule of room.schedules ?? []) {
       if (!schedule.isEnabled) continue
 
-      const at = firstOccurrence(schedule, previous, now)
+      const at = latestOccurrence(schedule, previous, now)
       if (at) decisions.push({ room, schedule, at })
     }
   }
 
-  return decisions
+  // Insertion order says nothing about which action should leave a room in
+  // its final state after sleep: an older off must precede a newer on.
+  return decisions.sort((a, b) => a.at - b.at)
 }
 
-/** First matching minute in (previous, now], preserving local-time/DST stepping. */
-function firstOccurrence(schedule, previous, now) {
+/** Latest matching minute in (previous, now], preserving local-time/DST stepping. */
+function latestOccurrence(schedule, previous, now) {
   const cursor = new Date(previous.getTime())
   cursor.setSeconds(0, 0)
   cursor.setMinutes(cursor.getMinutes() + 1)
+  let latest = null
 
   // Do not replace this with elapsed milliseconds: setMinutes follows the
   // existing local-clock behavior across daylight-saving transitions.
@@ -45,11 +48,11 @@ function firstOccurrence(schedule, previous, now) {
     const matchesTime =
       cursor.getHours() === schedule.hour && cursor.getMinutes() === schedule.minute
     if (matchesDay && matchesTime && cursor > previous) {
-      return new Date(cursor.getTime()) // one firing per window, however long the gap
+      latest = new Date(cursor.getTime()) // one firing per rule: its newest missed action
     }
     cursor.setMinutes(cursor.getMinutes() + 1)
   }
-  return null
+  return latest
 }
 
 const DIM_LEVELS = new Map([

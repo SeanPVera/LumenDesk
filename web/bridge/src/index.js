@@ -34,6 +34,7 @@ function parseArgs(argv) {
     quiet: false,
     serve: true,
     appDir: null,
+    network: true,
   }
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i]
@@ -44,6 +45,7 @@ function parseArgs(argv) {
     else if (arg === '--app-dir') options.appDir = argv[++i]
     else if (arg === '--no-serve') options.serve = false
     else if (arg === '--quiet') options.quiet = true
+    else if (arg === '--no-network') options.network = false
     else if (arg === '--help' || arg === '-h') options.help = true
   }
   return options
@@ -65,6 +67,7 @@ the LumenDesk web app on a loopback HTTP API.
   --app-dir <path>      directory of the built web client to serve
   --no-serve            expose only the API, do not serve the web client
   --quiet               suppress discovery logging
+  --no-network          serve an empty workspace without device sockets (testing)
 `)
   process.exit(0)
 }
@@ -78,9 +81,11 @@ const lifx = new LifxClient({ registry, log })
 const govee = new GoveeClient({ registry, log })
 const nanoleaf = new NanoleafClient({ registry, log })
 
-await lifx.start()
-await govee.start()
-await nanoleaf.start()
+if (options.network) {
+  await lifx.start()
+  await govee.start()
+  await nanoleaf.start()
+}
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const appDir = options.appDir
@@ -120,7 +125,7 @@ server.listen(options.port, options.host, () => {
     log(`API only on ${base} (--no-serve)`)
   }
   log(`allowed origins: ${options.origins.join(', ')}`)
-  runDiscovery()
+  if (options.network) runDiscovery()
 })
 
 // A pass now spans two paced sweeps, so it is awaited and its outcome logged
@@ -135,7 +140,7 @@ function runDiscovery() {
     .catch(err => log(`discovery failed: ${err.message}`))
 }
 
-const discoverTimer = setInterval(runDiscovery, options.discoverEvery)
+const discoverTimer = options.network ? setInterval(runDiscovery, options.discoverEvery) : null
 
 const refreshTimer = setInterval(() => {
   lifx.refresh()
@@ -169,7 +174,7 @@ const reportTimer = setInterval(() => {
   }
 }, 2_000)
 
-function shutdown() {
+function shutdown(exitCode = 0) {
   clearInterval(discoverTimer)
   clearInterval(refreshTimer)
   clearInterval(reportTimer)
@@ -177,9 +182,14 @@ function shutdown() {
   lifx.stop()
   govee.stop()
   nanoleaf.stop()
-  server.close(() => process.exit(0))
-  setTimeout(() => process.exit(0), 500).unref()
+  server.close(() => process.exit(exitCode))
+  setTimeout(() => process.exit(exitCode), 500).unref()
 }
 
-process.on('SIGINT', shutdown)
-process.on('SIGTERM', shutdown)
+server.on('error', err => {
+  console.error(`LumenDesk could not start: ${err.message}`)
+  shutdown(1)
+})
+
+process.on('SIGINT', () => shutdown())
+process.on('SIGTERM', () => shutdown())

@@ -37,9 +37,17 @@ struct ScheduleEditorView: View {
 
             Divider()
             HStack {
-                Text("\(schedules.count) automation rule\(schedules.count == 1 ? "" : "s")").font(.caption).foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("\(schedules.count) of \(LightManager.maximumSchedulesPerRoom) automation rules")
+                        .font(.caption).foregroundStyle(.secondary)
+                    if schedules.count >= LightManager.maximumSchedulesPerRoom {
+                        Text("Limit reached. Delete a schedule to add another.")
+                            .font(.caption).foregroundStyle(Lumen.warning)
+                    }
+                }
                 Spacer()
                 Button { showingNewEntry = true } label: { Label("Add Schedule", systemImage: "plus") }.buttonStyle(LumenPrimaryButtonStyle())
+                    .disabled(schedules.count >= LightManager.maximumSchedulesPerRoom)
             }.padding(16)
         }
         .sheetFrame(minWidth: 560, idealWidth: 680, minHeight: 460, idealHeight: 620).background(LumenBackground(glow: false))
@@ -81,6 +89,7 @@ struct ScheduleEditorView: View {
             Menu {
                 Button("Edit…") { editingEntry = entry }
                 Button("Duplicate") { manager.duplicateSchedule(entry, in: room.id) }
+                    .disabled(manager.schedules(for: room.id).count >= LightManager.maximumSchedulesPerRoom)
                 Divider()
                 Button("Delete", role: .destructive) { manager.deleteSchedule(entry.id, from: room.id) }
             } label: { Image(systemName: "ellipsis.circle") }
@@ -137,6 +146,18 @@ private struct ScheduleFormView: View {
     @State private var action: ScheduleAction = .turnOff
     @State private var offset = 0
     @State private var weekdays = Set(1...7)
+    @State private var saveError: String?
+
+    private var creationError: String? {
+        guard entry == nil else { return nil }
+        guard manager.rooms.contains(where: { $0.id == room.id }) else {
+            return "This room no longer exists. Close this draft and choose another room."
+        }
+        guard manager.schedules(for: room.id).count < LightManager.maximumSchedulesPerRoom else {
+            return "This room has reached its limit of \(LightManager.maximumSchedulesPerRoom) schedules. Delete a schedule before adding another."
+        }
+        return nil
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -176,13 +197,18 @@ private struct ScheduleFormView: View {
                         .buttonStyle(LumenSecondaryButtonStyle(compact: true))
                 }
             }
+            if let error = creationError ?? saveError {
+                Label(error, systemImage: "exclamationmark.triangle")
+                    .font(.caption).foregroundStyle(Lumen.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }
                     .buttonStyle(LumenSecondaryButtonStyle())
                 Button("Save") { save() }
                     .buttonStyle(LumenPrimaryButtonStyle())
-                    .disabled(weekdays.isEmpty)
+                    .disabled(weekdays.isEmpty || creationError != nil)
             }
         }.padding(20).sheetFrame(minWidth: 440, idealWidth: 520).background(LumenBackground(glow: false)).onAppear(perform: load)
     }
@@ -191,7 +217,14 @@ private struct ScheduleFormView: View {
     private func save() {
         let parts = Calendar.current.dateComponents([.hour,.minute], from: date)
         let value = ScheduleEntry(id: entry?.id ?? UUID(), isEnabled: entry?.isEnabled ?? true, hour: parts.hour ?? 0, minute: parts.minute ?? 0, offsetMinutes: action.isRelativeToSun ? offset : 0, action: action, weekdays: weekdays)
-        if entry == nil { manager.addSchedule(value, to: room.id) } else { manager.updateSchedule(value, in: room.id) }
+        if entry == nil {
+            guard manager.addSchedule(value, to: room.id) else {
+                saveError = creationError ?? "The schedule could not be saved. Keep this draft open and try again."
+                return
+            }
+        } else {
+            manager.updateSchedule(value, in: room.id)
+        }
         dismiss()
     }
 }

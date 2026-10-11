@@ -232,18 +232,36 @@ final class ScheduleEngineTests: XCTestCase {
         XCTAssertEqual(calendar.component(.minute, from: occurrence), 30)
     }
 
+    func testMidnightRuleStaysOnTheRequestedLocalDay() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "America/New_York"))
+        let engine = ScheduleEngine(calendar: calendar)
+        let entry = ScheduleEntry(hour: 0, minute: 0, action: .turnOn)
+
+        for (month, day) in [(7, 13), (3, 8), (11, 1)] {
+            let reference = try date(2026, month, day, 12, 0, calendar: calendar)
+            XCTAssertEqual(
+                engine.occurrence(for: entry, relativeTo: reference, solarTimes: solarTimes),
+                try date(2026, month, day, 0, 0, calendar: calendar)
+            )
+        }
+    }
+
     func testFixedAndSolarWallClockTimesStayCorrectOnBothDSTTransitions() throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "America/New_York"))
         let engine = ScheduleEngine(calendar: calendar)
         let fixed = ScheduleEntry(hour: 9, minute: 0, action: .turnOn)
         let sunrise = ScheduleEntry(hour: 0, minute: 0, offsetMinutes: 15, action: .atSunrise)
+        let sunset = ScheduleEntry(hour: 0, minute: 0, offsetMinutes: -30, action: .atSunset)
         for (month, day) in [(3, 8), (11, 1)] {
             let reference = try date(2026, month, day, 12, 0, calendar: calendar)
             XCTAssertEqual(engine.occurrence(for: fixed, relativeTo: reference, solarTimes: solarTimes),
                            try date(2026, month, day, 9, 0, calendar: calendar))
             XCTAssertEqual(engine.occurrence(for: sunrise, relativeTo: reference, solarTimes: solarTimes),
                            try date(2026, month, day, 6, 45, calendar: calendar))
+            XCTAssertEqual(engine.occurrence(for: sunset, relativeTo: reference, solarTimes: solarTimes),
+                           try date(2026, month, day, 20, 0, calendar: calendar))
         }
     }
 
@@ -264,6 +282,7 @@ final class ScheduleEngineTests: XCTestCase {
         XCTAssertEqual(occurrence.scheduledAt, first)
         currentDate = second.addingTimeInterval(5)
         XCTAssertTrue(engine.evaluate(rooms: [room], solarTimes: solarTimes).decisions.isEmpty)
+        XCTAssertTrue(engine.missedAutomations.isEmpty)
         XCTAssertEqual(engine.nextOccurrence(for: entry, solarTimes: solarTimes),
                        try date(2026, 11, 2, 1, 30, calendar: calendar))
     }

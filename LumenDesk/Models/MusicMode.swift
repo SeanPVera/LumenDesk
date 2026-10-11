@@ -874,8 +874,8 @@ enum MusicModeHelp {
                  title: "Play something",
                  detail: "Start music in any app on this Mac. LumenDesk listens to the sound your Mac is already playing, so Spotify, YouTube, a DJ set and a game all work the same way. The first time you press Start, macOS asks for Screen Recording permission — that is the only way an app is allowed to hear your Mac's audio, and nothing is recorded or saved."),
             Step(id: 2,
-                 title: "Pick a room and a preset",
-                 detail: "Choose which lights are in the show at the top right, then pick a preset. Balanced is the safe first choice. You can change presets while the music is playing."),
+                 title: "Pick a source, room and preset",
+                 detail: "Select System audio, Audio file or MIDI clock, choose the room and included lights, then pick a preset. Balanced is the safe first choice. Choosing a source does not start the show."),
             Step(id: 3,
                  title: "Press Start Music Mode",
                  detail: "The meters below start moving and your lights follow the music. Press Stop when you are done. Every light goes back to how you left it, unless you switch off Restore previous state in the advanced controls.")
@@ -884,10 +884,10 @@ enum MusicModeHelp {
         return [
             Step(id: 1,
                  title: "Play something out loud",
-                 detail: "On iPhone and iPad, Music Mode listens through the microphone, so the music has to be audible in the room. Grant microphone access the first time you press Start. Nothing is recorded or saved. If you want to follow a track the microphone cannot hear, use Open Audio File instead."),
+                 detail: "On iPhone and iPad, the Microphone source listens to music audible in the room. Grant microphone access the first time you press Start. Nothing is recorded or saved. To follow a track the microphone cannot hear, select Audio file and choose a track instead."),
             Step(id: 2,
-                 title: "Pick a room and a preset",
-                 detail: "Choose which lights are in the show at the top, then pick a preset. Balanced is the safe first choice. You can change presets while the music is playing."),
+                 title: "Pick a source, room and preset",
+                 detail: "Select Microphone, Audio file or MIDI clock, choose the room and included lights, then pick a preset. Balanced is the safe first choice. Choosing a source does not start the show."),
             Step(id: 3,
                  title: "Press Start Music Mode",
                  detail: "The meters below start moving and your lights follow the music. Press Stop when you are done. Every light goes back to how you left it, unless you switch off Restore previous state in the advanced controls.")

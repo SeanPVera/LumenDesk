@@ -16,7 +16,6 @@ struct LumenDeskApp: App {
             RootView()
                 .environmentObject(manager)
                 .preferredColorScheme(.dark)
-                .onAppear { manager.start() }
         }
         #endif
     }
@@ -28,12 +27,14 @@ struct LumenDeskApp: App {
                 .environmentObject(manager)
                 .frame(minWidth: 620, minHeight: 540)
                 .preferredColorScheme(.dark)
-                .onAppear { manager.start() }
         }
         .windowResizability(.automatic)
         .commands {
             CommandGroup(after: .newItem) {
-                Button("Scan for Lights") { manager.scan() }
+                Button("Scan for Lights") {
+                    manager.start(discover: false)
+                    manager.scan()
+                }
                     .keyboardShortcut("r", modifiers: .command)
                 Button("Toggle All Lights") {
                     manager.setAllPower(on: !manager.devices.contains(where: { $0.isOn }))
@@ -149,6 +150,15 @@ struct RootView: View {
         }
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: hasOnboarded)
         .managedActionConfirmations(manager)
+        .onAppear { startReturningWorkspace() }
+        .onChange(of: hasOnboarded) { _ in startReturningWorkspace() }
+        .onChange(of: manager.isDemoMode) { _ in startReturningWorkspace() }
+    }
+
+    private func startReturningWorkspace() {
+        // First-run network access begins only after Prepare explains it.
+        // Exploring the demo does not initialize live discovery services.
+        if hasOnboarded { manager.start() }
     }
 }
 

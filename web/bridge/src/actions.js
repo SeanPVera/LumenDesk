@@ -39,19 +39,19 @@ function applyPower(device, on, client, registry) {
   return true
 }
 
-// State restoration deliberately keeps its existing acceptance semantics:
-// power failure returns false; subsequent channel writes are best-effort.
+// A restored state is accepted only if every required channel can be queued.
+// A successful power write alone must not report the complete scene as applied.
 function restoreState({ device, command, registry, client, lifx, govee, nanoleaf }) {
   const { isOn, brightness, color, kelvin } = command
   if (!applyPower(device, isOn, client, registry)) return false
   if (!isOn) return true
 
   if (device.brand === 'lifx') {
-    restoreLIFXColor(lifx, device, command.hsbk, brightness, color, kelvin)
+    if (!restoreLIFXColor(lifx, device, command.hsbk, brightness, color, kelvin)) return false
   } else if (device.brand === 'nanoleaf') {
-    restoreSeparateChannels(nanoleaf, device, brightness, color, kelvin, command.design)
+    if (!restoreSeparateChannels(nanoleaf, device, brightness, color, kelvin, command.design, command.effect)) return false
   } else {
-    restoreSeparateChannels(govee, device, brightness, color, kelvin)
+    if (!restoreSeparateChannels(govee, device, brightness, color, kelvin)) return false
   }
   registry.patch(device.id, {
     brightness: clampPercent(brightness),
@@ -65,12 +65,12 @@ function restoreLIFXColor(client, device, hsbk, brightness, color, kelvin) {
   // One SetColor packet must carry every channel. Separate colour and
   // brightness commands would rebuild HSBK from the previous device state.
   if (hsbk) {
-    client.setColor(device, {
+    return client.setColor(device, {
       hsbk: { ...hsbk, brightness: percentToU16(brightness) },
     })
   } else {
     // Legacy scenes lack HSBK; a stored kelvin does not imply white mode.
-    client.setColor(device, {
+    return client.setColor(device, {
       rgb: color ?? undefined,
       brightnessPercent: brightness,
       kelvin: color ? 0 : kelvin || 0,
@@ -78,13 +78,17 @@ function restoreLIFXColor(client, device, hsbk, brightness, color, kelvin) {
   }
 }
 
-function restoreSeparateChannels(client, device, brightness, color, kelvin, design = null) {
-  // Shapes restores its panel design before master brightness. Without a
-  // design, both Shapes and Govee use the same white/colour precedence.
-  if (design) client.displayPanels(device, design)
-  else if (kelvin) client.setColor(device, { kelvin })
-  else if (color) client.setColor(device, { rgb: color })
-  client.setBrightness(device, brightness)
+function restoreSeparateChannels(client, device, brightness, color, kelvin, design = null, effect = null) {
+  // Shapes restores its panel design or named controller scene before master
+  // brightness. Otherwise Shapes and Govee share white/colour precedence.
+  if (design) {
+    if (!client.displayPanels(device, design)) return false
+  } else if (effect) {
+    if (!client.selectEffect(device, effect)) return false
+  } else if (kelvin) {
+    if (!client.setColor(device, { kelvin })) return false
+  } else if (color && !client.setColor(device, { rgb: color })) return false
+  return client.setBrightness(device, brightness)
 }
 
 /** Capture the current state of the given devices as a scene snapshot. */
@@ -102,14 +106,18 @@ export function snapshot(devices) {
       hsbk: device.hsbk ?? null,
       // A Shapes wall showing LumenDesk's design keeps every panel.
       design: device.brand === 'nanoleaf' && device.shapes?.output === 'design' ? device.shapes.design : null,
+      // A controller scene is known by name even though its panel colours
+      // cannot be read. Older snapshots simply fall back to their colour.
+      effect: device.brand === 'nanoleaf' && device.shapes?.output === 'effect' ? device.shapes.effect : null,
     }
   }
   return snapshots
 }
 
 /**
- * Apply a scene. Devices that have since disappeared are skipped rather than
- * failing the whole scene, and the result reports what actually happened.
+ * Apply a scene. Missing devices and commands a client cannot accept are
+ * skipped rather than failing the whole scene. Applied means accepted for
+ * local dispatch; a later device reading confirms the actual output.
  */
 export function applyScene({ scene, registry, lifx, govee, nanoleaf = null, onlyDeviceIDs = null }) {
   const applied = []
@@ -124,7 +132,7 @@ export function applyScene({ scene, registry, lifx, govee, nanoleaf = null, only
       skipped.push(deviceID)
       continue
     }
-    applyCommand({
+    const ok = applyCommand({
       device,
       registry,
       lifx,
@@ -138,9 +146,11 @@ export function applyScene({ scene, registry, lifx, govee, nanoleaf = null, only
         kelvin: snap.kelvin,
         hsbk: snap.hsbk ?? null,
         design: snap.design ?? null,
+        effect: snap.effect ?? null,
       },
     })
-    applied.push(deviceID)
+    if (ok) applied.push(deviceID)
+    else skipped.push(deviceID)
   }
 
   return { applied, skipped }

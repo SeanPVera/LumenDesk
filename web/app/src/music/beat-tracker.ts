@@ -93,7 +93,8 @@ export class BeatTracker {
     const clampedOnset = Math.max(0, Math.min(1, onset));
     this.history[this.writeIndex] = clampedOnset;
     this.kickHistory[this.writeIndex] = Math.max(0, Math.min(1, lowFrequencyOnset));
-    this.writeIndex = (this.writeIndex + 1) % this.capacity;
+    this.writeIndex += 1;
+    if (this.writeIndex >= this.capacity) this.writeIndex = 0;
     this.frameCount += 1;
     this.latestFrameTime = time;
     this.onsetScale =
@@ -419,16 +420,17 @@ export class BeatTracker {
     const available = Math.min(this.frameCount, this.capacity);
     if (framesAgo < 0 || framesAgo >= available) return 0;
     let index = this.writeIndex - 1 - framesAgo;
-    while (index < 0) index += this.capacity;
-    return this.kickHistory[index % this.capacity];
+    // A valid lookback is less than capacity, so at most one wrap is needed.
+    if (index < 0) index += this.capacity;
+    return this.kickHistory[index];
   }
 
   private historyValue(framesAgo: number): number {
     const available = Math.min(this.frameCount, this.capacity);
     if (framesAgo < 0 || framesAgo >= available) return 0;
     let index = this.writeIndex - 1 - framesAgo;
-    while (index < 0) index += this.capacity;
-    return this.history[index % this.capacity];
+    if (index < 0) index += this.capacity;
+    return this.history[index];
   }
 }
 

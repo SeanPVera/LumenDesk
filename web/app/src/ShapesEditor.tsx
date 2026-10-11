@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { type Device, type RGB, hexToRGB, rgbToHex } from './bridge'
-import { type Direction, bounds, fit, neighbor, normalizeDegrees, panelNumbers, toScreen } from './shapes/geometry'
+import { type Direction, bounds, createScreenTransform, fit, neighbor, normalizeDegrees, panelNumbers } from './shapes/geometry'
 import { type Tone, toRGB, toTone } from './shapes/tone'
 
 // The browser side of the Shapes panel studio. The bridge owns the controller
@@ -113,6 +113,7 @@ export function ShapesEditor({ device, actions }: { device: Device; actions: Sha
     return Math.round(Math.min(560, Math.max(240, (width - INSET * 2) * aspect + INSET * 2)))
   }, [geometry, reported, width])
   const view = useMemo(() => fit(geometry, degrees, width, height, INSET), [geometry, degrees, width, height])
+  const screen = useMemo(() => createScreenTransform(geometry.pivot, degrees, view), [geometry, degrees, view])
   const numbers = useMemo(() => panelNumbers(geometry, degrees), [geometry, degrees])
   const ordered = useMemo(() => [...geometry.panels].sort((a, b) => numbers[a.panelID] - numbers[b.panelID]),
     [geometry, numbers])
@@ -223,13 +224,13 @@ export function ShapesEditor({ device, actions }: { device: Device; actions: Sha
             </defs>
             <text x={width / 2} y={17} textAnchor="middle" className="shapes-up" aria-hidden="true">↑ Up on the wall</text>
             {geometry.references.map(reference => {
-              const [x, y] = toScreen([reference.x, reference.y], geometry.pivot, degrees, view)
+              const [x, y] = screen([reference.x, reference.y])
               return <circle key={`r${reference.panelID}`} cx={x} cy={y} r={Math.max(3, reference.radius * view.scale)}
                 className="shapes-reference" aria-hidden="true" />
             })}
             {ordered.map(panel => {
-              const outline = panel.outline.map(point => toScreen(point, geometry.pivot, degrees, view))
-              const [cx, cy] = toScreen([panel.x, panel.y], geometry.pivot, degrees, view)
+              const outline = panel.outline.map(screen)
+              const [cx, cy] = screen([panel.x, panel.y])
               const color = colors?.[panel.panelID]
               const isSelected = selection.includes(panel.panelID)
               const off = Boolean(color) && color!.r + color!.g + color!.b === 0
@@ -404,6 +405,7 @@ export function ShapesMiniWall({ device }: { device: Device }) {
   const degrees = device.shapes!.orientation ?? 0
   const key = useId().replace(/:/g, '')
   const view = fit(geometry, degrees, 120, 40, 2)
+  const screen = createScreenTransform(geometry.pivot, degrees, view)
   const lit = device.power && device.reachable
   const colors = lit ? shownColors(device) : null
   return (
@@ -418,7 +420,7 @@ export function ShapesMiniWall({ device }: { device: Device }) {
         const color = colors?.[panel.panelID]
         const fill = !lit ? 'var(--surface)' : color ? rgbToHex(color) : `url(#${key}-unknown)`
         return <polygon key={panel.panelID} fill={fill}
-          points={panel.outline.map(point => toScreen(point, geometry.pivot, degrees, view).map(n => n.toFixed(1)).join(',')).join(' ')} />
+          points={panel.outline.map(point => screen(point).map(n => n.toFixed(1)).join(',')).join(' ')} />
       })}
     </svg>
   )

@@ -4,6 +4,7 @@ import { MusicChoreographyEngine } from '../.test-build/choreography.js'
 import { configurationFor } from '../.test-build/config.js'
 import { emptySnapshot } from '../.test-build/types.js'
 import { MusicFeatureAnalyzer } from '../.test-build/analyzer.js'
+import { BeatTracker } from '../.test-build/beat-tracker.js'
 import { WebMusicSession, frameToCommands } from '../.test-build/session.js'
 const fixtures = [{id:'a',label:'A',transport:'lifxLAN',segmentCount:0,role:'accent'}]
 const topology = {layout:'leftToRight',fixtureOrder:['a'],excludedFixtureIDs:[]}
@@ -283,4 +284,96 @@ test('completion of an old audio close cannot stop a replacement session',async(
   finishClose();await oldStop
   try { assert.equal(session.state.running,true) }
   finally { await session.stop() }
+})
+
+test('beat histories retain the newest frames across capacity boundaries',()=>{
+  for(const capacity of [64,67,750,8000]) {
+    const tracker=new BeatTracker(8/capacity)
+    // Isolate storage from the unrelated autocorrelation work in this test.
+    tracker.updateTempo=()=>{}
+    const onsets=[],kicks=[]
+    const checkpoints=new Set([1,capacity-1,capacity,capacity+1,2*capacity,2*capacity+1,3*capacity+11])
+    assert.equal(tracker.capacity,capacity)
+    assert.equal(tracker.historyValue(0),0)
+    assert.equal(tracker.kickHistoryValue(0),0)
+    for(let frame=1;frame<=3*capacity+11;frame++) {
+      const onset=frame%53===0?-1:frame%59===0?2:(frame%997)/996
+      const kick=frame%47===0?2:frame%61===0?-1:((frame*31)%991)/990
+      onsets.push(Math.max(0,Math.min(1,onset)))
+      kicks.push(Math.max(0,Math.min(1,kick)))
+      tracker.process(onset,kick,100+frame*tracker.frameInterval)
+      if(!checkpoints.has(frame))continue
+      const available=Math.min(frame,capacity)
+      assert.ok(tracker.writeIndex>=0&&tracker.writeIndex<capacity)
+      for(let ago=0;ago<available;ago++) {
+        assert.equal(tracker.historyValue(ago),onsets[frame-1-ago],`${capacity}/${frame}: onset ${ago}`)
+        assert.equal(tracker.kickHistoryValue(ago),kicks[frame-1-ago],`${capacity}/${frame}: kick ${ago}`)
+      }
+      for(const ago of [-1,available,available+capacity]) {
+        assert.equal(tracker.historyValue(ago),0)
+        assert.equal(tracker.kickHistoryValue(ago),0)
+      }
+    }
+  }
+})
+
+test('beat history reset and reconfiguration discard the previous ring',()=>{
+  const tracker=new BeatTracker(8/67)
+  tracker.updateTempo=()=>{}
+  const feed=(count,onset,kick)=>{
+    for(let i=0;i<count;i++) tracker.process(onset,kick,100+i*tracker.frameInterval)
+  }
+  feed(150,.8,.6)
+  tracker.reset()
+  assert.equal(tracker.frameCount,0)
+  assert.equal(tracker.writeIndex,0)
+  assert.equal(tracker.historyValue(0),0)
+  assert.equal(tracker.kickHistoryValue(0),0)
+  assert.ok(tracker.history.every(value=>value===0))
+  assert.ok(tracker.kickHistory.every(value=>value===0))
+  feed(1,.2,.3)
+  assert.equal(tracker.historyValue(0),.2)
+  assert.equal(tracker.kickHistoryValue(0),.3)
+  assert.equal(tracker.historyValue(1),0)
+  tracker.configure(tracker.frameInterval*1.005)
+  assert.equal(tracker.frameCount,1,'a negligible interval change preserves history')
+  tracker.configure(8/64)
+  assert.equal(tracker.capacity,64)
+  assert.equal(tracker.frameCount,0)
+  assert.equal(tracker.writeIndex,0)
+  assert.equal(tracker.historyValue(0),0)
+  assert.equal(tracker.kickHistoryValue(0),0)
+  feed(129,.4,.9)
+  assert.equal(tracker.historyValue(63),.4)
+  assert.equal(tracker.kickHistoryValue(63),.9)
+  assert.equal(tracker.historyValue(64),0)
+})
+
+test('beat tempo and phase match modulo history through wraps and reset',()=>{
+  const tracker=new BeatTracker(.025),reference=new BeatTracker(.025)
+  for(const [method,buffer] of [['historyValue','history'],['kickHistoryValue','kickHistory']]) {
+    // Preserve the former lookup as an independent reference for the full grid.
+    reference[method]=function(ago) {
+      if(ago<0||ago>=Math.min(this.frameCount,this.capacity))return 0
+      let index=this.writeIndex-1-ago
+      while(index<0)index+=this.capacity
+      return this[buffer][index%this.capacity]
+    }
+  }
+  for(const period of [20,16]) {
+    tracker.reset();reference.reset()
+    let locked=0
+    for(let frame=0;frame<1000;frame++) {
+      const kick=frame%period===0?1:0
+      const onset=Math.max(kick,frame%(period/4)===0?.12:0)
+      const time=100+frame*.025
+      assert.equal(tracker.process(onset,kick,time),reference.process(onset,kick,time))
+      assert.deepEqual(tracker.grid,reference.grid)
+      if(frame>640&&tracker.grid.isLocked) {
+        locked++
+        assert.ok(Math.abs(tracker.grid.tempo-60/(period*.025))<3)
+      }
+    }
+    assert.ok(locked>300,`${60/(period*.025)} BPM must remain locked after two wraps`)
+  }
 })

@@ -63,7 +63,7 @@ struct ScheduleEntry: Identifiable, Equatable {
         self.offsetMinutes = offsetMinutes
         self.action = action
         self.weekdays = weekdays
-        self = normalized()
+        normalizeFields()
     }
 
     /// Imported or subsequently mutated values must be safe to format and
@@ -89,6 +89,17 @@ struct ScheduleEntry: Identifiable, Equatable {
                                   min(Self.supportedOffsetMinutes.upperBound, offsetMinutes))
         value.weekdays = validDays
         return value
+    }
+
+    /// Normalize the mutable fields after initialization without assigning the
+    /// immutable identity a second time.
+    private mutating func normalizeFields() {
+        let value = normalized()
+        isEnabled = value.isEnabled
+        hour = value.hour
+        minute = value.minute
+        offsetMinutes = value.offsetMinutes
+        weekdays = value.weekdays
     }
 
     var daySummary: String {
@@ -130,6 +141,6 @@ extension ScheduleEntry: Codable {
         offsetMinutes = (try? c.decode(Int.self, forKey: .offsetMinutes)) ?? 0
         action = try c.decode(ScheduleAction.self, forKey: .action)
         weekdays = (try? c.decode(Set<Int>.self, forKey: .weekdays)) ?? Set(1...7)
-        self = normalized()
+        normalizeFields()
     }
 }

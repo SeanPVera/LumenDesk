@@ -601,8 +601,313 @@ final class DomainTests: XCTestCase {
         XCTAssertEqual(manager.lastActionSummary?.hasPrefix("Configuration exported"), true)
     }
 
+    @MainActor
+    func testRepeatedIdentifyRestoresTheOriginalLookInsteadOfTheTemporaryLook() async throws {
+        let delay = IdentificationDelay()
+        let manager = LightManager(defaults: isolatedDefaults(), persistenceStore: temporaryPersistenceStore(),
+                                   identifySleep: { _ in await delay.wait() })
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+        let light = try XCTUnwrap(manager.devices.first { $0.brand == .lifx && !$0.isLIFXLuna })
+        light.isOn = false
+        light.brightness = 0.3
+        light.color = .orange
+        let originalColor = light.color
+
+        manager.identify(light)
+        await waitUntilState { await delay.pendingCount == 1 }
+        manager.identify(light)
+        await waitUntilState { await delay.pendingCount == 2 }
+        await delay.release()
+        await waitUntilState { manager.identifyingDeviceIDsForTesting.isEmpty }
+
+        XCTAssertFalse(light.isOn)
+        XCTAssertEqual(light.brightness, 0.3, accuracy: 0.0001)
+        XCTAssertEqual(light.color.rgbDistance(to: originalColor), 0, accuracy: 0.0001)
+    }
+
+    @MainActor
+    func testSceneTakeoverCancelsIdentificationRestoration() async throws {
+        let delay = IdentificationDelay()
+        let manager = LightManager(defaults: isolatedDefaults(), persistenceStore: temporaryPersistenceStore(),
+                                   identifySleep: { _ in await delay.wait() })
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+        let light = try XCTUnwrap(manager.devices.first { $0.brand == .lifx && !$0.isLIFXLuna })
+        manager.identify(light)
+        await waitUntilState { await delay.pendingCount == 1 }
+        let scene = LightingScene(name: "New look", snapshots: [light.id: .init(
+            isOn: true, brightness: 0.42, hue: 0.65, saturation: 0.9, kelvin: 3500)])
+        manager.applyScene(scene, allowTurningOff: true, reviewed: true)
+        let appliedColor = light.color
+        await delay.release()
+        await settleStateTasks()
+
+        XCTAssertTrue(manager.identifyingDeviceIDsForTesting.isEmpty)
+        XCTAssertEqual(light.brightness, 0.42, accuracy: 0.0001)
+        XCTAssertEqual(light.color.rgbDistance(to: appliedColor), 0, accuracy: 0.0001)
+    }
+
+    @MainActor
+    func testDemoEntryCancelsIdentificationBeforeSavingTheLiveWorkspace() async throws {
+        let delay = IdentificationDelay()
+        let manager = LightManager(defaults: isolatedDefaults(), persistenceStore: temporaryPersistenceStore(),
+                                   identifySleep: { _ in await delay.wait() })
+        manager.goveeDiscovered(deviceID: "LIVE", address: "192.0.2.1", sku: nil)
+        await waitUntilState { manager.devices.count == 1 }
+        let light = try XCTUnwrap(manager.devices.first)
+        light.isOn = false
+        light.brightness = 0.27
+        light.color = .orange
+        manager.identify(light)
+        await waitUntilState { await delay.pendingCount == 1 }
+        manager.enterDemoMode()
+        XCTAssertTrue(manager.identifyingDeviceIDsForTesting.isEmpty)
+        XCTAssertFalse(light.isOn)
+        await delay.release()
+        manager.exitDemoMode()
+        await settleStateTasks()
+        XCTAssertTrue(manager.devices.first === light)
+        XCTAssertFalse(light.isOn)
+        XCTAssertEqual(light.brightness, 0.27, accuracy: 0.0001)
+        XCTAssertEqual(light.color.rgbDistance(to: .orange), 0, accuracy: 0.0001)
+    }
+
+    @MainActor
+    func testDemoResetAndExitCancelPendingIdentificationTasks() async throws {
+        let delay = IdentificationDelay()
+        let manager = LightManager(defaults: isolatedDefaults(), persistenceStore: temporaryPersistenceStore(),
+                                   identifySleep: { _ in await delay.wait() })
+        manager.enterDemoMode()
+        let first = try XCTUnwrap(manager.devices.first { $0.brand == .lifx && !$0.isLIFXLuna })
+        manager.identify(first)
+        await waitUntilState { await delay.pendingCount == 1 }
+        manager.resetDemoMode()
+        XCTAssertTrue(manager.identifyingDeviceIDsForTesting.isEmpty)
+        let replacement = try XCTUnwrap(manager.devices.first { $0.id == first.id })
+        manager.identify(replacement)
+        await waitUntilState { await delay.pendingCount == 2 }
+        manager.exitDemoMode()
+        await delay.release()
+        await settleStateTasks()
+        XCTAssertTrue(manager.devices.isEmpty)
+        XCTAssertTrue(manager.identifyingDeviceIDsForTesting.isEmpty)
+        XCTAssertFalse(manager.commandStates.keys.contains { $0.hasPrefix("demo:") })
+    }
+
+    @MainActor
+    func testManualTakeoverEndsSustainedIdentification() async throws {
+        let manager = LightManager(defaults: isolatedDefaults(), persistenceStore: temporaryPersistenceStore())
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+        let light = try XCTUnwrap(manager.devices.first { $0.brand == .lifx && !$0.isLIFXLuna })
+        manager.beginSustainedIdentify(light)
+        await settleStateTasks()
+        XCTAssertTrue(manager.isHoldingIdentify)
+        manager.setBrightness(light, value: 0.45)
+        await settleStateTasks()
+        XCTAssertFalse(manager.isHoldingIdentify)
+        XCTAssertEqual(light.brightness, 0.45, accuracy: 0.0001)
+    }
+
+    @MainActor
+    func testEditingAfterUndoClearsRedoAndStartsANewUndoBoundary() throws {
+        var now = Date(timeIntervalSince1970: 1_700_000_000)
+        let manager = LightManager(defaults: isolatedDefaults(), persistenceStore: temporaryPersistenceStore(),
+                                   changeClock: { now })
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+        let light = try XCTUnwrap(manager.devices.first { !$0.isStale })
+        manager.setBrightness(light, value: 0.4)
+        now = now.addingTimeInterval(2)
+        manager.setBrightness(light, value: 0.6)
+        manager.undo()
+        XCTAssertEqual(light.brightness, 0.4, accuracy: 0.0001)
+        XCTAssertTrue(manager.canRedo)
+
+        manager.setBrightness(light, value: 0.8)
+        XCTAssertFalse(manager.canRedo)
+        manager.redo()
+        XCTAssertEqual(light.brightness, 0.8, accuracy: 0.0001)
+        manager.undo()
+        XCTAssertEqual(light.brightness, 0.4, accuracy: 0.0001,
+                       "The post-Undo edit must not merge into the older undo entry")
+    }
+
+    @MainActor
+    func testSceneRetryTargetsOnlyFailedLightsAndUsesSceneIdentity() throws {
+        let manager = LightManager(defaults: isolatedDefaults(), persistenceStore: temporaryPersistenceStore())
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+        let available = manager.devices.filter { !$0.isStale && $0.brand != .nanoleaf }
+        let first = try XCTUnwrap(available.first)
+        let second = try XCTUnwrap(available.last)
+        first.brightness = 0.2
+        second.brightness = 0.4
+        manager.captureScene(name: "Retry this scene")
+        let scene = try XCTUnwrap(manager.scenes.last)
+        second.isStale = true
+        manager.applyScene(scene, allowTurningOff: false, reviewed: true)
+        XCTAssertTrue(try XCTUnwrap(manager.lastSceneResult).failedIDs.contains(second.id))
+        first.brightness = 0.83
+        second.isStale = false
+        second.brightness = 0.9
+        // Renaming must not make the remembered scene disappear from retry.
+        manager.renameScene(scene.id, to: "Renamed")
+        manager.retryLastSceneFailures()
+        XCTAssertEqual(first.brightness, 0.83, accuracy: 0.0001)
+        XCTAssertEqual(second.brightness, 0.4, accuracy: 0.0001)
+        XCTAssertEqual(manager.lastSceneResult?.sceneID, scene.id)
+        XCTAssertEqual(manager.lastSceneResult?.sceneName, "Renamed")
+        XCTAssertEqual(manager.lastSceneResult?.allowTurningOff, false)
+    }
+
+    @MainActor
+    func testSceneRetryPreservesTheOriginalSkipOffPolicy() throws {
+        let manager = LightManager(defaults: isolatedDefaults(), persistenceStore: temporaryPersistenceStore())
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+        let lights = manager.devices.filter { !$0.isStale && $0.brand != .nanoleaf }
+        let first = try XCTUnwrap(lights.first)
+        let second = try XCTUnwrap(lights.last)
+        first.isOn = true
+        second.isOn = true
+        manager.captureScene(name: "Skip off")
+        let scene = try XCTUnwrap(manager.scenes.last)
+        second.isStale = true
+        manager.applyScene(scene, allowTurningOff: false, reviewed: true)
+        var edited = scene
+        edited.snapshots[second.id]?.isOn = false
+        manager.updateScene(edited)
+        second.isStale = false
+        manager.retryLastSceneFailures()
+        XCTAssertTrue(second.isOn, "Retry must not turn off a light when the original apply prohibited that")
+        XCTAssertTrue(try XCTUnwrap(manager.lastSceneResult).skippedOffIDs.contains(second.id))
+    }
+
+    @MainActor
+    func testSceneRetryStillAttemptsAnOfflineLightWithoutStoppingAnotherRoomsShow() throws {
+        let manager = LightManager(defaults: isolatedDefaults(), persistenceStore: temporaryPersistenceStore())
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+        let firstRoom = try XCTUnwrap(manager.rooms.first)
+        let failed = try XCTUnwrap(manager.devices.first { $0.brand == .govee && !firstRoom.lightIDs.contains($0.id) })
+        failed.brightness = 0.41
+        manager.captureScene(name: "Retry offline")
+        let scene = try XCTUnwrap(manager.scenes.last)
+        failed.isStale = true
+        manager.applyScene(scene, allowTurningOff: false, reviewed: true)
+        let effect = try XCTUnwrap(LightingCatalog.effects.first { $0.id != "music-pulse" })
+        let scope = LightScope.room(firstRoom.id)
+        manager.startEffect(effect, scope: scope)
+        failed.brightness = 0.9
+        manager.retryLastSceneFailures()
+        XCTAssertEqual(failed.brightness, 0.41, accuracy: 0.0001,
+                       "A retry must try the failed target even before it answers a refresh")
+        XCTAssertEqual(manager.activeEffects[scope], effect.id)
+        XCTAssertEqual(try XCTUnwrap(manager.lastSceneResult).failedIDs, [failed.id])
+    }
+
+    @MainActor
+    func testRecoveredDeviceUpdatesPublishedAndConfirmedState() async throws {
+        let manager = LightManager(defaults: isolatedDefaults(), persistenceStore: temporaryPersistenceStore())
+        manager.goveeDiscovered(deviceID: "RECOVER", address: "192.0.2.2", sku: nil)
+        await waitUntilState { manager.devices.count == 1 }
+        let light = try XCTUnwrap(manager.devices.first)
+        manager.retry(light)
+        manager.goveeDidUpdate(deviceID: "RECOVER", isOn: false, brightness: 42,
+                               r: 255, g: 0, b: 0, kelvin: 3500)
+        await waitUntilState { !manager.commandPendingIDs.contains(light.id) }
+        XCTAssertFalse(light.isOn)
+        XCTAssertEqual(light.brightness, 0.42, accuracy: 0.0001)
+        XCTAssertEqual(light.color.rgbComponents.r, 1, accuracy: 0.0001)
+        XCTAssertEqual(manager.confirmedStates[light.id]?.isOn, false)
+    }
+
+    @MainActor
+    func testDirectGoveeStateCallbacksBoundExtremeNumbersBeforePublication() async throws {
+        let manager = LightManager(defaults: isolatedDefaults(), persistenceStore: temporaryPersistenceStore())
+        manager.goveeDiscovered(deviceID: "BOUNDS", address: "192.0.2.3", sku: nil)
+        await waitUntilState { manager.devices.count == 1 }
+        let light = try XCTUnwrap(manager.devices.first)
+        manager.goveeDidUpdate(deviceID: "BOUNDS", isOn: true, brightness: Int.max,
+                               r: Int.max, g: Int.min, b: Int.max, kelvin: Int.max)
+        await settleStateTasks()
+        XCTAssertEqual(light.brightness, 1)
+        XCTAssertEqual(Int(light.brightness * 100), 100)
+        XCTAssertEqual(light.kelvin, 9000)
+        XCTAssertEqual(light.color.rgbComponents.r, 1, accuracy: 0.0001)
+        XCTAssertEqual(light.color.rgbComponents.g, 0, accuracy: 0.0001)
+        manager.goveeDidUpdate(deviceID: "BOUNDS", isOn: false, brightness: Int.min,
+                               r: Int.min, g: Int.max, b: Int.min, kelvin: Int.min)
+        await settleStateTasks()
+        XCTAssertEqual(light.brightness, 0)
+        XCTAssertEqual(Int(light.brightness * 100), 0)
+        XCTAssertEqual(try XCTUnwrap(manager.confirmedStates[light.id]).brightness, 0)
+    }
+
+    @MainActor
+    func testSolarPreferenceSettersBoundExtremeProgrammaticValues() {
+        let manager = LightManager(defaults: isolatedDefaults(), persistenceStore: temporaryPersistenceStore())
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+        manager.setSunriseTime(hour: Int.max, minute: Int.min)
+        manager.setSunsetTime(hour: Int.min, minute: Int.max)
+        XCTAssertEqual(manager.sunriseHour, 23)
+        XCTAssertEqual(manager.sunriseMinute, 0)
+        XCTAssertEqual(manager.sunsetHour, 0)
+        XCTAssertEqual(manager.sunsetMinute, 59)
+    }
+
+    @MainActor
+    func testProgrammaticBrightnessAndWhiteCommandsBoundValuesBeforePublication() throws {
+        let manager = LightManager(defaults: isolatedDefaults(), persistenceStore: temporaryPersistenceStore())
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+        let light = try XCTUnwrap(manager.devices.first { $0.brand == .lifx && !$0.isLIFXLuna })
+        manager.setBrightness(light, value: .nan)
+        XCTAssertEqual(light.brightness, 0)
+        manager.previewBrightness(light, value: .infinity)
+        XCTAssertEqual(light.brightness, 0)
+        manager.commitBrightness(light, value: -Double.greatestFiniteMagnitude)
+        XCTAssertEqual(light.brightness, 0)
+        manager.setKelvin(light, kelvin: Int.min)
+        XCTAssertEqual(light.kelvin, 1200)
+        manager.setKelvin(light, kelvin: Int.max)
+        XCTAssertEqual(light.kelvin, 9000)
+    }
+
+    @MainActor
+    private func waitUntilState(_ condition: @escaping @MainActor () async -> Bool) async {
+        for _ in 0..<1000 {
+            if await condition() { return }
+            await Task.yield()
+        }
+        XCTFail("State transition did not complete")
+    }
+
+    @MainActor
+    private func settleStateTasks() async {
+        for _ in 0..<20 { await Task.yield() }
+    }
+
     private func isolatedDefaults() -> UserDefaults {
         UserDefaults(suiteName: "LumenDeskTests.\(UUID().uuidString)")!
     }
 
+}
+
+private actor IdentificationDelay {
+    private var continuations: [CheckedContinuation<Void, Never>] = []
+    var pendingCount: Int { continuations.count }
+
+    func wait() async {
+        await withCheckedContinuation { continuations.append($0) }
+    }
+
+    func release() {
+        let pending = continuations
+        continuations.removeAll()
+        pending.forEach { $0.resume() }
+    }
 }

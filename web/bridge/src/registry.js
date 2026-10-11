@@ -26,6 +26,7 @@ export class Registry {
       ...patch,
       lastSeen: this.now(),
     }
+    device.name = typeof device.name === 'string' ? device.name : id
     this.devices.set(id, device)
     return device
   }
@@ -39,6 +40,7 @@ export class Registry {
     const existing = this.devices.get(id)
     if (!existing) return null
     const device = { ...existing, ...patch }
+    device.name = typeof device.name === 'string' ? device.name : id
     this.devices.set(id, device)
     return device
   }

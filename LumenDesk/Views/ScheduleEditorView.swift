@@ -141,7 +141,7 @@ private struct ScheduleFormView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text(entry == nil ? "New Schedule" : "Edit Schedule").font(LumenType.display(size: 19, weight: .bold))
-            Label("Times use \(TimeZone.current.identifier). Across daylight-saving changes, skipped actions are held for review after wake; repeated wall-clock times run once.", systemImage: "globe")
+            Label("Times use \(TimeZone.current.identifier). A time skipped by daylight saving moves forward by the clock change; a repeated time runs once, at its first occurrence. Actions missed while asleep stay available for review.", systemImage: "globe")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Picker("Action", selection: $action) { ForEach(ScheduleAction.allCases, id: \.self) { Text($0.displayName).tag($0) } }
             if action.isRelativeToSun {

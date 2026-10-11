@@ -12,8 +12,14 @@ struct LightingScene: Identifiable, Codable, Equatable {
          createdAt: Date = Date()) {
         self.id = id
         self.name = name
-        self.snapshots = snapshots
+        self.snapshots = snapshots.mapValues { $0.normalized() }
         self.createdAt = createdAt
+    }
+
+    func normalized() -> LightingScene {
+        var value = self
+        value.snapshots = snapshots.mapValues { $0.normalized() }
+        return value
     }
 }
 
@@ -48,6 +54,18 @@ struct DeviceSnapshot: Equatable {
         self.matrix = matrix
         self.nanoleafAppearance = nanoleafAppearance
         self.nanoleafDesign = nanoleafDesign
+        self = normalized()
+    }
+
+    /// Keep scene data safe before any numeric conversion to a LAN channel.
+    /// The lower white point also preserves Nanoleaf's supported 1200 K state.
+    func normalized() -> DeviceSnapshot {
+        var value = self
+        value.brightness = brightness.isFinite ? max(0, min(1, brightness)) : 0
+        value.hue = hue.isFinite ? max(0, min(1, hue)) : 0
+        value.saturation = saturation.isFinite ? max(0, min(1, saturation)) : 0
+        value.kelvin = max(1200, min(9000, kelvin))
+        return value
     }
 }
 
@@ -69,5 +87,6 @@ extension DeviceSnapshot: Codable {
         // fail the scene, and with it every scene in the archive.
         nanoleafAppearance = try? c.decodeIfPresent(NanoleafAppearance.self, forKey: .nanoleafAppearance)
         nanoleafDesign = try? c.decodeIfPresent(NanoleafPanelDesign.self, forKey: .nanoleafDesign)
+        self = normalized()
     }
 }

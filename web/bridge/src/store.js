@@ -115,9 +115,9 @@ export class Store {
   async flush() {
     while (this.writing) await this.writing
     if (this.lastWriteError) {
-      const err = this.lastWriteError
-      this.lastWriteError = null
-      throw new Error(`could not save state: ${err.message}`)
+      // Every waiter for the failed batch must observe failure. Only a
+      // subsequent successful write clears this error.
+      throw new Error(`could not save state: ${this.lastWriteError.message}`)
     }
   }
 

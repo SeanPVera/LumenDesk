@@ -174,12 +174,29 @@ final class NanoleafShapesManagerTests: XCTestCase {
 
     func testAnotherAppTakingTheWallReleasesItFromTheShow() async throws {
         let wall = try wallDevice()
-        let effect = try XCTUnwrap(LightingCatalog.effects.first { $0.id == "color-flow" })
+        let bulbID = "lifx:001122334455"
+        manager.lifxDiscovered(macHex: "001122334455", address: "192.0.2.45")
+        await waitUntil { self.manager.devices.contains { $0.id == bulbID } }
+        manager.lifxDidUpdate(macHex: "001122334455", label: "ZZ bulb",
+                              color: LIFXHSBK(hue: 0, saturation: 0, brightness: 65535, kelvin: 3500), isOn: true)
+        await waitUntil { self.manager.devices.first { $0.id == bulbID }?.name == "ZZ bulb" }
+        let bulb = try XCTUnwrap(manager.devices.first { $0.id == bulbID })
+        XCTAssertEqual(manager.devices.map(\.id), [wallID, bulbID])
+        // A breathing palette stays fixed by fixture slot, independent of
+        // elapsed time, so a slot shift would turn the blue bulb red.
+        let effect = LightingEffect(id: "takeover-slot-test", name: "Slot test", summary: "", icon: "lightbulb",
+                                    style: .breathe, colors: [CatalogColor(hex: 0xFF0000), CatalogColor(hex: 0x0000FF)],
+                                    speed: 0, isAudioReactive: false, isHighEnergy: false)
+        let expectedBulbColor = Color(hex: 0x0000FF)
         manager.startEffect(effect, scope: .all)
-        await waitUntil(4) { self.datagrams.sent.count >= 1 }
+        await waitUntil(4) { self.datagrams.sent.count >= 1 && bulb.color.rgbDistance(to: expectedBulbColor) < 0.005 }
         fake.simulateExternalSelection("Evening")
         manager.refreshShapes(wall)
         await waitUntil { self.manager.animatingEffect(for: self.wallID) == nil }
+        XCTAssertNotNil(manager.animatingEffect(for: bulbID))
+        manager.renderEffectNowForTesting(scope: .all)
+        manager.renderEffectNowForTesting(scope: .all)
+        XCTAssertLessThan(bulb.color.rgbDistance(to: expectedBulbColor), 0.005, "releasing the wall must preserve the bulb's palette slot")
         XCTAssertEqual(client.streamStatus(serial), .idle)
         let sent = datagrams.sent.count
         try await Task.sleep(nanoseconds: 400_000_000)

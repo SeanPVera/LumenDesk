@@ -88,6 +88,7 @@ export function ShapesEditor({ device, actions }: { device: Device; actions: Sha
   const [startHex, setStartHex] = useState('#ffffff')
   const [hexText, setHexText] = useState('')
   const [message, setMessage] = useState<string | null>(null)
+  const [applying, setApplying] = useState(false)
   const refs = useRef(new Map<number, SVGGElement>())
   const stage = useRef<HTMLDivElement>(null)
   // Drawn one unit per CSS pixel, so labels and edges stay legible on a phone.
@@ -193,6 +194,22 @@ export function ShapesEditor({ device, actions }: { device: Device; actions: Sha
 
   const report = (promise: Promise<unknown>, done: string) =>
     promise.then(() => setMessage(done)).catch(err => setMessage(err instanceof Error ? err.message : String(err)))
+
+  const apply = async () => {
+    if (!draft || applying) return
+    const submitted = draft
+    setApplying(true)
+    try {
+      await actions.paint(Object.fromEntries(ids.map(id => [id, toRGB(submitted[id] ?? toTone(BLACK))])))
+      // Edits made while the write was pending remain a separate draft.
+      setDraft(current => current === submitted ? null : current)
+      setMessage('Applied. The wall confirms it on its next reading.')
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : String(err))
+    } finally {
+      setApplying(false)
+    }
+  }
 
   const levels = draft ? targets.map(id => Math.round((draft[id]?.v ?? 0) * 100)) : []
   const level = levels.length ? Math.round(levels.reduce((sum, v) => sum + v, 0) / levels.length) : 0
@@ -367,11 +384,9 @@ export function ShapesEditor({ device, actions }: { device: Device; actions: Sha
                   <button onClick={redoStep} disabled={!redo.length}>Redo</button>
                 </div>
                 <div className="toolbar">
-                  <button className="primary" disabled={offline} onClick={() => {
-                    report(actions.paint(Object.fromEntries(ids.map(id => [id, toRGB(draft[id] ?? toTone(BLACK))]))),
-                      'Applied. The wall confirms it on its next reading.')
-                    setDraft(null)
-                  }}>Apply to wall</button>
+                  <button className="primary" disabled={offline || applying} onClick={() => void apply()}>
+                    {applying ? 'Applying…' : 'Apply to wall'}
+                  </button>
                   <button className="ghost" onClick={() => setDraft(null)}>Discard draft</button>
                 </div>
               </>

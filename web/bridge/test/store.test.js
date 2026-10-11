@@ -267,8 +267,33 @@ test('flush reports a write that actually failed', async () => {
   store.addRoom('Studio')
   await assert.rejects(() => store.flush(), /could not save state/)
 
-  // The failure is reported once, then cleared, so a later good write is clean.
+  await assert.rejects(() => store.flush(), /could not save state/)
+
+  // A successful retry clears the error for every subsequent waiter.
+  await fs.rm(blocker)
+  store.save()
   await store.flush()
+  assert.equal(JSON.parse(await fs.readFile(store.file, 'utf8')).rooms[0].name, 'Studio')
+  await fs.rm(dir, { recursive: true, force: true })
+})
+
+test('every concurrent flush rejects when the state batch cannot be persisted', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'lumendesk-concurrent-ro-'))
+  try {
+    const blocker = path.join(dir, 'blocker')
+    await fs.writeFile(blocker, 'not a directory')
+    const store = new Store({ file: path.join(blocker, 'state.json') })
+    store.load()
+    store.addRoom('A')
+    const first = store.flush()
+    store.addRoom('B')
+    const second = store.flush()
+    const outcomes = await Promise.allSettled([first, second])
+    assert.deepEqual(outcomes.map(result => result.status), ['rejected', 'rejected'])
+    for (const outcome of outcomes) assert.match(outcome.reason.message, /could not save state/)
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true })
+  }
 })
 
 test('a saturated LIFX colour survives capture and restore', () => {

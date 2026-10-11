@@ -526,6 +526,103 @@ final class RoomWorkspaceTests: XCTestCase {
     }
 }
 
+final class EffectOwnershipRegressionTests: XCTestCase {
+    @MainActor
+    func testUndoStopsRegularEffectBeforeRestoringItsBaseline() throws {
+        let manager = makeManager()
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+        let room = try XCTUnwrap(manager.rooms.first)
+        let light = try XCTUnwrap(manager.devices(in: room).first { !$0.isLIFXLuna })
+        light.brightness = 0.31
+        light.color = .orange
+        let effect = try XCTUnwrap(LightingCatalog.effects.first { $0.id != "music-pulse" })
+        let scope = LightScope.room(room.id)
+        manager.startEffect(effect, scope: scope)
+        XCTAssertNotNil(manager.animatingEffect(for: light.id))
+
+        manager.undo()
+        manager.renderEffectNowForTesting(scope: scope)
+        XCTAssertNil(manager.activeEffects[scope])
+        XCTAssertNil(manager.animatingEffect(for: light.id))
+        XCTAssertEqual(light.brightness, 0.31, accuracy: 0.0001)
+        XCTAssertEqual(light.color.rgbDistance(to: .orange), 0, accuracy: 0.0001)
+    }
+
+    @MainActor
+    func testUndoStopsMusicSessionAndRestoresItsBaseline() throws {
+        let manager = makeManager()
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+        let room = try XCTUnwrap(manager.rooms.first)
+        let light = try XCTUnwrap(manager.devices(in: room).first { !$0.isLIFXLuna })
+        light.brightness = 0.28
+        light.color = .orange
+        var configuration = MusicModeConfiguration.configuration(for: .balanced)
+        configuration.usesSyntheticDemoPattern = true
+        let scope = LightScope.room(room.id)
+        manager.startMusicMode(configuration: configuration, scope: scope)
+        manager.musicModeController.renderNowForTesting()
+        manager.undo()
+        manager.musicModeController.renderNowForTesting()
+        XCTAssertNil(manager.activeEffects[scope])
+        XCTAssertTrue(manager.musicModeController.activeScopeIDs.isEmpty)
+        XCTAssertEqual(light.brightness, 0.28, accuracy: 0.0001)
+        XCTAssertEqual(light.color.rgbDistance(to: .orange), 0, accuracy: 0.0001)
+    }
+
+    @MainActor
+    func testRoomAssignmentCannotExpandAnExistingEffectsTargets() throws {
+        let manager = makeManager()
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+        let firstRoom = try XCTUnwrap(manager.rooms.first)
+        let otherRoom = try XCTUnwrap(manager.rooms.last)
+        let outside = try XCTUnwrap(manager.devices(in: otherRoom).first { !$0.isStale && $0.brand == .govee })
+        outside.color = .orange
+        outside.brightness = 0.31
+        let effect = try XCTUnwrap(LightingCatalog.effects.first { $0.id != "music-pulse" })
+        let scope = LightScope.room(firstRoom.id)
+        manager.startEffect(effect, scope: scope)
+        manager.assign(lightID: outside.id, toRoom: firstRoom.id)
+        for _ in 0..<5 { manager.renderEffectNowForTesting(scope: scope) }
+
+        XCTAssertNil(manager.animatingEffect(for: outside.id))
+        XCTAssertEqual(outside.brightness, 0.31, accuracy: 0.0001)
+        XCTAssertEqual(outside.color.rgbDistance(to: .orange), 0, accuracy: 0.0001)
+        manager.stopEffect(scope: scope)
+        XCTAssertEqual(outside.brightness, 0.31, accuracy: 0.0001)
+    }
+
+    @MainActor
+    func testMovedOwnedLightRetainsItsShowUntilAnotherActionTakesOver() throws {
+        let manager = makeManager()
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+        let firstRoom = try XCTUnwrap(manager.rooms.first)
+        let otherRoom = try XCTUnwrap(manager.rooms.last)
+        let light = try XCTUnwrap(manager.devices(in: firstRoom).first { !$0.isLIFXLuna })
+        let effect = try XCTUnwrap(LightingCatalog.effects.first { $0.id != "music-pulse" })
+        let scope = LightScope.room(firstRoom.id)
+        manager.startEffect(effect, scope: scope)
+        manager.assign(lightID: light.id, toRoom: otherRoom.id)
+        light.brightness = 0
+        for _ in 0..<5 { manager.renderEffectNowForTesting(scope: scope) }
+        XCTAssertGreaterThan(light.brightness, 0, "Existing ownership is independent of subsequent room membership")
+        XCTAssertEqual(manager.animatingEffect(for: light.id)?.scope, scope)
+        manager.setBrightness(deviceIDs: [light.id], value: 0.42)
+        manager.renderEffectNowForTesting(scope: scope)
+        XCTAssertNil(manager.activeEffects[scope])
+        XCTAssertEqual(light.brightness, 0.42, accuracy: 0.0001)
+    }
+
+    @MainActor
+    private func makeManager() -> LightManager {
+        LightManager(defaults: UserDefaults(suiteName: "LumenDeskTests.EffectOwnership.\(UUID().uuidString)")!,
+                     persistenceStore: temporaryPersistenceStore())
+    }
+}
+
 /// Region edits must stay narrower than room-level bulk controls.
 final class SpectrumRegionSelectionTests: XCTestCase {
     func testNoneAndRemovedRegionsNeverExpandToTheWholeFixture() {

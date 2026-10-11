@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import type { Device, RGB } from './bridge'
+import { fetchState, type Device, type RGB } from './bridge'
 import { MUSIC_HELP, PRESET_COPY, ROLE_COPY, SOURCE_COPY, configurationFor } from './music/config'
 import { GROOVES } from './music/grooves'
 import { hsvToRgb } from './music/fixtures'
@@ -70,6 +70,8 @@ export function MusicModeView({
   void version
   const [file, setFile] = useState<File | null>(null)
   const reachable = devices.filter(d => d.reachable)
+  const reachableRef = useRef(reachable)
+  reachableRef.current = reachable
 
   // Restore color and independent brightness only while this session still
   // owns the fixture. The bridge rejects restoration after a newer manual edit.
@@ -84,38 +86,82 @@ export function MusicModeView({
   const sender=senderRef.current
   const transition = useRef(Promise.resolve())
   const transitionEpoch = useRef(0)
+  const restoration = useRef(Promise.resolve())
+
+  const restoreBaseline = (
+    previous: MusicFrameCommand[] | null,
+    restore: boolean,
+    captureStopped = Promise.resolve(),
+  ) => {
+    // Queue restoration immediately so a second Stop or Start also drains a
+    // restore whose capture shutdown or HTTP request is still pending.
+    const framesDrained = sender.stop()
+    restoration.current = restoration.current.then(async () => {
+      await captureStopped
+      await framesDrained
+      if (previous?.length) {
+        await postFrame(port, restore ? previous : previous.map(s => ({ ...s, restoring: false, release: true })))
+          .catch(() => undefined)
+      }
+    })
+    return restoration.current
+  }
 
   const start = (source: Parameters<WebMusicSession['start']>[0], audio?: File) => {
-    const epoch=++transitionEpoch.current
-    transition.current=transition.current.then(async()=>{
-    if(epoch!==transitionEpoch.current) return
-    await sender.stop()
-    if(epoch!==transitionEpoch.current) return
-    // Capture only when nothing is running: a Restart must not adopt a colour
-    // the show itself painted as the state to go back to.
-    if (!state.running) {
-      baseline.current = reachable
-        .filter((d): d is Device & { color: RGB } => Boolean(d.color) && session.state.fixtures.find(f=>f.id===d.id)?.role !== 'off')
-        .map(d => ({ fixtureID: d.id, rgb: d.color, brightness:d.brightness/100,restoring:true,owner:owner.current,controlRevision:d.controlRevision ?? 0 }))
-    }
-    await session.start(source, audio)
-    if (session.state.running && epoch===transitionEpoch.current) sender.start()
+    const epoch = ++transitionEpoch.current
+    transition.current = transition.current.then(async () => {
+      if (epoch !== transitionEpoch.current) return
+      await restoration.current
+      if (epoch !== transitionEpoch.current) return
+      await sender.stop()
+      if (epoch !== transitionEpoch.current) return
+      // Keep the original snapshot across restarts and queued source changes,
+      // including a superseded source start that failed before the next begins.
+      if (!baseline.current) {
+        let current: Device[]
+        try {
+          // A completed restore returns no device state. Read the bridge before
+          // a new show captures a baseline, since the page may still show the
+          // previous show's colors until its next periodic poll.
+          current = (await fetchState(port)).devices
+        } catch (err) {
+          if (epoch === transitionEpoch.current) {
+            session.patch({ error: err instanceof Error ? err.message : String(err) })
+          }
+          return
+        }
+        if (epoch !== transitionEpoch.current) return
+        // The user can change rooms while the baseline request is pending.
+        // Capture and render the current room together before starting capture.
+        const scoped = reachableRef.current
+        session.setDevices(scoped.map(d => ({ id: d.id, name: d.name, brand: d.brand, reachable: d.reachable })))
+        const scope = new Set(scoped.map(d => d.id))
+        baseline.current = current
+          .filter(d => scope.has(d.id) && d.reachable)
+          .filter((d): d is Device & { color: RGB } => Boolean(d.color) && session.state.fixtures.find(f=>f.id===d.id)?.role !== 'off')
+          .map(d => ({ fixtureID: d.id, rgb: d.color, brightness:d.brightness/100,restoring:true,owner:owner.current,controlRevision:d.controlRevision ?? 0 }))
+      }
+      await session.start(source, audio)
+      if (epoch !== transitionEpoch.current) return
+      if (session.state.running) sender.start()
+      else {
+        const previous = baseline.current
+        baseline.current = null
+        await restoreBaseline(previous, state.configuration.restorePreviousState)
+      }
     })
     return transition.current
   }
 
   const stop = () => {
     ++transitionEpoch.current
-    const previous=baseline.current; baseline.current=null
-    const restore=state.configuration.restorePreviousState
+    const previous = baseline.current
+    baseline.current = null
+    const restore = state.configuration.restorePreviousState
     // Invalidate permission/capture work synchronously; serialize network restore
     // before any subsequent start. No old HTTP frame can follow the restore.
-    const captureStopped=session.stop()
-    transition.current=(async()=>{
-      await captureStopped
-      await sender.stop()
-      if(previous?.length) await postFrame(port,restore?previous:previous.map(s=>({...s,restoring:false,release:true}))).catch(()=>undefined)
-    })()
+    const captureStopped = session.stop()
+    transition.current = restoreBaseline(previous, restore, captureStopped)
     return transition.current
   }
 

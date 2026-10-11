@@ -108,6 +108,7 @@ final class CommandCoordinator {
         var commandStates: [String: DeviceCommandState] = [:]
         var confirmedStates: [String: ConfirmedDeviceState] = [:]
         var expectedStates: [String: ExpectedDeviceState] = [:]
+        var recoveringDeviceIDs: Set<String> = []
     }
 
     struct Timing {
@@ -162,6 +163,7 @@ final class CommandCoordinator {
 
     func markQueued(_ deviceID: String, summary: String = "Applying change") {
         updateState {
+            state.recoveringDeviceIDs.remove(deviceID)
             state.pendingDeviceIDs.insert(deviceID)
             state.commandStates[deviceID] = DeviceCommandState(
                 lifecycle: .queued,
@@ -212,6 +214,9 @@ final class CommandCoordinator {
     }
 
     func reportedStateMatchesExpectation(deviceID: String, reported: ReportedDeviceState) -> Bool {
+        // A recovery asks for a reading rather than a particular desired state.
+        // Discovery alone does not call this method, so it cannot confirm one.
+        if state.recoveringDeviceIDs.contains(deviceID) { return true }
         guard let expected = state.expectedStates[deviceID] else { return false }
         if let appearance = expected.nanoleafAppearance, appearance != reported.nanoleafAppearance { return false }
         if let value = expected.isOn, value != reported.isOn { return false }
@@ -299,6 +304,7 @@ final class CommandCoordinator {
             if confirmsPendingCommand {
                 state.pendingDeviceIDs.remove(deviceID)
                 state.expectedStates.removeValue(forKey: deviceID)
+                state.recoveringDeviceIDs.remove(deviceID)
             }
             state.confirmedStates[deviceID] = confirmedState
             state.commandStates[deviceID] = DeviceCommandState(
@@ -337,6 +343,7 @@ final class CommandCoordinator {
             for deviceID in deviceIDs {
                 state.pendingDeviceIDs.remove(deviceID)
                 state.expectedStates.removeValue(forKey: deviceID)
+                state.recoveringDeviceIDs.remove(deviceID)
                 state.commandStates[deviceID] = DeviceCommandState(
                     lifecycle: .failed,
                     summary: summary,
@@ -362,6 +369,7 @@ final class CommandCoordinator {
             for deviceID in deviceIDs {
                 state.pendingDeviceIDs.remove(deviceID)
                 state.expectedStates.removeValue(forKey: deviceID)
+                state.recoveringDeviceIDs.remove(deviceID)
                 state.commandStates[deviceID] = DeviceCommandState(
                     lifecycle: .cancelled,
                     summary: "Cancelled",
@@ -390,8 +398,23 @@ final class CommandCoordinator {
         startTimeout(deviceID: deviceID, summary: "state refresh", timedOut: timedOut)
     }
 
-    func recover(deviceID: String, refresh: @escaping @MainActor () -> Void) {
-        markQueued(deviceID)
+    func recover(
+        deviceID: String,
+        timedOut: @escaping @MainActor () -> Void = {},
+        refresh: @escaping @MainActor () -> Void
+    ) {
+        cancelTasks(for: deviceID)
+        updateState {
+            state.expectedStates.removeValue(forKey: deviceID)
+            state.pendingDeviceIDs.insert(deviceID)
+            state.recoveringDeviceIDs.insert(deviceID)
+            state.commandStates[deviceID] = DeviceCommandState(
+                lifecycle: .sending,
+                summary: "Checking connection",
+                updatedAt: now()
+            )
+        }
+        startTimeout(deviceID: deviceID, summary: "connection check", timedOut: timedOut)
         refresh()
     }
 
@@ -453,6 +476,7 @@ final class CommandCoordinator {
             updateState {
                 state.pendingDeviceIDs = []
                 state.expectedStates = [:]
+                state.recoveringDeviceIDs = []
             }
         }
     }
@@ -485,6 +509,7 @@ final class CommandCoordinator {
             self.updateState {
                 self.state.pendingDeviceIDs.remove(deviceID)
                 self.state.expectedStates.removeValue(forKey: deviceID)
+                self.state.recoveringDeviceIDs.remove(deviceID)
                 self.state.commandStates[deviceID] = DeviceCommandState(
                     lifecycle: .timedOut,
                     summary: "No confirmation: \(summary)",

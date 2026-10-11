@@ -615,7 +615,7 @@ struct NanoleafShapesStudio: View {
         let shown = display(layout).colors[panel.panelID]
         return VStack(alignment: .leading, spacing: 6) {
             Text("Panel \(number)").font(.headline)
-            Text("\(panel.kind.displayName) \u{00B7} ID \(panel.panelID) \u{00B7} turned \(Int(panel.orientation.rounded()))\u{00B0} in the layout")
+            Text("\(panel.kind.displayName) \u{00B7} ID \(panel.panelID) \u{00B7} turned \(String(format: "%.0f", panel.orientation))\u{00B0} in the layout")
                 .font(.caption).foregroundStyle(Lumen.meter)
             Text("Layout position x \(String(format: "%.1f", panel.x)), y \(String(format: "%.1f", panel.y))")
                 .font(.caption.monospacedDigit()).foregroundStyle(Lumen.meter)

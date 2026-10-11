@@ -326,16 +326,26 @@ final class GoveeClient {
         return source
     }
 
+    /// Keep both routing directions consistent when DHCP moves or swaps
+    /// addresses. Another device may already have claimed the old address.
+    static func learnAddress(deviceID: String, address: String,
+                             addressesByDevice: inout [String: String],
+                             deviceByAddress: inout [String: String]) {
+        if let oldAddress = addressesByDevice[deviceID], oldAddress != address,
+           deviceByAddress[oldAddress] == deviceID {
+            deviceByAddress.removeValue(forKey: oldAddress)
+        }
+        addressesByDevice[deviceID] = address
+        deviceByAddress[address] = deviceID
+    }
+
     private func handle(data: Data, from host: String) {
         // Govee occasionally emits truncated/duplicated frames; ignore failures.
         if let scan = GoveeProtocol.decodeScanResponse(data) {
             let id = scan.msg.data.device
             let address = Self.commandAddress(source: host, reported: scan.msg.data.ip)
-            if let oldAddress = addressByDevice[id], oldAddress != address {
-                deviceByAddress.removeValue(forKey: oldAddress)
-            }
-            addressByDevice[id] = address
-            deviceByAddress[address] = id
+            Self.learnAddress(deviceID: id, address: address,
+                              addressesByDevice: &addressByDevice, deviceByAddress: &deviceByAddress)
             // Every valid response is evidence that the device is reachable.
             // Suppressing repeated responses made manual rescans report zero
             // devices when the address had not changed.

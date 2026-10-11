@@ -40,10 +40,14 @@ enum ScheduleAction: String, Codable, CaseIterable {
 }
 
 struct ScheduleEntry: Identifiable, Equatable {
+    /// Keep legacy offsets beyond the editor's two-hour choices while bounding
+    /// the adjacent solar days the scheduler must consider.
+    static let supportedOffsetMinutes = -1440...1440
+
     let id: UUID
     var isEnabled: Bool
     var hour: Int       // 0–23 (absolute time; ignored for sun-relative entries)
-    var minute: Int     // 0–59 multiples of 15 (absolute); ignored for sun-relative entries
+    var minute: Int     // 0–59 (absolute); ignored for sun-relative entries
     var offsetMinutes: Int  // signed offset applied to sunrise/sunset base time
     var action: ScheduleAction
     /// Calendar weekday numbers (1 = Sunday ... 7 = Saturday). Empty means every day.
@@ -59,10 +63,37 @@ struct ScheduleEntry: Identifiable, Equatable {
         self.offsetMinutes = offsetMinutes
         self.action = action
         self.weekdays = weekdays
+        self = normalized()
+    }
+
+    /// Imported or subsequently mutated values must be safe to format and
+    /// evaluate. Disable malformed rules instead of silently running them at
+    /// a corrected time or on additional days. Empty weekdays still means daily.
+    func normalized() -> ScheduleEntry {
+        var value = self
+        let validDays = weekdays.filter { (1...7).contains($0) }
+        let invalidTime = action.isRelativeToSun
+            ? !Self.supportedOffsetMinutes.contains(offsetMinutes)
+            : !(0...23).contains(hour) || !(0...59).contains(minute)
+        if invalidTime || validDays != weekdays {
+            value.isEnabled = false
+        }
+        let (hourMinutes, hourOverflow) = hour.multipliedReportingOverflow(by: 60)
+        let (totalMinutes, minuteOverflow) = hourMinutes.addingReportingOverflow(minute)
+        let safeMinute = hourOverflow || minuteOverflow
+            ? (hour < 0 ? 0 : 1439)
+            : max(0, min(1439, totalMinutes))
+        value.hour = safeMinute / 60
+        value.minute = safeMinute % 60
+        value.offsetMinutes = max(Self.supportedOffsetMinutes.lowerBound,
+                                  min(Self.supportedOffsetMinutes.upperBound, offsetMinutes))
+        value.weekdays = validDays
+        return value
     }
 
     var daySummary: String {
-        let days = weekdays.isEmpty ? Set(1...7) : weekdays
+        let days = weekdays.isEmpty ? Set(1...7) : weekdays.filter { (1...7).contains($0) }
+        guard !days.isEmpty else { return "No valid days" }
         if days == Set(1...7) { return "Every day" }
         if days == Set(2...6) { return "Weekdays" }
         if days == Set([1, 7]) { return "Weekends" }
@@ -78,7 +109,8 @@ struct ScheduleEntry: Identifiable, Equatable {
             return "\(symbol) \(sign)\(offsetMinutes)m"
         }
         var components = DateComponents()
-        components.hour = hour; components.minute = minute
+        let value = normalized()
+        components.hour = value.hour; components.minute = value.minute
         let date = Calendar.current.date(from: components) ?? Date()
         return date.formatted(date: .omitted, time: .shortened)
     }
@@ -98,5 +130,6 @@ extension ScheduleEntry: Codable {
         offsetMinutes = (try? c.decode(Int.self, forKey: .offsetMinutes)) ?? 0
         action = try c.decode(ScheduleAction.self, forKey: .action)
         weekdays = (try? c.decode(Set<Int>.self, forKey: .weekdays)) ?? Set(1...7)
+        self = normalized()
     }
 }

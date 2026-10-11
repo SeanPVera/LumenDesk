@@ -101,6 +101,23 @@ struct NanoleafInfo: Decodable {
         let sat: Value<Int>
         let ct: Value<Int>
         let colorMode: String
+
+        private enum CodingKeys: String, CodingKey { case on, brightness, hue, sat, ct, colorMode }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            on = try container.decode(Value<Bool>.self, forKey: .on)
+            brightness = try container.decode(Value<Int>.self, forKey: .brightness)
+            hue = try container.decode(Value<Int>.self, forKey: .hue)
+            sat = try container.decode(Value<Int>.self, forKey: .sat)
+            ct = try container.decode(Value<Int>.self, forKey: .ct)
+            colorMode = try container.decode(String.self, forKey: .colorMode)
+            guard (0...100).contains(brightness.value), (0...360).contains(hue.value),
+                  (0...100).contains(sat.value), (1200...6500).contains(ct.value) else {
+                throw DecodingError.dataCorruptedError(forKey: .brightness, in: container,
+                                                      debugDescription: "Invalid Nanoleaf state range")
+            }
+        }
     }
     struct Effects: Decodable {
         let select: String

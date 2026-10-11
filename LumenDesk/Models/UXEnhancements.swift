@@ -71,10 +71,12 @@ struct SceneApplicationPreview {
 
 struct SceneApplicationResult: Identifiable, Equatable {
     let id = UUID()
+    let sceneID: UUID
     let sceneName: String
     let succeededIDs: [String]
     let failedIDs: [String]
     let skippedOffIDs: [String]
+    let allowTurningOff: Bool
 }
 
 struct FavoriteReference: Codable, Hashable, Identifiable {

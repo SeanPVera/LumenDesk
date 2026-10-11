@@ -337,7 +337,61 @@ final class CommandCoordinatorTests: XCTestCase {
         coordinator.recover(deviceID: "light-2") { refreshCount += 1 }
         XCTAssertEqual(refreshCount, 1)
         XCTAssertTrue(coordinator.pendingDeviceIDs.contains("light-2"))
-        XCTAssertEqual(coordinator.commandState(for: "light-2").phase, .queued)
+        XCTAssertEqual(coordinator.commandState(for: "light-2").phase, .sending)
+    }
+
+    @MainActor
+    func testRecoveryAcceptsAStateReadingButNotDiscoveryAndClearsPendingState() {
+        let coordinator = makeCoordinator()
+        coordinator.expectPower(deviceID: "light-1", isOn: true)
+        coordinator.recover(deviceID: "light-1") {}
+
+        // Discovery proves reachability but does not contain a fresh state.
+        coordinator.recordObservation(deviceID: "light-1", confirmedState: confirmedState(isOn: true),
+                                      confirmsPendingCommand: false)
+        XCTAssertTrue(coordinator.pendingDeviceIDs.contains("light-1"))
+
+        let observed = ReportedDeviceState(isOn: false, brightness: 0.4,
+                                           red: 1, green: 1, blue: 1, kelvin: 3500)
+        let matches = coordinator.reportedStateMatchesExpectation(deviceID: "light-1", reported: observed)
+        XCTAssertTrue(matches, "Recovery accepts the actual state, including a changed power setting")
+        coordinator.recordObservation(deviceID: "light-1", confirmedState: confirmedState(isOn: false, brightness: 0.4),
+                                      confirmsPendingCommand: matches)
+        XCTAssertFalse(coordinator.pendingDeviceIDs.contains("light-1"))
+        XCTAssertTrue(coordinator.state.recoveringDeviceIDs.isEmpty)
+        XCTAssertNil(coordinator.state.expectedStates["light-1"])
+        XCTAssertEqual(coordinator.confirmedStates["light-1"]?.isOn, false)
+        XCTAssertEqual(coordinator.commandState(for: "light-1").phase, .applied)
+    }
+
+    @MainActor
+    func testUnansweredRecoveryTimesOutAndAllowsLateStateReadings() async {
+        let coordinator = makeCoordinator()
+        var timeoutCount = 0
+        coordinator.recover(deviceID: "light-1", timedOut: { timeoutCount += 1 }) {}
+        await waitUntil { coordinator.commandState(for: "light-1").lifecycle == .timedOut }
+        XCTAssertEqual(timeoutCount, 1)
+        XCTAssertFalse(coordinator.pendingDeviceIDs.contains("light-1"))
+        XCTAssertTrue(coordinator.state.recoveringDeviceIDs.isEmpty)
+
+        coordinator.recordObservation(deviceID: "light-1", confirmedState: confirmedState(isOn: false),
+                                      confirmsPendingCommand: false)
+        XCTAssertEqual(coordinator.commandState(for: "light-1").lifecycle, .confirmed)
+        XCTAssertEqual(coordinator.confirmedStates["light-1"]?.isOn, false)
+    }
+
+    @MainActor
+    func testNewCommandReplacesRecoveryWithItsOwnExpectation() {
+        let coordinator = makeCoordinator()
+        coordinator.recover(deviceID: "light-1") {}
+        coordinator.expectPower(deviceID: "light-1", isOn: true)
+        coordinator.markQueued("light-1", summary: "Turning on")
+        XCTAssertFalse(coordinator.state.recoveringDeviceIDs.contains("light-1"))
+        XCTAssertFalse(coordinator.reportedStateMatchesExpectation(
+            deviceID: "light-1",
+            reported: .init(isOn: false, brightness: 1, red: 1, green: 1, blue: 1, kelvin: 3500)
+        ))
+        coordinator.cancel(deviceIDs: ["light-1"])
     }
 
     @MainActor

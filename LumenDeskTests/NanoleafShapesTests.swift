@@ -209,6 +209,31 @@ final class NanoleafShapesTests: XCTestCase {
         XCTAssertNil(value.globalOrientation)
     }
 
+    func testPanelOrientationRejectsOutOfRangeTurns() throws {
+        for orientation in ["-1", "361", "1e20", "1e308"] {
+            let json = layoutJSON(#"{"panelId":1,"x":0,"y":0,"o":\#(orientation),"shapeType":7}"#)
+            XCTAssertEqual(problem(json), .malformed("panel 1 has an invalid orientation"))
+        }
+        let fullTurn = try arrangement(layoutJSON(#"{"panelId":1,"x":0,"y":0,"o":360,"shapeType":0}"#))
+        XCTAssertEqual(fullTurn.layout.panels.first?.orientation, 360, "Aurora reports a full turn in its documented layout")
+    }
+
+    func testImportedLayoutRejectsDuplicateIDsAndInvalidPanelFields() throws {
+        let panel = #"{"panelID":1,"x":0,"y":0,"orientation":360,"shapeCode":0}"#
+        let duplicate = Data(#"{"panels":[\#(panel),\#(panel)]}"#.utf8)
+        XCTAssertThrowsError(try JSONDecoder().decode(NanoleafLayout.self, from: duplicate))
+        for fields in [#""panelID":70000,"x":0,"y":0,"orientation":0"#,
+                       #""panelID":1,"x":1e20,"y":0,"orientation":0"#,
+                       #""panelID":1,"x":0,"y":0,"orientation":1e20"#] {
+            let invalid = Data(#"{"panels":[{\#(fields),"shapeCode":7}]}"#.utf8)
+            XCTAssertThrowsError(try JSONDecoder().decode(NanoleafLayout.self, from: invalid), fields)
+        }
+        let decoded = try JSONDecoder().decode(NanoleafLayout.self, from: Data(#"{"panels":[\#(panel)]}"#.utf8))
+        XCTAssertEqual(decoded.panels.first?.orientation, 360)
+        XCTAssertEqual(try JSONDecoder().decode(NanoleafLayout.self, from: JSONEncoder().encode(decoded)), decoded)
+        XCTAssertTrue(NanoleafTopologyChange.between(decoded, decoded).isEmpty)
+    }
+
     func testOrientationThatCannotBeReadIsNotReportedAsZero() throws {
         let value = try arrangement(layoutJSON(#"{"panelId":3,"x":0,"y":0,"o":0,"shapeType":7}"#,
                                                extra: #""globalOrientation":{"value":"up"},"#))
@@ -263,6 +288,16 @@ final class NanoleafShapesTests: XCTestCase {
         XCTAssertNil(NanoleafGeometry.outline(of: NanoleafPanel(panelID: 0, x: 0, y: 0, orientation: 0, shapeCode: 12)))
         XCTAssertEqual(NanoleafGeometry.inradius(of: .hexagon) ?? 0, 58.02, accuracy: 0.01)
         XCTAssertEqual(NanoleafGeometry.inradius(of: .miniTriangle) ?? 0, 19.34, accuracy: 0.01)
+    }
+
+    func testPolygonNormalizesAngleBeforeTrigonometricArithmetic() {
+        for degrees in [Double.greatestFiniteMagnitude, -Double.greatestFiniteMagnitude] {
+            let polygon = NanoleafGeometry.polygon(center: NanoleafPoint(0, 0), circumradius: 67,
+                                                   firstVertexDegrees: degrees, count: 6)
+            XCTAssertEqual(polygon.count, 6)
+            XCTAssertTrue(polygon.allSatisfy { $0.x.isFinite && $0.y.isFinite })
+            for point in polygon { XCTAssertEqual(hypot(point.x, point.y), 67, accuracy: 1e-9) }
+        }
     }
 
     /// Two edges are the same edge when both endpoints coincide, in either
@@ -979,6 +1014,34 @@ final class NanoleafShapesTests: XCTestCase {
         XCTAssertTrue(plugins[1].options.isEmpty)
         XCTAssertEqual(NanoleafOptionValue.label(for: "transTime"), "Transition")
         XCTAssertEqual(NanoleafOptionValue.label(for: "someNewOption"), "Some new option")
+    }
+
+    func testEffectPaletteClampsHugeFiniteValuesBeforeIntegerConversion() throws {
+        for value in ["1e20", "1e308", "-1e20", "-1e308"] {
+            let json = Data(#"{"animations":[{"animName":"Broken","animType":"plugin","palette":[{"hue":\#(value),"saturation":\#(value),"brightness":\#(value)}]}]}"#.utf8)
+            let color = try XCTUnwrap(try NanoleafEffectDefinition.parseLibrary(json).first?.palette.first)
+            XCTAssertEqual(color, value.hasPrefix("-")
+                           ? NanoleafPaletteColor(hue: 0, saturation: 0, brightness: 0)
+                           : NanoleafPaletteColor(hue: 359, saturation: 100, brightness: 100))
+        }
+    }
+
+    func testPluginEditorRejectsUnsafeIntegerRangesAndPreservesRawValue() throws {
+        let option = try JSONDecoder().decode(NanoleafOptionValue.self, from: Data(String(Int.max).utf8))
+        XCTAssertEqual(option, .int(Int.max))
+        XCTAssertEqual(option.displayText, String(Int.max))
+        for bounds in [#""minValue":0,"maxValue":1e20"#,
+                       #""minValue":-1e20,"maxValue":100"#,
+                       #""minValue":-1e308,"maxValue":1e308"#,
+                       #""minValue":10,"maxValue":1"#] {
+            let json = Data(#"{"plugins":[{"uuid":"x","name":"Motion","type":"color","pluginConfig":[{"name":"count","type":"int",\#(bounds)}]}]}"#.utf8)
+            let spec = try XCTUnwrap(try NanoleafPluginDescription.parseList(json).first?.options.first)
+            XCTAssertNil(spec.integerRange, bounds)
+        }
+        let documented = Data(#"{"plugins":[{"uuid":"x","name":"Flow","type":"color","pluginConfig":[{"name":"transTime","type":"int","minValue":1,"maxValue":600}]}]}"#.utf8)
+        let spec = try XCTUnwrap(try NanoleafPluginDescription.parseList(documented).first?.options.first)
+        XCTAssertEqual(spec.integerRange, 1...600)
+        XCTAssertEqual(spec.numericRange, 1...600)
     }
 }
 

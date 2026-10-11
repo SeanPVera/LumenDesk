@@ -62,17 +62,28 @@ function start(root, port = 0, extra = [], overrides = {}) {
     child.stdout.on('data', check)
     check()
   })
-  const childStarted = () => new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => { cleanup(); reject(new Error(`Bridge child did not start: ${errors}`)) }, 5_000)
+  const stderrMatch = pattern => new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => { cleanup(); reject(new Error(`No ${pattern} marker: ${errors}`)) }, 5_000)
     const check = () => {
-      const match = errors.match(/child-pid:(\d+)/)
-      if (match) { cleanup(); resolve(Number(match[1])) }
+      const match = errors.match(pattern)
+      if (match) { cleanup(); resolve(match) }
     }
     const cleanup = () => { clearTimeout(timeout); child.stderr.off('data', check) }
     child.stderr.on('data', check)
     check()
   })
-  return { child, exited, event, childStarted, childPID: () => Number(errors.match(/child-pid:(\d+)/)?.[1]) }
+  const childStarted = async () => Number((await stderrMatch(/child-pid:(\d+)/))[1])
+  return { child, exited, event, childStarted, stderrMatch, output: () => output, childPID: () => Number(errors.match(/child-pid:(\d+)/)?.[1]) }
+}
+
+async function exitBeforeFallback(run) {
+  let timeout
+  try {
+    return await Promise.race([
+      run.exited,
+      new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error('Quit waited for readiness past the native fallback deadline')), 2_500) }),
+    ])
+  } finally { clearTimeout(timeout) }
 }
 
 test('packaged launcher starts from a path with spaces and Quit closes its bridge', async t => {
@@ -115,15 +126,62 @@ test('Quit during slow startup closes the bridge before the native fallback dead
   })
   run.child.stdin.write('qu')
   run.child.stdin.write('it\n')
-  let timeout
-  try {
-    const exit = await Promise.race([
-      run.exited,
-      new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error('Quit waited for readiness past the native fallback deadline')), 2_500) }),
-    ])
-    assert.equal(exit[0], 0)
-    assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' })
-  } finally { clearTimeout(timeout) }
+  assert.equal((await exitBeforeFallback(run))[0], 0)
+  assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' })
+})
+
+test('Quit during the owned bridge health request cancels network handles and drains child pipes', async t => {
+  const root = await fixture(t)
+  const slowHealth = stub.replace('const server = http.createServer((req, res) => {', `const server = http.createServer((req, res) => {
+    if (req.url === '/health') {
+      console.error('health-request');
+      setTimeout(() => { res.end('{"ok":true,"service":"lumendesk-bridge"}'); }, 5_000);
+      return;
+    }`)
+  await fs.writeFile(path.join(root, 'web', 'bridge', 'src', 'index.js'), slowHealth)
+  const run = start(root)
+  const pid = await run.childStarted()
+  t.after(() => {
+    run.child.kill()
+    try { process.kill(pid, 'SIGKILL') } catch { /* Cleanup after a failed assertion. */ }
+  })
+  await run.stderrMatch(/health-request/)
+  run.child.stdin.write('quit\n')
+  assert.equal((await exitBeforeFallback(run))[0], 0)
+  assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' })
+  assert.doesNotMatch(run.output(), /"event":"error"/)
+})
+
+test('Quit during an existing-service probe does not spawn a later bridge', async t => {
+  const root = await fixture(t)
+  let received
+  const requested = new Promise(resolve => { received = resolve })
+  const server = http.createServer(() => received())
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  t.after(() => new Promise(resolve => { server.closeAllConnections(); server.close(resolve) }))
+  const run = start(root, server.address().port)
+  t.after(() => run.child.kill())
+  await requested
+  run.child.stdin.write('quit\n')
+  assert.equal((await exitBeforeFallback(run))[0], 0)
+  assert.ok(Number.isNaN(run.childPID()))
+  assert.doesNotMatch(run.output(), /"event":"error"/)
+})
+
+test('an incomplete existing-service response fails promptly without leaving a request deadline', async t => {
+  const root = await fixture(t)
+  const server = http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Length': '100' })
+    res.write('{')
+    setImmediate(() => res.destroy())
+  })
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  t.after(() => new Promise(resolve => server.close(resolve)))
+  const run = start(root, server.address().port)
+  t.after(() => run.child.kill())
+  assert.match((await run.event('error')).message, /did not answer as LumenDesk/)
+  assert.equal((await exitBeforeFallback(run))[0], 1)
+  assert.ok(Number.isNaN(run.childPID()))
 })
 
 test('an existing bridge is reused without taking ownership or stopping it', async t => {

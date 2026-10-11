@@ -52,16 +52,23 @@ try {
   if (process.platform === 'darwin') {
     await run(path.join(root, 'LumenDesk Bridge.app', 'Contents', 'MacOS', 'LumenDesk Bridge'), ['--smoke-test'], { env })
   } else if (process.platform === 'win32') {
-    let failure = null
-    try {
-      await run(path.join(root, 'LumenDesk Bridge.exe'), ['--smoke-test'], { env })
-    } catch (err) { failure = err }
-    // The GUI executable captures its Node child's stdout/stderr in a file.
-    // Print it even on failure, before cleanup removes the extracted bundle.
-    const result = await fs.readFile(path.join(root, 'smoke-result.jsonl'), 'utf8').catch(() => '')
-    if (result) process.stdout.write(result)
-    if (failure) throw failure
-    if (!result.includes('"event":"smoke-passed"')) throw new Error('Native Windows launcher did not report a completed smoke test.')
+    // Exercise repeated start/stop because the Windows pipe-teardown defect
+    // was intermittent. Every iteration must pass; failures are not retried.
+    for (let iteration = 1; iteration <= 3; iteration += 1) {
+      const resultFile = path.join(root, 'smoke-result.jsonl')
+      await fs.rm(resultFile, { force: true })
+      let failure = null
+      try {
+        await run(path.join(root, 'LumenDesk Bridge.exe'), ['--smoke-test'], { env })
+      } catch (err) { failure = err }
+      // The GUI executable captures its Node child's stdout/stderr in a file.
+      // Print it even on failure, before cleanup removes the extracted bundle.
+      const result = await fs.readFile(resultFile, 'utf8').catch(() => '')
+      console.log(`Windows native launcher start/stop ${iteration}/3`)
+      if (result) process.stdout.write(result)
+      if (failure) throw failure
+      if (!result.includes('"event":"smoke-passed"')) throw new Error('Native Windows launcher did not report a completed smoke test.')
+    }
   } else await run(path.join(root, 'Start LumenDesk.sh'), ['--smoke-test'], { env })
   console.log(`Verified ${Object.keys(manifest.files).length} packaged files and native launcher startup, static assets, state API and shutdown.`)
 } finally {

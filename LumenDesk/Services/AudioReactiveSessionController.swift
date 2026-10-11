@@ -160,6 +160,7 @@ final class AudioReactiveSessionController: ObservableObject {
     /// slow permission prompt is never read as a dead microphone.
     private var sourceActiveSince: TimeInterval = 0
     private var analysisSnapshot = AudioReactiveSnapshot()
+    private var hasUnrenderedCapture = false
     private var lastSnapshotPublishedAt = -Double.greatestFiniteMagnitude
     private let previewPublicationInterval: TimeInterval = 0.1
 
@@ -191,11 +192,13 @@ final class AudioReactiveSessionController: ObservableObject {
             Task { @MainActor in
                 guard let self, self.sessions.values.contains(where: { !$0.synthetic }) else { return }
                 guard snapshot.analysisTimestamp.map({ $0 >= self.liveCaptureBeganAt }) ?? true else { return }
-                self.analysisSnapshot = snapshot
+                self.analysisSnapshot = snapshot.retainingUnrenderedTransients(
+                    from: self.hasUnrenderedCapture ? self.analysisSnapshot : nil)
+                self.hasUnrenderedCapture = true
                 self.publishPlaybackState(Self.isAudible(snapshot))
                 let timestamp = self.now()
                 if snapshot.beat > 0 || timestamp - self.lastSnapshotPublishedAt >= self.previewPublicationInterval {
-                    self.latestSnapshot = snapshot
+                    self.latestSnapshot = self.analysisSnapshot
                     self.lastSnapshotPublishedAt = timestamp
                 }
             }
@@ -221,6 +224,7 @@ final class AudioReactiveSessionController: ObservableObject {
         if !useSyntheticPattern && !sessions.values.contains(where: { !$0.synthetic }) {
             liveCaptureBeganAt = startTime
             analysisSnapshot = AudioReactiveSnapshot()
+            hasUnrenderedCapture = false
         }
         let groove = MusicGroove.all.first { $0.id == selectedGrooveID } ?? MusicGroove.fourOnTheFloor
         let session = Session(
@@ -304,6 +308,7 @@ final class AudioReactiveSessionController: ObservableObject {
         captureService.stop()
         liveCaptureBeganAt = now()
         analysisSnapshot = AudioReactiveSnapshot()
+        hasUnrenderedCapture = false
         latestSnapshot = analysisSnapshot
         inputHealth = .waiting
         publishPlaybackState(false)
@@ -431,7 +436,7 @@ final class AudioReactiveSessionController: ObservableObject {
         }
         sequenceNumber &+= 1
         for (scope, session) in sessions {
-            let snapshot = applyMusicalPolicy(
+            let snapshot = Self.applyMusicalPolicy(
                 session.synthetic
                     ? syntheticSnapshot(groove: session.groove, startedAt: session.startedAt, timestamp: timestamp)
                     : analysisSnapshot,
@@ -464,6 +469,7 @@ final class AudioReactiveSessionController: ObservableObject {
             }
             session.onFrame(frame)
         }
+        hasUnrenderedCapture = false
     }
 
     /// A deterministic pattern for Demo Mode. It reports the same beat grid a
@@ -557,16 +563,21 @@ final class AudioReactiveSessionController: ObservableObject {
 
     /// Applies a preset's metre/feel override on top of the detected grid so
     /// Club stays 4/4, Waltz stays 3/4, and Half-time feels every other beat.
-    private func applyMusicalPolicy(
+    nonisolated static func applyMusicalPolicy(
         _ snapshot: AudioReactiveSnapshot,
         configuration: MusicModeConfiguration
     ) -> AudioReactiveSnapshot {
         var next = snapshot
         if let metre = configuration.metreOverride {
             next.metre = metre.rawValue
-            if metre.rawValue > 0 {
-                next.beatInBar = ((next.beatCount % metre.rawValue) + metre.rawValue) % metre.rawValue
+            if metre.rawValue > 0, snapshot.metre != metre.rawValue {
+                // Fallback onset detections can put the cumulative count ahead
+                // of the locked grid. Overrides must retain the grid's downbeat.
+                let gridPosition = next.gridBeatPosition ?? next.beatCount
+                next.beatInBar = ((gridPosition % metre.rawValue) + metre.rawValue) % metre.rawValue
             }
+            // A matching override already has a learned downbeat. Recomputing
+            // its modulo would discard the tracker's detected bar offset.
         }
         if configuration.timeFeel != .auto {
             next.timeFeel = configuration.timeFeel
@@ -598,6 +609,7 @@ final class AudioReactiveSessionController: ObservableObject {
         sourceStatus = .idle
         latestSnapshot = AudioReactiveSnapshot()
         analysisSnapshot = AudioReactiveSnapshot()
+        hasUnrenderedCapture = false
         lastSnapshotPublishedAt = -Double.greatestFiniteMagnitude
         publishPlaybackState(false)
         inputHealth = .waiting

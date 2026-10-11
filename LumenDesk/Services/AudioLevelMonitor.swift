@@ -74,12 +74,43 @@ struct AudioReactiveSnapshot: Equatable {
         guard let analysisTimestamp else { return self } // explicit synthetic snapshots
         let age = max(0, timestamp - analysisTimestamp)
         let weight = max(0, min(1, 1 - (age - freshnessGrace) / 1.0))
+        // A capture grace period applies to sustained loudness, not hits.
+        // Otherwise the renderer replays a frozen transient at full strength
+        // for a quarter second, shifting the crest and potentially flashing twice.
+        let transientWeight = weight * exp(-age / 0.08)
+        let pulseRelease = isTempoLocked && beatInterval > 0
+            ? min(0.34, max(0.1, beatInterval * 0.42)) : 0.16
         var next = self
         next.level *= weight; next.energy *= weight; next.confidence *= weight
-        next.beat *= weight; next.pulse *= weight; next.kick *= weight
-        next.snare *= weight; next.percussion *= weight; next.bass *= weight
+        next.beat *= transientWeight; next.kick *= transientWeight
+        next.snare *= transientWeight; next.percussion *= transientWeight
+        next.onset *= transientWeight
+        next.pulse *= weight * exp(-age / pulseRelease)
+        next.drop *= weight * exp(-age / 0.3)
+        next.bass *= weight
         next.mids *= weight; next.highs *= weight; next.beatConfidence *= weight
         if weight == 0 { next.isTempoLocked = false; next.tempo = 0 }
+        return next
+    }
+
+    /// Preserve hits between capture publications or render ticks. Only the
+    /// exponential transient envelope is accumulated; loudness and the grid
+    /// come from this newest snapshot, and freshness is applied when rendering.
+    func retainingUnrenderedTransients(from previous: AudioReactiveSnapshot?) -> AudioReactiveSnapshot {
+        guard let previous, let previousTime = previous.analysisTimestamp,
+              let analysisTimestamp, previousTime <= analysisTimestamp else { return self }
+        // Format changes and capture gaps can restart the sample clock while
+        // host time keeps advancing. The previous stream's hit ends there.
+        if analyzedSamples > 0, previous.analyzedSamples > 0,
+           analyzedSamples <= previous.analyzedSamples { return self }
+        if droppedBuffers > previous.droppedBuffers { return self }
+        let decay = exp(-(analysisTimestamp - previousTime) / 0.08)
+        var next = self
+        next.beat = max(beat, previous.beat * decay)
+        next.kick = max(kick, previous.kick * decay)
+        next.snare = max(snare, previous.snare * decay)
+        next.percussion = max(percussion, previous.percussion * decay)
+        next.onset = max(onset, previous.onset * decay)
         return next
     }
 }
@@ -110,6 +141,7 @@ final class AudioCaptureService {
     // beats, which are published immediately.
     private let publicationInterval: TimeInterval = 0.04
     private var lastPublishedHostTime = -Double.greatestFiniteMagnitude
+    private var unpublishedSnapshot: AudioReactiveSnapshot?
     // Several rooms can run the same audio-reactive effect. They share one
     // capture session instead of starting a ScreenCaptureKit/AVAudioEngine
     // pipeline per room.
@@ -279,6 +311,7 @@ final class AudioCaptureService {
             self.analyzerGeneration = generation
             self.analyzer = MusicFeatureAnalyzer(sourceDescription: sourceDescription)
             self.lastPublishedHostTime = -Double.greatestFiniteMagnitude
+            self.unpublishedSnapshot = nil
         }
     }
 
@@ -435,11 +468,17 @@ final class AudioCaptureService {
             guard let self else { return }
             defer { self.finishBuffer(duration: duration, generation: generation) }
             guard self.analyzerGeneration == generation else { return }
-            if resetRequired { self.analyzer.resetStream() }
+            if resetRequired {
+                self.analyzer.resetStream()
+                self.unpublishedSnapshot = nil
+            }
             guard var snapshot = self.analyzer.analyze(analysisBuffer, hostTime: hostTime) else { return }
             snapshot.analysisCompletedAt = ProcessInfo.processInfo.systemUptime
             snapshot.droppedBuffers = dropped
-            guard snapshot.beat > 0 || hostTime - self.lastPublishedHostTime >= self.publicationInterval else { return }
+            let shouldPublish = snapshot.beat > 0 || hostTime - self.lastPublishedHostTime >= self.publicationInterval
+            snapshot = snapshot.retainingUnrenderedTransients(from: self.unpublishedSnapshot)
+            guard shouldPublish else { self.unpublishedSnapshot = snapshot; return }
+            self.unpublishedSnapshot = nil
             self.lastPublishedHostTime = hostTime
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.startGeneration == generation else { return }
@@ -691,7 +730,8 @@ final class MIDIClockSource {
 struct MIDIBeatClockTracker {
     private var ticks = 0
     private var lastTickTime: TimeInterval?
-    private var interval: TimeInterval = 0.5
+    private var lastBeatTime: TimeInterval?
+    private var interval: TimeInterval = 0
     private var beatCount = 0
     private var transportRunning = true
 
@@ -701,32 +741,51 @@ struct MIDIBeatClockTracker {
             ticks = 0
             beatCount = 0
             lastTickTime = nil
+            lastBeatTime = nil
+            interval = 0
             transportRunning = true
             return nil
         case 0xFB: // Continue preserves song position.
             lastTickTime = nil
+            lastBeatTime = nil
+            interval = 0
             transportRunning = true
             return nil
         case 0xFC:
             transportRunning = false
             lastTickTime = nil
+            lastBeatTime = nil
+            interval = 0
             return AudioReactiveSnapshot(sourceDescription: "MIDI clock stopped")
         case 0xF8:
             guard transportRunning else { return nil }
         default:
             return nil
         }
+        guard now.isFinite else { return nil }
         if let lastTickTime {
             let gap = now - lastTickTime
-            if gap > 0, gap < 0.2 { interval = interval * 0.85 + gap * 24 * 0.15 }
+            guard gap >= 0 else { return nil }
+            if gap > max(0.25, (interval > 0 ? interval : 1.2) * 1.5) {
+                lastBeatTime = nil
+                interval = 0
+            }
         }
         lastTickTime = now
         let isBeat = ticks == 0
         ticks = (ticks + 1) % 24
         guard isBeat else { return nil }
+        // Measure all 24 ticks together. Several clock bytes may share a
+        // packet timestamp; multiplying the inter-packet gap by 24 treats
+        // each batch as one tick and reports a fraction of the real tempo.
+        if let lastBeatTime {
+            let measured = now - lastBeatTime
+            interval = (0.15...1.2).contains(measured) ? measured : 0
+        }
+        lastBeatTime = now
         let beats = beatCount
         beatCount += 1
-        let beatInterval = max(0.15, min(1.2, interval))
+        let beatInterval = interval
         let beatInBar = beats % 4
         var snapshot = AudioReactiveSnapshot()
         snapshot.level = 0.55
@@ -741,20 +800,20 @@ struct MIDIBeatClockTracker {
         snapshot.confidence = 1
         snapshot.pulse = 1
         snapshot.beatCount = beats
-        snapshot.tempo = 60 / beatInterval
+        snapshot.tempo = beatInterval > 0 ? 60 / beatInterval : 0
         snapshot.beatInterval = beatInterval
-        snapshot.beatConfidence = 1
+        snapshot.beatConfidence = beatInterval > 0 ? 1 : 0
         snapshot.beatReferenceTime = now
         snapshot.beatInBar = beatInBar
-        snapshot.isTempoLocked = true
+        snapshot.isTempoLocked = beatInterval > 0
         snapshot.metre = 4
         snapshot.metreConfidence = 1
         snapshot.timeFeel = .straight
         snapshot.feltInterval = beatInterval
-        snapshot.feltTempo = 60 / beatInterval
+        snapshot.feltTempo = snapshot.tempo
         snapshot.sourceDescription = "MIDI clock"
         snapshot.analysisTimestamp = now
-        snapshot.freshnessGrace = beatInterval * 1.5
+        snapshot.freshnessGrace = max(0.25, beatInterval * 1.5)
         return snapshot
     }
 }
@@ -812,6 +871,17 @@ final class MusicFeatureAnalyzer {
         var count: Int { max(1, last - first + 1) }
     }
 
+    /// The presentation spectrum groups bins independently of sample rate.
+    /// Precompute the inverse of `(bin - 1) * 32 / usable` once, preserving
+    /// those exact bucket boundaries without dividing for every FFT bin.
+    private static let spectrumRanges: [BinRange] = {
+        let usable = windowSize / 2 - 1
+        return (0..<32).map { bucket in
+            BinRange(first: 1 + (bucket * usable + 31) / 32,
+                     last: ((bucket + 1) * usable + 31) / 32)
+        }
+    }()
+
     // Gapless STFT plumbing.
     private var channelRings: [[Float]] = []
     private var ringWriteIndex = 0
@@ -839,6 +909,16 @@ final class MusicFeatureAnalyzer {
 
     // Band layout, rebuilt when the capture format changes.
     private var configuredSampleRate: Double = 0
+    // Every completed hop has the same duration until the format changes.
+    // Fixed envelope coefficients do not need new exponentials per hop.
+    private var hopInterval: Double = 0
+    private var bandPeakDecay: Double = 1
+    private var onsetScaleDecay: Double = 1
+    private var noveltyCoefficient: Double = 0
+    private var energyCoefficient: Double = 0
+    private var dropDecay: Double = 1
+    private var fallbackPulseDecay: Double = 1
+    private var transientHopDecay: Double = 1
     private var bassBins = BinRange(first: 1, last: 1)
     private var midsBins = BinRange(first: 1, last: 1)
     private var highsBins = BinRange(first: 1, last: 1)
@@ -846,6 +926,7 @@ final class MusicFeatureAnalyzer {
     private var snareBins = BinRange(first: 1, last: 1)
     private var hatBins = BinRange(first: 1, last: 1)
     private var fluxBands: [BinRange] = []
+    private var chromaBins: [[Int]] = Array(repeating: [], count: 12)
 
     // Automatic gain. Everything the show reacts to is normalized against a
     // fast-attack / slow-decay peak so the choreography looks the same whether
@@ -930,6 +1011,10 @@ final class MusicFeatureAnalyzer {
 
         var latest: AudioReactiveSnapshot?
         var strongestBeat = 0.0
+        var strongestKick = 0.0
+        var strongestSnare = 0.0
+        var strongestPercussion = 0.0
+        var strongestOnset = 0.0
         var index = 0
         while index < frameCount {
             let chunk = max(1, min(samplesUntilHop, frameCount - index))
@@ -940,24 +1025,37 @@ final class MusicFeatureAnalyzer {
             if samplesUntilHop <= 0 {
                 samplesUntilHop = Self.hopSize
                 let snapshot = analyzeHop(sampleRate: sampleRate)
-                strongestBeat = max(strongestBeat, snapshot.beat)
+                // Earlier hits remain audible evidence, but must already have
+                // aged when published at the final hop's analysis timestamp.
+                strongestBeat = max(strongestBeat * transientHopDecay, snapshot.beat)
+                strongestKick = max(strongestKick * transientHopDecay, snapshot.kick)
+                strongestSnare = max(strongestSnare * transientHopDecay, snapshot.snare)
+                strongestPercussion = max(strongestPercussion * transientHopDecay, snapshot.percussion)
+                strongestOnset = max(strongestOnset * transientHopDecay, snapshot.onset)
                 latest = snapshot
             }
         }
         guard var snapshot = latest else { return nil }
         snapshot.inputChannels = channels
-        // A beat can land on any hop in the buffer, not only the last one.
-        // Reporting the strongest keeps the beat indicator and the publication
-        // gate honest; `beatCount` is monotonic, so choreography never misses
-        // one regardless.
+        // A transient can land on any hop in the buffer, not only the last.
+        // Keep each channel's strongest aged hit. Pulse and drop already carry
+        // their own continuous envelopes through every hop.
         snapshot.beat = strongestBeat
+        snapshot.kick = strongestKick
+        snapshot.snare = strongestSnare
+        snapshot.percussion = strongestPercussion
+        snapshot.onset = strongestOnset
+        // Only the final hop is returned. Keep onset/tempo processing at the
+        // full hop rate, but build presentation vectors once per buffer.
+        snapshot.chroma = chromaVector()
+        snapshot.spectrum = spectrumVector()
         return snapshot
     }
 
     // MARK: - Per-hop analysis
 
     private func analyzeHop(sampleRate: Double) -> AudioReactiveSnapshot {
-        let dt = Double(Self.hopSize) / sampleRate
+        let dt = hopInterval
         let streamTime = Double(processedSamples) / sampleRate
 
         // Average channel POWER, not waveforms. Stereo widening and opposite
@@ -967,12 +1065,20 @@ final class MusicFeatureAnalyzer {
         var totalMeanSquare: Float = 0
         let channelCount = Float(max(1, channelRings.count))
         if channelRings.count <= 1 {
-            // Mono fast path: one FFT, magnitudes are already the spectrum.
+            // A zero window still advances onset/tempo state, but needs no FFT.
             fillChronologicalWindow(channel: 0)
             vDSP_measqv(chronologicalSamples, 1, &totalMeanSquare, vDSP_Length(Self.windowSize))
-            vDSP_vmul(chronologicalSamples, 1, hannWindow, 1, &windowedSamples, 1,
-                      vDSP_Length(Self.windowSize))
-            updateSpectrum()
+            if totalMeanSquare > 0 {
+                vDSP_vmul(chronologicalSamples, 1, hannWindow, 1, &windowedSamples, 1,
+                          vDSP_Length(Self.windowSize))
+                updateSpectrumPower()
+                // Separate buffers satisfy Swift's mutable-access rules.
+                var sqrtCount = Int32(fftMagnitudes.count)
+                vvsqrtf(&magnitudeScratch, &fftMagnitudes, &sqrtCount)
+                swap(&fftMagnitudes, &magnitudeScratch)
+            } else {
+                vDSP_vclr(&fftMagnitudes, 1, binCount)
+            }
         } else {
             vDSP_vclr(&spectrumPower, 1, binCount)
             for channel in channelRings.indices {
@@ -980,12 +1086,13 @@ final class MusicFeatureAnalyzer {
                 var meanSquare: Float = 0
                 vDSP_measqv(chronologicalSamples, 1, &meanSquare, vDSP_Length(Self.windowSize))
                 totalMeanSquare += meanSquare
+                guard meanSquare > 0 else { continue }
                 vDSP_vmul(chronologicalSamples, 1, hannWindow, 1, &windowedSamples, 1,
                           vDSP_Length(Self.windowSize))
-                updateSpectrum()
-                // Accumulate |X|² with vector ops instead of a scalar Swift loop.
-                vDSP_vsq(fftMagnitudes, 1, &magnitudeScratch, 1, binCount)
-                vDSP_vadd(spectrumPower, 1, magnitudeScratch, 1, &spectrumPower, 1, binCount)
+                updateSpectrumPower()
+                // Stay in power until channels are combined: computing each
+                // channel's square root only to square it again is redundant.
+                vDSP_vadd(spectrumPower, 1, fftMagnitudes, 1, &spectrumPower, 1, binCount)
             }
             var invChannels = 1 / channelCount
             // Separate buffers: Swift exclusivity rejects in-place vvsqrtf.
@@ -1002,9 +1109,7 @@ final class MusicFeatureAnalyzer {
         vDSP_vsmul(fftMagnitudes, 1, &compression, &magnitudeScratch, 1, binCount)
         var n = Int32(fftMagnitudes.count)
         vvlog1pf(&spectrumPower, &magnitudeScratch, &n)
-        for bin in logMagnitudes.indices {
-            logMagnitudes[bin] = Double(spectrumPower[bin])
-        }
+        vDSP_vspdp(spectrumPower, 1, &logMagnitudes, 1, binCount)
 
         // Fixed soft-knee loudness preserves quiet/loud contrast. Adaptive gain
         // remains in the onset detector, where playback-volume independence is useful.
@@ -1016,7 +1121,7 @@ final class MusicFeatureAnalyzer {
         let loudestBand = max(bassRaw, max(midsRaw, highsRaw))
         bandPeak = loudestBand > bandPeak
             ? bandPeak + (loudestBand - bandPeak) * 0.3
-            : max(0.000_02, bandPeak * exp(-dt / 8))
+            : max(0.000_02, bandPeak * bandPeakDecay)
         let bandScale = 0.9 / bandPeak * sqrt(level)
         let bass = clamp(bassRaw * bandScale)
         let mids = clamp(midsRaw * bandScale)
@@ -1038,10 +1143,10 @@ final class MusicFeatureAnalyzer {
         }
         swap(&logMagnitudes, &previousLogMagnitudes)
 
-        let onset = normalize(rawOnset, scale: &odfScale, dt: dt)
-        let kick = normalize(rawKick, scale: &kickScale, dt: dt)
-        let snare = normalize(rawSnare, scale: &snareScale, dt: dt)
-        let percussion = normalize(rawHat, scale: &hatScale, dt: dt)
+        let onset = normalize(rawOnset, scale: &odfScale)
+        let kick = normalize(rawKick, scale: &kickScale)
+        let snare = normalize(rawSnare, scale: &snareScale)
+        let percussion = normalize(rawHat, scale: &hatScale)
         let energy = clamp(level * 0.4 + bass * 0.3 + mids * 0.16 + highs * 0.14)
 
         // Tempo and phase. The tracker runs on stream time so it is unaffected
@@ -1066,9 +1171,8 @@ final class MusicFeatureAnalyzer {
         // material without a detectable pulse (ambient, spoken word, sparse
         // acoustic) still gets a show, it is just driven by onsets rather than
         // by a grid.
-        let baselineCoefficient = decayCoefficient(dt: dt, timeConstant: 1.5)
-        noveltyBaseline += (beatOnset - noveltyBaseline) * baselineCoefficient
-        noveltyDeviation += (abs(beatOnset - noveltyBaseline) - noveltyDeviation) * baselineCoefficient
+        noveltyBaseline += (beatOnset - noveltyBaseline) * noveltyCoefficient
+        noveltyDeviation += (abs(beatOnset - noveltyBaseline) - noveltyDeviation) * noveltyCoefficient
         let onsetThreshold = noveltyBaseline + max(0.09, noveltyDeviation * 2.2)
 
         var beatStrength = 0.0
@@ -1087,15 +1191,16 @@ final class MusicFeatureAnalyzer {
         // Pulse decays over a fraction of the beat, so it reads as one discrete
         // hit per beat at any tempo instead of a fixed twitch rate.
         let pulseDecay = grid.isLocked ? min(0.34, max(0.1, grid.interval * 0.42)) : 0.16
-        pulseEnv = max(pulseEnv * exp(-dt / pulseDecay), onset * 0.85)
+        let pulseCoefficient = grid.isLocked ? exp(-dt / pulseDecay) : fallbackPulseDecay
+        pulseEnv = max(pulseEnv * pulseCoefficient, onset * 0.85)
         if beatStrength > 0 { pulseEnv = max(pulseEnv, 0.9) }
         let pulse = clamp(pulseEnv)
 
         // Sustained energy above the running baseline. Music Mode treats this
         // as evidence, not as guaranteed section/drop detection.
-        energyBaseline += (energy - energyBaseline) * decayCoefficient(dt: dt, timeConstant: 3.3)
+        energyBaseline += (energy - energyBaseline) * energyCoefficient
         let intensity = clamp((energy - 0.5) * 2.4) * clamp((energy - energyBaseline) * 4 + 0.3)
-        dropEnv = max(dropEnv * exp(-dt / 0.3), intensity)
+        dropEnv = max(dropEnv * dropDecay, intensity)
 
         // Mood: treble-leaning reads bright/airy (→1), bass-leaning dark/heavy (→0).
         let mood = clamp(0.5 + (highs - bass) * 0.6 + mids * 0.05)
@@ -1133,8 +1238,8 @@ final class MusicFeatureAnalyzer {
             feltInterval: feltInterval,
             feltTempo: feltTempo,
             stereo: lastStereo,
-            chroma: chromaVector(sampleRate: sampleRate),
-            spectrum: spectrumVector(),
+            chroma: [],
+            spectrum: [],
             phrasePosition: (beatCount / metre) % 8,
             energySlope: slope,
             sourceDescription: sourceDescription,
@@ -1148,26 +1253,32 @@ final class MusicFeatureAnalyzer {
 
     // MARK: - Spectrum
 
-    private func updateSpectrum() {
+    /// Leaves scaled squared magnitudes in `fftMagnitudes`; the caller takes
+    /// one square root after averaging all audible channels' power.
+    private func updateSpectrumPower() {
         guard let fftSetup else { return }
         let size = Self.windowSize
         let half = size / 2
-        for index in 0..<half {
-            fftReal[index] = windowedSamples[index * 2]
-            fftImaginary[index] = windowedSamples[index * 2 + 1]
-        }
         fftReal.withUnsafeMutableBufferPointer { real in
             fftImaginary.withUnsafeMutableBufferPointer { imaginary in
                 guard let realBase = real.baseAddress, let imaginaryBase = imaginary.baseAddress else { return }
                 var split = DSPSplitComplex(realp: realBase, imagp: imaginaryBase)
+                // A real FFT packs consecutive even/odd samples into the two
+                // split arrays. vDSP_ctoz expresses that exact permutation.
+                windowedSamples.withUnsafeBufferPointer { samples in
+                    guard let base = samples.baseAddress else { return }
+                    base.withMemoryRebound(to: DSPComplex.self, capacity: half) { interleaved in
+                        vDSP_ctoz(interleaved, 2, &split, 1, vDSP_Length(half))
+                    }
+                }
                 vDSP_fft_zrip(fftSetup, &split, 1, fftLog2Size, FFTDirection(FFT_FORWARD))
                 fftMagnitudes.withUnsafeMutableBufferPointer { magnitudes in
                     guard let magnitudeBase = magnitudes.baseAddress else { return }
-                    vDSP_zvabs(&split, 1, magnitudeBase, 1, vDSP_Length(half))
+                    vDSP_zvmags(&split, 1, magnitudeBase, 1, vDSP_Length(half))
                 }
             }
         }
-        var scale = 1 / Float(size)
+        var scale = 1 / Float(size * size)
         vDSP_vsmul(fftMagnitudes, 1, &scale, &fftMagnitudes, 1, vDSP_Length(half))
         // Bin 0 packs DC and Nyquist together and carries rumble and any DC
         // offset, so it never participates in a band.
@@ -1192,41 +1303,42 @@ final class MusicFeatureAnalyzer {
     }
 
     private func spectrumVector() -> [Double] {
-        let half = Self.windowSize / 2
         var bins = [Double](repeating: 0, count: 32)
-        let usable = max(1, half - 1)
-        for index in 1..<half {
-            let bucket = min(31, (index - 1) * 32 / usable)
-            bins[bucket] = max(bins[bucket], Double(fftMagnitudes[index]))
+        var peak = 0.0
+        fftMagnitudes.withUnsafeBufferPointer { magnitudes in
+            guard let base = magnitudes.baseAddress else { return }
+            for (index, range) in Self.spectrumRanges.enumerated() {
+                var maximum: Float = 0
+                vDSP_maxv(base.advanced(by: range.first), 1, &maximum, vDSP_Length(range.count))
+                bins[index] = Double(maximum)
+                peak = max(peak, bins[index])
+            }
         }
-        let peak = bins.max() ?? 0
         guard peak > 1e-9 else { return bins }
-        return bins.map { min(1, $0 / peak) }
+        for index in bins.indices { bins[index] = min(1, bins[index] / peak) }
+        return bins
     }
 
-    private func chromaVector(sampleRate: Double) -> [Double] {
+    private func chromaVector() -> [Double] {
         var bins = [Double](repeating: 0, count: 12)
-        let half = Self.windowSize / 2
-        guard sampleRate > 0 else { return bins }
-        for index in 1..<half {
-            let frequency = Double(index) * sampleRate / Double(Self.windowSize)
-            guard frequency >= 40, frequency <= 5_000 else { continue }
-            let midi = 69 + 12 * log2(frequency / 440)
-            let pitchClass = ((Int(midi.rounded()) % 12) + 12) % 12
-            bins[pitchClass] += Double(fftMagnitudes[index])
+        for pitchClass in chromaBins.indices {
+            for index in chromaBins[pitchClass] {
+                bins[pitchClass] += Double(fftMagnitudes[index])
+            }
         }
         let peak = bins.max() ?? 0
         guard peak > 1e-9 else { return bins }
-        return bins.map { min(1, $0 / peak) }
+        for index in bins.indices { bins[index] = min(1, bins[index] / peak) }
+        return bins
     }
 
     /// Divides by a fast-attack, slow-decay peak so onset strength is relative
     /// to how hard this material actually hits, not to absolute volume.
-    private func normalize(_ value: Double, scale: inout Double, dt: Double) -> Double {
+    private func normalize(_ value: Double, scale: inout Double) -> Double {
         if value > scale {
             scale += (value - scale) * 0.3
         } else {
-            scale = max(Self.minimumOnsetScale, scale * exp(-dt / 6))
+            scale = max(Self.minimumOnsetScale, scale * onsetScaleDecay)
         }
         return clamp(value / scale * 0.9)
     }
@@ -1289,6 +1401,14 @@ final class MusicFeatureAnalyzer {
     private func configureIfNeeded(sampleRate: Double) {
         guard sampleRate != configuredSampleRate else { return }
         configuredSampleRate = sampleRate
+        hopInterval = Double(Self.hopSize) / sampleRate
+        bandPeakDecay = exp(-hopInterval / 8)
+        onsetScaleDecay = exp(-hopInterval / 6)
+        noveltyCoefficient = 1 - exp(-hopInterval / 1.5)
+        energyCoefficient = 1 - exp(-hopInterval / 3.3)
+        dropDecay = exp(-hopInterval / 0.3)
+        fallbackPulseDecay = exp(-hopInterval / 0.16)
+        transientHopDecay = exp(-hopInterval / 0.08)
         bassBins = binRange(low: 45, high: 160, sampleRate: sampleRate)
         midsBins = binRange(low: 350, high: 2_200, sampleRate: sampleRate)
         highsBins = binRange(low: 3_200, high: 12_000, sampleRate: sampleRate)
@@ -1296,7 +1416,17 @@ final class MusicFeatureAnalyzer {
         snareBins = binRange(low: 200, high: 2_000, sampleRate: sampleRate)
         hatBins = binRange(low: 3_000, high: 12_000, sampleRate: sampleRate)
         fluxBands = makeFluxBands(sampleRate: sampleRate)
-        beatTracker.configure(frameInterval: Double(Self.hopSize) / sampleRate)
+        // Pitch classes depend on the capture format, not the audio. Avoid
+        // recalculating logarithms and rounding hundreds of bins every hop.
+        chromaBins = Array(repeating: [], count: 12)
+        for index in 1..<Self.windowSize / 2 {
+            let frequency = Double(index) * sampleRate / Double(Self.windowSize)
+            guard frequency >= 40, frequency <= 5_000 else { continue }
+            let midi = 69 + 12 * log2(frequency / 440)
+            let pitchClass = ((Int(midi.rounded()) % 12) + 12) % 12
+            chromaBins[pitchClass].append(index)
+        }
+        beatTracker.configure(frameInterval: hopInterval)
     }
 
     private func binRange(low: Double, high: Double, sampleRate: Double) -> BinRange {
@@ -1341,10 +1471,6 @@ final class MusicFeatureAnalyzer {
         } else {
             hostTimeOffset += (target - hostTimeOffset) * 0.05
         }
-    }
-
-    private func decayCoefficient(dt: Double, timeConstant: Double) -> Double {
-        1 - exp(-dt / timeConstant)
     }
 
     private func clamp(_ value: Double) -> Double { max(0, min(1, value)) }
@@ -1492,6 +1618,11 @@ private extension CMSampleBuffer {
                       channel + count <= Int(asbd.mChannelsPerFrame),
                       Int(ab.mDataByteSize) >= Int(frames) * count * MemoryLayout<Float>.size else { return nil }
                 let src = data.assumingMemoryBound(to: Float.self)
+                if count == 1 {
+                    dst[channel].update(from: src, count: Int(frames))
+                    channel += 1
+                    continue
+                }
                 for c in 0..<count {
                     for i in 0..<Int(frames) { dst[channel + c][i] = src[i * count + c] }
                 }

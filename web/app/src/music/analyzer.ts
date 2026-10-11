@@ -9,6 +9,8 @@ import {
 } from "./types";
 
 const WINDOW = 2048;
+// WINDOW is a power of two, so a mask wraps its bounded write index.
+const WINDOW_MASK = WINDOW - 1;
 const HOP = 512;
 const LOG_COMPRESSION = 1000;
 const MIN_ONSET_SCALE = 0.01;
@@ -136,67 +138,102 @@ export class MusicFeatureAnalyzer {
     this.hasHostAnchor = true;
     let latest: AudioReactiveSnapshot | null = null;
     let strongestBeat = 0;
+    const count = samples.length;
+    const stereoLeft = stereo?.left;
+    const stereoRight = stereo?.right;
     let left = 0, right = 0;
-    for (let i = 0; i < samples.length; i++) {
-      const l = stereo?.left[i] ?? samples[i] ?? 0;
-      const r = stereo?.right[i] ?? l;
+    for (let i = 0; i < count; i++) {
+      const l = stereoLeft?.[i] ?? samples[i] ?? 0;
+      const r = stereoRight?.[i] ?? l;
       left += l * l; right += r * r;
     }
-    left = Math.sqrt(left / samples.length); right = Math.sqrt(right / samples.length);
+    left = Math.sqrt(left / count); right = Math.sqrt(right / count);
     const image = left + right < 1e-8 ? .5 : right / (left + right);
-    for (let i = 0; i < samples.length; i++) {
-      if (stereo) {
-        this.rings[0][this.ringWrite] = stereo.left[i] ?? 0;
-        this.rings[1][this.ringWrite] = stereo.right[i] ?? 0;
-      } else {
-        this.rings[0][this.ringWrite] = samples[i] ?? 0;
+    const ring0 = this.rings[0];
+    let ringWrite = this.ringWrite;
+    if (stereo) {
+      const ring1 = this.rings[1];
+      const left = stereo.left;
+      const right = stereo.right;
+      for (let i = 0; i < count; i++) {
+        ring0[ringWrite] = left[i] ?? 0;
+        ring1[ringWrite] = right[i] ?? 0;
+        ringWrite = (ringWrite + 1) & WINDOW_MASK;
+        this.processedSamples++;
+        if (--this.samplesUntilHop <= 0) {
+          this.samplesUntilHop = HOP;
+          this.ringWrite = ringWrite;
+          latest = this.hop(image);
+          strongestBeat = Math.max(strongestBeat, latest.beat);
+        }
       }
-      this.ringWrite = (this.ringWrite + 1) % WINDOW;
-      this.processedSamples++;
-      if (--this.samplesUntilHop <= 0) {
-        this.samplesUntilHop = HOP;
-        latest = this.hop(image);
-        strongestBeat = Math.max(strongestBeat, latest.beat);
+    } else {
+      for (let i = 0; i < count; i++) {
+        ring0[ringWrite] = samples[i] ?? 0;
+        ringWrite = (ringWrite + 1) & WINDOW_MASK;
+        this.processedSamples++;
+        if (--this.samplesUntilHop <= 0) {
+          this.samplesUntilHop = HOP;
+          this.ringWrite = ringWrite;
+          latest = this.hop(image);
+          strongestBeat = Math.max(strongestBeat, latest.beat);
+        }
       }
     }
+    this.ringWrite = ringWrite;
     if (latest) { latest.beat = strongestBeat; this.lastSnapshot = latest; }
     return latest;
   }
 
-  /** Fills `windowed` from a channel's ring and returns its mean square. */
+  /** Reads the chronological window in two contiguous spans, without wrapping
+   * an index for every sample, and returns the channel's mean square. */
   private windowChannel(ring: Float64Array): number {
     let square = 0;
-    for (let i = 0; i < WINDOW; i++) {
-      const sample = ring[(this.ringWrite + i) % WINDOW];
+    let windowIndex = 0;
+    const write = this.ringWrite;
+    const hann = this.hann;
+    const windowed = this.windowed;
+    for (let i = write; i < WINDOW; i++, windowIndex++) {
+      const sample = ring[i];
       square += sample * sample;
-      this.windowed[i] = sample * this.hann[i];
+      windowed[windowIndex] = sample * hann[windowIndex];
+    }
+    for (let i = 0; i < write; i++, windowIndex++) {
+      const sample = ring[i];
+      square += sample * sample;
+      windowed[windowIndex] = sample * hann[windowIndex];
     }
     return square / WINDOW;
   }
 
   private hop(stereo: number): AudioReactiveSnapshot {
+    const magnitudes = this.magnitudes;
     let meanSquare = 0;
     if (this.channels <= 1) {
       meanSquare = this.windowChannel(this.rings[0]);
-      this.fft.magnitudes(this.windowed, this.magnitudes);
+      this.fft.magnitudes(this.windowed, magnitudes);
     } else {
       // Average channel POWER, not waveforms, so opposite phase cannot cancel.
-      this.power.fill(0);
+      const power = this.power;
+      const channelMagnitudes = this.channelMagnitudes;
+      power.fill(0);
       for (let c = 0; c < this.channels; c += 1) {
         meanSquare += this.windowChannel(this.rings[c]);
-        this.fft.magnitudes(this.windowed, this.channelMagnitudes);
-        for (let k = 0; k < this.power.length; k += 1) this.power[k] += this.channelMagnitudes[k] * this.channelMagnitudes[k];
+        this.fft.magnitudes(this.windowed, channelMagnitudes);
+        for (let k = 0; k < power.length; k += 1) power[k] += channelMagnitudes[k] * channelMagnitudes[k];
       }
-      for (let k = 0; k < this.magnitudes.length; k += 1) this.magnitudes[k] = Math.sqrt(this.power[k] / this.channels);
+      for (let k = 0; k < magnitudes.length; k += 1) magnitudes[k] = Math.sqrt(power[k] / this.channels);
       meanSquare /= this.channels;
     }
     const rms = Math.sqrt(meanSquare);
     const level = clamp(Math.log1p(Math.max(0, rms - .001) * 20) / Math.log1p(10));
-    for (let i = 1; i < this.logMagnitudes.length; i++) this.logMagnitudes[i] = Math.log1p(this.magnitudes[i] * LOG_COMPRESSION);
+    const logMagnitudes = this.logMagnitudes;
+    const previousLog = this.previousLog;
+    for (let i = 1; i < logMagnitudes.length; i++) logMagnitudes[i] = Math.log1p(magnitudes[i] * LOG_COMPRESSION);
     const dt = HOP / this.sampleRate;
-    const bassRaw = meanBins(this.magnitudes, this.bassBins);
-    const midsRaw = meanBins(this.magnitudes, this.midsBins);
-    const highsRaw = meanBins(this.magnitudes, this.highsBins);
+    const bassRaw = meanBins(magnitudes, this.bassBins);
+    const midsRaw = meanBins(magnitudes, this.midsBins);
+    const highsRaw = meanBins(magnitudes, this.highsBins);
     const loudest = Math.max(bassRaw, midsRaw, highsRaw);
     this.bandPeak = loudest > this.bandPeak ? this.bandPeak + (loudest - this.bandPeak) * .3 : Math.max(.00002, this.bandPeak * Math.exp(-dt / 8));
     const scale = .9 / this.bandPeak * Math.sqrt(level);
@@ -206,19 +243,20 @@ export class MusicFeatureAnalyzer {
       this.warmupHops -= 1;
     } else {
       let fluxSum = 0;
-      for (const band of this.fluxBands) fluxSum += rectifiedBandFlux(this.logMagnitudes,this.previousLog,band);
+      for (const band of this.fluxBands) fluxSum += rectifiedBandFlux(logMagnitudes,previousLog,band);
       flux = fluxSum / Math.max(1,this.fluxBands.length);
-      rawKick = rectifiedBandFlux(this.logMagnitudes,this.previousLog,this.kickBins);
-      rawSnare = rectifiedBandFlux(this.logMagnitudes,this.previousLog,this.snareBins);
-      rawHat = rectifiedBandFlux(this.logMagnitudes,this.previousLog,this.hatBins);
+      rawKick = rectifiedBandFlux(logMagnitudes,previousLog,this.kickBins);
+      rawSnare = rectifiedBandFlux(logMagnitudes,previousLog,this.snareBins);
+      rawHat = rectifiedBandFlux(logMagnitudes,previousLog,this.hatBins);
     }
-    this.previousLog.set(this.logMagnitudes);
-    const normalize = (value: number, key: 'odfScale'|'kickScale'|'snareScale'|'hatScale') => {
-      this[key] = value > this[key] ? this[key] + (value - this[key]) * .3 : Math.max(MIN_ONSET_SCALE, this[key] * Math.exp(-dt / 6));
-      return clamp(value / this[key] * .9);
-    };
-    const onset = normalize(flux,'odfScale'), kick = normalize(rawKick,'kickScale');
-    const snare = normalize(rawSnare,'snareScale'), percussion = normalize(rawHat,'hatScale');
+    previousLog.set(logMagnitudes);
+    const onsetDecay = Math.exp(-dt / 6);
+    this.odfScale = updatedOnsetScale(this.odfScale, flux, onsetDecay);
+    this.kickScale = updatedOnsetScale(this.kickScale, rawKick, onsetDecay);
+    this.snareScale = updatedOnsetScale(this.snareScale, rawSnare, onsetDecay);
+    this.hatScale = updatedOnsetScale(this.hatScale, rawHat, onsetDecay);
+    const onset = clamp(flux / this.odfScale * .9), kick = clamp(rawKick / this.kickScale * .9);
+    const snare = clamp(rawSnare / this.snareScale * .9), percussion = clamp(rawHat / this.hatScale * .9);
     const energy = clamp(level * .4 + bass * .3 + mids * .16 + highs * .14);
     const sampleTime = this.processedSamples / this.sampleRate;
     const beatOnset = clamp(onset * .6 + kick * .4);
@@ -239,7 +277,7 @@ export class MusicFeatureAnalyzer {
     this.energyBaseline += (energy-this.energyBaseline)*(1-Math.exp(-dt/3.3));
     this.dropEnv = Math.max(this.dropEnv*Math.exp(-dt/.3),clamp((energy-.5)*2.4)*clamp((energy-this.energyBaseline)*4+.3));
     this.updateChroma(); this.updateSpectrum();
-    return {...emptySnapshot(),level,beat,kick,snare,percussion,bass,mids,highs,energy,
+    return {level,beat,kick,snare,percussion,bass,mids,highs,energy,
       mood:clamp(.5+(highs-bass)*.6+mids*.05), confidence:clamp(level*1.8),pulse:clamp(this.pulseEnv),drop:clamp(this.dropEnv),
       beatCount:this.beatCount,tempo:grid.isLocked?grid.tempo:0,beatInterval:grid.isLocked?grid.interval:0,
       beatConfidence:grid.confidence,beatReferenceTime:grid.lastBeatTime>0?grid.lastBeatTime+this.hostOffset:0,
@@ -254,28 +292,33 @@ export class MusicFeatureAnalyzer {
   latest(): AudioReactiveSnapshot { return this.lastSnapshot; }
 
   private updateSpectrum(): void {
-    const n = this.magnitudes.length;
+    const magnitudes = this.magnitudes;
+    const spectrum = this.spectrum;
+    const n = magnitudes.length;
     const peak = Math.max(this.bandPeak, 1e-6);
     for (let i = 0; i < SPECTRUM_BINS; i += 1) {
       const { first, end } = SPECTRUM_RANGES[i];
       let sum = 0;
-      for (let k = first; k < end && k < n; k += 1) sum += this.magnitudes[k];
+      for (let k = first; k < end && k < n; k += 1) sum += magnitudes[k];
       const mean = sum / (end - first);
       const target = Math.min(1, mean / peak);
-      this.spectrum[i] = this.spectrum[i] * 0.55 + target * 0.45;
+      spectrum[i] = spectrum[i] * 0.55 + target * 0.45;
     }
   }
 
   private updateChroma(): void {
-    this.chroma.fill(0);
+    const chroma = this.chroma;
+    const magnitudes = this.magnitudes;
+    const pitchClass = this.chromaPitchClass;
+    chroma.fill(0);
     const { first, last } = this.chromaBins;
     for (let bin = first; bin <= last; bin += 1) {
-      this.chroma[this.chromaPitchClass[bin]] += this.magnitudes[bin];
+      chroma[pitchClass[bin]] += magnitudes[bin];
     }
     let max = 0;
-    for (let i = 0; i < 12; i += 1) max = Math.max(max, this.chroma[i]);
+    for (let i = 0; i < 12; i += 1) max = Math.max(max, chroma[i]);
     if (max > 0) {
-      for (let i = 0; i < 12; i += 1) this.chroma[i] /= max;
+      for (let i = 0; i < 12; i += 1) chroma[i] /= max;
     }
   }
 
@@ -332,9 +375,14 @@ function meanBins(magnitudes: Float64Array, range: BinRange): number {
 }
 
 function rectifiedBandFlux(now: Float64Array, prev: Float64Array, range: BinRange): number {
+  const { first, last } = range;
   let sum = 0;
-  for (let i = range.first; i <= range.last; i += 1) sum += Math.max(0, now[i] - prev[i]);
-  return sum / Math.max(1, range.last - range.first + 1);
+  for (let i = first; i <= last; i += 1) sum += Math.max(0, now[i] - prev[i]);
+  return sum / Math.max(1, last - first + 1);
+}
+
+function updatedOnsetScale(scale: number, value: number, decay: number): number {
+  return value > scale ? scale + (value - scale) * .3 : Math.max(MIN_ONSET_SCALE, scale * decay);
 }
 
 function clamp(value: number): number { return Math.max(0,Math.min(1,value)); }

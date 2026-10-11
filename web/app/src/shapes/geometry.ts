@@ -39,15 +39,25 @@ export function normalizeDegrees(degrees: number): number {
   return remainder < 0 ? remainder + 360 : remainder
 }
 
-/** Clockwise by the global orientation about the pivot, y up, exact at right angles. */
-export function toWall(point: Point, pivot: Point, degrees: number): Point {
+export type WallTransform = (point: Point) => Point
+
+/** Reusable clockwise rotation about a fixed pivot, y up, exact at right angles. */
+export function createWallTransform(pivot: Point, degrees: number): WallTransform {
   const radians = (normalizeDegrees(degrees) * Math.PI) / 180
   const snap = (value: number) => (Math.abs(value) < 1e-12 ? 0 : value)
   const c = snap(Math.cos(radians))
   const s = snap(Math.sin(radians))
-  const dx = point[0] - pivot[0]
-  const dy = point[1] - pivot[1]
-  return [dx * c + dy * s, -dx * s + dy * c]
+  const [px, py] = pivot
+  return ([x, y]: Point): Point => {
+    const dx = x - px
+    const dy = y - py
+    return [dx * c + dy * s, -dx * s + dy * c]
+  }
+}
+
+/** Clockwise by the global orientation about the pivot, y up, exact at right angles. */
+export function toWall(point: Point, pivot: Point, degrees: number): Point {
+  return createWallTransform(pivot, degrees)(point)
 }
 
 export interface Fit {
@@ -61,17 +71,29 @@ export interface Bounds { minX: number; maxX: number; minY: number; maxY: number
 
 /** The drawing's extent on the wall as oriented, controller markers included. */
 export function bounds(geometry: ShapesGeometry, degrees: number): Bounds | null {
-  const points: Point[] = [
-    ...geometry.panels.flatMap(p => p.outline.map(point => toWall(point, geometry.pivot, degrees))),
-    ...geometry.references.flatMap(r => {
-      const [x, y] = toWall([r.x, r.y], geometry.pivot, degrees)
-      return [[x - r.radius, y - r.radius], [x + r.radius, y + r.radius]] as Point[]
-    }),
-  ]
-  if (!points.length) return null
-  const xs = points.map(p => p[0])
-  const ys = points.map(p => p[1])
-  return { minX: Math.min(...xs), maxX: Math.max(...xs), minY: Math.min(...ys), maxY: Math.max(...ys) }
+  const transform = createWallTransform(geometry.pivot, degrees)
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
+  let hasPoints = false
+  for (const panel of geometry.panels) {
+    for (const point of panel.outline) {
+      const [x, y] = transform(point)
+      minX = Math.min(minX, x)
+      maxX = Math.max(maxX, x)
+      minY = Math.min(minY, y)
+      maxY = Math.max(maxY, y)
+      hasPoints = true
+    }
+  }
+  for (const reference of geometry.references) {
+    const [x, y] = transform([reference.x, reference.y])
+    const radius = reference.radius
+    minX = Math.min(minX, x - radius, x + radius)
+    maxX = Math.max(maxX, x - radius, x + radius)
+    minY = Math.min(minY, y - radius, y + radius)
+    maxY = Math.max(maxY, y - radius, y + radius)
+    hasPoints = true
+  }
+  return hasPoints ? { minX, maxX, minY, maxY } : null
 }
 
 /** Uniform scale, centred, y flipped for the screen. */
@@ -84,31 +106,49 @@ export function fit(geometry: ShapesGeometry, degrees: number, width: number, he
 }
 
 export function toScreen(point: Point, pivot: Point, degrees: number, view: Fit): Point {
-  const [x, y] = toWall(point, pivot, degrees)
-  return [view.ox + x * view.scale, view.oy - y * view.scale]
+  return createScreenTransform(pivot, degrees, view)(point)
+}
+
+/** Reuses the wall rotation when drawing every vertex of a layout. */
+export function createScreenTransform(pivot: Point, degrees: number, view: Fit): WallTransform {
+  const transform = createWallTransform(pivot, degrees)
+  const { ox, oy, scale } = view
+  return (point: Point): Point => {
+    const [x, y] = transform(point)
+    return [ox + x * scale, oy - y * scale]
+  }
 }
 
 /** 1 is the leftmost panel on the wall as oriented; ties go to the lower ID. */
 export function panelNumbers(geometry: ShapesGeometry, degrees: number): Record<number, number> {
-  const placed = geometry.panels.map(p => ({ id: p.panelID, x: toWall([p.x, p.y], geometry.pivot, degrees)[0] }))
-  const xs = placed.map(p => p.x)
-  const span = Math.max(...xs) - Math.min(...xs)
-  const minX = Math.min(...xs)
+  const transform = createWallTransform(geometry.pivot, degrees)
+  const placed: { id: number; x: number }[] = []
+  let minX = Infinity, maxX = -Infinity
+  for (const panel of geometry.panels) {
+    const x = transform([panel.x, panel.y])[0]
+    placed.push({ id: panel.panelID, x })
+    minX = Math.min(minX, x)
+    maxX = Math.max(maxX, x)
+  }
+  const span = maxX - minX
   const quantised = (x: number) => (span < 0.5 ? 0.5 : Math.round(((x - minX) / span) * 1e9) / 1e9)
   placed.sort((a, b) => quantised(a.x) - quantised(b.x) || a.id - b.id)
-  return Object.fromEntries(placed.map((p, index) => [p.id, index + 1]))
+  const result: Record<number, number> = {}
+  for (let i = 0; i < placed.length; i += 1) result[placed[i].id] = i + 1
+  return result
 }
 
 /** The nearest panel within 60° of a direction on the wall, for arrow keys. */
 export function neighbor(geometry: ShapesGeometry, degrees: number, from: number, direction: Direction): number | null {
   const origin = geometry.panels.find(p => p.panelID === from)
   if (!origin) return geometry.panels[0]?.panelID ?? null
-  const [sx, sy] = toWall([origin.x, origin.y], geometry.pivot, degrees)
+  const transform = createWallTransform(geometry.pivot, degrees)
+  const [sx, sy] = transform([origin.x, origin.y])
   const axis: Point = { up: [0, 1], down: [0, -1], left: [-1, 0], right: [1, 0] }[direction] as Point
   let best: { id: number; score: number } | null = null
   for (const panel of geometry.panels) {
     if (panel.panelID === from) continue
-    const [x, y] = toWall([panel.x, panel.y], geometry.pivot, degrees)
+    const [x, y] = transform([panel.x, panel.y])
     const dx = x - sx, dy = y - sy
     const distance = Math.hypot(dx, dy)
     if (distance <= 0.5) continue

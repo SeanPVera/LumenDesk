@@ -7,6 +7,11 @@ final class ScheduleEngine {
     struct SolarTimes: Equatable {
         var sunriseMinutes: Int
         var sunsetMinutes: Int
+
+        func normalized() -> SolarTimes {
+            SolarTimes(sunriseMinutes: max(0, min(1439, sunriseMinutes)),
+                       sunsetMinutes: max(0, min(1439, sunsetMinutes)))
+        }
     }
 
     struct State: Equatable {
@@ -85,7 +90,7 @@ final class ScheduleEngine {
         var decisions: [Decision] = []
 
         for room in rooms {
-            for entry in room.schedules where entry.isEnabled {
+            for entry in room.schedules.map({ $0.normalized() }) where entry.isEnabled {
                 for scheduledAt in occurrences(
                     for: entry,
                     after: previous,
@@ -162,8 +167,15 @@ final class ScheduleEngine {
         solarTimes: SolarTimes
     ) -> [Date] {
         guard previous < currentDate else { return [] }
-        var day = calendar.startOfDay(for: previous)
-        let finalDay = calendar.startOfDay(for: currentDate)
+        let entry = entry.normalized()
+        let margin = entry.action.isRelativeToSun ? 2 : 0
+        // A solar rule belongs to its base day's weekdays even when its offset
+        // lands on the preceding or following day. Two days also cover a
+        // 24-hour legacy offset across a daylight-saving transition.
+        var day = calendar.date(byAdding: .day, value: -margin,
+                                to: calendar.startOfDay(for: previous)) ?? previous
+        let finalDay = calendar.date(byAdding: .day, value: margin,
+                                     to: calendar.startOfDay(for: currentDate)) ?? currentDate
         var matches: [Date] = []
 
         while day <= finalDay {
@@ -180,40 +192,37 @@ final class ScheduleEngine {
     }
 
     func occurrence(for entry: ScheduleEntry, relativeTo date: Date, solarTimes: SolarTimes) -> Date? {
+        let entry = entry.normalized()
+        let solarTimes = solarTimes.normalized()
+        let baseMinutes: Int
         switch entry.action {
-        case .atSunrise:
-            guard let sunrise = wallClockTime(at: solarTimes.sunriseMinutes, on: date) else { return nil }
-            return calendar.date(byAdding: .minute, value: entry.offsetMinutes, to: sunrise)
-        case .atSunset:
-            guard let sunset = wallClockTime(at: solarTimes.sunsetMinutes, on: date) else { return nil }
-            return calendar.date(byAdding: .minute, value: entry.offsetMinutes, to: sunset)
-        default:
-            return wallClockTime(at: entry.hour * 60 + entry.minute, on: date)
+        case .atSunrise: baseMinutes = solarTimes.sunriseMinutes
+        case .atSunset: baseMinutes = solarTimes.sunsetMinutes
+        default: baseMinutes = entry.hour * 60 + entry.minute
         }
-    }
-
-    /// Clock times remain local clock times on 23- and 25-hour days. A missing
-    /// 02:30 advances to 03:30, and a repeated 01:30 uses its first occurrence.
-    /// Solar offsets are added after resolving the configured local base time.
-    private func wallClockTime(at minute: Int, on date: Date) -> Date? {
-        let clamped = clampedMinute(minute)
-        // On Darwin, bySettingHour can resolve a nonexistent 02:30 to
-        // 03:00 despite the preserving policy. Match clock components via
-        // nextDate so the minute survives the missing hour. Starting just
-        // before midnight also keeps a 00:00 rule on the requested day.
-        return calendar.nextDate(
-            after: calendar.startOfDay(for: date).addingTimeInterval(-1),
-            matching: DateComponents(hour: clamped / 60, minute: clamped % 60, second: 0),
+        let day = calendar.startOfDay(for: date)
+        // Resolve a wall-clock time first. A nonexistent 02:30 becomes 03:30;
+        // a repeated 01:30 uses the first instance exactly once. Adding all
+        // minutes to midnight would shift every later rule by the DST change.
+        guard let base = calendar.nextDate(
+            after: day.addingTimeInterval(-1),
+            matching: DateComponents(hour: baseMinutes / 60, minute: baseMinutes % 60, second: 0),
             matchingPolicy: .nextTimePreservingSmallerComponents,
             repeatedTimePolicy: .first,
             direction: .forward
-        )
+        ), calendar.isDate(base, inSameDayAs: day) else { return nil }
+        return entry.action.isRelativeToSun
+            ? calendar.date(byAdding: .minute, value: entry.offsetMinutes, to: base)
+            : base
     }
 
     func nextOccurrence(for entry: ScheduleEntry, solarTimes: SolarTimes) -> Date? {
         let currentDate = now()
-        var day = calendar.startOfDay(for: currentDate)
-        for _ in 0..<8 {
+        let entry = entry.normalized()
+        let margin = entry.action.isRelativeToSun ? 2 : 0
+        var day = calendar.date(byAdding: .day, value: -margin,
+                                to: calendar.startOfDay(for: currentDate)) ?? currentDate
+        for _ in 0..<(8 + margin * 2) {
             if matchesWeekday(for: entry, on: day),
                let occurrence = occurrence(for: entry, relativeTo: day, solarTimes: solarTimes),
                occurrence > currentDate {
@@ -226,7 +235,7 @@ final class ScheduleEngine {
     }
 
     func hasEnabledSchedules(in rooms: [Room]) -> Bool {
-        rooms.contains { room in room.schedules.contains(where: \.isEnabled) }
+        rooms.contains { room in room.schedules.contains { $0.normalized().isEnabled } }
     }
 
     func scheduledMinute(for entry: ScheduleEntry, solarTimes: SolarTimes) -> Int {
@@ -234,7 +243,7 @@ final class ScheduleEngine {
     }
 
     func conflicts(in entries: [ScheduleEntry], solarTimes: SolarTimes) -> [Conflict] {
-        let enabledEntries = entries.filter(\.isEnabled)
+        let enabledEntries = entries.map { $0.normalized() }.filter(\.isEnabled)
         guard enabledEntries.count > 1 else { return [] }
         let minutes = enabledEntries.map { scheduledMinute(for: $0, solarTimes: solarTimes) }
         var conflicts: [Conflict] = []
@@ -292,6 +301,8 @@ final class ScheduleEngine {
     /// Solar offsets may cross midnight when resolving a date. Conflict
     /// comparisons still clamp them to the day, as they did before.
     private func minuteOffset(for entry: ScheduleEntry, solarTimes: SolarTimes) -> Int {
+        let entry = entry.normalized()
+        let solarTimes = solarTimes.normalized()
         switch entry.action {
         case .atSunrise:
             return solarTimes.sunriseMinutes + entry.offsetMinutes

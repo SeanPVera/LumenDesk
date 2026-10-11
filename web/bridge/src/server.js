@@ -34,15 +34,53 @@ function applyCORS(req, res, allowedOrigins) {
  * CORS only stops a disallowed page from *reading* a response — a simple POST
  * (text/plain body, no preflight) is still delivered and still acts. So
  * state-changing requests are rejected outright unless the Origin is one we
- * allow, or the bridge's own origin when it is serving the page. A request
+ * allow, or the bridge's own HTTP origin after its authority was validated. A request
  * with no Origin at all is not browser-driven (curl, a script) and is allowed.
  */
-function originPermitted(req, allowedOrigins) {
+function originPermitted(req, allowedOrigins, authority) {
   const origin = req.headers.origin
   if (!origin) return true
   if (allowedOrigins.includes('*') || allowedOrigins.includes(origin)) return true
-  const host = req.headers.host
-  return Boolean(host) && (origin === `http://${host}` || origin === `https://${host}`)
+  return origin === `http://${authority.host}`
+}
+
+function parseAuthority(value) {
+  if (typeof value !== 'string' || /[/?#@\\%\s]/.test(value) ||
+      !/^(?:\[[^\]]+\]|[^:[\]]+)(?::\d+)?$/.test(value)) return null
+  try {
+    const url = new URL(`http://${value}`)
+    const port = Number(url.port || 80)
+    return port > 0 ? { host: url.host, hostname: url.hostname.replace(/\.$/, ''), port } : null
+  } catch {
+    return null
+  }
+}
+
+const hostAuthority = (host, port) => parseAuthority(`${host.includes(':') && !host.startsWith('[') ? `[${host}]` : host}:${port}`)
+const isLoopback = hostname => hostname === 'localhost' || hostname === '[::1]' || /^127\./.test(hostname)
+
+/** Bind addresses, rather than a caller's Host, define the bridge's authority.
+ * Wildcard listeners still accept only the concrete local address reached. */
+function requestAuthority(req, configuredHost) {
+  const hostHeaders = req.rawHeaders.filter((_, index) => index % 2 === 0 && req.rawHeaders[index].toLowerCase() === 'host')
+  if (hostHeaders.length !== 1) return null
+  const authority = parseAuthority(req.headers.host)
+  const port = req.socket.localPort
+  if (!authority || authority.port !== port) return null
+  const localAddress = req.socket.localAddress?.replace(/^::ffff:/i, '')
+  if (!localAddress) return null
+  const local = hostAuthority(localAddress, port)
+  const hosts = new Set(local ? [local.hostname] : [])
+  if (local && isLoopback(local.hostname)) {
+    hosts.add('localhost')
+    hosts.add('127.0.0.1')
+    hosts.add('[::1]')
+  }
+  if (configuredHost && !['0.0.0.0', '::', '[::]'].includes(configuredHost)) {
+    const configured = hostAuthority(configuredHost, port)
+    if (configured) hosts.add(configured.hostname)
+  }
+  return hosts.has(authority.hostname) ? authority : null
 }
 
 function json(res, status, body) {
@@ -83,6 +121,7 @@ export function createServer({
   version,
   staticDir = null,
   store = null,
+  host = null,
 }) {
   const musicBrightnessOpened = new Set()
   /** Shapes wall id -> what it showed before a browser music show claimed it. */
@@ -260,22 +299,24 @@ export function createServer({
   }
 
   return http.createServer(async (req, res) => {
-    applyCORS(req, res, allowedOrigins)
-
-    if (req.method === 'OPTIONS') {
-      res.writeHead(204)
-      res.end()
-      return
-    }
-
-    if (req.method !== 'GET' && req.method !== 'HEAD' && !originPermitted(req, allowedOrigins)) {
-      return json(res, 403, { error: 'origin not allowed' })
-    }
-
-    const url = new URL(req.url, 'http://127.0.0.1')
-    const path = url.pathname.replace(/\/+$/, '') || '/'
-
     try {
+      const authority = requestAuthority(req, host)
+      if (!authority) return json(res, 403, { error: 'host not allowed' })
+      applyCORS(req, res, allowedOrigins)
+
+      if (req.method === 'OPTIONS') {
+        res.writeHead(204)
+        res.end()
+        return
+      }
+
+      if (req.method !== 'GET' && req.method !== 'HEAD' && !originPermitted(req, allowedOrigins, authority)) {
+        return json(res, 403, { error: 'origin not allowed' })
+      }
+
+      const url = new URL(req.url, 'http://127.0.0.1')
+      const path = url.pathname.replace(/\/+$/, '') || '/'
+
       // "/" is the web client when we are serving it; /health stays the probe
       // either way, and is what the client uses to recognise the bridge.
       if (req.method === 'GET' && (path === '/health' || (path === '/' && !staticDir))) {

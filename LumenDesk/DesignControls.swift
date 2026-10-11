@@ -138,7 +138,10 @@ struct LumenFader: View {
     private var fraction: Double { min(1, max(0, (value - range.lowerBound) / span)) }
     private var readout: String { format(value) }
 
-    static func percent(_ value: Double) -> String { "\(Int((value * 100).rounded()))%" }
+    static func percent(_ value: Double) -> String {
+        let normalized = value.isFinite ? min(1, max(0, value)) : 0
+        return "\(Int((normalized * 100).rounded()))%"
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {

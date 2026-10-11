@@ -99,6 +99,9 @@ export default function App() {
   // Ids with a command in flight, so a poll cannot overwrite an optimistic
   // value with a reading taken before the command landed.
   const inFlight = useRef(new Map<string, number>())
+  // Each connection attempt owns its requests. An older response may settle
+  // after a newer one, or after the user has selected another bridge.
+  const connectionRef = useRef<{ port: number; requests: number; settled: number } | null>(null)
 
   useEffect(() => window.localStorage.setItem(PORT_KEY, String(port)), [port])
   useEffect(() => window.localStorage.setItem(NAV_KEY, destination), [destination])
@@ -110,8 +113,14 @@ export default function App() {
   }, [toast])
 
   const poll = useCallback(async () => {
+    const connection = connectionRef.current
+    if (!connection || connection.port !== port) return
+    const request = ++connection.requests
+    const isCurrent = () => connectionRef.current === connection && request >= connection.settled
     try {
       const next = await fetchState(port)
+      if (!isCurrent()) return
+      connection.settled = request
       setDevices(previous =>
         next.devices.map(device =>
           inFlight.current.has(device.id)
@@ -129,6 +138,8 @@ export default function App() {
       void flushPendingMusicCleanup(port, postMusicFrame)
       return next
     } catch (err) {
+      if (!isCurrent()) return
+      connection.settled = request
       setState('unavailable')
       setConnectionError(describeFailure(err))
       return null
@@ -136,22 +147,24 @@ export default function App() {
   }, [port])
 
   useEffect(() => {
-    let cancelled = false
+    const connection = { port, requests: 0, settled: 0 }
+    connectionRef.current = connection
+    const isCurrent = () => connectionRef.current === connection
     setState('checking')
-    detectSameOrigin()
-      .then(same => {
+    void (async () => {
+      try {
+        const same = await detectSameOrigin()
+        if (!isCurrent()) return
         useSameOrigin(same)
-        if (same) setServedByBridge(true)
-        return checkHealth(port)
-      })
-      .then(() => {
-        if (!cancelled) poll()
-      })
-      .catch(() => {
-        if (!cancelled) setState('unavailable')
-      })
+        setServedByBridge(same)
+        await checkHealth(port)
+        if (isCurrent()) await poll()
+      } catch {
+        if (isCurrent()) setState('unavailable')
+      }
+    })()
     return () => {
-      cancelled = true
+      connectionRef.current = null
     }
   }, [port, poll])
 
@@ -172,12 +185,16 @@ export default function App() {
   }, [supportsRooms, destination])
 
   const connect = useCallback(async () => {
+    const connection = { port, requests: 0, settled: 0 }
+    connectionRef.current = connection
+    const isCurrent = () => connectionRef.current === connection
     setState('checking')
     setConnectionError(null)
     try {
       await checkHealth(port)
-      await poll()
+      if (isCurrent()) await poll()
     } catch (err) {
+      if (!isCurrent()) return
       setState('unavailable')
       setConnectionError(describeFailure(err))
       setAttempts(n => n + 1)

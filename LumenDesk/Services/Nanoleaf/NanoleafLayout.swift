@@ -116,6 +116,28 @@ struct NanoleafPanel: Equatable, Hashable, Codable, Identifiable {
     var isPaintable: Bool { kind.isPaintable }
 }
 
+extension NanoleafPanel {
+    private enum CodingKeys: String, CodingKey { case panelID, x, y, orientation, shapeCode }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let id = try container.decode(Int.self, forKey: .panelID)
+        let x = try container.decode(Double.self, forKey: .x)
+        let y = try container.decode(Double.self, forKey: .y)
+        let orientation = try container.decode(Double.self, forKey: .orientation)
+        let shape = try container.decodeIfPresent(Int.self, forKey: .shapeCode)
+        guard (0...Int(UInt16.max)).contains(id), x.isFinite, y.isFinite,
+              abs(x) <= NanoleafTopologyParser.maximumCoordinate,
+              abs(y) <= NanoleafTopologyParser.maximumCoordinate,
+              orientation.isFinite, (0...360).contains(orientation),
+              shape.map({ (-9999...9999).contains($0) }) ?? true else {
+            throw DecodingError.dataCorruptedError(forKey: .panelID, in: container,
+                                                  debugDescription: "Invalid saved Nanoleaf panel")
+        }
+        self.init(panelID: id, x: x, y: y, orientation: orientation, shapeCode: shape)
+    }
+}
+
 /// The arrangement as the controller reports it. Raw topology only: rotation
 /// for display, room placement, zoom and selection all live elsewhere, so a
 /// change of orientation can never rewrite a panel's identity or position.
@@ -132,6 +154,20 @@ struct NanoleafLayout: Equatable, Codable {
         self.panels = panels
         self.reportedPanelCount = reportedPanelCount
         self.legacySideLength = legacySideLength
+    }
+
+    private enum CodingKeys: String, CodingKey { case panels, reportedPanelCount, legacySideLength }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let panels = try container.decode([NanoleafPanel].self, forKey: .panels)
+        guard Set(panels.map(\.panelID)).count == panels.count else {
+            throw DecodingError.dataCorruptedError(forKey: .panels, in: container,
+                                                  debugDescription: "Duplicate saved Nanoleaf panel IDs")
+        }
+        self.init(panels: panels,
+                  reportedPanelCount: try container.decodeIfPresent(Int.self, forKey: .reportedPanelCount),
+                  legacySideLength: try container.decodeIfPresent(Int.self, forKey: .legacySideLength))
     }
 
     /// Light panels in ascending ID order: a stable order for lists, tests
@@ -408,6 +444,9 @@ enum NanoleafTopologyParser {
             let x = try Self.number(container, .x, field: "x position", panel: id)
             let y = try Self.number(container, .y, field: "y position", panel: id)
             let o = try Self.number(container, .o, field: "orientation", panel: id)
+            guard (0...360).contains(o) else {
+                throw NanoleafTopologyProblem.malformed("panel \(id) has an invalid orientation")
+            }
             guard abs(x) <= NanoleafTopologyParser.maximumCoordinate,
                   abs(y) <= NanoleafTopologyParser.maximumCoordinate else {
                 throw NanoleafTopologyProblem.malformed("panel \(id) is positioned outside any plausible wall")

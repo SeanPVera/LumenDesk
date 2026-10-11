@@ -137,10 +137,15 @@ try {
   await expect(music.getByText(/Selected for the next start: Microphone/)).toBeVisible()
   assert.equal((await requests()).microphone, beforeMicrophone)
   await expect(music.locator('.music-transport')).toContainText('Running · Demo groove')
+  const beforeFailedRestart = restores().length
   await music.getByRole('button', { name: 'Restart', exact: true }).click()
   await expect(music.getByRole('alert')).toContainText('Microphone access denied.')
+  await expect.poll(() => restores().length).toBe(beforeFailedRestart + 1)
+  const rolledBack = restores().at(-1)
+  assert.equal(rolledBack.length, 1)
+  assert.deepEqual(rolledBack[0].rgb, original[0].color, 'failed Restart automatically restores the first show’s baseline')
+  assert.equal(rolledBack[0].brightness, original[0].brightness / 100)
   await expect(controlRoom).toBeEnabled()
-  await expect(music.getByRole('button', { name: 'Stop', exact: true })).toBeEnabled()
   await expectRoom('office', 'Desk lamp')
   await expectRoom('lounge', 'Reading lamp')
   await expectRoom('office', 'Desk lamp')
@@ -153,16 +158,15 @@ try {
   await music.getByRole('button', { name: 'Start', exact: true }).click()
   await expect.poll(() => liveFrames().slice(beforeOffice).some(commands => commands.some(command => command.fixtureID === 'lifx:office'))).toBe(true)
   assert.deepEqual(badRevisions, [], 'each included fixture needs its own captured control revision')
+  const beforeOfficeStop = restores().length
   await music.getByRole('button', { name: 'Stop', exact: true }).click()
-  await expect.poll(() => restores().length).toBeGreaterThan(0)
+  await expect.poll(() => restores().length).toBe(beforeOfficeStop + 1)
   const restored = restores().at(-1)
-  for (const device of original) {
-    const command = restored.find(candidate => candidate.fixtureID === device.id)
-    assert.ok(command, `Stop must restore the original baseline for ${device.id}`)
-    assert.deepEqual(command.rgb, device.color)
-    assert.equal(command.brightness, device.brightness / 100)
-    assert.equal(command.controlRevision, device.controlRevision)
-  }
+  assert.equal(restored.length, 1, 'a new show snapshots only its selected room')
+  assert.equal(restored[0].fixtureID, original[1].id)
+  assert.deepEqual(restored[0].rgb, original[1].color)
+  assert.equal(restored[0].brightness, original[1].brightness / 100)
+  assert.equal(restored[0].controlRevision, original[1].controlRevision)
 
   // Failed restoration still gates a new show and its permission request,
   // while idle room selection remains usable. Retry must unblock Start.

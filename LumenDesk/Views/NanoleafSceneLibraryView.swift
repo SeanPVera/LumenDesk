@@ -214,19 +214,22 @@ struct NanoleafEffectEditor: View {
                 LabeledContent(label, value: value)
             }
         case .int(let value):
-            if let low = spec?.minValue, let high = spec?.maxValue, high > low {
-                LumenFader(label: label, value: Binding(get: { Double(value) },
-                                                        set: { definition.options[index].value = .int(Int($0.rounded())) }),
-                           range: low...high, step: 1,
-                           format: { tenths ? String(format: "%.1f s", $0 / 10) : "\(Int($0.rounded()))" })
+            if let range = spec?.integerRange {
+                LumenFader(label: label, value: Binding(get: { min(range.upperBound, max(range.lowerBound, Double(value))) },
+                                                        set: { if let integer = Int(exactly: $0.rounded()) { definition.options[index].value = .int(integer) } }),
+                           range: range, step: 1,
+                           format: { tenths ? String(format: "%.1f s", $0 / 10) : String(format: "%.0f", $0) })
+            } else if spec?.minValue != nil || spec?.maxValue != nil {
+                LabeledContent(label, value: option.value.displayText)
             } else {
                 Stepper(tenths ? "\(label): \(String(format: "%.1f s", Double(value) / 10))" : "\(label): \(value)",
-                        value: Binding(get: { value }, set: { definition.options[index].value = .int(max(0, $0)) }))
+                        onIncrement: { if value < Int.max { definition.options[index].value = .int(max(0, value + 1)) } },
+                        onDecrement: { if value > 0 { definition.options[index].value = .int(value - 1) } })
             }
         case .double(let value):
-            if let low = spec?.minValue, let high = spec?.maxValue, high > low {
+            if let range = spec?.numericRange {
                 LumenFader(label: label, value: Binding(get: { value }, set: { definition.options[index].value = .double($0) }),
-                           range: low...high, format: { String(format: "%.1f", $0) })
+                           range: range, format: { String(format: "%.1f", $0) })
             } else {
                 LabeledContent(label, value: option.value.displayText)
             }

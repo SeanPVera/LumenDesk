@@ -103,21 +103,24 @@ final class LightManager: ObservableObject {
     private let scheduleEngine: ScheduleEngine
     private let persistenceStore: ApplicationPersistence
     private let commandCoordinator: CommandCoordinator
+    private let changeClock: () -> Date
+    private let identifyDurationNanoseconds: UInt64
+    private let identifySleep: CommandCoordinator.Sleep
     private var rehearsalSnapshot: [LightRuntimeSnapshot] = []
+
+    private struct Identification {
+        let token: UUID
+        let snapshot: LightRuntimeSnapshot
+        var task: Task<Void, Never>?
+    }
+    private var identifications: [String: Identification] = [:]
 
     /// State saved before a held identify, so the fixture can be put back
     /// exactly as it was however the question ends. Lives here rather than
     /// beside `beginSustainedIdentify` because that sits in an extension, and
     /// an extension may not hold stored properties.
     private struct IdentifyHold {
-        let deviceID: String
-        let power: Bool
-        let color: Color
-        let brightness: Double
-        let segments: GoveeSegmentState?
-        let matrix: LIFXMatrixState?
-        let nanoleafAppearance: NanoleafAppearance?
-        let nanoleafDesign: NanoleafPanelDesign?
+        let snapshot: LightRuntimeSnapshot
         var task: Task<Void, Never>?
     }
 
@@ -174,6 +177,7 @@ final class LightManager: ObservableObject {
         // user-excluded fixtures out, so ownership can no longer be derived
         // by re-querying `devices(in: scope)` — it has to be this stored set.
         let animatedDeviceIDs: Set<String>
+        let orderedDeviceIDs: [String]
         // Lights another app took over mid-run: a Shapes wall switched to a
         // scene chosen in the Nanoleaf app. The run stops driving them, gives
         // their controls back, and never "restores" them over that choice.
@@ -196,7 +200,9 @@ final class LightManager: ObservableObject {
             self.snapshot = snapshot
             self.restorePreviousState = restorePreviousState
             self.reducedMotion = reducedMotion
-            self.animatedDeviceIDs = Set(snapshot.map(\.deviceID))
+            let deviceIDs = snapshot.map(\.deviceID)
+            self.orderedDeviceIDs = deviceIDs
+            self.animatedDeviceIDs = Set(deviceIDs)
         }
     }
     private var effectRuns: [LightScope: EffectRun] = [:]
@@ -235,7 +241,10 @@ final class LightManager: ObservableObject {
         persistenceStore: ApplicationPersistence? = nil,
         commandCoordinator: CommandCoordinator? = nil,
         musicModeController: AudioReactiveSessionController? = nil,
-        nanoleafClient: NanoleafClient? = nil
+        nanoleafClient: NanoleafClient? = nil,
+        changeClock: @escaping () -> Date = Date.init,
+        identifyDurationNanoseconds: UInt64 = 2_000_000_000,
+        identifySleep: @escaping CommandCoordinator.Sleep = { try await Task.sleep(nanoseconds: $0) }
     ) {
         let nanoleaf = nanoleafClient ?? NanoleafClient()
         self.nanoleaf = nanoleaf
@@ -245,6 +254,9 @@ final class LightManager: ObservableObject {
         self.scheduleEngine = scheduleEngine ?? ScheduleEngine()
         self.persistenceStore = persistenceStore ?? PersistenceStore.live(legacyDefaults: defaults)
         self.commandCoordinator = commandCoordinator ?? CommandCoordinator()
+        self.changeClock = changeClock
+        self.identifyDurationNanoseconds = identifyDurationNanoseconds
+        self.identifySleep = identifySleep
         self.musicModeController = musicModeController ?? AudioReactiveSessionController()
         let persistedState = self.persistenceStore.load()
         rooms = persistedState.rooms
@@ -295,8 +307,8 @@ final class LightManager: ObservableObject {
 
     private var scheduleSolarTimes: ScheduleEngine.SolarTimes {
         ScheduleEngine.SolarTimes(
-            sunriseMinutes: sunriseHour * 60 + sunriseMinute,
-            sunsetMinutes: sunsetHour * 60 + sunsetMinute
+            sunriseMinutes: min(23, max(0, sunriseHour)) * 60 + min(59, max(0, sunriseMinute)),
+            sunsetMinutes: min(23, max(0, sunsetHour)) * 60 + min(59, max(0, sunsetMinute))
         )
     }
 
@@ -626,10 +638,10 @@ final class LightManager: ObservableObject {
     // MARK: - Solar preferences
 
     func setSunriseTime(hour: Int, minute: Int) {
-        sunriseHour = hour; sunriseMinute = minute; persistApplicationState()
+        sunriseHour = min(23, max(0, hour)); sunriseMinute = min(59, max(0, minute)); persistApplicationState()
     }
     func setSunsetTime(hour: Int, minute: Int) {
-        sunsetHour = hour; sunsetMinute = minute; persistApplicationState()
+        sunsetHour = min(23, max(0, hour)); sunsetMinute = min(59, max(0, minute)); persistApplicationState()
     }
 
     // MARK: - Room expansion state
@@ -738,6 +750,7 @@ final class LightManager: ObservableObject {
 
     func setBrightness(_ device: LightDevice, value: Double) {
         recordChange([device])
+        let value = boundedBrightness(value)
         device.brightness = value
         sendBrightness(device, value: value)
     }
@@ -1064,6 +1077,7 @@ final class LightManager: ObservableObject {
                          : "No lights in “\(scopeDisplayName(scope))” to animate.")
             return
         }
+        cancelIdentifications(deviceIDs: Set(targets.map(\.id)), restore: true)
         // Inherit snapshots from any run these lights are leaving, so stopping
         // the new run later restores the true pre-effect state rather than a
         // mid-effect frame.
@@ -1140,6 +1154,7 @@ final class LightManager: ObservableObject {
             publishError("Music Mode shares one audio source across rooms. Stop the other shows before selecting a different source.")
             return
         }
+        cancelIdentifications(deviceIDs: Set(targets.map(\.id)), restore: true)
         let inherited = stopEffects(touching: Set(targets.map(\.id)))
         // Frames carry brightness from here on; a slider send still in flight
         // would land under the show and, on Govee, dim every frame twice.
@@ -1291,7 +1306,9 @@ final class LightManager: ObservableObject {
         run.phase += run.effect.speed
         let effect = run.effect
         let effectPhase = run.phase
-        let targets = devices(in: run.scope)
+        // A show's ownership is fixed at startup. Room edits must not add
+        // fixtures with no baseline or steal them from another running show.
+        let targets = run.orderedDeviceIDs.compactMap { device(withID: $0) }
         run.modelUpdateElapsed += effect.frameInterval
         let shouldUpdateModel = run.modelUpdateElapsed >= 0.25
         if shouldUpdateModel { run.modelUpdateElapsed = 0 }
@@ -1299,7 +1316,7 @@ final class LightManager: ObservableObject {
         for (index, device) in targets.enumerated() {
             // A light another app took over mid-run keeps its slot, so the
             // rest of the room animates exactly as before, but gets nothing.
-            guard !run.releasedDeviceIDs.contains(device.id) else { continue }
+            guard run.ownedDeviceIDs.contains(device.id) else { continue }
             let (color, clampedBrightness) = effectSample(effect, phase: effectPhase, slot: Double(index),
                                                           paletteIndex: index, count: targets.count)
             if shouldUpdateModel {
@@ -1314,6 +1331,11 @@ final class LightManager: ObservableObject {
                                 duration: effect.frameInterval)
             }
         }
+    }
+
+    func renderEffectNowForTesting(scope: LightScope) {
+        guard let run = effectRuns[scope] else { return }
+        runEffectFrame(run)
     }
 
     /// One light's colour and level in an effect frame. `slot` is the light's
@@ -1410,8 +1432,8 @@ final class LightManager: ObservableObject {
                 color: LIFXHSBK(
                     hue: UInt16(hsb.h * 65535),
                     saturation: UInt16(hsb.s * 65535),
-                    brightness: UInt16(brightness * 65535),
-                    kelvin: UInt16(device.kelvin)
+                    brightness: UInt16(boundedBrightness(brightness) * 65535),
+                    kelvin: UInt16(min(9000, max(1200, device.kelvin)))
                 ),
                 durationMS: UInt32(max(0, min(500, Int(duration * 1_000)))),
                 musicTimestamp: musicTimestamp
@@ -1428,6 +1450,7 @@ final class LightManager: ObservableObject {
     }
 
     private func restoreDeviceStates(_ states: [LightRuntimeSnapshot]) {
+        cancelIdentifications(deviceIDs: Set(states.map(\.deviceID)), restore: false)
         for state in states {
             guard let device = device(withID: state.deviceID) else { continue }
             device.isOn = state.isOn
@@ -1476,6 +1499,7 @@ final class LightManager: ObservableObject {
     }
 
     private func sendBrightness(_ device: LightDevice, value: Double) {
+        let value = boundedBrightness(value)
         expectBrightness(device, value: value)
         let matrixUpdate: LIFXMatrixState?
         if device.isLIFXLuna,
@@ -1498,7 +1522,7 @@ final class LightManager: ObservableObject {
                     )
                 } else {
                     let hsb = device.color.hsbComponents
-                    let lifxColor = LIFXHSBK(hue: UInt16(hsb.h * 65535), saturation: UInt16(hsb.s * 65535), brightness: UInt16(max(0, min(1, value)) * 65535), kelvin: UInt16(device.kelvin))
+                    let lifxColor = LIFXHSBK(hue: UInt16(hsb.h * 65535), saturation: UInt16(hsb.s * 65535), brightness: UInt16(value * 65535), kelvin: UInt16(min(9000, max(1200, device.kelvin))))
                     self.lifx?.setColor(macHex: device.backendID, color: lifxColor)
                 }
             case .nanoleaf:
@@ -1519,7 +1543,7 @@ final class LightManager: ObservableObject {
             switch device.brand {
             case .lifx:
                 let hsb = color.hsbComponents
-                let lifxColor = LIFXHSBK(hue: UInt16(hsb.h * 65535), saturation: UInt16(hsb.s * 65535), brightness: UInt16(device.brightness * 65535), kelvin: UInt16(device.kelvin))
+                let lifxColor = LIFXHSBK(hue: UInt16(hsb.h * 65535), saturation: UInt16(hsb.s * 65535), brightness: UInt16(self.boundedBrightness(device.brightness) * 65535), kelvin: UInt16(min(9000, max(1200, device.kelvin))))
                 self.lifx?.setColor(macHex: device.backendID, color: lifxColor)
             case .nanoleaf:
                 let hsb = color.hsbComponents
@@ -1534,7 +1558,7 @@ final class LightManager: ObservableObject {
     }
 
     private func sendColorTemperature(_ device: LightDevice, kelvin: Int) {
-        let kelvin = device.brand == .nanoleaf ? NanoleafProtocol.kelvin(kelvin) : kelvin
+        let kelvin = device.brand == .nanoleaf ? NanoleafProtocol.kelvin(kelvin) : min(9000, max(1200, kelvin))
         device.kelvin = kelvin
         expectNanoleafAppearance(device, appearance: .init(colorMode: "ct"))
         simulateShapesOutput(device, .white)
@@ -1545,7 +1569,7 @@ final class LightManager: ObservableObject {
             switch device.brand {
             case .lifx:
                 let hsb = device.color.hsbComponents
-                self.lifx?.setColor(macHex: device.backendID, color: LIFXHSBK(hue: UInt16(hsb.h * 65535), saturation: 0, brightness: UInt16(device.brightness * 65535), kelvin: UInt16(kelvin)))
+                self.lifx?.setColor(macHex: device.backendID, color: LIFXHSBK(hue: UInt16(hsb.h * 65535), saturation: 0, brightness: UInt16(self.boundedBrightness(device.brightness) * 65535), kelvin: UInt16(kelvin)))
             case .nanoleaf:
                 self.shapes.outputReplaced(device.id, by: .white)
                 self.nanoleaf.setState(device.backendID, ["ct": ["value": kelvin], "brightness": ["value": NanoleafProtocol.percent(device.brightness)]])
@@ -1569,7 +1593,10 @@ final class LightManager: ObservableObject {
 
     private func recordChange(_ devices: [LightDevice]) {
         guard !devices.isEmpty else { return }
-        let now = Date()
+        cancelIdentifications(deviceIDs: Set(devices.map(\.id)), restore: true)
+        let now = changeClock()
+        redoStack.removeAll()
+        canRedo = false
         if let last = undoStack.last,
            last.count == devices.count,
            Set(last.map { $0.deviceID }) == Set(devices.map { $0.id }),
@@ -1579,9 +1606,7 @@ final class LightManager: ObservableObject {
         }
         undoStack.append(devices.map { snapshot($0) })
         if undoStack.count > undoLimit { undoStack.removeFirst() }
-        redoStack.removeAll()
         canUndo = true
-        canRedo = false
         for d in devices { lastChangeTime[d.id] = now }
     }
 
@@ -1593,6 +1618,7 @@ final class LightManager: ObservableObject {
         }
         redoStack.append(current)
         apply(entry)
+        lastChangeTime = [:]
         canUndo = !undoStack.isEmpty
         canRedo = !redoStack.isEmpty
     }
@@ -1605,12 +1631,16 @@ final class LightManager: ObservableObject {
         }
         undoStack.append(current)
         apply(entry)
+        lastChangeTime = [:]
         canUndo = !undoStack.isEmpty
         canRedo = !redoStack.isEmpty
     }
 
     private func apply(_ entry: [LightRuntimeSnapshot]) {
-        cancelPendingBrightness(deviceIDs: Set(entry.map(\.deviceID)))
+        let ids = Set(entry.map(\.deviceID))
+        cancelIdentifications(deviceIDs: ids, restore: false)
+        stopEffects(touching: ids)
+        cancelPendingBrightness(deviceIDs: ids)
         for snap in entry {
             guard let d = device(withID: snap.deviceID) else { continue }
             d.isOn = snap.isOn
@@ -1635,6 +1665,10 @@ final class LightManager: ObservableObject {
     }
 
     // MARK: - Internal helpers
+
+    private func boundedBrightness(_ value: Double) -> Double {
+        value.isFinite ? max(0, min(1, value)) : 0
+    }
 
     fileprivate func upsert(_ device: LightDevice) {
         scanResponseCount += 1
@@ -1746,20 +1780,21 @@ extension LightManager {
         if let owner = shapes.didRead(deviceID: id, info: info) {
             releaseShapesStream(deviceID: id, owner: owner)
         }
-        let color = Color(hue: Double(info.state.hue.value) / 360,
-                          saturation: Double(info.state.sat.value) / 100, brightness: 1)
+        let color = Color(hue: Double(min(360, max(0, info.state.hue.value))) / 360,
+                          saturation: Double(min(100, max(0, info.state.sat.value))) / 100, brightness: 1)
         let rgb = color.rgbComponents
-        let brightness = Double(info.state.brightness.value) / 100
+        let brightness = Double(min(100, max(0, info.state.brightness.value))) / 100
+        let kelvin = NanoleafProtocol.kelvin(info.state.ct.value)
         let matches = commandCoordinator.reportedStateMatchesExpectation(
             deviceID: id,
             reported: ReportedDeviceState(isOn: info.state.on.value, brightness: brightness,
                                            red: rgb.r, green: rgb.g, blue: rgb.b,
-                                           kelvin: info.state.ct.value, nanoleafAppearance: info.appearance)
+                                           kelvin: kelvin, nanoleafAppearance: info.appearance)
         )
         if !isEffectAnimating(id) && (!commandPendingIDs.contains(id) || matches) {
             device.isOn = info.state.on.value
             device.brightness = brightness
-            device.kelvin = info.state.ct.value
+            device.kelvin = kelvin
             // A wall showing LumenDesk's design reports the hue of its last
             // solid colour, which is not what it shows; its swatch is the
             // design's own.
@@ -2175,10 +2210,11 @@ extension LightManager: GoveeClientDelegate {
             guard let device = self.device(withID: id) else { return }
             if self.isScanning { self.scanResponseCount += 1 }
             let wasOn = device.isOn
-            let normalizedBrightness = Double(brightness) / 100.0
-            let red = Double(r) / 255.0
-            let green = Double(g) / 255.0
-            let blue = Double(b) / 255.0
+            let normalizedBrightness = Double(min(100, max(0, brightness))) / 100.0
+            let red = Double(min(255, max(0, r))) / 255.0
+            let green = Double(min(255, max(0, g))) / 255.0
+            let blue = Double(min(255, max(0, b))) / 255.0
+            let kelvin = kelvin <= 0 ? 0 : min(9000, max(1200, kelvin))
             let matches = self.reportedStateMatchesExpectation(
                 deviceID: id,
                 isOn: isOn,
@@ -3015,6 +3051,7 @@ extension LightManager {
     /// layout previewed a solid wash, at the light's old brightness, while
     /// Apply painted the real segments.
     fileprivate func applySceneSnapshot(_ snap: DeviceSnapshot, to device: LightDevice) {
+        let snap = snap.normalized()
         device.isOn = snap.isOn
         device.brightness = snap.brightness
         device.kelvin = snap.kelvin
@@ -3044,6 +3081,9 @@ extension LightManager {
             publishError("“\(scene.name)” has no currently available lights to preview.")
             return
         }
+        cancelIdentifications(deviceIDs: Set(targets.map(\.id)), restore: true)
+        stopEffects(touching: Set(targets.map(\.id)))
+        cancelPendingBrightness(deviceIDs: Set(targets.map(\.id)))
         rehearsalSnapshot = targets.map(snapshot)
         rehearsalSceneID = scene.id
         for device in targets {
@@ -3688,6 +3728,8 @@ extension LightManager {
 
     /// Optimistically updates the UI while coalescing LAN traffic to one send per 120 ms.
     func previewBrightness(_ device: LightDevice, value: Double) {
+        cancelIdentifications(deviceIDs: [device.id], restore: true)
+        let value = boundedBrightness(value)
         device.brightness = value
         brightnessTasks[device.id]?.cancel()
         brightnessTasks[device.id] = Task { @MainActor [weak self, weak device] in
@@ -3715,6 +3757,8 @@ extension LightManager {
     var pendingBrightnessDeviceIDsForTesting: Set<String> { Set(brightnessTasks.keys) }
 
     func commitBrightness(_ device: LightDevice, value: Double) {
+        cancelIdentifications(deviceIDs: [device.id], restore: true)
+        let value = boundedBrightness(value)
         cancelPendingBrightness(deviceIDs: [device.id])
         device.brightness = value
         sendBrightness(device, value: value)
@@ -3723,38 +3767,32 @@ extension LightManager {
 
     func identify(_ device: LightDevice) {
         if device.brand == .nanoleaf, !isDemoMode {
+            cancelIdentifications(deviceIDs: [device.id], restore: true)
             // The controller's own identify flashes every panel and then puts
             // back whatever was showing by itself, per-panel design included.
             shapes.identifyWall(device.id)
             logActivity(.recovery, title: "Identifying light", detail: device.label)
             return
         }
-        let originalPower = device.isOn
-        let originalColor = device.color
-        let originalBrightness = device.brightness
-        let originalSegments = activeSegmentState(for: device.id)
-        let originalMatrix = activeLIFXMatrixState(for: device.id)
-        let originalNanoleaf = device.nanoleafAppearance
+        let saved = identifications[device.id]?.snapshot
+        cancelIdentifications(deviceIDs: [device.id], restore: true)
+        let inherited = stopEffects(touching: [device.id])
+        cancelPendingBrightness(deviceIDs: [device.id])
+        let original = saved ?? inherited[device.id] ?? snapshot(device)
+        let token = UUID()
+        identifications[device.id] = Identification(token: token, snapshot: original)
         device.isOn = true
         device.color = .cyan
         device.brightness = 1
         sendPower(device, on: true); sendColor(device, color: .cyan); sendBrightness(device, value: 1)
         logActivity(.recovery, title: "Identifying light", detail: device.label)
-        Task { @MainActor [weak self, weak device] in
-            try? await Task.sleep(for: .seconds(2))
-            guard let self, let device else { return }
-            device.color = originalColor; device.brightness = originalBrightness; device.isOn = originalPower
-            if self.restoreNanoleafAppearance(originalNanoleaf, to: device) {
-                // Restore the effect selected before identification.
-            } else if let originalMatrix {
-                self.applyLIFXMatrix(device, state: originalMatrix, recordUndo: false,
-                                     turnOn: false, announce: false)
-            } else if let originalSegments {
-                self.applySegments(device, state: originalSegments, recordUndo: false, turnOn: false, announce: false)
-            } else {
-                self.sendColor(device, color: originalColor)
-            }
-            self.sendBrightness(device, value: originalBrightness); self.sendPower(device, on: originalPower)
+        let delay = identifyDurationNanoseconds
+        let sleep = identifySleep
+        identifications[device.id]?.task = Task { @MainActor [weak self, weak device] in
+            do { try await sleep(delay) } catch { return }
+            guard !Task.isCancelled, let self, let device,
+                  self.identifications[device.id]?.token == token else { return }
+            self.cancelIdentifications(deviceIDs: [device.id], restore: true)
         }
     }
 
@@ -3772,15 +3810,10 @@ extension LightManager {
     /// one" from the other side of a room without being unpleasant to sit in.
     func beginSustainedIdentify(_ device: LightDevice) {
         endSustainedIdentify()
-        var hold = IdentifyHold(deviceID: device.id,
-                                power: device.isOn,
-                                color: device.color,
-                                brightness: device.brightness,
-                                segments: activeSegmentState(for: device.id),
-                                matrix: activeLIFXMatrixState(for: device.id),
-                                nanoleafAppearance: device.nanoleafAppearance,
-                                nanoleafDesign: device.brand == .nanoleaf ? shapes.showingDesign(for: device.id) : nil,
-                                task: nil)
+        cancelIdentifications(deviceIDs: [device.id], restore: true)
+        let inherited = stopEffects(touching: [device.id])
+        cancelPendingBrightness(deviceIDs: [device.id])
+        var hold = IdentifyHold(snapshot: inherited[device.id] ?? snapshot(device), task: nil)
         logActivity(.recovery, title: "Identifying light", detail: device.label)
         hold.task = Task { @MainActor [weak self, weak device] in
             var full = true
@@ -3804,27 +3837,39 @@ extension LightManager {
     /// or matrix layout it was carrying before the question was asked.
     func endSustainedIdentify() {
         guard let hold = identifyHold else { return }
-        identifyHold = nil
-        hold.task?.cancel()
-        guard let device = devicesByID[hold.deviceID] else { return }
-        device.color = hold.color
-        device.brightness = hold.brightness
-        device.isOn = hold.power
-        if restoreNanoleafOutput(design: hold.nanoleafDesign, appearance: hold.nanoleafAppearance, to: device) {
-            // Restore the design or effect shown before identification.
-        } else if let matrix = hold.matrix {
-            applyLIFXMatrix(device, state: matrix, recordUndo: false, turnOn: false, announce: false)
-        } else if let segments = hold.segments {
-            applySegments(device, state: segments, recordUndo: false, turnOn: false, announce: false)
-        } else {
-            sendColor(device, color: hold.color)
-        }
-        sendBrightness(device, value: hold.brightness)
-        sendPower(device, on: hold.power)
+        cancelIdentifications(deviceIDs: [hold.snapshot.deviceID], restore: true)
     }
 
+    /// Stops both kinds of identification before another command owns a light.
+    /// Removing ownership first makes a cancelled delayed task harmless even
+    /// when its injected sleep finishes after a workspace transition.
+    private func cancelIdentifications(deviceIDs: Set<String>? = nil, restore: Bool) {
+        var originals: [LightRuntimeSnapshot] = []
+        let ids = deviceIDs ?? Set(identifications.keys)
+        for id in ids {
+            guard let identification = identifications.removeValue(forKey: id) else { continue }
+            identification.task?.cancel()
+            originals.append(identification.snapshot)
+        }
+        if let hold = identifyHold, deviceIDs == nil || ids.contains(hold.snapshot.deviceID) {
+            identifyHold = nil
+            hold.task?.cancel()
+            originals.append(hold.snapshot)
+        }
+        guard !originals.isEmpty else { return }
+        let cancelledIDs = Set(originals.map(\.deviceID))
+        commandCoordinator.cancel(deviceIDs: cancelledIDs)
+        cancelPendingBrightness(deviceIDs: cancelledIDs)
+        if restore { restoreDeviceStates(originals) }
+    }
+
+    var identifyingDeviceIDsForTesting: Set<String> { Set(identifications.keys) }
+
     func retry(_ device: LightDevice) {
-        commandCoordinator.recover(deviceID: device.id) { [weak self, weak device] in
+        commandCoordinator.recover(deviceID: device.id, timedOut: { [weak self, weak device] in
+            guard let self, let device else { return }
+            self.publishError("\(device.label) is still not answering. Rescan or check its power and network.")
+        }) { [weak self, weak device] in
             guard let self, let device else { return }
             self.refresh(device)
         }
@@ -3971,6 +4016,7 @@ extension LightManager {
     private func applyScheduleAction(_ action: ScheduleAction, to lights: [LightDevice], recordUndo: Bool = false) {
         guard !lights.isEmpty else { return }
         let ids = Set(lights.map(\.id))
+        cancelIdentifications(deviceIDs: ids, restore: true)
         let inherited = stopEffects(touching: ids)
         cancelPendingBrightness(deviceIDs: ids)
         restoreDeviceStates(lights.compactMap { inherited[$0.id] })
@@ -4039,11 +4085,12 @@ extension LightManager {
         Set(devices.lazy.filter { scene.snapshots[$0.id] != nil && !$0.isStale }.map(\.id))
     }
 
-    func applyScene(_ scene: LightingScene, allowTurningOff: Bool, reviewed: Bool = false) {
+    func applyScene(_ scene: LightingScene, allowTurningOff: Bool, reviewed: Bool = false,
+                    allowUnavailableTargets: Bool = false) {
         let preview = scenePreview(scene)
         guard !preview.affected.isEmpty else { publishError("“\(scene.name)” has no discovered lights to change."); return }
         let availableCount = preview.affected.count - preview.unreachable.count
-        guard availableCount > 0 else {
+        guard availableCount > 0 || allowUnavailableTargets else {
             publishError("“\(scene.name)” has no currently available lights to change.")
             return
         }
@@ -4087,20 +4134,24 @@ extension LightManager {
 
     func retryLastSceneFailures() {
         guard let result = lastSceneResult, !result.failedIDs.isEmpty else { return }
-        let failed = devices.filter { result.failedIDs.contains($0.id) }
+        let failedIDs = Set(result.failedIDs)
+        let failed = devices.filter { failedIDs.contains($0.id) }
         guard !failed.isEmpty else {
             publishError("The failed lights for “\(result.sceneName)” have not been rediscovered yet.")
             return
         }
-        for device in failed { retry(device) }
+        for device in failed { refresh(device) }
         let retried = applySceneSnapshots(result.scene, to: failed, allowTurningOff: result.allowTurningOff)
         let succeeded = Set(result.succeededIDs).union(retried.succeeded).sorted()
         let remainingFailures = Set(result.failedIDs).subtracting(retried.succeeded).subtracting(retried.skipped).sorted()
         let skipped = Set(result.skippedOffIDs).union(retried.skipped).sorted()
+        // A rename may update the displayed title, but retry always applies
+        // the saved version of the scene that produced these failures.
+        let sceneName = scenes.first { $0.id == result.sceneID }?.name ?? result.sceneName
         lastSceneResult = SceneApplicationResult(scene: result.scene, allowTurningOff: result.allowTurningOff,
                                                 succeededIDs: succeeded, failedIDs: remainingFailures,
-                                                skippedOffIDs: skipped)
-        logActivity(.scene, title: "Scene failures retried", detail: "\(result.sceneName): \(failed.count) retried, \(remainingFailures.count) need retry", isFailure: !remainingFailures.isEmpty)
+                                                skippedOffIDs: skipped, sceneName: sceneName)
+        logActivity(.scene, title: "Scene failures retried", detail: "\(sceneName): \(failed.count) retried, \(remainingFailures.count) need retry", isFailure: !remainingFailures.isEmpty)
     }
 
     func reconcileFavoriteOrder() {
@@ -4194,6 +4245,7 @@ extension LightManager {
     func enterDemoMode() {
         nanoleaf.pause()
         guard !isDemoMode else { return }
+        cancelIdentifications(restore: true)
         if rehearsalSceneID != nil { stopSceneRehearsal(restore: true) }
         let liveEffects = activeEffects
         stopAllEffects(restore: true)
@@ -4211,6 +4263,7 @@ extension LightManager {
 
     func exitDemoMode() {
         guard isDemoMode else { return }
+        cancelIdentifications(restore: false)
         confirmationCoordinator.cancelPendingRequest()
         if rehearsalSceneID != nil { stopSceneRehearsal(restore: false) }
         stopAllEffects(restore: false)
@@ -4262,6 +4315,7 @@ extension LightManager {
 
     func resetDemoMode() {
         guard isDemoMode else { return }
+        cancelIdentifications(restore: false)
         confirmationCoordinator.cancelPendingRequest()
         if rehearsalSceneID != nil { stopSceneRehearsal(restore: false) }
         stopAllEffects(restore: false)

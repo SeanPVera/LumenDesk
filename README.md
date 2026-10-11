@@ -91,6 +91,8 @@ To connect:
 
 Discovery uses Bonjour (`_nanoleafapi._tcp`, plus `_nanoleafms._tcp`, which Aurora controllers on older firmware advertise). Paired controllers reconnect using credentials stored in this device's Keychain; these credentials are excluded from configuration exports, logs and error messages. A controller reset or revoked credential requires pairing again. If multicast discovery is blocked, use the manual address entry.
 
+Pairing keeps the controller's chosen hostname or IP address and port. Discovery cannot move a saved credential to a different endpoint. A paired hostname can continue resolving after a DHCP change; if a controller paired by IP moves to a new address, pair it again at that address.
+
 **Where the panel controls are.** In **Room → Light**, select the wall on its own: its panel studio opens under the room, in working order. The same studio opens as a sheet from the wall's row (**Shapes panels** or **Aurora panels**) or its context menu (**Shapes Panels…** or **Aurora Panels…**).
 
 - **Arrangement.** The wall is drawn from the layout the controller reports, with each panel's true shape and, on Shapes, the controller as a dashed marker (an Aurora never reports its controller). Panels are known by controller and panel ID, so a reordered or partly damaged reading never moves a colour to the wrong panel; a damaged reading keeps the last trusted layout and says so.
@@ -563,6 +565,8 @@ Fixed times follow the local clock across daylight-saving changes. A missing
 02:30 moves to 03:30; a repeated time runs once. Solar offsets apply before or
 after the configured local sunrise or sunset time.
 
+Fixed times keep their local wall-clock hour on daylight-saving transition days. A nonexistent time moves forward by the daylight-saving gap, and a repeated time runs at its first occurrence. Solar offsets can cross midnight; weekday selection applies to the sunrise or sunset's base day.
+
 ### Nap Mode
 
 Nap Mode is a one-click lighting routine intended for rest:
@@ -623,6 +627,8 @@ Export includes app-managed configuration such as:
 - White-mode preferences.
 
 Import replaces the current local configuration and shows a warning before overwriting rooms, scenes, favorites, and custom names.
+
+Malformed schedule times or weekdays disable the imported rule for review. Scene brightness, color channels, and white temperature are bounded before they reach a light.
 
 ### Demo Mode
 

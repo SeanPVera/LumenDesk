@@ -54,7 +54,7 @@ device behavior or native UI behavior.
 
 ## Verification and release checks
 
-The production browser build, all 53 component tests and all 154 bridge tests pass locally. The theme catalog audit and whitespace checks also pass; CI repeats these checks. The main Chromium walkthrough covers
+The production browser build, all 101 component tests and all 167 bridge tests pass locally. The theme catalog audit and whitespace checks also pass; CI repeats these checks. The main Chromium walkthrough covers
 27 rendered states, including phone widths, reduced motion, failures and recovery.
 Focused production-app regressions cover guided setup/discovery, scenes/favorites,
 schedule editing, explicit names, legacy bridges and Music capture recovery. Each script checks browser errors, narrow
@@ -71,10 +71,10 @@ The scripts are:
 - [`music-setup-review.mjs`](../web/app/scripts/music-setup-review.mjs)
 
 Screenshots and audit reports are written to `/tmp/LumenDesk-Web-QA` by default.
-Eleven native regressions cover scene retry, rehearsal cleanup, schedule capacity,
+Eight added native regressions cover scene retry, rehearsal cleanup, schedule capacity,
 daylight saving, saved scene scope and favorites ordering. They supplement the
 existing macOS test suite and iOS build; this Linux workspace cannot run Xcode.
-Pull-request CI has passed all 395 native tests, macOS analysis and the iOS build.
+Pull-request CI runs the complete native test suite, macOS analysis and the iOS build.
 The bridge packaging matrix builds and smoke-tests both Mac architectures,
 Windows x64 and Linux x64. Packages are preview artifacts until a release is
 published; Mac previews are ad-hoc signed and Windows previews are unsigned.

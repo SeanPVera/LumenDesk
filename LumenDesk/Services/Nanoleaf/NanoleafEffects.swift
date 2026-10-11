@@ -146,7 +146,7 @@ extension NanoleafOptionValue: Decodable {
         // is exactly the distinction needed and holds on every platform.
         if let value = try? container.decode(Bool.self) { self = .bool(value); return }
         if let value = try? container.decode(Int.self) { self = .int(value); return }
-        if let value = try? container.decode(Double.self) { self = .double(value); return }
+        if let value = try? container.decode(Double.self), value.isFinite { self = .double(value); return }
         if let value = try? container.decode(String.self) { self = .string(value); return }
         throw DecodingError.dataCorruptedError(in: container, debugDescription: "Unsupported option value")
     }
@@ -172,12 +172,14 @@ struct NanoleafPaletteColor: Equatable, Hashable, Decodable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: Keys.self)
-        func whole(_ key: Keys) throws -> Int {
+        func whole(_ key: Keys, maximum: Double) throws -> Int {
             let value = try container.decode(Double.self, forKey: key)
             guard value.isFinite else { throw DecodingError.dataCorruptedError(forKey: key, in: container, debugDescription: "Not finite") }
-            return Int(value.rounded())
+            // Clamp in floating-point space: converting first can trap even
+            // for a finite number such as 1e20.
+            return Int(min(maximum, max(0, value)).rounded())
         }
-        self.init(hue: try whole(.hue), saturation: try whole(.saturation), brightness: try whole(.brightness),
+        self.init(hue: try whole(.hue, maximum: 359), saturation: try whole(.saturation, maximum: 100), brightness: try whole(.brightness, maximum: 100),
                   probability: try? container.decodeIfPresent(Double.self, forKey: .probability))
     }
 
@@ -330,6 +332,26 @@ struct NanoleafPluginDescription: Equatable, Identifiable, Decodable {
         let strings: [String]?
 
         var choices: [String] { strings ?? [] }
+
+        /// A controller-supplied range must also be usable by the fader's
+        /// arithmetic. A finite pair can still have an infinite span.
+        var numericRange: ClosedRange<Double>? {
+            guard let low = minValue, let high = maxValue,
+                  low.isFinite, high.isFinite, high > low,
+                  (high - low).isFinite else { return nil }
+            return low...high
+        }
+
+        var integerRange: ClosedRange<Double>? {
+            guard let range = numericRange else { return nil }
+            let low = range.lowerBound.rounded(.up)
+            let high = range.upperBound.rounded(.down)
+            // Double(Int.max) rounds upward to 2^63, so it is not a safe
+            // upper bound for conversion back into Int.
+            guard low >= Double(Int.min), high <= Double(Int.max).nextDown,
+                  high > low else { return nil }
+            return low...high
+        }
     }
 
     let uuid: String

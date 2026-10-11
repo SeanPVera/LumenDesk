@@ -2,6 +2,9 @@
 // its HTTP API, and turns HTTP commands back into correct protocol datagrams.
 import { test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
+import http from 'node:http'
+import net from 'node:net'
+import dgram from 'node:dgram'
 import { Registry } from '../src/registry.js'
 import { LifxClient } from '../src/lifx-client.js'
 import { GoveeClient } from '../src/govee-client.js'
@@ -28,6 +31,17 @@ const api = (path, init) => fetch(`${base}${path}`, init).then(async r => ({
   headers: r.headers,
   body: await r.json().catch(() => null),
 }))
+
+const directRequest = (address, path, { method = 'GET', headers = {} } = {}) => new Promise((resolve, reject) => {
+  const url = new URL(address)
+  const req = http.request({ hostname: url.hostname.replace(/^\[|\]$/g, ''), port: url.port, path, method, headers }, res => {
+    const chunks = []
+    res.on('data', chunk => chunks.push(chunk))
+    res.on('end', () => resolve({ status: res.statusCode, text: Buffer.concat(chunks).toString('utf8') }))
+  })
+  req.on('error', reject)
+  req.end()
+})
 
 before(async () => {
   bulb = new FakeLifxBulb({ label: 'Desk Lamp' })
@@ -405,4 +419,134 @@ test('newer manual control revokes music frames and stale restoration', async()=
   assert.equal((await send(frame)).body.applied,0)
   assert.equal((await send({...frame,restoring:true})).body.applied,0)
   await waitFor(()=>Math.abs(bulb.color.brightness-percentToU16(65))<=1)
+})
+
+test('malformed Govee UDP discoveries cannot poison the registry', async () => {
+  const localRegistry = new Registry()
+  const sender = dgram.createSocket('udp4')
+  await new Promise(resolve => sender.bind(0, '127.0.0.1', resolve))
+  const client = new GoveeClient({ registry: localRegistry, responsePort: 0, controlPort: sender.address().port,
+    joinMulticast: false, sweep: false })
+  await client.start()
+  try {
+    const send = data => new Promise((resolve, reject) => sender.send(Buffer.from(JSON.stringify({ msg: { cmd: 'scan', data } })),
+      client.socket.address().port, '127.0.0.1', err => err ? reject(err) : resolve()))
+    await send({ ip: '127.0.0.1', device: 'bad-name', deviceName: {} })
+    await send({ ip: '127.0.0.1', device: 'bad-sku', sku: [] })
+    await send({ ip: '127.0.0.1', device: 'valid', deviceName: 'Desk' })
+    await waitFor(() => localRegistry.get('govee:valid'))
+    assert.equal(localRegistry.get('govee:bad-name'), null)
+    assert.equal(localRegistry.get('govee:bad-sku'), null)
+    assert.deepEqual(localRegistry.list().map(d => d.name), ['Desk'])
+    assert.doesNotThrow(() => client.refresh())
+  } finally {
+    client.stop()
+    sender.close()
+  }
+})
+
+test('Host validation rejects rebinding for every HTTP method', async () => {
+  const port = new URL(base).port
+  for (const method of ['GET', 'HEAD', 'OPTIONS', 'POST']) {
+    const result = await directRequest(base, method === 'POST' ? '/refresh' : '/state', {
+      method, headers: { Host: `attacker.example:${port}`, Origin: `http://attacker.example:${port}` },
+    })
+    assert.equal(result.status, 403, method)
+  }
+  for (const host of [`localhost.evil.example:${port}`, `127.0.0.1.evil.example:${port}`, `attacker@localhost:${port}`,
+    `localhost:${Number(port) + 1}`, `localhost:${port}/`, `localhost:${port}?x`, `localhost:${port}#x`]) {
+    assert.equal((await directRequest(base, '/state', { headers: { Host: host } })).status, 403, host)
+  }
+  const wrongScheme = await directRequest(base, '/refresh', { method: 'POST',
+    headers: { Host: `localhost:${port}`, Origin: `https://localhost:${port}` } })
+  assert.equal(wrongScheme.status, 403, 'the HTTP bridge has no HTTPS own origin')
+  assert.equal((await api('/health')).status, 200)
+})
+
+test('local aliases and the configured hostname retain their own HTTP origin', async () => {
+  const localRegistry = new Registry()
+  let refreshes = 0
+  const inert = { refresh: () => { refreshes += 1 } }
+  const localServer = createServer({ registry: localRegistry, lifx: inert, govee: inert, host: 'bridge.local',
+    allowedOrigins: [ORIGIN, 'https://custom.example'], version: 'test' })
+  await new Promise(resolve => localServer.listen(0, '127.0.0.1', resolve))
+  const port = localServer.address().port
+  const address = `http://127.0.0.1:${port}`
+  try {
+    for (const host of ['127.0.0.1', '127.1', 'LOCALHOST', 'localhost.', 'bridge.local']) {
+      const canonical = new URL(`http://${host}:${port}`).origin
+      assert.equal((await directRequest(address, '/refresh', { method: 'POST',
+        headers: { Host: `${host}:${port}`, Origin: canonical } })).status, 202, host)
+    }
+    for (const origin of [ORIGIN, 'https://custom.example']) {
+      assert.equal((await directRequest(address, '/refresh', { method: 'POST', headers: { Origin: origin } })).status, 202, origin)
+    }
+    assert.equal((await directRequest(address, '/refresh', { method: 'POST' })).status, 202, 'local scripts need no Origin')
+    assert.equal(refreshes, 16)
+  } finally {
+    await new Promise(resolve => localServer.close(resolve))
+  }
+})
+
+test('wildcard bind and allow-any-origin do not authorize arbitrary Hosts', async () => {
+  const inert = { refresh: () => {} }
+  const localServer = createServer({ registry: new Registry(), lifx: inert, govee: inert, host: '0.0.0.0',
+    allowedOrigins: ['*'], version: 'test' })
+  await new Promise(resolve => localServer.listen(0, '0.0.0.0', resolve))
+  const port = localServer.address().port
+  const address = `http://127.0.0.1:${port}`
+  try {
+    assert.equal((await directRequest(address, '/refresh', { method: 'POST', headers: { Origin: 'https://custom.example' } })).status, 202)
+    assert.equal((await directRequest(address, '/state', { headers: { Host: `attacker.example:${port}` } })).status, 403)
+  } finally {
+    await new Promise(resolve => localServer.close(resolve))
+  }
+})
+
+test('an IPv6 listener accepts its configured port and loopback alias', async t => {
+  const inert = { refresh: () => {} }
+  const localServer = createServer({ registry: new Registry(), lifx: inert, govee: inert, host: '::1',
+    allowedOrigins: [], version: 'test' })
+  try {
+    await new Promise((resolve, reject) => {
+      localServer.once('error', reject)
+      localServer.listen(0, '::1', resolve)
+    })
+  } catch (err) {
+    if (['EAFNOSUPPORT', 'EADDRNOTAVAIL'].includes(err.code)) return t.skip('IPv6 loopback is unavailable')
+    throw err
+  }
+  const port = localServer.address().port
+  const address = `http://[::1]:${port}`
+  try {
+    for (const host of ['[::1]', 'localhost']) {
+      assert.equal((await directRequest(address, '/refresh', { method: 'POST',
+        headers: { Host: `${host}:${port}`, Origin: `http://${host}:${port}` } })).status, 202)
+    }
+    assert.equal((await directRequest(address, '/health', { headers: { Host: `[::1]:${port + 1}` } })).status, 403)
+  } finally {
+    await new Promise(resolve => localServer.close(resolve))
+  }
+})
+
+test('duplicate Host headers are rejected before the bridge routes a request', async () => {
+  const port = Number(new URL(base).port)
+  const response = await new Promise((resolve, reject) => {
+    const socket = net.createConnection({ host: '127.0.0.1', port })
+    const chunks = []
+    socket.on('error', reject)
+    socket.on('data', chunk => chunks.push(chunk))
+    socket.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
+    socket.on('connect', () => socket.end(`GET /state HTTP/1.1\r\nHost: localhost:${port}\r\nHost: attacker.example:${port}\r\nConnection: close\r\n\r\n`))
+  })
+  assert.match(response, /^HTTP\/1\.1 (400|403) /)
+})
+
+test('malformed request URLs return 400 and leave the server running', async () => {
+  for (const path of ['//[', 'http://[']) {
+    const response = await directRequest(base, path)
+    assert.equal(response.status, 400, path)
+    assert.match(response.text, /Invalid URL/)
+    assert.equal((await api('/health')).status, 200, 'the next request still succeeds')
+  }
 })

@@ -9,7 +9,9 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 0.0.0.0",
-    "test": "tsc -p tsconfig.music-tests.json && tsc -p tsconfig.shapes-tests.json && tsc -p tsconfig.setup-tests.json && node test/run.cjs"
+    "test": "tsc -p tsconfig.music-tests.json && tsc -p tsconfig.shapes-tests.json && tsc -p tsconfig.setup-tests.json && node test/run.cjs",
+    "bench:music": "tsc -p tsconfig.music-tests.json && node --import ./test/register.mjs ./test/bench-music.mjs",
+    "bench:choreography": "tsc -p tsconfig.music-tests.json && node --import ./test/register.mjs ./test/bench-choreography.mjs"
   },
   "dependencies": {
     "react": "19.2.7",

@@ -45,13 +45,30 @@ enum GoveeProtocol {
                 let g: Int
                 let b: Int
             }
+
+            private enum CodingKeys: String, CodingKey { case onOff, brightness, color, colorTemInKelvin }
+
+            init(from decoder: Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                onOff = try container.decode(Int.self, forKey: .onOff)
+                brightness = try container.decode(Int.self, forKey: .brightness)
+                color = try container.decodeIfPresent(RGB.self, forKey: .color)
+                colorTemInKelvin = try container.decodeIfPresent(Int.self, forKey: .colorTemInKelvin)
+                guard (0...1).contains(onOff), (0...100).contains(brightness),
+                      color.map({ (0...255).contains($0.r) && (0...255).contains($0.g) && (0...255).contains($0.b) }) ?? true,
+                      colorTemInKelvin.map({ $0 == 0 || (1200...9000).contains($0) }) ?? true else {
+                    throw DecodingError.dataCorruptedError(forKey: .brightness, in: container,
+                                                          debugDescription: "Invalid Govee status range")
+                }
+            }
         }
     }
 
     static func decodeScanResponse(_ data: Data) -> ScanResponse? {
         guard data.range(of: scanMarker) != nil,
               let response = try? decoder.decode(ScanResponse.self, from: data),
-              response.msg.cmd == "scan" else { return nil }
+              response.msg.cmd == "scan", !response.msg.data.ip.isEmpty,
+              !response.msg.data.device.isEmpty else { return nil }
         return response
     }
 

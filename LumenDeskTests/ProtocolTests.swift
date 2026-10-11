@@ -160,6 +160,44 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(statusResponse?.msg.data.colorTemInKelvin, 4_200)
     }
 
+    func testGoveeRejectsMalformedStatusRangesAndTypes() {
+        for brightness in [String(Int.max), String(Int.min), "-1", "101", "true", "\"100\"", "1.5"] {
+            let response = Data(#"{"msg":{"cmd":"devStatus","data":{"onOff":1,"brightness":\#(brightness)}}}"#.utf8)
+            XCTAssertNil(GoveeProtocol.decodeStatusResponse(response), brightness)
+        }
+        let malformed = [
+            #"{"onOff":2,"brightness":100}"#,
+            #"{"onOff":true,"brightness":100}"#,
+            #"{"onOff":1,"brightness":100,"color":{"r":256,"g":0,"b":0}}"#,
+            #"{"onOff":1,"brightness":100,"color":{"r":0,"g":-1,"b":0}}"#,
+            #"{"onOff":1,"brightness":100,"color":{"r":0,"g":0,"b":"255"}}"#,
+            #"{"onOff":1,"brightness":100,"colorTemInKelvin":9001}"#,
+            #"{"onOff":1,"brightness":100,"colorTemInKelvin":true}"#
+        ]
+        for payload in malformed {
+            XCTAssertNil(GoveeProtocol.decodeStatusResponse(Data(#"{"msg":{"cmd":"devStatus","data":\#(payload)}}"#.utf8)), payload)
+        }
+        for payload in [#"{"onOff":0,"brightness":0}"#,
+                        #"{"onOff":1,"brightness":100,"color":null,"colorTemInKelvin":null}"#,
+                        #"{"onOff":1,"brightness":100,"color":{"r":0,"g":255,"b":255},"colorTemInKelvin":0}"#,
+                        #"{"onOff":1,"brightness":100,"colorTemInKelvin":1200}"#,
+                        #"{"onOff":1,"brightness":100,"colorTemInKelvin":9000}"#] {
+            XCTAssertNotNil(GoveeProtocol.decodeStatusResponse(Data(#"{"msg":{"cmd":"devStatus","data":\#(payload)}}"#.utf8)), payload)
+        }
+    }
+
+    func testGoveeScanRejectsInvalidIdentityTypesAndAllowsOptionalNulls() {
+        for fields in [#""ip":"","device":"A""#,
+                       #""ip":"192.0.2.1","device":"""#,
+                       #""ip":"192.0.2.1","device":7"#,
+                       #""ip":"192.0.2.1","device":"A","sku":{}"#,
+                       #""ip":"192.0.2.1","device":"A","deviceName":[]"#] {
+            XCTAssertNil(GoveeProtocol.decodeScanResponse(Data(#"{"msg":{"cmd":"scan","data":{\#(fields)}}}"#.utf8)), fields)
+        }
+        let valid = Data(#"{"msg":{"cmd":"scan","data":{"ip":"192.0.2.1","device":"A","sku":null,"deviceName":null}}}"#.utf8)
+        XCTAssertNotNil(GoveeProtocol.decodeScanResponse(valid))
+    }
+
     func testH612BDiscoveryResponseIsAccepted() {
         let response = Data(#"{"msg":{"cmd":"scan","data":{"ip":"192.168.1.44","device":"11:22:33:44:55:66","sku":"H612B","deviceName":"Strip Light S"}}}"#.utf8)
         let decoded = GoveeProtocol.decodeScanResponse(response)

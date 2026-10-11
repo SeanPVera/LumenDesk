@@ -102,10 +102,13 @@ const server = createServer({
   version: VERSION,
   staticDir,
   store,
+  host: options.host,
 })
 
 server.listen(options.port, options.host, () => {
-  const base = `http://${options.host}:${server.address().port}`
+  const displayHost = options.host === '0.0.0.0' ? '127.0.0.1' : options.host === '::' ? '::1' : options.host
+  const hostname = displayHost.includes(':') && !displayHost.startsWith('[') ? `[${displayHost}]` : displayHost
+  const base = `http://${hostname}:${server.address().port}`
   if (staticDir) {
     // Same-origin: no CORS, and no local-network permission prompt.
     console.log(`\n  LumenDesk is running. Open ${base}\n`)

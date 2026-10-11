@@ -85,12 +85,23 @@ struct SceneApplicationResult: Identifiable, Equatable {
     /// Retain the applied version: a retry must not resolve a renamed or edited
     /// scene by its display name, or pick another scene with the same name.
     let scene: LightingScene
+    let sceneName: String
     let allowTurningOff: Bool
     let succeededIDs: [String]
     let failedIDs: [String]
     let skippedOffIDs: [String]
 
-    var sceneName: String { scene.name }
+    var sceneID: UUID { scene.id }
+
+    init(scene: LightingScene, allowTurningOff: Bool, succeededIDs: [String],
+         failedIDs: [String], skippedOffIDs: [String], sceneName: String? = nil) {
+        self.scene = scene
+        self.sceneName = sceneName ?? scene.name
+        self.allowTurningOff = allowTurningOff
+        self.succeededIDs = succeededIDs
+        self.failedIDs = failedIDs
+        self.skippedOffIDs = skippedOffIDs
+    }
 }
 
 struct FavoriteReference: Codable, Hashable, Identifiable {

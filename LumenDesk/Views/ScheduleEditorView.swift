@@ -162,7 +162,7 @@ private struct ScheduleFormView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text(entry == nil ? "New Schedule" : "Edit Schedule").font(LumenType.display(size: 19, weight: .bold))
-            Label("Times use \(TimeZone.current.identifier). Missing daylight-saving times move forward; repeated wall-clock times run once. Actions missed while LumenDesk is unavailable are held for review.", systemImage: "globe")
+            Label("Times use \(TimeZone.current.identifier). A time skipped by daylight saving moves forward by the clock change; a repeated time runs once, at its first occurrence. Actions missed while asleep stay available for review.", systemImage: "globe")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Picker("Action", selection: $action) { ForEach(ScheduleAction.allCases, id: \.self) { Text($0.displayName).tag($0) } }
             if action.isRelativeToSun {

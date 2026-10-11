@@ -88,7 +88,7 @@ export function ShapesEditor({ device, actions }: { device: Device; actions: Sha
   const [startHex, setStartHex] = useState('#ffffff')
   const [hexText, setHexText] = useState('')
   const [message, setMessage] = useState<string | null>(null)
-  const [painting, setPainting] = useState(false)
+  const [applying, setApplying] = useState(false)
   const [orienting, setOrienting] = useState(false)
   const refs = useRef(new Map<number, SVGGElement>())
   const stage = useRef<HTMLDivElement>(null)
@@ -181,7 +181,7 @@ export function ShapesEditor({ device, actions }: { device: Device; actions: Sha
   }
 
   const onEditorKey = (event: KeyboardEvent<HTMLElement>) => {
-    if (painting || !(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'z' || !draft) return
+    if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'z' || !draft) return
     // A field keeps its own undo; only the wall and its buttons undo the draft.
     const target = event.target
     if (target instanceof HTMLTextAreaElement) return
@@ -195,6 +195,22 @@ export function ShapesEditor({ device, actions }: { device: Device; actions: Sha
 
   const report = (promise: Promise<unknown>, done: string) =>
     promise.then(() => setMessage(done)).catch(err => setMessage(err instanceof Error ? err.message : String(err)))
+
+  const apply = async () => {
+    if (!draft || applying) return
+    const submitted = draft
+    setApplying(true)
+    try {
+      await actions.paint(Object.fromEntries(ids.map(id => [id, toRGB(submitted[id] ?? toTone(BLACK))])))
+      // Edits made while the write was pending remain a separate draft.
+      setDraft(current => current === submitted ? null : current)
+      setMessage('Applied. The wall confirms it on its next reading.')
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : String(err))
+    } finally {
+      setApplying(false)
+    }
+  }
 
   const levels = draft ? targets.map(id => Math.round((draft[id]?.v ?? 0) * 100)) : []
   const level = levels.length ? Math.round(levels.reduce((sum, v) => sum + v, 0) / levels.length) : 0
@@ -325,7 +341,7 @@ export function ShapesEditor({ device, actions }: { device: Device; actions: Sha
             <p className="note">Turn the drawing until it matches the wall. Orientation aims spatial output and the controller’s own gestures; the panels never move.</p>
           </fieldset>
 
-          <fieldset disabled={painting}>
+          <fieldset>
             <legend>Paint panels</legend>
             {!draft ? (
               shown ? (
@@ -378,19 +394,9 @@ export function ShapesEditor({ device, actions }: { device: Device; actions: Sha
                   <button onClick={redoStep} disabled={!redo.length}>Redo</button>
                 </div>
                 <div className="toolbar">
-                  <button className="primary" disabled={offline || painting} onClick={async () => {
-                    if (painting) return
-                    setPainting(true)
-                    try {
-                      await actions.paint(Object.fromEntries(ids.map(id => [id, toRGB(draft[id] ?? toTone(BLACK))])))
-                      setMessage('Applied. The wall confirms it on its next reading.')
-                      setDraft(null)
-                    } catch (err) {
-                      setMessage(err instanceof Error ? err.message : String(err))
-                    } finally {
-                      setPainting(false)
-                    }
-                  }}>{painting ? 'Applying…' : 'Apply to wall'}</button>
+                  <button className="primary" disabled={offline || applying} onClick={() => void apply()}>
+                    {applying ? 'Applying…' : 'Apply to wall'}
+                  </button>
                   <button className="ghost" onClick={() => setDraft(null)}>Discard draft</button>
                 </div>
               </>

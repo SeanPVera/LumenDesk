@@ -46,8 +46,8 @@ export function RoomSetup({ open, devices, rooms, scanning, discovery, answeredC
   const nameID = useId()
   const levelID = useId()
   const canonicalRoom = savedRoom ? rooms.find(candidate => candidate.id === savedRoom.id) : undefined
-  // The create response may arrive before the next room collection. Once a
-  // room has appeared in that collection, only its current record is valid.
+  // A successful create response or room collection confirms the room. Once
+  // confirmed, only its current record is valid.
   const room = canonicalRoom ?? (savedRoom && confirmedRoom.current?.id !== savedRoom.id ? savedRoom : null)
   const duplicate = rooms.find(candidate => candidate.name.trim().toLocaleLowerCase() === name.trim().toLocaleLowerCase())
   const roomDevices = room ? devices.filter(device => device.roomID === room.id || assignedIDs.includes(device.id) || room.lightIDs.includes(device.id)) : []
@@ -112,6 +112,9 @@ export function RoomSetup({ open, devices, rooms, scanning, discovery, answeredC
       setProblem('The room could not be saved. Your name is kept here; try again.')
       return
     }
+    // The parent adopts a successful create before refreshing its collection.
+    // That refresh may already report a deletion made by another client.
+    confirmedRoom.current = created
     setSavedRoom(created)
     changeStage(2)
   })

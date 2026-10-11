@@ -119,6 +119,7 @@ export interface AudioReactiveSnapshot {
   sourceDescription: string;
   analysisTimestamp?: number;
   analysisCompletedAt?: number;
+  freshnessGrace?: number;
   rawRMS?: number;
   onset?: number;
   gridBeatPosition?: number;
@@ -270,9 +271,44 @@ export function synthSpectrum(
 /** Matches AudioReactiveSnapshot.fresh; no raw PCM is retained for diagnostics. */
 export function freshSnapshot(input: AudioReactiveSnapshot, timestamp: number): AudioReactiveSnapshot {
   if (input.analysisTimestamp == null) return input;
-  const weight = clamp01(1 - (Math.max(0, timestamp - input.analysisTimestamp) - .25));
+  const age = Math.max(0, timestamp - input.analysisTimestamp);
+  const weight = clamp01(1 - (age - (input.freshnessGrace ?? .25)));
   const next = { ...input };
-  for (const key of ['level','energy','confidence','beat','pulse','kick','snare','percussion','bass','mids','highs','beatConfidence'] as const) next[key] *= weight;
+  for (const key of ['level','energy','confidence','bass','mids','highs','beatConfidence'] as const) next[key] *= weight;
+  // A delayed or repeated snapshot still carries a loudness estimate, but its
+  // one-hop transients must not restart an accent on each render tick.
+  const transientWeight = weight * Math.exp(-age / .08);
+  for (const key of ['beat','kick','snare','percussion'] as const) next[key] *= transientWeight;
+  if (next.onset != null) next.onset *= transientWeight;
+  const pulseDecay = input.isTempoLocked && input.beatInterval > 0 ? Math.min(.34, Math.max(.1, input.beatInterval * .42)) : .16;
+  next.pulse *= weight * Math.exp(-age / pulseDecay);
+  next.drop *= weight * Math.exp(-age / .3);
   if (weight === 0) { next.isTempoLocked = false; next.tempo = 0; }
   return next;
+}
+
+/** Retain hits that arrived since the previous render while keeping the newest
+ * loudness and grid. Exponential aging composes across capture/publication
+ * boundaries; the ordinary freshness policy is applied once when rendering. */
+export function retainUnrenderedTransients(
+  next: AudioReactiveSnapshot,
+  previous: AudioReactiveSnapshot | undefined,
+): AudioReactiveSnapshot {
+  if (previous?.analysisTimestamp == null || next.analysisTimestamp == null ||
+      previous.analysisTimestamp > next.analysisTimestamp) return next;
+  // A new sample clock or a reported capture gap ends the old stream even
+  // when its host timestamps remain monotonic. Do not carry its last hit over.
+  if ((previous.analyzedSamples ?? 0) > 0 && (next.analyzedSamples ?? 0) > 0 &&
+      next.analyzedSamples! <= previous.analyzedSamples!) return next;
+  if ((next.droppedBuffers ?? 0) > (previous.droppedBuffers ?? 0)) return next;
+  const decay = Math.exp(-(next.analysisTimestamp - previous.analysisTimestamp) / .08);
+  let combined = next;
+  for (const key of ['beat', 'kick', 'snare', 'percussion', 'onset'] as const) {
+    const held = (previous[key] ?? 0) * decay;
+    if (held > (next[key] ?? 0)) {
+      if (combined === next) combined = { ...next };
+      combined[key] = held;
+    }
+  }
+  return combined;
 }

@@ -81,6 +81,49 @@ final class NanoleafTests: XCTestCase {
     }
 
     @MainActor
+    func testDiscoveryCannotRetargetStoredCredentialButExplicitPairingCan() async throws {
+        let fixture = NanoleafFixture()
+        let store = MemoryNanoleafCredentials()
+        let client = makeClient(fixture, store: store)
+        defer { client.pause() }
+        try await client.pair(endpoint: fixture.endpoint, serviceID: "bonjour-id")
+        let trusted = try XCTUnwrap(store.pairings.first)
+        let replacement = try NanoleafEndpoint(host: "other.local", port: 17000)
+        var candidates: [NanoleafCandidate] = []
+        client.onCandidates = { candidates = $0 }
+        client.didResolveCandidate(.init(id: "bonjour-id", name: "New advertisement", endpoint: replacement, model: "NL42"))
+        XCTAssertFalse(client.hasWork(trusted.serial))
+        XCTAssertEqual(fixture.requests.count, 2, "discovery must not send a stored token to another host")
+        XCTAssertEqual(store.pairings.first, trusted)
+        XCTAssertEqual(candidates.first?.endpoint, replacement)
+
+        client.didResolveCandidate(.init(id: "changed-id", name: "Known endpoint", endpoint: fixture.endpoint, model: "NL42"))
+        try await waitUntil { !client.hasWork(trusted.serial) }
+        XCTAssertEqual(store.pairings.first, trusted, "discovery cannot change the saved service identity either")
+        XCTAssertEqual(fixture.requests.last?.url?.host, fixture.endpoint.host)
+
+        try await client.pair(endpoint: replacement, serviceID: "bonjour-id")
+        XCTAssertEqual(store.pairings.first?.endpoint, replacement)
+        XCTAssertEqual(fixture.requests.suffix(2).map { $0.url?.host }, [replacement.host, replacement.host])
+    }
+
+    func testControllerInfoRejectsInvalidNumericStateBeforePublishing() throws {
+        let fixture = NanoleafFixture()
+        let valid = try fixture.info()
+        XCTAssertEqual(valid.state.brightness.value, 80)
+        for brightness in [String(Int.max), String(Int.min), "-1", "101", "true", "\"100\""] {
+            let info = Data(#"{"name":"Shapes","serialNo":"S","model":"NL42","state":{"on":{"value":true},"brightness":{"value":\#(brightness)},"hue":{"value":0},"sat":{"value":100},"ct":{"value":3500},"colorMode":"hs"},"effects":{"select":"*Solid*","effectsList":[]}}"#.utf8)
+            XCTAssertThrowsError(try JSONDecoder().decode(NanoleafInfo.self, from: info), brightness)
+        }
+        let boundary = Data(#"{"name":"Shapes","serialNo":"S","model":"NL22","state":{"on":{"value":true},"brightness":{"value":100},"hue":{"value":360},"sat":{"value":100},"ct":{"value":6500},"colorMode":"hs"},"effects":{"select":"*Solid*","effectsList":[]}}"#.utf8)
+        XCTAssertEqual(try JSONDecoder().decode(NanoleafInfo.self, from: boundary).state.brightness.value, 100)
+        XCTAssertEqual(LumenFader.percent(Double(Int.max)), "100%")
+        XCTAssertEqual(LumenFader.percent(-Double.greatestFiniteMagnitude), "0%")
+        XCTAssertEqual(LumenFader.percent(.nan), "0%")
+        XCTAssertEqual(LumenFader.percent(.infinity), "0%")
+    }
+
+    @MainActor
     func testAuroraLightPanelsPair() async throws {
         let fixture = NanoleafFixture()
         fixture.model = "NL22"

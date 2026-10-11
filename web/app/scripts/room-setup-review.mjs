@@ -31,11 +31,17 @@ let discoveryKind = 'blocked'
 let failingPath = null
 let delayedPath = null
 let roomNumber = 0
+let deleteCreatedRoomOnRefresh = false
+let createdRoomPendingDeletion = null
 
 await page.route('**/*', async route => {
   const url = new URL(route.request().url())
   const path = url.pathname
   if (!['/health', '/state', '/discover', '/rooms', '/nanoleaf/pair'].includes(path) && !path.startsWith('/devices/')) return route.continue()
+  if (path === '/state' && createdRoomPendingDeletion) {
+    deleteRoomElsewhere(createdRoomPendingDeletion)
+    createdRoomPendingDeletion = null
+  }
   let response = path === '/health' ? { ok: true, service: 'lumendesk-bridge' } : path === '/state' ? state : { ok: true }
   if (route.request().method() === 'POST') {
     const data = route.request().postDataJSON() ?? {}
@@ -57,6 +63,10 @@ await page.route('**/*', async route => {
     if (path === '/rooms') {
       const room = { id: `created-${++roomNumber}`, name: data.name, lightIDs: [], schedules: [] }
       state.rooms.push(room)
+      if (deleteCreatedRoomOnRefresh) {
+        createdRoomPendingDeletion = room.id
+        deleteCreatedRoomOnRefresh = false
+      }
       response = { room }
     }
     const assignment = path.match(/^\/devices\/([^/]+)\/room$/)
@@ -212,6 +222,23 @@ try {
   await page.getByRole('button', { name: 'Set up room', exact: true }).click()
   await expect(wizard.getByRole('heading', { name: 'Create room', exact: true })).toBeVisible()
   await expect(wizard.getByLabel('Room name', { exact: true })).toHaveValue('Living room')
+  // The create response can succeed while its following refresh reports that
+  // another client has already deleted the room. No canonical saved room has
+  // been shown to the wizard yet, so creation itself must confirm its identity.
+  deleteCreatedRoomOnRefresh = true
+  const creationsBeforeRefreshDeletion = count('/rooms')
+  await wizard.getByRole('button', { name: 'Create room', exact: true }).click()
+  await expect(wizard.getByRole('alert')).toContainText('This room was deleted')
+  await expect(wizard.getByRole('heading', { name: 'Create room', exact: true })).toBeVisible()
+  await expect(wizard.getByLabel('Room name', { exact: true })).toHaveValue('Living room')
+  await expect(wizard.getByRole('button', { name: 'Create room', exact: true })).toBeEnabled()
+  assert.equal(state.rooms.length, 0, 'the create refresh reports the deleted room')
+  assert.equal(count('/rooms'), creationsBeforeRefreshDeletion + 1)
+  assert.equal(commands.filter(command => command.path.endsWith('/room')).length, assignmentsBeforeDeletion, 'a room deleted during create refresh must not receive assignments')
+  await wizard.getByRole('button', { name: 'Pause setup', exact: true }).click()
+  await page.getByRole('button', { name: 'Set up room', exact: true }).click()
+  await expect(wizard.getByRole('heading', { name: 'Create room', exact: true })).toBeVisible()
+  await expect(wizard.getByLabel('Room name', { exact: true })).toHaveValue('Living room')
   await wizard.getByRole('button', { name: 'Create room', exact: true }).click()
   await expect(wizard.getByRole('heading', { name: 'Assign lights', exact: true })).toBeVisible()
   for (const name of ['Reading lamp', 'Bookshelf strip']) {
@@ -280,7 +307,7 @@ try {
   assert.equal(connectedPort, true)
   assert.ok(healthRequests.includes('http://127.0.0.1:9387/health'))
   await portContext.close()
-  console.log('ROOM_SETUP_ASSERTIONS_PASS: fresh discovery diagnostics, vendor and network preparation, pairing draft retention, room failure and duplicate guards, pause/reopen, partial assignment retry, explicit control commands, completed room scope, deleted-room recovery from Assign, Try and Pause, same-name recreation and retained fixture choices, Connect-only bridge port changes, 390px overflow and accessibility')
+  console.log('ROOM_SETUP_ASSERTIONS_PASS: fresh discovery diagnostics, vendor and network preparation, pairing draft retention, room failure and duplicate guards, pause/reopen, partial assignment retry, explicit control commands, completed room scope, deleted-room recovery from Assign, Try and Pause, deletion during create refresh, same-name recreation and retained fixture choices, Connect-only bridge port changes, 390px overflow and accessibility')
 } finally {
   await browser.close()
   server.kill()

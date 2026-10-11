@@ -125,6 +125,14 @@ part most likely to bite:
   mechanism on current browsers.
 - Other browsers differ and change over time.
 
+The bridge also checks the request's hostname and port before serving any
+API or web-client content. Use the address it prints, a loopback alias
+(`localhost`, `127.0.0.1` or `[::1]`), or the hostname explicitly supplied with
+`--host`, and the actual listening port. With a wildcard bind (`0.0.0.0` or
+`::`), use a concrete address of the machine. `--allow-origin` and
+`--allow-any-origin` control browser origins; they do not permit arbitrary
+request hostnames.
+
 If the hosted page cannot reach the bridge, stop fighting the permission and
 let the bridge serve the client instead — the request is then same-origin and
 none of the above applies:

@@ -365,6 +365,7 @@ final class PersistenceStore: ApplicationPersistence {
     }
 
     func exportConfiguration(from state: PersistedApplicationState) throws -> Data {
+        let state = migratedAndNormalized(state)
         let solar = state.solarPreferences
         let archive = ConfigurationArchive(
             rooms: state.rooms,
@@ -475,6 +476,17 @@ final class PersistenceStore: ApplicationPersistence {
             migrated.customBrightnessPresets
         )
         migrated.musicModeConfiguration = migrated.musicModeConfiguration.normalized()
+        migrated.rooms = migrated.rooms.map { room in
+            var value = room
+            value.schedules = room.schedules.map { $0.normalized() }
+            return value
+        }
+        migrated.solarPreferences.sunriseHour = max(0, min(23, migrated.solarPreferences.sunriseHour))
+        migrated.solarPreferences.sunriseMinute = max(0, min(59, migrated.solarPreferences.sunriseMinute))
+        migrated.solarPreferences.sunsetHour = max(0, min(23, migrated.solarPreferences.sunsetHour))
+        migrated.solarPreferences.sunsetMinute = max(0, min(59, migrated.solarPreferences.sunsetMinute))
+        migrated.scenes = migrated.scenes.map { $0.normalized() }
+        migrated.sceneDrafts = migrated.sceneDrafts.mapValues { $0.normalized() }
         return migrated
     }
 

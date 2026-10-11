@@ -13,29 +13,54 @@ import {
   type MusicTransportKind,
   emptySnapshot,
   freshSnapshot,
+  retainUnrenderedTransients,
 } from './types'
 
 const RENDER_HZ = 20
 const WORKLET = `
 class LumenTap extends AudioWorkletProcessor {
   constructor() {
-    super(); this.left = new Float32Array(1024); this.right = new Float32Array(1024);
-    this.used = 0; this.pending = 0; this.sequence = 0; this.dropped = 0;
-    this.port.onmessage = () => { this.pending = Math.max(0, this.pending - 1); };
+    super(); this.left = new Float32Array(1024); this.right = null;
+    this.used = 0; this.channels = 0; this.sequence = 0; this.dropped = 0;
+    this.pending = new Set(); this.free = [];
+    this.port.onmessage = event => {
+      const returned = event.data;
+      if (!returned || !this.pending.delete(returned.sequence)) return;
+      for (const channel of [returned.left, returned.right]) {
+        if (channel && channel.length === 1024) this.free.push(channel);
+      }
+    };
   }
+  take() { return this.free.pop() || new Float32Array(1024); }
   process(inputs) {
     const input = inputs[0];
-    if (!input || !input[0]) return true;
-    for (let i = 0; i < input[0].length; i++) {
-      this.left[this.used] = input[0][i]; this.right[this.used] = (input[1] || input[0])[i];
-      if (++this.used === 1024) {
+    const channels = input && input[0] ? Math.min(input.length, 2) : 0;
+    if (channels !== this.channels) {
+      // Never join PCM from different routes into one analysis window. A
+      // sequence gap also resets the analyzer when an input disappears.
+      if (this.channels) this.sequence++;
+      if (this.used) this.dropped++;
+      this.used = 0; this.channels = channels;
+      if (channels < 2 && this.right) { this.free.push(this.right); this.right = null; }
+      if (channels === 2 && !this.right) this.right = this.take();
+    }
+    if (!channels) return true;
+    let offset = 0;
+    while (offset < input[0].length) {
+      const count = Math.min(1024 - this.used, input[0].length - offset);
+      const whole = offset === 0 && count === input[0].length;
+      this.left.set(whole ? input[0] : input[0].subarray(offset, offset + count), this.used);
+      if (channels === 2) this.right.set(whole ? input[1] : input[1].subarray(offset, offset + count), this.used);
+      this.used += count; offset += count;
+      if (this.used === 1024) {
         this.sequence++;
-        if (this.pending < 2) {
-          this.pending++;
-          this.port.postMessage({left:this.left,right:this.right,sampleRate,
-            endTime:(currentFrame+i+1)/sampleRate,sequence:this.sequence,dropped:this.dropped},
-            [this.left.buffer,this.right.buffer]);
-          this.left = new Float32Array(1024); this.right = new Float32Array(1024);
+        if (this.pending.size < 2) {
+          this.pending.add(this.sequence);
+          const transfer = channels === 2 ? [this.left.buffer, this.right.buffer] : [this.left.buffer];
+          this.port.postMessage({left:this.left,right:this.right,channels,sampleRate,
+            endTime:(currentFrame+offset)/sampleRate,sequence:this.sequence,dropped:this.dropped}, transfer);
+          this.left = this.take();
+          if (channels === 2) this.right = this.take();
         } else { this.dropped++; }
         this.used = 0;
       }
@@ -69,8 +94,19 @@ export interface MusicSessionState {
 
 type Listener = () => void
 
+interface CapturedPCM {
+  left: Float32Array
+  right?: Float32Array | null
+  channels?: 1 | 2
+  sampleRate: number
+  sequence: number
+  dropped: number
+  endTime: number
+}
+
 export class WebMusicSession {
   private listeners = new Set<Listener>()
+  private controlsListeners = new Set<Listener>()
   private analyzer = new MusicFeatureAnalyzer('Demo grid')
   private choreography = new MusicChoreographyEngine()
   private timer: number | null = null
@@ -88,10 +124,18 @@ export class WebMusicSession {
   private captureSequence = 0
   private midiLastBeat: number | null = null
   private midiLastTick: number | null = null
+  private readonly midiTickTimes = new Float64Array(25)
+  private midiTimingWrite = 0
+  private midiTimingCount = 0
   private midiStopped = false
   private inputSnapshot = emptySnapshot()
+  private hasUnrenderedCapture = false
+  private readonly playbackSnapshots: Array<ReturnType<typeof emptySnapshot> | undefined> = new Array(128)
+  private playbackRead = 0
+  private playbackCount = 0
   readonly diagnostics = { analyzedSamples: 0, droppedBuffers: 0, framesGenerated: 0, snapshotAge: 0, renderInterval: 0 }
   version = 0
+  controlsVersion = 0
   private onFrame: ((frame: MusicLightingFrame) => void) | null = null
 
   readonly state: MusicSessionState = {
@@ -111,6 +155,11 @@ export class WebMusicSession {
   subscribe(listener: Listener): () => void {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
+  }
+
+  subscribeControls(listener: Listener): () => void {
+    this.controlsListeners.add(listener)
+    return () => this.controlsListeners.delete(listener)
   }
 
   setDevices(devices: BridgeDevice[]): void {
@@ -143,6 +192,7 @@ export class WebMusicSession {
     if (generation !== this.generation) return
     this.captureSequence = 0
     this.inputSnapshot = emptySnapshot()
+    this.clearPlaybackSnapshots()
     this.state.snapshot = emptySnapshot()
     this.state.error = null
     this.state.source = source
@@ -160,6 +210,7 @@ export class WebMusicSession {
       else if (source === 'midi') await this.startMidi(generation)
       if (generation !== this.generation) return
       this.timer = window.setInterval(() => this.tick(), 1000 / RENDER_HZ)
+      this.emit()
     } catch (err) {
       if (generation !== this.generation) return
       await this.stop()
@@ -173,6 +224,7 @@ export class WebMusicSession {
     const generation = ++this.generation
     this.state.running = false
     this.inputSnapshot = emptySnapshot()
+    this.clearPlaybackSnapshots()
     this.state.snapshot = emptySnapshot()
     if (this.timer != null) {
       window.clearInterval(this.timer)
@@ -188,7 +240,8 @@ export class WebMusicSession {
     this.audio = null
     if (this.midiAccess) for (const input of this.midiAccess.inputs.values()) input.onmidimessage = null
     this.midiAccess = null
-    this.midiTicks = 0; this.midiBeats = 0; this.midiLastBeat = null; this.midiLastTick = null
+    this.midiTicks = 0; this.midiBeats = 0; this.midiLastBeat = null
+    this.resetMidiTiming()
     if (audio) await audio.close().catch(() => undefined)
     if (generation !== this.generation) return
     this.state.running = false
@@ -196,14 +249,19 @@ export class WebMusicSession {
     this.emit()
   }
 
-  private emit(): void {
+  private emit(controlChange = true): void {
     this.version += 1
     for (const listener of this.listeners) listener()
+    if (controlChange) {
+      this.controlsVersion += 1
+      for (const listener of this.controlsListeners) listener()
+    }
   }
 
   private tick(): void {
     if (!this.state.running) return
     const timestamp = performance.now() / 1000
+    this.promotePlaybackSnapshots(timestamp)
     this.diagnostics.renderInterval = this.lastRenderAt == null ? 0 : timestamp-this.lastRenderAt
     this.lastRenderAt = timestamp
     this.sequence += 1
@@ -216,7 +274,7 @@ export class WebMusicSession {
     // The display and engine each age the original snapshot once.
     const snapshot = this.state.source === 'demo' ? this.state.snapshot : {...this.inputSnapshot}
     const config = this.state.configuration
-    if (config.metreOverride !== 'auto') {
+    if (config.metreOverride !== 'auto' && config.metreOverride !== snapshot.metre) {
       snapshot.metre = config.metreOverride
       snapshot.beatInBar = (snapshot.gridBeatPosition ?? snapshot.beatCount) % snapshot.metre
     }
@@ -236,7 +294,8 @@ export class WebMusicSession {
     )
     this.state.frame = frame
     this.onFrame?.(frame)
-    this.emit()
+    this.hasUnrenderedCapture = false
+    this.emit(false)
   }
 
   private async ensureAudio(generation: number): Promise<AudioContext> {
@@ -253,13 +312,26 @@ export class WebMusicSession {
   }
 
   private connectTap(source: AudioNode, audio: AudioContext, monitor: boolean, generation: number): void {
-    const node = new AudioWorkletNode(audio, 'lumen-tap')
+    const node = new AudioWorkletNode(audio, 'lumen-tap', { outputChannelCount: [1] })
     node.port.onmessage = event => {
       if (generation !== this.generation || !this.state.running) return
-      const pcm = event.data
-      const end = performance.now()/1000 - (audio.currentTime-pcm.endTime)
-      this.consumePCM(pcm, end)
-      node.port.postMessage('consumed')
+      const pcm: CapturedPCM = event.data
+      let end = performance.now()/1000 - (audio.currentTime-pcm.endTime)
+      if (monitor && audio.getOutputTimestamp) {
+        // Monitored files follow the samples at the speakers. This measured
+        // clock pair includes output buffering; microphones retain capture time.
+        const output = audio.getOutputTimestamp()
+        if (output.contextTime != null && output.performanceTime != null &&
+            Number.isFinite(output.contextTime) && Number.isFinite(output.performanceTime) &&
+            output.contextTime >= 0 && output.performanceTime > 0) {
+          end = output.performanceTime/1000 + pcm.endTime-output.contextTime
+        }
+      }
+      try { this.consumePCM(pcm, end) }
+      finally {
+        const transfer = pcm.right ? [pcm.left.buffer, pcm.right.buffer] : [pcm.left.buffer]
+        node.port.postMessage({ sequence: pcm.sequence, left: pcm.left, right: pcm.right }, transfer)
+      }
     }
     const mute = audio.createGain()
     mute.gain.value = 0
@@ -305,37 +377,115 @@ export class WebMusicSession {
   }
 
   /** Capture consumes every accepted buffer once, independently of rendering. */
-  private consumePCM(pcm: {left:Float32Array;right:Float32Array;sampleRate:number;sequence:number;dropped:number}, end: number): void {
+  private consumePCM(pcm: Omit<CapturedPCM, 'endTime'>, end: number): void {
     if (pcm.sequence <= this.captureSequence) return
-    if (this.captureSequence && pcm.sequence !== this.captureSequence+1) this.analyzer.reset()
+    if (this.captureSequence && pcm.sequence !== this.captureSequence+1) {
+      this.analyzer.reset()
+      this.clearPlaybackSnapshots()
+      this.inputSnapshot = emptySnapshot()
+    }
     this.captureSequence = pcm.sequence
-    const analyzed = this.analyzer.analyze(pcm.left,end,pcm,pcm.sampleRate)
+    const stereo = pcm.channels !== 1 && pcm.right ? pcm as typeof pcm & {right:Float32Array} : undefined
+    const analyzed = this.analyzer.analyze(pcm.left,end,stereo,pcm.sampleRate)
     this.diagnostics.analyzedSamples += pcm.left.length
     this.diagnostics.droppedBuffers = pcm.dropped
     if (analyzed) {
       analyzed.analysisCompletedAt = performance.now()/1000
       analyzed.droppedBuffers = pcm.dropped
-      this.inputSnapshot = analyzed
+      if (this.state.source === 'file') {
+        // Output may be buffered ahead of the speakers. Keep bounded snapshots
+        // until their samples are audible instead of firing future transients.
+        if (this.playbackCount === this.playbackSnapshots.length) {
+          this.playbackRead = (this.playbackRead+1)%this.playbackSnapshots.length
+          this.playbackCount--
+        }
+        this.playbackSnapshots[(this.playbackRead+this.playbackCount)%this.playbackSnapshots.length] = analyzed
+        this.playbackCount++
+      } else this.acceptCaptureSnapshot(analyzed)
     }
+  }
+
+  private promotePlaybackSnapshots(timestamp: number): void {
+    while (this.playbackCount) {
+      const snapshot = this.playbackSnapshots[this.playbackRead]!
+      if (snapshot.analysisTimestamp != null && snapshot.analysisTimestamp > timestamp) break
+      this.acceptCaptureSnapshot(snapshot)
+      this.playbackSnapshots[this.playbackRead] = undefined
+      this.playbackRead = (this.playbackRead+1)%this.playbackSnapshots.length
+      this.playbackCount--
+    }
+  }
+
+  private clearPlaybackSnapshots(): void {
+    this.playbackSnapshots.fill(undefined)
+    this.playbackRead = 0
+    this.playbackCount = 0
+    this.hasUnrenderedCapture = false
+  }
+
+  private acceptCaptureSnapshot(snapshot: ReturnType<typeof emptySnapshot>): void {
+    this.inputSnapshot = retainUnrenderedTransients(snapshot,
+      this.hasUnrenderedCapture ? this.inputSnapshot : undefined)
+    this.hasUnrenderedCapture = true
   }
 
   private handleMidi(event: MIDIMessageEvent): void {
     const now = event.timeStamp/1000
+    if (!Number.isFinite(now)) return
     for (const byte of event.data ?? []) {
-      if (byte === 0xfc) { this.midiStopped = true; this.inputSnapshot = emptySnapshot(); continue }
-      if (byte === 0xfa) { this.midiTicks=0;this.midiBeats=0;this.midiLastBeat=null;this.midiLastTick=null;this.midiStopped=false;continue }
-      if (byte === 0xfb) { this.midiStopped=false;this.midiLastTick=null;continue }
+      if (byte === 0xfc) { this.midiStopped = true; this.resetMidiTiming(); this.inputSnapshot = emptySnapshot(); continue }
+      if (byte === 0xfa) {
+        this.midiTicks=0;this.midiBeats=0;this.midiLastBeat=null;this.resetMidiTiming();this.midiStopped=false
+        this.inputSnapshot = emptySnapshot();continue
+      }
+      if (byte === 0xfb) { this.midiStopped=false;this.resetMidiTiming();continue }
       if (byte !== 0xf8 || this.midiStopped) continue
-      const tickInterval = this.midiLastTick == null ? 0 : now-this.midiLastTick
+      if (this.midiLastTick != null && now < this.midiLastTick) continue
+      // A stopped clock cannot lend its old tempo to a resumed stream.
+      if (this.midiLastTick != null && now-this.midiLastTick > Math.max(.25,(this.inputSnapshot.beatInterval || 1.2)*1.5)) {
+        this.resetMidiTiming()
+        this.midiLastBeat = null
+      }
       this.midiLastTick = now
-      if (this.midiTicks++ % 24 === 0) { this.midiBeats++; this.midiLastBeat=now }
-      const interval = tickInterval>0 && tickInterval<.25 ? tickInterval*24 : this.inputSnapshot.beatInterval
-      this.inputSnapshot = {...emptySnapshot(),level:.55,energy:.6,confidence:1,
-        beat:this.midiTicks%24===1?1:0,pulse:.6,kick:.8,beatCount:this.midiBeats-1,
-        gridBeatPosition:this.midiBeats-1,beatInBar:(this.midiBeats-1)%4,
-        beatReferenceTime:this.midiLastBeat ?? now,beatInterval:interval,tempo:interval>0?60/interval:0,
-        beatConfidence:interval>0?1:0,isTempoLocked:interval>0,analysisTimestamp:now,sourceDescription:'MIDI clock'}
+      this.midiTickTimes[this.midiTimingWrite] = now
+      this.midiTimingWrite = (this.midiTimingWrite+1)%this.midiTickTimes.length
+      this.midiTimingCount = Math.min(this.midiTickTimes.length,this.midiTimingCount+1)
+      const isBeat = this.midiTicks++ % 24 === 0
+      if (isBeat) { this.midiBeats++; this.midiLastBeat=now }
+      // Measure a quarter note (24 clocks), rather than amplifying one tick's
+      // scheduling jitter by 24. Wait for a measured beat before claiming lock.
+      const oldest = (this.midiTimingWrite-this.midiTimingCount+this.midiTickTimes.length)%this.midiTickTimes.length
+      const span = now-this.midiTickTimes[oldest]
+      const interval = this.midiTimingCount === this.midiTickTimes.length && span >= .15 && span <= 1.2 ? span : 0
+      const reference = this.midiLastBeat ?? (interval > 0 ? now-((this.midiTicks-1)%24)*interval/24 : now)
+      // A clock tick refines timing; only a quarter note is a musical hit.
+      // Keeping the beat's capture timestamp lets every intervening render
+      // see its real decay instead of refreshing the pulse 24 times per beat.
+      if (isBeat) {
+        const beatInBar = (this.midiBeats-1)%4
+        this.inputSnapshot = {...this.inputSnapshot,level:.55,energy:.62,confidence:1,
+          beat:1,pulse:1,kick:beatInBar===0?1:.35,
+          snare:beatInBar===1||beatInBar===3?.9:.1,percussion:.4,
+          bass:.6,mids:.45,highs:.35,beatCount:this.midiBeats-1,
+          gridBeatPosition:this.midiBeats-1,beatInBar,metreConfidence:1,
+          analysisTimestamp:now,sourceDescription:'MIDI clock'}
+      }
+      const snapshot = this.inputSnapshot
+      snapshot.beatReferenceTime = reference
+      snapshot.beatInterval = snapshot.feltInterval = interval
+      snapshot.tempo = snapshot.feltTempo = interval > 0 ? 60/interval : 0
+      snapshot.beatCount = snapshot.gridBeatPosition = this.midiBeats-1
+      snapshot.beatInBar = (this.midiBeats-1)%4
+      snapshot.beatConfidence = interval > 0 ? 1 : 0
+      snapshot.isTempoLocked = interval > 0
+      snapshot.freshnessGrace = Math.max(.25, interval*1.5)
     }
+  }
+
+  private resetMidiTiming(): void {
+    this.midiLastTick = null
+    this.midiTimingWrite = 0
+    this.midiTimingCount = 0
   }
 
 }

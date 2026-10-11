@@ -62,7 +62,17 @@ function start(root, port = 0, extra = [], overrides = {}) {
     child.stdout.on('data', check)
     check()
   })
-  return { child, exited, event, childPID: () => Number(errors.match(/child-pid:(\d+)/)?.[1]) }
+  const childStarted = () => new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => { cleanup(); reject(new Error(`Bridge child did not start: ${errors}`)) }, 5_000)
+    const check = () => {
+      const match = errors.match(/child-pid:(\d+)/)
+      if (match) { cleanup(); resolve(Number(match[1])) }
+    }
+    const cleanup = () => { clearTimeout(timeout); child.stderr.off('data', check) }
+    child.stderr.on('data', check)
+    check()
+  })
+  return { child, exited, event, childStarted, childPID: () => Number(errors.match(/child-pid:(\d+)/)?.[1]) }
 }
 
 test('packaged launcher starts from a path with spaces and Quit closes its bridge', async t => {
@@ -88,13 +98,32 @@ test('closing the native wrapper input shuts down the bridge', async t => {
   await assert.rejects(fetch(ready.url))
 })
 
-test('Quit during startup does not leave a bridge behind', async t => {
+test('Quit during slow startup closes the bridge before the native fallback deadline', async t => {
   const root = await fixture(t)
+  // Windows force-closes a stuck native wrapper after three seconds. The
+  // bridge must be stopped sooner even when readiness has not arrived yet.
+  const slow = stub.replace(
+    "console.log('LumenDesk is running. Open http://127.0.0.1:' + server.address().port);",
+    "setTimeout(() => console.log('LumenDesk is running. Open http://127.0.0.1:' + server.address().port), 5_000);",
+  )
+  await fs.writeFile(path.join(root, 'web', 'bridge', 'src', 'index.js'), slow)
   const run = start(root)
+  const pid = await run.childStarted()
+  t.after(() => {
+    run.child.kill()
+    try { process.kill(pid, 'SIGKILL') } catch { /* Cleanup after a failed assertion. */ }
+  })
   run.child.stdin.write('qu')
   run.child.stdin.write('it\n')
-  assert.equal((await run.exited)[0], 0)
-  if (!Number.isNaN(run.childPID())) assert.throws(() => process.kill(run.childPID(), 0), { code: 'ESRCH' })
+  let timeout
+  try {
+    const exit = await Promise.race([
+      run.exited,
+      new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error('Quit waited for readiness past the native fallback deadline')), 2_500) }),
+    ])
+    assert.equal(exit[0], 0)
+    assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' })
+  } finally { clearTimeout(timeout) }
 })
 
 test('an existing bridge is reused without taking ownership or stopping it', async t => {

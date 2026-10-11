@@ -51,8 +51,7 @@ device behavior or native UI behavior.
 
 ## Verification and release checks
 
-The production browser build, component tests, bridge tests, theme catalog audit
-and whitespace checks run locally and in CI. The main Chromium walkthrough covers
+The production browser build, all 53 component tests and all 151 bridge tests pass locally. The theme catalog audit and whitespace checks also pass; CI repeats these checks. The main Chromium walkthrough covers
 27 rendered states, including phone widths, reduced motion, failures and recovery.
 Focused production-app regressions cover guided setup/discovery, scenes/favorites,
 schedule editing and explicit names. Each script checks browser errors, narrow

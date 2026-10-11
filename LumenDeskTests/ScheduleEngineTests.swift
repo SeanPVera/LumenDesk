@@ -218,7 +218,7 @@ final class ScheduleEngineTests: XCTestCase {
         )
     }
 
-    func testDaylightSavingSpringForwardPreservesExistingElapsedMinuteBehavior() throws {
+    func testNonexistentSpringForwardTimePreservesMinutesAfterGap() throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "America/New_York"))
         let reference = try date(2026, 3, 8, 12, 0, calendar: calendar)
@@ -230,6 +230,123 @@ final class ScheduleEngineTests: XCTestCase {
 
         XCTAssertEqual(calendar.component(.hour, from: occurrence), 3)
         XCTAssertEqual(calendar.component(.minute, from: occurrence), 30)
+    }
+
+    func testFixedAndSolarWallClockTimesStayCorrectOnBothDSTTransitions() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "America/New_York"))
+        let engine = ScheduleEngine(calendar: calendar)
+        let fixed = ScheduleEntry(hour: 9, minute: 0, action: .turnOn)
+        let sunrise = ScheduleEntry(hour: 0, minute: 0, offsetMinutes: 15, action: .atSunrise)
+        for (month, day) in [(3, 8), (11, 1)] {
+            let reference = try date(2026, month, day, 12, 0, calendar: calendar)
+            XCTAssertEqual(engine.occurrence(for: fixed, relativeTo: reference, solarTimes: solarTimes),
+                           try date(2026, month, day, 9, 0, calendar: calendar))
+            XCTAssertEqual(engine.occurrence(for: sunrise, relativeTo: reference, solarTimes: solarTimes),
+                           try date(2026, month, day, 6, 45, calendar: calendar))
+        }
+    }
+
+    func testRepeatedFallBackWallClockTimeRunsOnlyFirstInstance() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "America/New_York"))
+        let formatter = ISO8601DateFormatter()
+        let first = try XCTUnwrap(formatter.date(from: "2026-11-01T05:30:00Z"))
+        let second = try XCTUnwrap(formatter.date(from: "2026-11-01T06:30:00Z"))
+        var currentDate = first.addingTimeInterval(5)
+        let entry = ScheduleEntry(hour: 1, minute: 30, action: .turnOn)
+        let room = Room(name: "Office", schedules: [entry])
+        let engine = ScheduleEngine(now: { currentDate }, calendar: calendar,
+                                    state: .init(lastCheck: first.addingTimeInterval(-60)))
+        guard case let .run(occurrence)? = engine.evaluate(rooms: [room], solarTimes: solarTimes).decisions.first else {
+            return XCTFail("The first 01:30 should run")
+        }
+        XCTAssertEqual(occurrence.scheduledAt, first)
+        currentDate = second.addingTimeInterval(5)
+        XCTAssertTrue(engine.evaluate(rooms: [room], solarTimes: solarTimes).decisions.isEmpty)
+        XCTAssertEqual(engine.nextOccurrence(for: entry, solarTimes: solarTimes),
+                       try date(2026, 11, 2, 1, 30, calendar: calendar))
+    }
+
+    func testSolarOffsetsCrossMidnightInBothQueriesUsingBaseDayWeekdays() throws {
+        let calendar = utcCalendar()
+        let times = ScheduleEngine.SolarTimes(sunriseMinutes: 60, sunsetMinutes: 23 * 60)
+        // Monday's sunset occurs on Tuesday; Tuesday's sunrise occurs on Monday.
+        let sunset = ScheduleEntry(hour: 0, minute: 0, offsetMinutes: 120,
+                                   action: .atSunset, weekdays: [2])
+        let sunrise = ScheduleEntry(hour: 0, minute: 0, offsetMinutes: -120,
+                                    action: .atSunrise, weekdays: [3])
+        for (entry, previous, expected) in [
+            (sunset, try date(2026, 7, 14, 0, 59, calendar: calendar),
+             try date(2026, 7, 14, 1, 0, calendar: calendar)),
+            (sunrise, try date(2026, 7, 13, 22, 59, calendar: calendar),
+             try date(2026, 7, 13, 23, 0, calendar: calendar))
+        ] {
+            let engine = ScheduleEngine(now: { previous }, calendar: calendar)
+            XCTAssertEqual(engine.occurrences(for: entry, after: previous,
+                                              through: expected.addingTimeInterval(60), solarTimes: times), [expected])
+            XCTAssertEqual(engine.nextOccurrence(for: entry, solarTimes: times), expected)
+            var wrongDay = entry
+            wrongDay.weekdays = [4]
+            XCTAssertTrue(engine.occurrences(for: wrongDay, after: previous,
+                                             through: expected.addingTimeInterval(60), solarTimes: times).isEmpty)
+        }
+    }
+
+    func testMalformedDecodedScheduleIsDisabledAndSafeToFormat() throws {
+        let data = Data("""
+        {"id":"\(UUID().uuidString)","isEnabled":true,"hour":\(Int.max),"minute":59,
+         "offsetMinutes":\(Int.min),"action":"turnOn","weekdays":[0,2,8]}
+        """.utf8)
+        let entry = try JSONDecoder().decode(ScheduleEntry.self, from: data)
+        XCTAssertFalse(entry.isEnabled)
+        XCTAssertEqual(entry.weekdays, [2])
+        XCTAssertEqual(entry.daySummary, Calendar.current.veryShortWeekdaySymbols[1])
+        XCTAssertEqual(entry.hour, 23)
+        XCTAssertEqual(entry.minute, 59)
+        XCTAssertEqual(entry.offsetMinutes, -1440)
+    }
+
+    func testLegacyDayLongSolarOffsetCanCrossTwoCalendarDatesAtDST() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "America/New_York"))
+        let times = ScheduleEngine.SolarTimes(sunriseMinutes: 30, sunsetMinutes: 23 * 60 + 30)
+        let sunrise = ScheduleEntry(hour: 0, minute: 0, offsetMinutes: -1440,
+                                    action: .atSunrise, weekdays: [2])
+        let sunset = ScheduleEntry(hour: 0, minute: 0, offsetMinutes: 1440,
+                                   action: .atSunset, weekdays: [7])
+        // Monday 00:30 minus 24 hours is Saturday 23:30 across a 23-hour Sunday.
+        for (entry, expected) in [
+            (sunrise, try date(2026, 3, 7, 23, 30, calendar: calendar)),
+            (sunset, try date(2026, 3, 9, 0, 30, calendar: calendar))
+        ] {
+            let previous = expected.addingTimeInterval(-60)
+            let engine = ScheduleEngine(now: { previous }, calendar: calendar)
+            XCTAssertEqual(engine.occurrences(for: entry, after: previous,
+                                              through: expected, solarTimes: times), [expected])
+            XCTAssertEqual(engine.nextOccurrence(for: entry, solarTimes: times), expected)
+        }
+    }
+
+    func testMutatedScheduleAndSolarValuesCannotOverflowOrRunInvalidRule() throws {
+        let calendar = utcCalendar()
+        let currentDate = try date(2026, 7, 13, 23, 59, calendar: calendar)
+        let engine = ScheduleEngine(now: { currentDate }, calendar: calendar)
+        var malformed = ScheduleEntry(hour: 9, minute: 0, action: .turnOn)
+        malformed.hour = Int.max
+        malformed.minute = Int.max
+        malformed.weekdays = [8]
+        let room = Room(name: "Office", schedules: [malformed])
+        XCTAssertEqual(malformed.daySummary, "No valid days")
+        XCTAssertTrue(engine.evaluate(rooms: [room], solarTimes: solarTimes).decisions.isEmpty)
+        XCTAssertFalse(engine.hasEnabledSchedules(in: [room]))
+        XCTAssertEqual(engine.scheduledMinute(for: malformed, solarTimes: solarTimes), 1439)
+
+        let solar = ScheduleEntry(hour: 0, minute: 0, offsetMinutes: 120, action: .atSunset)
+        let badSolarTimes = ScheduleEngine.SolarTimes(sunriseMinutes: Int.min, sunsetMinutes: Int.max)
+        XCTAssertEqual(engine.occurrence(for: solar, relativeTo: currentDate, solarTimes: badSolarTimes),
+                       try date(2026, 7, 14, 1, 59, calendar: calendar))
+        XCTAssertEqual(engine.scheduledMinute(for: solar, solarTimes: badSolarTimes), 1439)
     }
 
     func testDefaultCalendarTracksSystemTimeZoneChanges() throws {

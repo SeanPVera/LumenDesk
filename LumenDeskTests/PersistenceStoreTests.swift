@@ -229,6 +229,101 @@ final class PersistenceStoreTests: XCTestCase {
         XCTAssertEqual(current.scenes.map(\.name), ["Current Scene"])
     }
 
+    func testFullAndLegacyImportsNormalizeUnsafeScheduleFieldsBeforeSaving() throws {
+        let store = temporaryPersistenceStore()
+        let schedule: [String: Any] = [
+            "id": UUID().uuidString, "isEnabled": true, "hour": Int.max,
+            "minute": Int.min, "offsetMinutes": Int.max, "action": "turnOn",
+            "weekdays": [0, 2, 8]
+        ]
+        let room: [String: Any] = [
+            "id": UUID().uuidString, "name": "Imported", "lightIDs": [],
+            "schedules": [schedule]
+        ]
+        var archive = try XCTUnwrap(try JSONSerialization.jsonObject(
+            with: store.exportConfiguration(from: PersistedApplicationState())) as? [String: Any])
+        archive["rooms"] = [room]
+        archive["sunriseHour"] = Int.max
+        archive["sunriseMinute"] = Int.min
+        archive["sunsetHour"] = Int.min
+        archive["sunsetMinute"] = Int.max
+        let full = try store.importingConfiguration(
+            from: JSONSerialization.data(withJSONObject: archive), into: PersistedApplicationState())
+        let legacy = try store.importingConfiguration(
+            from: JSONSerialization.data(withJSONObject: [room]), into: PersistedApplicationState())
+        for imported in [full, legacy] {
+            let entry = try XCTUnwrap(imported.rooms.first?.schedules.first)
+            XCTAssertFalse(entry.isEnabled)
+            XCTAssertEqual(entry.weekdays, [2])
+            XCTAssertEqual(entry.daySummary, Calendar.current.veryShortWeekdaySymbols[1])
+            XCTAssertTrue((0...23).contains(entry.hour))
+            XCTAssertTrue((0...59).contains(entry.minute))
+            XCTAssertEqual(entry.offsetMinutes, 1440)
+            try store.save(imported)
+            XCTAssertEqual(store.load().rooms, imported.rooms)
+        }
+        XCTAssertEqual(full.solarPreferences.sunriseHour, 23)
+        XCTAssertEqual(full.solarPreferences.sunriseMinute, 0)
+        XCTAssertEqual(full.solarPreferences.sunsetHour, 0)
+        XCTAssertEqual(full.solarPreferences.sunsetMinute, 59)
+    }
+
+    func testImportedSceneChannelsAreSafeForLANConversionsAndLegacyDefaults() throws {
+        let store = temporaryPersistenceStore()
+        var source = PersistedApplicationState()
+        source.scenes = [LightingScene(name: "Imported", snapshots: [:])]
+        var archive = try XCTUnwrap(try JSONSerialization.jsonObject(
+            with: store.exportConfiguration(from: source)) as? [String: Any])
+        var scenes = try XCTUnwrap(archive["scenes"] as? [[String: Any]])
+        scenes[0]["snapshots"] = [
+            "lifx:malformed": ["isOn": true, "brightness": 2.0, "hue": -2.0,
+                               "saturation": 3.0, "kelvin": -1],
+            "nanoleaf:legacy": ["isOn": true, "brightness": 0.4, "hue": 0.2,
+                                "saturation": 0.7]
+        ]
+        archive["scenes"] = scenes
+        let imported = try store.importingConfiguration(
+            from: JSONSerialization.data(withJSONObject: archive), into: PersistedApplicationState())
+        let snapshots = try XCTUnwrap(imported.scenes.first?.snapshots)
+        let malformed = try XCTUnwrap(snapshots["lifx:malformed"])
+        XCTAssertEqual(malformed.brightness, 1)
+        XCTAssertEqual(malformed.hue, 0)
+        XCTAssertEqual(malformed.saturation, 1)
+        XCTAssertEqual(malformed.kelvin, 1200)
+        XCTAssertEqual(UInt16(malformed.brightness * 65535), 65535)
+        XCTAssertEqual(UInt16(malformed.kelvin), 1200)
+        XCTAssertEqual(snapshots["nanoleaf:legacy"]?.kelvin, 3500)
+        try store.save(imported)
+        XCTAssertEqual(store.load().scenes, imported.scenes)
+    }
+
+    func testProgrammaticNonFiniteSceneValuesNormalizeInSaveAndExport() throws {
+        let store = temporaryPersistenceStore()
+        var snapshot = DeviceSnapshot(isOn: true, brightness: 0.5, hue: 0.2, saturation: 0.7)
+        snapshot.brightness = .infinity
+        snapshot.hue = .nan
+        snapshot.saturation = -.infinity
+        snapshot.kelvin = Int.max
+        var scene = LightingScene(name: "Malformed", snapshots: [:])
+        scene.snapshots["lifx:fixture"] = snapshot
+        var state = PersistedApplicationState()
+        state.scenes = [scene]
+        state.sceneDrafts[scene.id] = scene
+        try store.save(state)
+        let loaded = store.load()
+        let saved = try XCTUnwrap(loaded.scenes.first?.snapshots["lifx:fixture"])
+        XCTAssertEqual(saved.brightness, 0)
+        XCTAssertEqual(saved.hue, 0)
+        XCTAssertEqual(saved.saturation, 0)
+        XCTAssertEqual(saved.kelvin, 9000)
+        XCTAssertEqual(loaded.sceneDrafts[scene.id]?.snapshots["lifx:fixture"], saved)
+        let exported = try store.exportConfiguration(from: state)
+        let imported = try store.importingConfiguration(from: exported, into: PersistedApplicationState())
+        XCTAssertEqual(imported.scenes, loaded.scenes)
+        XCTAssertEqual(DeviceSnapshot(isOn: true, brightness: .nan, hue: .infinity,
+                                      saturation: -.infinity, kelvin: Int.min).kelvin, 1200)
+    }
+
     @MainActor
     func testDemoModeCannotWriteToLivePersistence() {
         let spy = PersistenceSpy()

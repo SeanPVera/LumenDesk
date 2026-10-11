@@ -208,6 +208,25 @@ final class NetworkUtilityTests: XCTestCase {
                        "192.168.1.57")
     }
 
+    func testGoveeDHCPAddressSwapKeepsBothStatusRoutes() {
+        var addresses = ["A": "192.0.2.10", "B": "192.0.2.20"]
+        var devices = ["192.0.2.10": "A", "192.0.2.20": "B"]
+        GoveeClient.learnAddress(deviceID: "A", address: "192.0.2.20",
+                                 addressesByDevice: &addresses, deviceByAddress: &devices)
+        GoveeClient.learnAddress(deviceID: "B", address: "192.0.2.10",
+                                 addressesByDevice: &addresses, deviceByAddress: &devices)
+        XCTAssertEqual(devices["192.0.2.20"], "A")
+        XCTAssertEqual(devices["192.0.2.10"], "B")
+        XCTAssertEqual(addresses["A"], "192.0.2.20")
+        XCTAssertEqual(addresses["B"], "192.0.2.10")
+
+        GoveeClient.learnAddress(deviceID: "A", address: "192.0.2.30",
+                                 addressesByDevice: &addresses, deviceByAddress: &devices)
+        XCTAssertNil(devices["192.0.2.20"])
+        XCTAssertEqual(devices["192.0.2.30"], "A")
+        XCTAssertEqual(devices["192.0.2.10"], "B")
+    }
+
     func testBoundUDPPortIsExclusive() throws {
         let first = try UDPSocket(boundPort: 0, queue: DispatchQueue(label: "LumenDeskTests.udp.first"))
         var address = sockaddr_in()

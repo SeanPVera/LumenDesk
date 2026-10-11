@@ -4,6 +4,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import * as lifx from '../src/lifx.js'
 import * as govee from '../src/govee.js'
+import { Registry } from '../src/registry.js'
 
 test('LIFX packet encoding matches the Swift encoder', () => {
   const target = Buffer.from([0xd0, 0x73, 0xd5, 0x12, 0x34, 0x56])
@@ -145,4 +146,51 @@ test('Govee decodes scan and status responses, ignoring foreign traffic', () => 
   assert.equal(govee.decodeScanResponse(Buffer.from('NOTIFY * HTTP/1.1')), null)
   assert.equal(govee.decodeScanResponse(Buffer.from('{"msg":{"cmd":"devStatus"}}')), null)
   assert.equal(govee.decodeStatusResponse(Buffer.from('not json at all')), null)
+})
+
+test('Govee discovery rejects names and identities with invalid JSON types', () => {
+  const scan = data => govee.decodeScanResponse(Buffer.from(JSON.stringify({ msg: { cmd: 'scan', data } })))
+  const valid = { ip: '192.168.1.50', device: 'AA:BB' }
+  assert.deepEqual(scan({ ...valid, sku: null, deviceName: '灯 · Studio' }),
+    { ...valid, sku: null, deviceName: '灯 · Studio' })
+  assert.deepEqual(scan({ ...valid, sku: '', deviceName: '' }), { ...valid, sku: '', deviceName: '' })
+  for (const key of ['ip', 'device']) {
+    for (const value of ['', null, 1, true, {}, []]) assert.equal(scan({ ...valid, [key]: value }), null)
+  }
+  for (const key of ['sku', 'deviceName']) {
+    for (const value of [1, true, {}, []]) assert.equal(scan({ ...valid, [key]: value }), null)
+  }
+  for (const value of [null, 1, 'scan', []]) assert.equal(scan(value), null)
+})
+
+test('Govee status accepts only typed values inside the vendor ranges', () => {
+  const status = data => govee.decodeStatusResponse(Buffer.from(JSON.stringify({ msg: { cmd: 'devStatus', data } })))
+  const valid = { onOff: 1, brightness: 80, color: { r: 0, g: 128, b: 255 }, colorTemInKelvin: 0 }
+  assert.ok(status(valid))
+  assert.ok(status({ onOff: 0, brightness: 0, color: null, colorTemInKelvin: null }))
+  assert.ok(status({ onOff: 1, brightness: 100 }))
+  for (const value of [-1, 2, 0.5, '1', true, null]) assert.equal(status({ ...valid, onOff: value }), null)
+  for (const value of [-1, 101, Number.MAX_SAFE_INTEGER, 80.5, '80', true, null]) assert.equal(status({ ...valid, brightness: value }), null)
+  for (const key of ['r', 'g', 'b']) {
+    for (const value of [-1, 256, 1.5, '1', true, null]) {
+      assert.equal(status({ ...valid, color: { ...valid.color, [key]: value } }), null)
+    }
+    const partial = { ...valid.color }
+    delete partial[key]
+    assert.equal(status({ ...valid, color: partial }), null)
+  }
+  for (const value of [1200, 9000]) assert.ok(status({ ...valid, colorTemInKelvin: value }))
+  for (const value of [-1, 1199, 9001, 3500.5, '3500', true]) {
+    assert.equal(status({ ...valid, colorTemInKelvin: value }), null)
+  }
+})
+
+test('registry names remain strings after discovery and optimistic patches', () => {
+  const registry = new Registry()
+  registry.upsert('govee:a', { name: {} })
+  registry.upsert('govee:b', { name: 'Desk' })
+  assert.equal(registry.get('govee:a').name, 'govee:a')
+  registry.patch('govee:b', { name: [] })
+  assert.equal(registry.get('govee:b').name, 'govee:b')
+  assert.doesNotThrow(() => registry.list())
 })

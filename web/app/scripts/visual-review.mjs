@@ -4,11 +4,12 @@ import { spawn } from 'node:child_process'
 import { mkdir, writeFile } from 'node:fs/promises'
 import assert from 'node:assert/strict'
 import { drawingGeometry, parseTopology } from '../../bridge/src/nanoleaf.js'
+import { reviewLifecycles } from './lifecycle-review.mjs'
 
 const output = process.env.LUMENDESK_WEB_QA_DIRECTORY ?? '/tmp/LumenDesk-Web-QA'
 await mkdir(output, { recursive: true })
 const server = spawn(process.execPath, ['node_modules/vite/bin/vite.js', '--host', '127.0.0.1', '--port', '4174'], { stdio: 'pipe' })
-const browser = await chromium.launch()
+const browser = await chromium.launch({ executablePath: process.env.LUMENDESK_CHROMIUM_PATH })
 const context = await browser.newContext({ viewport: { width: 1100, height: 900 }, colorScheme: 'dark' })
 const page = await context.newPage()
 const errors = []
@@ -230,6 +231,7 @@ try {
   await capture('web-connection-unavailable',620,850)
   await audit('setup')
   assert.deepEqual(errors,[],'Browser runtime errors')
+  await reviewLifecycles(browser, 'http://127.0.0.1:4174')
   console.log('UI_ASSERTIONS_PASS: scope, multi-selection, scoped scene capture, music scope lock, Shapes selection, painting, orientation and scene states, pairing errors, overflow, runtime errors, accessibility')
 } finally {
   await writeFile(output+'/review-states.json',JSON.stringify(results,null,2))

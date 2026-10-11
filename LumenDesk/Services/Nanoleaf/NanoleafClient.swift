@@ -298,8 +298,8 @@ final class NanoleafClient: NSObject {
         guard !info.serialNo.isEmpty, generation == self.generation, !paused else {
             throw NanoleafError.unavailable
         }
-        // A manual pairing may follow discovery. Retain its service ID so a
-        // later DHCP address change can reconnect without another button press.
+        // A manual pairing may follow discovery. Retain its service ID for
+        // candidate matching; it never authorizes automatic credential moves.
         let resolvedServiceID = serviceID ?? candidates.values.first(where: { $0.endpoint == endpoint })?.id
         let pairing = NanoleafPairing(serial: info.serialNo, serviceID: resolvedServiceID,
                                      name: info.name, endpoint: endpoint, token: token)
@@ -829,6 +829,23 @@ final class NanoleafClient: NSObject {
     private func publishCandidates() {
         onCandidates?(candidates.values.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending })
     }
+
+    func didResolveCandidate(_ candidate: NanoleafCandidate) {
+        guard !paused, candidate.model == nil || NanoleafProductFamily(model: candidate.model) != nil else { return }
+        // An Aurora can advertise under both service types; list it once.
+        candidates = candidates.filter { $0.key == candidate.id || $0.value.endpoint != candidate.endpoint }
+        candidates[candidate.id] = candidate
+        for serial in Array(pairings.keys) {
+            // Bonjour identifiers are unauthenticated. A matching TXT id
+            // cannot authorize sending a stored token to another endpoint.
+            // Keep new advertisements available for explicit pairing; a saved
+            // hostname still follows legitimate DHCP changes through DNS.
+            guard let pairing = pairings[serial], pairing.endpoint == candidate.endpoint else { continue }
+            refresh(serial)
+            startEvents(serial)
+        }
+        publishCandidates()
+    }
 }
 
 extension NanoleafClient: NetServiceBrowserDelegate, NetServiceDelegate {
@@ -844,30 +861,8 @@ extension NanoleafClient: NetServiceBrowserDelegate, NetServiceDelegate {
               let endpoint = try? NanoleafEndpoint(host: host, port: sender.port) else { return }
         let txt = sender.txtRecordData().map(NetService.dictionary(fromTXTRecord:)) ?? [:]
         let model = txt["md"].flatMap { String(data: $0, encoding: .utf8) }
-        guard model == nil || NanoleafProductFamily(model: model) != nil else { return }
         let id = txt["id"].flatMap { String(data: $0, encoding: .utf8) } ?? sender.name
-        // An Aurora can advertise under both service types; list it once.
-        candidates = candidates.filter { $0.key == id || $0.value.endpoint != endpoint }
-        candidates[id] = NanoleafCandidate(id: id, name: sender.name, endpoint: endpoint, model: model)
-        for serial in Array(pairings.keys) {
-            guard var pairing = pairings[serial],
-                  pairing.serviceID == id || pairing.endpoint == endpoint else { continue }
-            let moved = pairing.endpoint != endpoint
-            pairing.endpoint = endpoint
-            pairing.serviceID = id
-            pairings[serial] = pairing
-            do { try credentials.save(Array(pairings.values)) }
-            catch { onDiscoveryError?(NanoleafError.storageFailure.localizedDescription) }
-            if moved {
-                // A stream aimed at the old address would go nowhere; the
-                // owner restarts it against the new one.
-                endStream(serial, notify: true)
-                eventTasks.removeValue(forKey: serial)?.cancel()
-            }
-            refresh(serial)
-            startEvents(serial)
-        }
-        publishCandidates()
+        didResolveCandidate(NanoleafCandidate(id: id, name: sender.name, endpoint: endpoint, model: model))
     }
 
     func netServiceBrowser(_ browser: NetServiceBrowser, didNotSearch errorDict: [String: NSNumber]) {

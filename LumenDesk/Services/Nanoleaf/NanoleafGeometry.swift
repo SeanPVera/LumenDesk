@@ -70,8 +70,9 @@ enum NanoleafGeometry {
 
     static func polygon(center: NanoleafPoint, circumradius: Double,
                         firstVertexDegrees: Double, count: Int) -> [NanoleafPoint] {
-        (0..<count).map { index in
-            let degrees = firstVertexDegrees + Double(index) * 360 / Double(count)
+        let orientation = firstVertexDegrees.isFinite ? firstVertexDegrees.truncatingRemainder(dividingBy: 360) : 0
+        return (0..<count).map { index in
+            let degrees = orientation + Double(index) * 360 / Double(count)
             let radians = degrees * .pi / 180
             return NanoleafPoint(center.x + circumradius * cos(radians),
                                  center.y + circumradius * sin(radians))

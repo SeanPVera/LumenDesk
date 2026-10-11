@@ -52,7 +52,9 @@ export function decodeScanResponse(data) {
   const parsed = decode(data)
   if (parsed?.msg?.cmd !== 'scan') return null
   const d = parsed.msg.data
-  if (!d?.ip || !d?.device) return null
+  if (!d || typeof d !== 'object' || Array.isArray(d) ||
+      typeof d.ip !== 'string' || !d.ip || typeof d.device !== 'string' || !d.device ||
+      ['sku', 'deviceName'].some(key => d[key] != null && typeof d[key] !== 'string')) return null
   return { ip: d.ip, device: d.device, sku: d.sku ?? null, deviceName: d.deviceName ?? null }
 }
 
@@ -62,7 +64,13 @@ export function decodeStatusResponse(data) {
   const parsed = decode(data)
   if (parsed?.msg?.cmd !== 'devStatus') return null
   const d = parsed.msg.data
-  if (!d) return null
+  const integerIn = (value, min, max) => Number.isInteger(value) && value >= min && value <= max
+  if (!d || typeof d !== 'object' || Array.isArray(d) ||
+      !integerIn(d.onOff, 0, 1) || !integerIn(d.brightness, 0, 100)) return null
+  if (d.color != null && (typeof d.color !== 'object' || Array.isArray(d.color) ||
+      ['r', 'g', 'b'].some(key => !integerIn(d.color[key], 0, 255)))) return null
+  if (d.colorTemInKelvin != null && d.colorTemInKelvin !== 0 &&
+      !integerIn(d.colorTemInKelvin, 1200, 9000)) return null
   return {
     onOff: d.onOff ?? 0,
     brightness: d.brightness ?? 0,

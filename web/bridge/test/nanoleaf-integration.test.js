@@ -218,3 +218,86 @@ test('an Aurora pairs, draws its triangles and is painted panel by panel', async
     aurora.close()
   }
 })
+
+test('concurrent pairing and forgetting persist ordered credential snapshots', async () => {
+  const credentialsFile = path.join(directory, 'concurrent-pairings.json')
+  const localRegistry = new Registry()
+  const client = new NanoleafClient({
+    registry: localRegistry,
+    credentialsFile,
+    fetchImpl: async url => ({
+      status: 200,
+      text: async () => JSON.stringify(url.endsWith('/new')
+        ? { auth_token: 'FakeToken' }
+        : { ...controller.info(), serialNo: `PAIR${new URL(url).port}` }),
+    }),
+  })
+  try {
+    const [first, second] = await Promise.all([
+      client.pair({ host: '127.0.0.1', port: 16021 }),
+      client.pair({ host: '127.0.0.1', port: 16022 }),
+    ])
+    assert.equal(localRegistry.devices.size, 2, 'both completed pairings are visible')
+    assert.deepEqual(JSON.parse(fs.readFileSync(credentialsFile, 'utf8')).map(p => p.serial).sort(), ['PAIR16021', 'PAIR16022'])
+
+    const [forgotten, third] = await Promise.all([
+      client.forget(first),
+      client.pair({ host: '127.0.0.1', port: 16023 }),
+    ])
+    assert.equal(forgotten, true)
+    assert.equal(third.id, 'nanoleaf:PAIR16023')
+    const saved = JSON.parse(fs.readFileSync(credentialsFile, 'utf8'))
+    assert.deepEqual(saved.map(p => p.serial).sort(), [second.id.slice('nanoleaf:'.length), 'PAIR16023'])
+    assert.equal(credentialFileMode(credentialsFile), 0o600)
+  } finally {
+    client.stop()
+  }
+})
+
+test('forgetting through the API cannot be undone by an in-flight refresh', async () => {
+  const localRegistry = new Registry()
+  let reads = 0
+  let releaseRead
+  let readStarted
+  const started = new Promise(resolve => { readStarted = resolve })
+  const delayedReading = new Promise(resolve => { releaseRead = resolve })
+  const info = { ...controller.info(), serialNo: 'FORGET-IN-FLIGHT' }
+  const client = new NanoleafClient({
+    registry: localRegistry,
+    credentialsFile: path.join(directory, 'forget-in-flight.json'),
+    fetchImpl: async url => ({
+      status: 200,
+      text: async () => {
+        if (url.endsWith('/new')) return JSON.stringify({ auth_token: 'FakeToken' })
+        if (++reads === 2) {
+          readStarted()
+          return delayedReading
+        }
+        return JSON.stringify(info)
+      },
+    }),
+  })
+  const localServer = createServer({ registry: localRegistry, lifx: inert, govee: inert, nanoleaf: client,
+    allowedOrigins: [], version: 'test' })
+  try {
+    const device = await client.pair({ host: '127.0.0.1', port: 16021 })
+    await new Promise(resolve => localServer.listen(0, '127.0.0.1', resolve))
+    client.refresh()
+    await started
+
+    const forgotten = await fetch(`http://127.0.0.1:${localServer.address().port}/devices/${encodeURIComponent(device.id)}/forget`,
+      { method: 'POST', body: '{}' })
+    assert.equal(forgotten.status, 200)
+    assert.equal(localRegistry.get(device.id), null)
+    assert.equal(client.pairings.size, 0)
+
+    releaseRead(JSON.stringify(info))
+    await new Promise(resolve => setImmediate(resolve))
+    assert.equal(localRegistry.get(device.id), null, 'a stale reading cannot recreate a forgotten wall')
+    assert.deepEqual(JSON.parse(fs.readFileSync(client.credentialsFile, 'utf8')), [])
+  } finally {
+    releaseRead(JSON.stringify(info))
+    client.stop()
+    await new Promise(resolve => localServer.close(resolve))
+  }
+})

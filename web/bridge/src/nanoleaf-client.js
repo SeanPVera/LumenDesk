@@ -71,6 +71,7 @@ export class NanoleafClient {
     this.lanes = new Map()
     /** serial -> panel colours LumenDesk last displayed, while it still owns the wall. */
     this.designs = new Map()
+    this.credentialWriting = Promise.resolve()
   }
 
   async start() {
@@ -91,12 +92,19 @@ export class NanoleafClient {
     this.lanes.clear()
   }
 
-  async #save() {
-    await fsp.mkdir(path.dirname(this.credentialsFile), { recursive: true, mode: 0o700 })
-    const temporary = `${this.credentialsFile}.${process.pid}.tmp`
-    await fsp.writeFile(temporary, JSON.stringify([...this.pairings.values()], null, 2), { mode: 0o600 })
-    await fsp.rename(temporary, this.credentialsFile)
-    await fsp.chmod(this.credentialsFile, 0o600).catch(() => {})
+  #save() {
+    // Preserve mutation order and give each caller the outcome of its own
+    // snapshot. Pairing and forgetting can arrive from different browsers.
+    const snapshot = JSON.stringify([...this.pairings.values()], null, 2)
+    const writing = this.credentialWriting.catch(() => {}).then(async () => {
+      await fsp.mkdir(path.dirname(this.credentialsFile), { recursive: true, mode: 0o700 })
+      const temporary = `${this.credentialsFile}.${process.pid}.tmp`
+      await fsp.writeFile(temporary, snapshot, { mode: 0o600 })
+      await fsp.rename(temporary, this.credentialsFile)
+      await fsp.chmod(this.credentialsFile, 0o600).catch(() => {})
+    })
+    this.credentialWriting = writing
+    return writing
   }
 
   async #request(endpoint, pathname, { method = 'GET', body, pairing = false } = {}) {
@@ -279,33 +287,43 @@ export class NanoleafClient {
         lane.pending = null
         const pairing = this.pairings.get(serial)
         if (!pairing) break
-        await this.#run(pairing, command).catch(err => this.#failed(pairing, err))
+        await this.#run(pairing, command, lane).catch(err => {
+          if (this.pairings.get(serial) === pairing && this.lanes.get(serial) === lane) this.#failed(pairing, err)
+        })
       }
     } finally {
       lane.running = false
     }
   }
 
-  async #run(pairing, command) {
+  async #run(pairing, command, lane) {
+    // A response from a forgotten, re-paired or stopped lane must not restore
+    // the old wall or continue sending its remaining writes.
+    const current = () => this.pairings.get(pairing.serial) === pairing && this.lanes.get(pairing.serial) === lane
     const base = `/api/v1/${pairing.token}`
     if (Object.keys(command.state).length) {
       await this.#request(pairing, `${base}/state`, { method: 'PUT', body: command.state })
+      if (!current()) return
     }
     if (command.output?.effect) {
       await this.#request(pairing, `${base}/effects`, { method: 'PUT', body: nanoleaf.selectBody(command.output.effect) })
+      if (!current()) return
     } else if (command.output?.frames) {
       await this.#request(pairing, `${base}/effects`, { method: 'PUT', body: nanoleaf.displayStaticBody(command.output.frames) })
+      if (!current()) return
     }
     if (command.orientation !== undefined) {
       await this.#request(pairing, `${base}/panelLayout`, { method: 'PUT', body: nanoleaf.orientationBody(command.orientation) })
+      if (!current()) return
     }
     if (command.identify !== undefined) {
       const layout = this.registry.get(`nanoleaf:${pairing.serial}`)?.shapes?.layout
       if (layout) await this.#request(pairing, `${base}/effects`, { method: 'PUT', body: identifyBody(command.identify, layout) })
+      if (!current()) return
     }
     if (command.refresh) {
       const info = await this.#request(pairing, base)
-      this.#absorb(pairing, info)
+      if (current()) this.#absorb(pairing, info)
     }
   }
 

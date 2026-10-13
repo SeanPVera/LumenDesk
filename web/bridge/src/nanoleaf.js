@@ -242,12 +242,41 @@ export function footprint(layout) {
   })
 }
 
+/**
+ * Calculates the bounding box center of all panel vertices and reference markers.
+ * Single-pass min/max search avoids creating intermediate flatMap and map arrays.
+ */
 export function pivot(layout) {
-  const points = footprint(layout)
-  if (!points.length) return [0, 0]
-  const xs = points.map(p => p[0])
-  const ys = points.map(p => p[1])
-  return [(Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2]
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
+  let hasPoints = false
+  const panels = layout?.panels || []
+  const len = panels.length
+  for (let i = 0; i < len; i += 1) {
+    const entry = panels[i]
+    const points = outline(entry)
+    if (points) {
+      for (let j = 0; j < points.length; j += 1) {
+        const pt = points[j]
+        const x = pt[0], y = pt[1]
+        if (x < minX) minX = x
+        if (x > maxX) maxX = x
+        if (y < minY) minY = y
+        if (y > maxY) maxY = y
+        hasPoints = true
+      }
+    } else {
+      const r = markerRadius(entry)
+      const x = entry.x, y = entry.y
+      const x1 = x - r, x2 = x + r, y1 = y - r, y2 = y + r
+      if (x1 < minX) minX = x1
+      if (x2 > maxX) maxX = x2
+      if (y1 < minY) minY = y1
+      if (y2 > maxY) maxY = y2
+      hasPoints = true
+    }
+  }
+  if (!hasPoints) return [0, 0]
+  return [(minX + maxX) / 2, (minY + maxY) / 2]
 }
 
 /**
@@ -280,33 +309,77 @@ export function wallTransform(rotationDegrees, center) {
 export function spatialPositions(layout, rotationDegrees, axis = 'leftToRight') {
   const panels = paintablePanels(layout)
   if (!panels.length) return []
-  const transform = wallTransform(rotationDegrees, pivot(layout))
-  const centers = panels.map(p => ({ id: p.panelID, point: transform.wall([p.x, p.y]) }))
-  const xs = centers.map(c => c.point[0])
-  const ys = centers.map(c => c.point[1])
-  const minX = Math.min(...xs), maxX = Math.max(...xs)
-  const minY = Math.min(...ys), maxY = Math.max(...ys)
-  const meanX = xs.reduce((a, b) => a + b, 0) / xs.length
-  const meanY = ys.reduce((a, b) => a + b, 0) / ys.length
-  const maxDistance = Math.max(...centers.map(c => Math.hypot(c.point[0] - meanX, c.point[1] - meanY)))
-  const position = ([x, y]) => {
-    switch (axis) {
-      case 'leftToRight': return maxX - minX < 0.5 ? 0.5 : (x - minX) / (maxX - minX)
-      case 'topToBottom': return maxY - minY < 0.5 ? 0.5 : (maxY - y) / (maxY - minY)
-      case 'clockwise': {
-        const dx = x - meanX, dy = y - meanY
-        if (Math.hypot(dx, dy) <= 0.5) return 0
-        const angle = Math.atan2(dx, dy)
-        return (angle < 0 ? angle + 2 * Math.PI : angle) / (2 * Math.PI)
-      }
-      case 'outward': return maxDistance < 0.5 ? 0 : Math.hypot(x - meanX, y - meanY) / maxDistance
-      default: throw new Error(`unknown axis ${axis}`)
+  const center = pivot(layout)
+  const transform = wallTransform(rotationDegrees, center)
+  const len = panels.length
+
+  // Collect centers, bounds, and sums in a single pass over panels.
+  let minX = Infinity, maxX = -Infinity
+  let minY = Infinity, maxY = -Infinity
+  let sumX = 0, sumY = 0
+
+  const centers = new Array(len)
+  for (let i = 0; i < len; i += 1) {
+    const p = panels[i]
+    const pt = transform.wall([p.x, p.y])
+    const x = pt[0], y = pt[1]
+    centers[i] = { id: p.panelID, x, y }
+    if (x < minX) minX = x
+    if (x > maxX) maxX = x
+    if (y < minY) minY = y
+    if (y > maxY) maxY = y
+    sumX += x
+    sumY += y
+  }
+
+  const meanX = sumX / len
+  const meanY = sumY / len
+
+  // Calculate maxDistance only when requested by 'clockwise' or 'outward' axes.
+  let maxDistance = 0
+  if (axis === 'clockwise' || axis === 'outward') {
+    for (let i = 0; i < len; i += 1) {
+      const c = centers[i]
+      const dist = Math.hypot(c.x - meanX, c.y - meanY)
+      if (dist > maxDistance) maxDistance = dist
     }
   }
-  const quantised = value => Math.round(Math.min(1, Math.max(0, value)) * 1e9) / 1e9
-  return centers
-    .map(c => ({ panelID: c.id, position: quantised(position(c.point)) }))
-    .sort((a, b) => (a.position === b.position ? a.panelID - b.panelID : a.position - b.position))
+
+  const rangeX = maxX - minX
+  const rangeY = maxY - minY
+
+  const result = new Array(len)
+  for (let i = 0; i < len; i += 1) {
+    const c = centers[i]
+    let pos = 0
+    switch (axis) {
+      case 'leftToRight':
+        pos = rangeX < 0.5 ? 0.5 : (c.x - minX) / rangeX
+        break
+      case 'topToBottom':
+        pos = rangeY < 0.5 ? 0.5 : (maxY - c.y) / rangeY
+        break
+      case 'clockwise': {
+        const dx = c.x - meanX, dy = c.y - meanY
+        if (Math.hypot(dx, dy) <= 0.5) {
+          pos = 0
+        } else {
+          const angle = Math.atan2(dx, dy)
+          pos = (angle < 0 ? angle + 2 * Math.PI : angle) / (2 * Math.PI)
+        }
+        break
+      }
+      case 'outward':
+        pos = maxDistance < 0.5 ? 0 : Math.hypot(c.x - meanX, c.y - meanY) / maxDistance
+        break
+      default:
+        throw new Error(`unknown axis ${axis}`)
+    }
+    const quantised = Math.round(Math.min(1, Math.max(0, pos)) * 1e9) / 1e9
+    result[i] = { panelID: c.id, position: quantised }
+  }
+
+  return result.sort((a, b) => (a.position === b.position ? a.panelID - b.panelID : a.position - b.position))
 }
 
 /** 1 is the leftmost panel on the wall as oriented. */

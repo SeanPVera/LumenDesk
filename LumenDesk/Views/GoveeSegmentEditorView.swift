@@ -271,7 +271,9 @@ struct GoveeSegmentEditorView: View {
                         .foregroundStyle(Lumen.chalk)
                         .frame(width: 44, height: 142)
                         .overlay(RoundedRectangle(cornerRadius: 6)
-                            .stroke(isSelected ? Lumen.lit : Lumen.rule, lineWidth: isSelected ? 2 : 1))
+                            .stroke(isSelected ? Lumen.lit : Lumen.rule, lineWidth: isSelected ? 2 : 1)
+                            .allowsHitTesting(false))
+                        .contentShape(RoundedRectangle(cornerRadius: 6))
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Curtain column \(index + 1)")
@@ -342,6 +344,7 @@ struct GoveeSegmentEditorView: View {
             RoundedRectangle(cornerRadius: 6)
                 .stroke(isSelected ? Color.accentColor : Lumen.hairline,
                         lineWidth: isSelected ? 2 : 0.5)
+                .allowsHitTesting(false)
         }
     }
 
@@ -404,7 +407,8 @@ struct GoveeSegmentEditorView: View {
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Lumen.surfaceRaised, in: RoundedRectangle(cornerRadius: 6))
-        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Lumen.hairline, lineWidth: 0.5))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Lumen.hairline, lineWidth: 0.5)
+            .allowsHitTesting(false))
         .accessibilityElement(children: .contain)
     }
 
@@ -433,7 +437,9 @@ struct GoveeSegmentEditorView: View {
                 .padding(.vertical, 5)
                 .background(isCurrent ? Color.accentColor.opacity(0.22) : Lumen.surfaceLoud, in: Capsule())
                 .overlay(Capsule().stroke(isCurrent ? Color.accentColor : Lumen.hairline,
-                                          lineWidth: isCurrent ? 1.5 : 0.5))
+                                          lineWidth: isCurrent ? 1.5 : 0.5)
+                    .allowsHitTesting(false))
+                .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .help("Light \(names)")
@@ -472,7 +478,9 @@ struct GoveeSegmentEditorView: View {
             .frame(minWidth: 44, minHeight: 44)
             .padding(3)
             .background(Lumen.deck)
-            .overlay(RoundedRectangle(cornerRadius: 4).stroke(isSelected ? Lumen.lit : Lumen.rule, lineWidth: isSelected ? 2 : 1))
+            .overlay(RoundedRectangle(cornerRadius: 4).stroke(isSelected ? Lumen.lit : Lumen.rule, lineWidth: isSelected ? 2 : 1)
+                .allowsHitTesting(false))
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel("\(unitName.capitalized) \(index + 1)")
@@ -583,7 +591,9 @@ struct GoveeSegmentEditorView: View {
                             .fill(swatch.color)
                             .frame(width: 36, height: 36)
                             .frame(width: 44, height: 44)
-                            .overlay(Circle().stroke(Color.primary.opacity(0.25), lineWidth: 0.5))
+                            .overlay(Circle().stroke(Color.primary.opacity(0.25), lineWidth: 0.5)
+                                .allowsHitTesting(false))
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .help(swatch.label)
@@ -598,7 +608,9 @@ struct GoveeSegmentEditorView: View {
                             .fill(recent.color)
                             .frame(width: 36, height: 36)
                             .frame(width: 44, height: 44)
-                            .overlay(Circle().stroke(Lumen.hairlineStrong, lineWidth: 0.5))
+                            .overlay(Circle().stroke(Lumen.hairlineStrong, lineWidth: 0.5)
+                                .allowsHitTesting(false))
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .help("\(recent.name) · \(recent.hex)")
@@ -718,7 +730,9 @@ struct GoveeSegmentEditorView: View {
             }
             .padding(7)
             .background(Lumen.surfaceRaised, in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Lumen.hairline, lineWidth: 0.5))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Lumen.hairline, lineWidth: 0.5)
+                .allowsHitTesting(false))
+            .contentShape(RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
         .help(custom ? "\(preset.name) (saved preset)" : preset.name)
@@ -1011,6 +1025,7 @@ struct SegmentMiniStripView: View {
         }
         .clipShape(RoundedRectangle(cornerRadius: 3))
         .overlay(RoundedRectangle(cornerRadius: 3).stroke(Lumen.hairlineStrong, lineWidth: 0.5))
+        .allowsHitTesting(false)
         .accessibilityHidden(true)
     }
 }

@@ -38,7 +38,9 @@ struct SpectrumValueRow: View {
             }
         }
         .padding(.vertical, 9)
-        .overlay(alignment: .bottom) { Rectangle().fill(Lumen.ruleSoft).frame(height: 1) }
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Lumen.ruleSoft).frame(height: 1).allowsHitTesting(false)
+        }
         .onAppear { hex = rgb.hexString }
         .onChange(of: rgb) { value in hex = value.hexString; invalidHex = false }
         .onChange(of: editingHex) { focused in if !focused { submitHex() } }
@@ -173,7 +175,12 @@ struct LumenFader: View {
         }
         .focusableCompat()
         .focused($hasKeyboardFocus)
-        .overlay(RoundedRectangle(cornerRadius: 4).stroke(hasKeyboardFocus ? Lumen.focus : .clear, lineWidth: 2).padding(-3))
+        .overlay {
+            RoundedRectangle(cornerRadius: 4)
+                .stroke(hasKeyboardFocus ? Lumen.focus : .clear, lineWidth: 2)
+                .padding(-3)
+                .allowsHitTesting(false)
+        }
         .onHorizontalMoveCompat { nudge($0) }
     }
 
@@ -195,11 +202,13 @@ struct LumenFader: View {
                     .frame(width: 5, height: 18)
 
                     .offset(x: min(max(0, width * fraction - 2.5), width - 5))
+                    .allowsHitTesting(false)
             }
             .contentShape(Rectangle())
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { drag in
+                        guard isEnabled else { return }
                         if !editing {
                             editing = true
                             onEditingChanged(true)
@@ -207,6 +216,7 @@ struct LumenFader: View {
                         commit(x: drag.location.x, width: width)
                     }
                     .onEnded { drag in
+                        guard editing else { return }
                         commit(x: drag.location.x, width: width)
                         editing = false
                         onEditingChanged(false)
@@ -330,6 +340,7 @@ private struct LumenRockerFace: View {
                 }
                 rocker
             }
+            .lumenInteractiveTarget()
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -379,6 +390,7 @@ private struct LumenChipFace: View {
                 .foregroundStyle(configuration.isOn ? Lumen.stage : Lumen.meter)
                 .padding(.horizontal, 11)
                 .padding(.vertical, 5)
+                .lumenInteractiveTarget()
                 .background(
                     RoundedRectangle(cornerRadius: Lumen.controlRadius, style: .continuous)
                         .fill(configuration.isOn ? tint : Lumen.stripRaised)
@@ -615,6 +627,7 @@ private struct LumenIconKeyFace: View {
             .foregroundStyle(prominent ? Lumen.stage : tint)
             .frame(minWidth: size, minHeight: size)
             .padding(.horizontal, 4)
+            .lumenInteractiveTarget()
             .background(
                 shape.fill(prominent
                            ? (configuration.isPressed ? Lumen.chalk : Lumen.lit)

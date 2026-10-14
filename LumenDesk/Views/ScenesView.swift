@@ -111,6 +111,7 @@ struct ScenesView: View {
                     .overlay(
                         RoundedRectangle(cornerRadius: 2, style: .continuous)
                             .stroke(Lumen.hairlineStrong, lineWidth: 1)
+                            .allowsHitTesting(false)
                     )
                 }
             }
@@ -135,13 +136,18 @@ struct ScenesView: View {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                     TextField(searchPlaceholder, text: $searchText).textFieldStyle(.plain)
                     if !searchText.isEmpty {
-                        Button { searchText = "" } label: { Image(systemName: "xmark.circle.fill") }
+                        Button { searchText = "" } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .lumenInteractiveTarget()
+                        }
                             .buttonStyle(.plain).foregroundStyle(.secondary)
+                            .accessibilityLabel("Clear search")
                     }
                 }
+                .frame(minHeight: 44)
                 .padding(8)
                 .background(RoundedRectangle(cornerRadius: 8).fill(Lumen.surfaceRaised))
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Lumen.hairline, lineWidth: 1))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Lumen.hairline, lineWidth: 1).allowsHitTesting(false))
 
                 if section == .themes {
                     Menu {
@@ -153,9 +159,9 @@ struct ScenesView: View {
                         }
                     } label: {
                         Label(themeCategory?.rawValue ?? "All moods", systemImage: "line.3.horizontal.decrease.circle")
+                            .lumenInteractiveTarget()
                     }
                     .fixedSize()
-                    .lumenInteractiveTarget()
                 }
 
                 if section != .scenes {
@@ -294,6 +300,7 @@ struct ScenesView: View {
                         .overlay(
                             RoundedRectangle(cornerRadius: 2, style: .continuous)
                                 .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                                .allowsHitTesting(false)
                         )
                 }
                 Spacer()
@@ -373,9 +380,10 @@ struct ScenesView: View {
             Button { manager.toggleFavoriteScene(scene.id) } label: {
                 Image(systemName: manager.isFavoriteScene(scene.id) ? "star.fill" : "star")
                     .foregroundStyle(manager.isFavoriteScene(scene.id) ? Lumen.gold : .secondary)
+                    .lumenInteractiveTarget()
             }
             .buttonStyle(.plain)
-            .lumenInteractiveTarget()
+            .accessibilityLabel(manager.isFavoriteScene(scene.id) ? "Remove \(scene.name) from favorites" : "Favorite \(scene.name)")
             Image(systemName: "wand.and.stars").foregroundStyle(Lumen.violetBright).font(LumenType.display(size: 18, weight: .semibold))
             VStack(alignment: .leading, spacing: 4) {
                 if renamingID == scene.id {
@@ -416,10 +424,13 @@ struct ScenesView: View {
                 Button("Rename…") { beginRename(scene) }
                 Button(manager.isFavoriteScene(scene.id) ? "Remove Favorite" : "Favorite") { manager.toggleFavoriteScene(scene.id) }
                 Button("Delete Scene", role: .destructive) { manager.deleteScene(scene.id) }
-            } label: { Image(systemName: "ellipsis.circle") }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .lumenInteractiveTarget()
+            }
             .menuStyle(.borderlessButton)
             .fixedSize()
-            .lumenInteractiveTarget()
+            .accessibilityLabel("Actions for \(scene.name)")
         }
         .padding(12).lumenCard()
     }

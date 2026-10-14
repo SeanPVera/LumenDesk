@@ -430,9 +430,9 @@ struct MusicModeView: View {
                     Spacer()
                     Button { toggleExclusion(fixture.id) } label: {
                         Image(systemName: isExcluded ? "eye.slash" : "eye")
+                            .lumenInteractiveTarget()
                     }
                     .buttonStyle(.borderless)
-                    .lumenInteractiveTarget()
                     .foregroundStyle(isExcluded ? Lumen.textTertiary : Lumen.success)
                     .disabled(isRunning)
                     .help(isRunning ? "Stop the show to change which lights are included." : "")
@@ -442,16 +442,16 @@ struct MusicModeView: View {
                     .accessibilityHint(isRunning ? "Stop the show first to change inclusion." : "")
                     Button { moveFixture(from: index, offset: -1, ordered: ordered) } label: {
                         Image(systemName: "chevron.up")
+                            .lumenInteractiveTarget()
                     }
                     .buttonStyle(.borderless).disabled(index == 0 || isExcluded)
                     .accessibilityLabel("Move \(fixture.label) earlier")
-                    .lumenInteractiveTarget()
                     Button { moveFixture(from: index, offset: 1, ordered: ordered) } label: {
                         Image(systemName: "chevron.down")
+                            .lumenInteractiveTarget()
                     }
                     .buttonStyle(.borderless).disabled(index == ordered.count - 1 || isExcluded)
                     .accessibilityLabel("Move \(fixture.label) later")
-                    .lumenInteractiveTarget()
                     }
                 }
                 .padding(.vertical, 8)

@@ -365,7 +365,10 @@ struct PlanWorkspaceView: View {
                                     if let message = manager.sceneScopeSummary(scene, selectedScope: scope).outsideSelectedRoomMessage {
                                         Text(message).font(.caption).foregroundStyle(Lumen.warn)
                                     }
-                                }.padding(12).frame(width: 190).background(Lumen.deck, in: RoundedRectangle(cornerRadius: 6))
+                                }
+                                .padding(12).frame(width: 190)
+                                .background(Lumen.deck, in: RoundedRectangle(cornerRadius: 6))
+                                .contentShape(RoundedRectangle(cornerRadius: 6))
                             }
                             .buttonStyle(.plain)
                             .accessibilityLabel("Apply \(scene.name) to its \(scene.snapshots.count) saved lights")
@@ -482,8 +485,11 @@ struct PlanWorkspaceView: View {
                         .font(.body.weight(section == item ? .semibold : .regular))
                         .foregroundStyle(section == item ? Lumen.lit : Lumen.meter)
                         .padding(.vertical, 12)
+                        .lumenInteractiveTarget()
                         .overlay(alignment: .bottom) {
-                            if section == item { Rectangle().fill(Lumen.lit).frame(height: 2) }
+                            if section == item {
+                                Rectangle().fill(Lumen.lit).frame(height: 2).allowsHitTesting(false)
+                            }
                         }
                 }
                 .buttonStyle(.plain)
@@ -491,7 +497,7 @@ struct PlanWorkspaceView: View {
             }
             Spacer(minLength: 0)
         }
-        .overlay(alignment: .bottom) { Rectangle().fill(Lumen.ruleSoft).frame(height: 1) }
+        .overlay(alignment: .bottom) { Rectangle().fill(Lumen.ruleSoft).frame(height: 1).allowsHitTesting(false) }
     }
 
     @ViewBuilder private func controls(wide: Bool) -> some View {
@@ -657,6 +663,7 @@ struct SpectrumFixtureLane: View {
         HStack(alignment: .top, spacing: 8) {
             Button(action: select) {
                 Image(systemName: selected ? "checkmark.square.fill" : "square")
+                    .lumenInteractiveTarget()
             }
             .buttonStyle(.plain)
             .accessibilityLabel("\(selected ? "Deselect" : "Select") \(light.label)")
@@ -876,7 +883,7 @@ struct RoomEmitter: View {
             .padding(6)
             .frame(maxWidth: .infinity)
             .contentShape(Rectangle())
-            .overlay(RoundedRectangle(cornerRadius: 6).stroke(selected ? Lumen.lit : .clear, lineWidth: 2))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(selected ? Lumen.lit : .clear, lineWidth: 2).allowsHitTesting(false))
         }
         .buttonStyle(.plain)
         .accessibilityLabel(light.label)
@@ -904,6 +911,7 @@ struct RoomFixtureLine: View {
                     }
                     Spacer(minLength: 0)
                 }
+                .padding(.vertical, compact ? 8 : 14)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -912,8 +920,7 @@ struct RoomFixtureLine: View {
             Text(light.isStale ? "Offline" : light.isOn ? "\(Int(light.brightness * 100))%" : "Off")
                 .font(.callout.monospacedDigit()).foregroundStyle(Lumen.meter)
         }
-        .padding(.vertical, compact ? 8 : 14)
-        .overlay(alignment: .bottom) { Rectangle().fill(Lumen.ruleSoft).frame(height: 1) }
+        .overlay(alignment: .bottom) { Rectangle().fill(Lumen.ruleSoft).frame(height: 1).allowsHitTesting(false) }
     }
 
     private var detail: String {
@@ -1234,16 +1241,21 @@ struct PlanBoardView: View {
     private func block(for room: Room, cell: CGSize) -> some View {
         if let frame = displayFrame(for: room) {
             let rect = frame.rect(cell: cell, origin: boardInset)
-            VStack(alignment: .leading, spacing: 8) {
-                Text(room.name).font(.headline).lineLimit(2)
-                Text("\(manager.devices(in: room).count) fixtures")
-                    .font(.caption).foregroundStyle(Lumen.meter)
-                Spacer(minLength: 0)
-                HStack {
-                    Text("\(frame.width) × \(frame.height) cells").font(.caption)
-                    Spacer()
+            let compact = rect.height < 160
+            let fixtureCount = manager.devices(in: room).count
+            VStack(alignment: .leading, spacing: compact ? 4 : 8) {
+                Text(room.name).font(.headline).lineLimit(compact ? 1 : 2)
+                if rect.height >= 120 {
+                    Text("\(fixtureCount) fixtures")
+                        .font(.caption).foregroundStyle(Lumen.meter)
+                }
+                HStack(spacing: rect.width >= 160 ? 8 : 0) {
+                    if rect.width >= 160 {
+                        Text("\(frame.width) × \(frame.height) cells").font(.caption).lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
                     Image(systemName: "arrow.down.right")
-                        .frame(width: 32, height: 32)
+                        .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
                         .gesture(DragGesture().onChanged { value in
                             move(room: room, by: PlanCellDelta(
@@ -1258,11 +1270,14 @@ struct PlanBoardView: View {
                         })
                         .accessibilityHidden(true)
                 }
+                .frame(maxHeight: .infinity, alignment: .bottom)
             }
-            .padding(12)
+            .padding(compact ? 8 : 12)
             .background(Lumen.deck)
-            .overlay(Rectangle().stroke(selectedRoomID == room.id ? Lumen.lit : Lumen.rule, lineWidth: 1))
+            .overlay(Rectangle().stroke(selectedRoomID == room.id ? Lumen.lit : Lumen.rule, lineWidth: 1).allowsHitTesting(false))
             .padding(3)
+            .frame(width: rect.width, height: rect.height)
+            .clipped()
             .contentShape(Rectangle())
             .onTapGesture { selectedRoomID = room.id }
             .gesture(DragGesture().onChanged { value in
@@ -1276,7 +1291,10 @@ struct PlanBoardView: View {
                     rows: Int((value.translation.height / cell.height).rounded())),
                      resize: false, committing: true)
             })
-            .frame(width: rect.width, height: rect.height)
+            .help("\(room.name) · \(fixtureCount) fixtures · \(frame.width) × \(frame.height) cells")
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(room.name)
+            .accessibilityValue("\(fixtureCount) fixtures, \(frame.width) by \(frame.height) cells")
             .offset(x: rect.minX, y: rect.minY)
             .zIndex(draft?.roomID == room.id ? 10 : 0)
         }

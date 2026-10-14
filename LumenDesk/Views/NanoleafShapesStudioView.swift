@@ -175,7 +175,7 @@ struct NanoleafShapesStudio: View {
                                onIdentify: { shapes.identifyPanel($0, on: deviceID) })
                 .frame(height: height)
                 .background(Lumen.stage)
-                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Lumen.ruleSoft, lineWidth: 1))
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Lumen.ruleSoft, lineWidth: 1).allowsHitTesting(false))
                 .focusableCompat()
                 .onMoveCompat { direction in moveCursor(direction, in: layout) }
                 .onExitCommandCompat { selection = [] }

@@ -6,6 +6,15 @@ import AppKit
 @testable import LumenDesk
 
 final class MusicCaptureTransientTests: XCTestCase {
+    func testExpiredMappedInputDropsItsMapAndBarEnergy() {
+        let mapped = AudioReactiveSnapshot(energy: 0.4, tempo: 120, beatConfidence: 1, isTempoLocked: true,
+                                           analysisTimestamp: 100, barEnergy: 1, beatMapActive: true)
+        let expired = mapped.fresh(at: 102)
+        XCTAssertFalse(expired.beatMapActive)
+        XCTAssertNil(expired.barEnergy)
+        XCTAssertFalse(expired.isTempoLocked)
+    }
+
     func testUnrenderedHitsCannotCrossAResetSampleClockOrDroppedCapture() {
         let hit = AudioReactiveSnapshot(snare: 1, analysisTimestamp: 100,
                                        analyzedSamples: 2048, droppedBuffers: 0)
@@ -427,6 +436,78 @@ final class MusicModeTests: XCTestCase {
         controller.renderNowForTesting()
         XCTAssertEqual(frames, before + 2)
         XCTAssertEqual(controller.lastRenderInterval, 0.05, accuracy: 0.0001)
+    }
+
+    @MainActor
+    func testCalibrationUsesTheSelectedRoomAndExpiresWhenItsShowStops() throws {
+        var time = 100.0
+        let controller = AudioReactiveSessionController(now: { time })
+        defer { controller.stopAll() }
+        let first = LightScope.room(UUID()), second = LightScope.room(UUID())
+        let fixtures = [MusicFixtureDescriptor(id: "a", label: "Lamp", transport: .lifxLAN)]
+        let config = MusicModeConfiguration.configuration(for: .balanced)
+        controller.start(scope: first, configuration: config, topology: FixtureTopology(), fixtures: fixtures,
+                         reducedMotion: false, useSyntheticPattern: true, onFrame: { _ in }, completion: { _ in })
+        time = 100.02
+        let secondFixtures = [MusicFixtureDescriptor(id: "b", label: "Other lamp", transport: .lifxLAN)]
+        controller.start(scope: second, configuration: config, topology: FixtureTopology(), fixtures: secondFixtures,
+                         reducedMotion: false, useSyntheticPattern: true, onFrame: { _ in }, completion: { _ in })
+        for beat in 0..<8 {
+            time = 100 + Double(beat) * (60 / 128.0) + 0.06
+            controller.renderNowForTesting()
+            controller.recordCalibrationTap(scope: first)
+        }
+        XCTAssertEqual(controller.calibrationTapCount(for: first), 8)
+        XCTAssertEqual(try XCTUnwrap(controller.calibratedLatencyOffset(from: 0, scope: first)), 0.06, accuracy: 1e-9)
+        XCTAssertEqual(controller.calibrationTapCount(for: second), 0)
+        XCTAssertNil(controller.calibratedLatencyOffset(from: 0, scope: second))
+        time += 1
+        XCTAssertFalse(controller.hasCalibrationGrid(for: first), "a stalled renderer cannot supply a tap grid")
+        controller.renderNowForTesting()
+        controller.stop(scope: first)
+        XCTAssertFalse(controller.hasCalibrationGrid(for: first))
+        XCTAssertEqual(controller.calibrationTapCount(for: first), 0)
+        XCTAssertNil(controller.calibratedLatencyOffset(from: 0, scope: first))
+        XCTAssertTrue(controller.hasCalibrationGrid(for: second))
+    }
+
+    @MainActor
+    func testCalibrationResetsWhenTimingChangesAndRequiresVisibleAccents() {
+        var time = 100.0
+        let controller = AudioReactiveSessionController(now: { time })
+        defer { controller.stopAll() }
+        let fixtures = [MusicFixtureDescriptor(id: "a", label: "Lamp", transport: .lifxLAN)]
+        var config = MusicModeConfiguration.configuration(for: .balanced)
+        controller.start(scope: .all, configuration: config, topology: FixtureTopology(), fixtures: fixtures,
+                         reducedMotion: false, useSyntheticPattern: true, onFrame: { _ in }, completion: { _ in })
+        time = 100.06
+        controller.renderNowForTesting()
+        controller.recordCalibrationTap(scope: .all)
+        XCTAssertEqual(controller.calibrationTapCount(for: .all), 1)
+        config.outputLatencyOffset = 0.1
+        controller.update(scope: .all, configuration: config, topology: FixtureTopology(), fixtures: fixtures, reducedMotion: false)
+        XCTAssertEqual(controller.calibrationTapCount(for: .all), 0)
+        controller.renderNowForTesting()
+        config.masterBrightness = 0
+        controller.update(scope: .all, configuration: config, topology: FixtureTopology(), fixtures: fixtures, reducedMotion: false)
+        XCTAssertFalse(controller.hasCalibrationGrid(for: .all))
+    }
+
+    @MainActor
+    func testJoiningASyntheticRoomDoesNotReplaceTheSharedLiveSourceStatus() {
+        let backend = MusicCaptureStub()
+        let capture = AudioCaptureService(makeSystemAudioCapture: { _ in backend })
+        let controller = AudioReactiveSessionController(captureService: capture)
+        defer { controller.stopAll() }
+        controller.start(scope: .room(UUID()), configuration: .configuration(for: .balanced),
+                         topology: FixtureTopology(), fixtures: [], reducedMotion: false,
+                         useSyntheticPattern: false, onFrame: { _ in }, completion: { _ in })
+        backend.completions.last?(.started)
+        XCTAssertEqual(controller.sourceStatus, .systemAudio)
+        controller.start(scope: .room(UUID()), configuration: .configuration(for: .balanced),
+                         topology: FixtureTopology(), fixtures: [], reducedMotion: false,
+                         useSyntheticPattern: true, onFrame: { _ in }, completion: { _ in })
+        XCTAssertEqual(controller.sourceStatus, .systemAudio, "file clocks and playback following depend on the shared source status")
     }
 
     func testMasterZeroAndLiveCeilingIncludeFlashes() {

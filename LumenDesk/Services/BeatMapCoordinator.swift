@@ -76,6 +76,7 @@ final class BeatMapCoordinator {
     private var current: NowPlayingSample?
     private var liveOnsets: [HopFeature] = []
     private var lastAlignment = -Double.greatestFiniteMagnitude
+    private var acceptsHopsSince = -Double.greatestFiniteMagnitude
     private var automationDenied = false
     #if os(macOS)
     private var monitor: NowPlayingMonitor?
@@ -107,6 +108,8 @@ final class BeatMapCoordinator {
         clock.reset()
         current = nil
         liveOnsets.removeAll()
+        lastAlignment = -Double.greatestFiniteMagnitude
+        acceptsHopsSince = -Double.greatestFiniteMagnitude
         automationDenied = false
         status = .off
     }
@@ -164,12 +167,13 @@ final class BeatMapCoordinator {
     // MARK: - Following Spotify and Music
 
     /// Starts asking Spotify and Music where the song is. macOS only.
-    func beginFollowing() {
+    func beginFollowing(startMonitor: Bool = true) {
         #if os(macOS)
         guard source != .following else { return }
         stop()
         source = .following
         status = .waitingForPlayer
+        guard startMonitor else { return }
         let monitor = NowPlayingMonitor(now: now)
         monitor.onSample = { [weak self] sample in self?.receive(sample) }
         monitor.onPermission = { [weak self] permission in
@@ -190,6 +194,7 @@ final class BeatMapCoordinator {
             current = nil
             map = nil
             clock.reset()
+            resetLiveHistory(since: now())
             updateFollowingStatus()
             return
         }
@@ -197,7 +202,7 @@ final class BeatMapCoordinator {
         if current.map({ $0.app.trackKey($0.trackID) }) != key {
             endTrack()
             clock.reset()
-            liveOnsets.removeAll()
+            resetLiveHistory(since: sample.sampledAt)
             if let cached = store.load(key: key), cached.isPlayable {
                 map = cached
                 learner = nil
@@ -207,16 +212,30 @@ final class BeatMapCoordinator {
             }
         }
         current = sample
-        clock.report(position: sample.position, at: sample.sampledAt, playing: sample.isPlaying)
+        let wasPlaying = clock.isPlaying
+        let result = clock.report(position: sample.position, at: sample.sampledAt, playing: sample.isPlaying)
+        if result == .jumped || wasPlaying != sample.isPlaying {
+            // A clock discontinuity invalidates the old correspondence between
+            // host time and track position, even if a pause kept that position.
+            learner?.restart()
+            resetLiveHistory(since: sample.sampledAt)
+        }
         updateFollowingStatus()
     }
 
     /// Hops analysed since the last render tick, with host times.
     func consume(hops: [HopFeature]) {
-        guard source == .following, clock.isKnown, !hops.isEmpty else { return }
-        for hop in hops {
+        guard source == .following, clock.isKnown, clock.isPlaying, !hops.isEmpty else { return }
+        for hop in hops where hop.time >= acceptsHopsSince {
+            if let previous = liveOnsets.last {
+                if hop.time <= previous.time { continue }
+                if hop.time - previous.time > 0.5 {
+                    learner?.restart()
+                    resetLiveHistory(since: hop.time)
+                }
+            }
             liveOnsets.append(hop)
-            if clock.isPlaying { learner?.add(hop, position: clock.position(at: hop.time)) }
+            learner?.add(hop, position: clock.position(at: hop.time))
         }
         if let newest = liveOnsets.last?.time,
            let drop = liveOnsets.firstIndex(where: { $0.time >= newest - Self.alignmentWindow - 1 }), drop > 0 {
@@ -252,6 +271,12 @@ final class BeatMapCoordinator {
     }
 
     // MARK: - Private
+
+    private func resetLiveHistory(since timestamp: TimeInterval) {
+        liveOnsets.removeAll(keepingCapacity: true)
+        lastAlignment = -Double.greatestFiniteMagnitude
+        acceptsHopsSince = timestamp
+    }
 
     private func alignIfDue(_ map: BeatMap, at timestamp: TimeInterval) {
         guard timestamp - lastAlignment >= Self.alignmentInterval,

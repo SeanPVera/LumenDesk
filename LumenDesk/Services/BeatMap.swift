@@ -22,7 +22,7 @@ struct HopFeature: Equatable {
 /// Kept in lockstep with `web/app/src/music/beat-map.ts`: the algorithms,
 /// constants and test vectors are the same on both sides.
 struct BeatMap: Codable, Equatable {
-    static let currentVersion = 1
+    static let currentVersion = 2
     /// Samples per second of every envelope a map stores or is built from.
     static let envelopeRate = 100.0
     /// Bars in a map always hold four beats; metre overrides still apply on top.
@@ -284,8 +284,15 @@ enum BeatMapBuilder {
         guard !means.isEmpty else { return [] }
         let order = means.indices.sorted { means[$0] < means[$1] || (means[$0] == means[$1] && $0 < $1) }
         var rank = [Double](repeating: 0, count: means.count)
-        for (position, index) in order.enumerated() {
-            rank[index] = means.count == 1 ? 1 : Double(position) / Double(means.count - 1)
+        // Tied bars share their average rank instead of inventing a build-up
+        // through a steady passage. One bar has the neutral rank.
+        var first = 0
+        while first < order.count {
+            var end = first + 1
+            while end < order.count, means[order[end]] - means[order[first]] < 1e-9 { end += 1 }
+            let percentile = means.count == 1 ? 0.5 : Double(first + end - 1) / Double(2 * (means.count - 1))
+            for i in first..<end { rank[order[i]] = percentile }
+            first = end
         }
         return means.indices.map { index in
             let absolute = max(0, min(1, means[index] / 0.75))
@@ -546,10 +553,13 @@ struct TapCalibrator {
     static let maximumSpread: TimeInterval = 0.06
 
     private(set) var errors: [TimeInterval] = []
+    private var lastTap: TimeInterval?
     var count: Int { errors.count }
 
     mutating func tap(at time: TimeInterval, beatReference: TimeInterval, interval: TimeInterval) {
         guard interval >= 0.2, interval <= 2, time.isFinite, beatReference.isFinite else { return }
+        if let lastTap, time - lastTap < interval * 0.5 { return }
+        lastTap = time
         let beats = (time - beatReference) / interval
         errors.append((beats - beats.rounded()) * interval)
         if errors.count > Self.maximumTaps { errors.removeFirst(errors.count - Self.maximumTaps) }

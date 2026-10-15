@@ -115,7 +115,9 @@ half-second mean, rectified. Global tempo comes from the novelty's
 autocorrelation under a log-normal prior at 120 BPM, each lag also scoring half
 its double. Beats come from dynamic programming (Ellis 2007, tightness 100),
 silent ends are trimmed, the downbeat is the beat phase with the strongest low
-band, and bar energy is 60 % absolute loudness, 40 % rank within the song. This
+band, and bar energy is 60 % absolute loudness, 40 % rank within the song.
+Equal-energy bars share their average rank; one bar gets a neutral rank. Version
+2 invalidates older cached maps that ranked equal bars by track order. This
 is an offline second pass: unlike the live tracker it sees the whole song, so
 early beats are not guesses.
 
@@ -164,6 +166,11 @@ Tap calibration (`TapCalibrator`, both platforms): each tap's distance to the
 nearest beat of the grid the last frame rendered against is the lights'
 lateness plus the person's lag. After eight taps whose median absolute
 deviation is under 60 ms, the median moves the offset, rounded to 10 ms.
+The grid belongs to the selected scope and expires with capture/render freshness.
+Stop, source/grid loss and timing-policy changes clear the measurement. Taps
+closer than half a beat cannot count twice. Calibration requires an included
+light and nonzero brightness, intensity and beat sensitivity; the saved offset
+remains app-wide. Zero offset is labeled Default timing, without claiming sync.
 
 ## Musical behavior
 
@@ -237,9 +244,15 @@ previous meaning. Session ownership and manual-control revisions reject stale
 frames/restoration after a newer user command. New/returned fixtures do not silently
 join a running show's membership. Normal source changes/restarts are serialized.
 
-The web builds beat maps for played files (cached for the page's lifetime) and
+The web builds beat maps for played files (up to eight cached maps per page) and
 has the light timing offset and tap calibration. It cannot follow Spotify or
 Music: a browser has no way to ask another app for its playback position.
+Suspended browser audio exposes Resume audio, clears pending input and suspends
+the playback clock. File playback loops until Stop. Readouts use the same metre
+and time-feel policy as the renderer, and Stop clears the generated-color preview.
+The bridge remembers exact LIFX HSBK and Govee white mode alongside the existing
+Shapes design/scene snapshot. Failed dispatch returns 503 and keeps restoration
+ownership and that snapshot for retry; newer manual control still revokes it.
 
 Web Music Mode has one all-device scope, active roles and presets; it has no native
 advanced sliders, saved Music Mode configuration, fixture-order editor or segment

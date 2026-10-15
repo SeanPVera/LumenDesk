@@ -18,6 +18,8 @@ import {
 } from './types'
 
 const RENDER_HZ = 20
+// Shared across Music tab mounts; audio and session ownership remain per show.
+const fileBeatMaps = new Map<string, BeatMap | null>()
 const WORKLET = `
 class LumenTap extends AudioWorkletProcessor {
   constructor() {
@@ -90,6 +92,7 @@ export interface BeatMapState {
 
 export interface MusicSessionState {
   beatMap: BeatMapState
+  audioSuspended: boolean
   running: boolean
   source: AudioSourceKind
   grooveId: string
@@ -145,13 +148,13 @@ export class WebMusicSession {
   private playbackRead = 0
   private playbackCount = 0
   /** Maps survive Stop and Restart for the life of the page, keyed by file identity. */
-  private readonly beatMapCache = new Map<string, BeatMap | null>()
+  private readonly beatMapCache = fileBeatMaps
   private beatMap: BeatMap | null = null
   private fileStartContextTime = 0
   private fileDuration = 0
   private lastProgressEmit = 0
   /** The grid the last frame rendered against, which calibration taps are measured from. */
-  private calibrationGrid: { reference: number; interval: number } | null = null
+  private calibrationGrid: { reference: number; interval: number; updatedAt: number } | null = null
   private readonly tapCalibrator = new TapCalibrator()
   readonly diagnostics = { analyzedSamples: 0, droppedBuffers: 0, framesGenerated: 0, snapshotAge: 0, renderInterval: 0 }
   version = 0
@@ -160,6 +163,7 @@ export class WebMusicSession {
 
   readonly state: MusicSessionState = {
     beatMap: { status: 'none', progress: 0, tempo: null },
+    audioSuspended: false,
     running: false,
     source: 'demo',
     grooveId: 'four',
@@ -185,7 +189,9 @@ export class WebMusicSession {
 
   setDevices(devices: BridgeDevice[]): void {
     const previous = new Map(this.state.fixtures.map(f=>[f.id,f]))
-    this.state.fixtures = devices.filter(d=>!this.state.running || previous.has(d.id)).map(d=>previous.get(d.id) ?? deviceToFixture(d))
+    this.state.fixtures = devices.filter(d=>!this.state.running || previous.has(d.id)).map(d => ({
+      ...deviceToFixture(d), role: previous.get(d.id)?.role ?? 'auto',
+    }))
     const ids = this.state.fixtures.map(f => f.id)
     if (this.state.topology.fixtureOrder.length === 0) {
       this.state.topology.fixtureOrder = ids
@@ -198,6 +204,10 @@ export class WebMusicSession {
   }
 
   patch(partial: Partial<MusicSessionState>): void {
+    if (partial.configuration && (partial.configuration.outputLatencyOffset !== this.state.configuration.outputLatencyOffset
+      || partial.configuration.timeFeel !== this.state.configuration.timeFeel
+      || partial.configuration.metreOverride !== this.state.configuration.metreOverride
+      || partial.configuration.preset !== this.state.configuration.preset)) this.tapCalibrator.reset()
     Object.assign(this.state, partial)
     if (partial.configuration) {
       this.state.configuration = normalizeConfiguration(partial.configuration)
@@ -229,7 +239,10 @@ export class WebMusicSession {
     this.emit()
     try {
       if (source === 'microphone') await this.startMicrophone(generation)
-      else if (source === 'file' && file) await this.startFile(file, generation)
+      else if (source === 'file') {
+        if (!file) throw new Error('Choose an audio file before starting.')
+        await this.startFile(file, generation)
+      }
       else if (source === 'midi') await this.startMidi(generation)
       if (generation !== this.generation) return
       this.timer = window.setInterval(() => this.tick(), 1000 / RENDER_HZ)
@@ -249,6 +262,10 @@ export class WebMusicSession {
     this.inputSnapshot = emptySnapshot()
     this.clearPlaybackSnapshots()
     this.state.snapshot = emptySnapshot()
+    this.state.frame = null
+    this.calibrationGrid = null
+    this.tapCalibrator.reset()
+    this.state.audioSuspended = false
     this.beatMap = null
     this.state.beatMap = { status: 'none', progress: 0, tempo: null }
     if (this.timer != null) {
@@ -263,6 +280,7 @@ export class WebMusicSession {
     this.mediaStream = null
     const audio = this.audio
     this.audio = null
+    if (audio) audio.onstatechange = null
     if (this.midiAccess) for (const input of this.midiAccess.inputs.values()) input.onmidimessage = null
     this.midiAccess = null
     this.midiTicks = 0; this.midiBeats = 0; this.midiLastBeat = null
@@ -296,14 +314,9 @@ export class WebMusicSession {
     const live = position != null && this.beatMap
       ? applyBeatMap(this.inputSnapshot, this.beatMap, position, timestamp)
       : this.inputSnapshot
-    if (this.state.source === 'demo') {
-      const groove = GROOVES.find(g => g.id === this.state.grooveId) ?? GROOVES[0]
-      this.state.snapshot = syntheticSnapshot(groove as Groove, this.startedAt, timestamp)
-    } else {
-      this.state.snapshot = freshSnapshot(live, timestamp)
-    }
     // The display and engine each age the original snapshot once.
-    const snapshot = this.state.source === 'demo' ? this.state.snapshot : {...live}
+    const groove = GROOVES.find(g => g.id === this.state.grooveId) ?? GROOVES[0]
+    const snapshot = this.state.source === 'demo' ? syntheticSnapshot(groove as Groove, this.startedAt, timestamp) : {...live}
     const config = this.state.configuration
     if (config.metreOverride !== 'auto' && config.metreOverride !== snapshot.metre) {
       snapshot.metre = config.metreOverride
@@ -323,9 +336,13 @@ export class WebMusicSession {
       timestamp,
       this.sequence,
     )
-    this.calibrationGrid = snapshot.isTempoLocked && snapshot.beatInterval > 0 && snapshot.beatReferenceTime > 0
-      ? { reference: snapshot.beatReferenceTime, interval: snapshot.beatInterval }
+    const fresh = freshSnapshot(snapshot, timestamp)
+    this.state.snapshot = fresh
+    this.calibrationGrid = !this.state.audioSuspended && fresh.isTempoLocked && fresh.beatConfidence >= 0.4
+      && fresh.beatInterval > 0 && fresh.beatReferenceTime > 0
+      ? { reference: fresh.beatReferenceTime, interval: fresh.beatInterval, updatedAt: timestamp }
       : null
+    if (!this.calibrationGrid) this.tapCalibrator.reset()
     this.state.frame = frame
     this.onFrame?.(frame)
     this.hasUnrenderedCapture = false
@@ -342,7 +359,37 @@ export class WebMusicSession {
     finally { URL.revokeObjectURL(url) }
     if (generation !== this.generation) { await audio.close(); throw new Error('Capture start cancelled') }
     this.audio = audio
+    audio.onstatechange = () => {
+      if (generation !== this.generation) return
+      this.state.audioSuspended = audio.state === 'suspended' || (audio.state as string) === 'interrupted'
+      if (this.state.audioSuspended) {
+        this.inputSnapshot = emptySnapshot()
+        this.clearPlaybackSnapshots()
+        this.calibrationGrid = null
+        this.tapCalibrator.reset()
+      }
+      this.emit()
+    }
+    // Browsers can create a suspended context even after the Start gesture.
+    // Expose a direct Resume action rather than reporting silent playback as running.
+    this.state.audioSuspended = audio.state === 'suspended'
+    if (this.state.audioSuspended) void this.resumeAudio()
     return audio
+  }
+
+  async resumeAudio(): Promise<void> {
+    const audio = this.audio
+    if (!audio) return
+    try {
+      await audio.resume()
+      if (this.audio !== audio) return
+      this.state.audioSuspended = audio.state !== 'running'
+      this.emit()
+    } catch (error) {
+      if (this.audio !== audio) return
+      this.state.error = error instanceof Error ? error.message : String(error)
+      this.emit()
+    }
   }
 
   private connectTap(source: AudioNode, audio: AudioContext, monitor: boolean, generation: number): void {
@@ -407,12 +454,17 @@ export class WebMusicSession {
   get calibrationTapCount(): number { return this.tapCalibrator.count }
 
   /** Whether the show has a beat grid to time taps against. */
-  get canCalibrate(): boolean { return this.state.running && this.calibrationGrid != null }
+  get canCalibrate(): boolean {
+    const config = this.state.configuration
+    return this.state.running && this.calibrationGrid != null && performance.now() / 1000 - this.calibrationGrid.updatedAt < 0.5
+      && config.masterBrightness > 0 && config.effectIntensity > 0 && config.beatSensitivity > 0
+      && this.state.fixtures.some(fixture => fixture.role !== 'off')
+  }
 
   /** Records one tap, made when the person saw the lights pulse, on the render clock. */
   recordCalibrationTap(): void {
     const grid = this.calibrationGrid
-    if (!grid) return
+    if (!grid || !this.canCalibrate) return
     this.tapCalibrator.tap(performance.now() / 1000, grid.reference, grid.interval)
     this.emit()
   }
@@ -424,6 +476,7 @@ export class WebMusicSession {
 
   /** The light timing offset the taps call for, or null until there are enough consistent taps. */
   calibratedLatencyOffset(): number | null {
+    if (!this.canCalibrate) return null
     return this.tapCalibrator.suggestedOffset(this.state.configuration.outputLatencyOffset ?? 0)
   }
 
@@ -444,6 +497,9 @@ export class WebMusicSession {
     }, () => generation === this.generation).then(map => {
       if (generation !== this.generation) return
       this.beatMapCache.set(key, map)
+      // A map holds the whole onset envelope. Keep repeated file selections
+      // bounded instead of retaining every song for the lifetime of the tab.
+      while (this.beatMapCache.size > 8) this.beatMapCache.delete(this.beatMapCache.keys().next().value!)
       this.useBeatMap(map)
     }, () => {
       if (generation !== this.generation) return
@@ -462,7 +518,7 @@ export class WebMusicSession {
   /** Track position audible at `timestamp` (performance seconds), from the output clock. */
   private filePosition(timestamp: number): number | null {
     const audio = this.audio
-    if (!audio || !(this.fileDuration > 0)) return null
+    if (!audio || this.state.audioSuspended || !(this.fileDuration > 0)) return null
     let contextTime = audio.currentTime
     const output = audio.getOutputTimestamp?.()
     if (output && output.contextTime != null && output.performanceTime != null &&

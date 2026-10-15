@@ -264,7 +264,7 @@ export function MusicModeView({
     session.setDevices(reachable
       .filter(device => (!starting && !state.running) || memberIDs.has(device.id))
       .map(d => ({ id: d.id, name: d.name, brand: d.brand, reachable: d.reachable })))
-  }, [session, starting, state.running, reachable.map(d => d.id).join('|')])
+  }, [session, starting, state.running, JSON.stringify(reachable.map(d => [d.id, d.name, d.brand]))])
 
   useEffect(() => {
     session.setOnFrame(frame => sender.enqueue(frame))
@@ -390,6 +390,10 @@ export function MusicModeView({
         {!connected && <p className="note">Reconnect the bridge before starting Music.</p>}
         {!includedFixtures.length && selectedSource !== 'demo' && <p className="note">Find lights in Room or change a light’s role from Off before starting. Demo groove can run without lights.</p>}
         {state.error && <p className="error" role="alert">{state.error}</p>}
+        {state.running && state.audioSuspended && <div className="diagnostic" role="status">
+          <p>Audio is paused by the browser. Resume audio to continue the show.</p>
+          <button onClick={() => void session.resumeAudio()}>Resume audio</button>
+        </div>}
         {stopSummary && cleanups.length === 0 && <p className="note" role="status">{stopSummary}</p>}
         {cleanups.length > 0 && <div className="diagnostic" role={cleanupError ? 'alert' : 'status'}>
           <p>Music stopped. {cleanupRestores ? 'Sending the starting light output back' : 'Releasing Music Mode’s lights'} is {cleanupBusy ? 'in progress' : 'still pending'}.</p>
@@ -472,7 +476,7 @@ function MusicMeters({ session }: { session: WebMusicSession }) {
       <strong>{!running ? 'Stopped' : tempo === 'Beat' ? 'Finding a pulse' : tempo}</strong>
       <span>{source === 'midi' ? 'Measured MIDI clock · ' : snapshot.beatMapActive ? 'Following the beat map · ' : ''}Confidence {Math.round(snapshot.beatConfidence * 100)}%</span>
     </div>
-    {running && source === 'file' && <p className="meta" role="status">{beatMapLabel(beatMap)}</p>}
+    {running && source === 'file' && <p className="meta" role="status">{beatMapLabel(beatMap, snapshot.beatMapActive)}</p>}
     <p className="note">Audio input and musical interpretation. Generated colors in the light list are not device confirmations.</p>
     <details onToggle={event => setExpanded(event.currentTarget.open)}>
       <summary>Audio diagnostics</summary>
@@ -572,6 +576,10 @@ function TimingCalibration({ session, apply }: { session: WebMusicSession; apply
   const count = session.calibrationTapCount
   const suggested = session.calibratedLatencyOffset()
   const status = !session.state.running ? 'Start a show to calibrate'
+    : !session.state.fixtures.some(fixture => fixture.role !== 'off') ? 'Include a light to calibrate'
+    : session.state.audioSuspended ? 'Resume audio to calibrate'
+    : session.state.configuration.masterBrightness <= 0 || session.state.configuration.effectIntensity <= 0
+      || session.state.configuration.beatSensitivity <= 0 ? 'Raise brightness, intensity and beat sensitivity to calibrate'
     : !session.canCalibrate ? 'Waiting for a steady beat'
     : count < TAP_MINIMUM ? `${count} of ${TAP_MINIMUM} taps`
     : suggested != null ? `Measured: ${timingLabel(suggested)}`
@@ -594,14 +602,14 @@ function TimingCalibration({ session, apply }: { session: WebMusicSession; apply
 
 function timingLabel(offset: number): string {
   const ms = Math.round(offset * 1000)
-  if (ms === 0) return 'On the beat'
+  if (ms === 0) return 'Default timing (0 ms)'
   return ms > 0 ? `${ms} ms earlier` : `${-ms} ms later`
 }
 
-function beatMapLabel(beatMap: { status: string; progress: number; tempo: number | null }): string {
+function beatMapLabel(beatMap: { status: string; progress: number; tempo: number | null }, active = false): string {
   switch (beatMap.status) {
     case 'analyzing': return `Mapping beats… ${Math.round(beatMap.progress * 100)}%. Live listening runs meanwhile.`
-    case 'ready': return `Beat map ready${beatMap.tempo ? ` · ${Math.round(beatMap.tempo)} BPM` : ''}. ${MUSIC_HELP.beatMap}`
+    case 'ready': return `Beat map ready${beatMap.tempo ? ` · ${Math.round(beatMap.tempo)} BPM` : ''}. ${active ? 'Following the file’s playback clock.' : 'Listening live outside the mapped beats.'}`
     case 'unavailable': return 'No steady beat found in this file, so the show keeps listening live.'
     default: return ''
   }

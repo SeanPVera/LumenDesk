@@ -302,7 +302,7 @@ export function freshSnapshot(input: AudioReactiveSnapshot, timestamp: number): 
   const pulseDecay = input.isTempoLocked && input.beatInterval > 0 ? Math.min(.34, Math.max(.1, input.beatInterval * .42)) : .16;
   next.pulse *= weight * Math.exp(-age / pulseDecay);
   next.drop *= weight * Math.exp(-age / .3);
-  if (weight === 0) { next.isTempoLocked = false; next.tempo = 0; }
+  if (weight === 0) { next.isTempoLocked = false; next.tempo = 0; next.beatMapActive = false; next.barEnergy = undefined; }
   return next;
 }
 

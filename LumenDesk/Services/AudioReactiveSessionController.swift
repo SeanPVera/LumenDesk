@@ -155,7 +155,8 @@ final class AudioReactiveSessionController: ObservableObject {
     private let beatMaps: BeatMapCoordinator
     private let now: () -> TimeInterval
     /// The grid the last frame rendered against, which taps are measured from.
-    private var calibrationGrid: (reference: TimeInterval, interval: TimeInterval)?
+    private var calibrationGrids: [LightScope: (reference: TimeInterval, interval: TimeInterval, updatedAt: TimeInterval)] = [:]
+    private var calibrationScope: LightScope?
     private var tapCalibrator = TapCalibrator()
     private var subscriptionToken: AudioCaptureService.SubscriptionToken?
     private var sessions: [LightScope: Session] = [:]
@@ -239,6 +240,7 @@ final class AudioReactiveSessionController: ObservableObject {
             return
         }
         let startTime = now()
+        clearCalibration(for: scope)
         if !useSyntheticPattern && !sessions.values.contains(where: { !$0.synthetic }) {
             liveCaptureBeganAt = startTime
             analysisSnapshot = AudioReactiveSnapshot()
@@ -261,7 +263,7 @@ final class AudioReactiveSessionController: ObservableObject {
         startRenderTimerIfNeeded()
 
         if useSyntheticPattern {
-            sourceStatus = .syntheticDemo
+            if !sessions.values.contains(where: { !$0.synthetic }) { sourceStatus = .syntheticDemo }
             publishPlaybackState(true)
             completion(.started)
             return
@@ -328,6 +330,9 @@ final class AudioReactiveSessionController: ObservableObject {
     /// or the saved lighting that Stop & Restore will return to.
     func restartSystemAudio() {
         guard canRestartSystemAudio, sourceStatus != .requestingPermission else { return }
+        for (scope, session) in sessions where !session.synthetic { clearCalibration(for: scope) }
+        beatMaps.stop()
+        captureService.setHopLogging(false)
         captureService.stop()
         liveCaptureBeganAt = now()
         analysisSnapshot = AudioReactiveSnapshot()
@@ -350,6 +355,12 @@ final class AudioReactiveSessionController: ObservableObject {
         reducedMotion: Bool
     ) {
         guard let session = sessions[scope] else { return }
+        if session.configuration.outputLatencyOffset != configuration.outputLatencyOffset
+            || session.configuration.timeFeel != configuration.timeFeel
+            || session.configuration.metreOverride != configuration.metreOverride
+            || session.configuration.preset != configuration.preset {
+            clearCalibration(for: scope)
+        }
         session.configuration = configuration
         session.topology = topology
         session.fixtures = fixtures
@@ -364,23 +375,42 @@ final class AudioReactiveSessionController: ObservableObject {
     func resetCalibrationTaps() {
         tapCalibrator = TapCalibrator()
         calibrationTapCount = 0
+        calibrationScope = nil
     }
 
     /// Records one tap, made when the person saw the lights pulse. Ignored
     /// until the show has a beat grid to measure against.
-    func recordCalibrationTap() {
-        guard let grid = calibrationGrid else { return }
+    func recordCalibrationTap(scope: LightScope) {
+        guard hasCalibrationGrid(for: scope), let grid = calibrationGrids[scope] else { return }
+        if calibrationScope != scope { resetCalibrationTaps() }
+        calibrationScope = scope
         tapCalibrator.tap(at: now(), beatReference: grid.reference, interval: grid.interval)
         calibrationTapCount = tapCalibrator.count
     }
 
     /// The light timing offset the taps call for, starting from `current`,
     /// or nil until there are enough consistent taps.
-    func calibratedLatencyOffset(from current: Double) -> Double? {
-        tapCalibrator.suggestedOffset(current: current)
+    func calibratedLatencyOffset(from current: Double, scope: LightScope) -> Double? {
+        guard calibrationScope == scope, hasCalibrationGrid(for: scope) else { return nil }
+        return tapCalibrator.suggestedOffset(current: current)
     }
 
-    var hasCalibrationGrid: Bool { calibrationGrid != nil }
+    func calibrationTapCount(for scope: LightScope) -> Int {
+        calibrationScope == scope ? calibrationTapCount : 0
+    }
+
+    func hasCalibrationGrid(for scope: LightScope) -> Bool {
+        guard let grid = calibrationGrids[scope], now() - grid.updatedAt < 0.5,
+              let session = sessions[scope], session.synthetic || (sourceStatus != .unavailable && sourceStatus != .requestingPermission),
+              session.configuration.masterBrightness > 0, session.configuration.effectIntensity > 0,
+              session.configuration.beatSensitivity > 0 else { return false }
+        return !session.topology.expandedTargets(for: session.fixtures).isEmpty
+    }
+
+    private func clearCalibration(for scope: LightScope) {
+        calibrationGrids.removeValue(forKey: scope)
+        if calibrationScope == scope { resetCalibrationTaps() }
+    }
 
     func effectiveConfiguration(for scope: LightScope) -> MusicModeConfiguration? {
         guard let session = sessions[scope] else { return nil }
@@ -388,6 +418,9 @@ final class AudioReactiveSessionController: ObservableObject {
     }
 
     func setGroove(_ grooveID: String) {
+        if grooveID != selectedGrooveID {
+            for (scope, session) in sessions where session.synthetic { clearCalibration(for: scope) }
+        }
         selectedGrooveID = grooveID
         let groove = MusicGroove.all.first { $0.id == grooveID } ?? MusicGroove.fourOnTheFloor
         for session in sessions.values where session.synthetic {
@@ -396,6 +429,7 @@ final class AudioReactiveSessionController: ObservableObject {
     }
 
     func stop(scope: LightScope) {
+        clearCalibration(for: scope)
         sessions.removeValue(forKey: scope)
         activeScopeIDs.remove(scope)
         latestFrames.removeValue(forKey: scope)
@@ -403,6 +437,8 @@ final class AudioReactiveSessionController: ObservableObject {
     }
 
     func stopAll() {
+        calibrationGrids.removeAll()
+        resetCalibrationTaps()
         sessions.removeAll(keepingCapacity: true)
         activeScopeIDs.removeAll(keepingCapacity: true)
         latestFrames.removeAll(keepingCapacity: true)
@@ -491,7 +527,6 @@ final class AudioReactiveSessionController: ObservableObject {
             }
         }
         sequenceNumber &+= 1
-        var grid: (reference: TimeInterval, interval: TimeInterval)?
         for (scope, session) in sessions {
             let snapshot = Self.applyMusicalPolicy(
                 session.synthetic
@@ -499,8 +534,11 @@ final class AudioReactiveSessionController: ObservableObject {
                     : liveSnapshot,
                 configuration: session.configuration
             )
-            if grid == nil, snapshot.isTempoLocked, snapshot.beatInterval > 0, snapshot.beatReferenceTime > 0 {
-                grid = (snapshot.beatReferenceTime, snapshot.beatInterval)
+            let fresh = snapshot.fresh(at: timestamp)
+            if fresh.isTempoLocked, fresh.beatConfidence >= 0.4, fresh.beatInterval > 0, fresh.beatReferenceTime > 0 {
+                calibrationGrids[scope] = (fresh.beatReferenceTime, fresh.beatInterval, timestamp)
+            } else {
+                clearCalibration(for: scope)
             }
             if session.synthetic {
                 if timestamp - lastSnapshotPublishedAt >= previewPublicationInterval {
@@ -529,7 +567,6 @@ final class AudioReactiveSessionController: ObservableObject {
             }
             session.onFrame(frame)
         }
-        calibrationGrid = grid
         hasUnrenderedCapture = false
     }
 
@@ -669,6 +706,7 @@ final class AudioReactiveSessionController: ObservableObject {
     }
 
     private func removeFailedSession(_ scope: LightScope) {
+        clearCalibration(for: scope)
         sessions.removeValue(forKey: scope)
         activeScopeIDs.remove(scope)
         latestFrames.removeValue(forKey: scope)

@@ -509,6 +509,8 @@ Live listening only ever hears the past, so it has to guess where the next beat 
 
 The show also shifts between six **energy gears**. On a map each bar's gear is known in advance; live, a bar's gear is set when the bar finishes. Calm passages ease in, and on a fast song nod on every other beat while the time feel is Auto. The loudest passages snap and change colour on the beat, never more than three times a second. The top gear can ask for a downbeat flash, which still goes through No-flash mode and the three-a-second limit.
 
+Timing calibration uses the selected room's fresh beat grid. Stop or a source/timing change clears its taps, and rapid repeated clicks do not count as separate beats. The zero position means **Default timing (0 ms)**, not a measured guarantee of synchronization. Browser audio that pauses exposes **Resume audio**; file playback repeats until **Stop**.
+
 #### How Music Mode works
 
 Music Mode is a first-class section of the selected Room workspace. It turns the existing `music-pulse` effect into a configurable choreography session while preserving that identifier for saved-state compatibility.

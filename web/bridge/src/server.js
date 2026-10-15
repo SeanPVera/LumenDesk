@@ -1,5 +1,5 @@
 import http from 'node:http'
-import { clampPercent } from './color.js'
+import { clampPercent, percentToU16 } from './color.js'
 import { serveStatic } from './static.js'
 import { applyScene, snapshot } from './actions.js'
 import { ACTIONS } from './schedules.js'
@@ -124,8 +124,8 @@ export function createServer({
   host = null,
 }) {
   const musicBrightnessOpened = new Set()
-  /** Shapes wall id -> what it showed before a browser music show claimed it. */
-  const shapesBeforeMusic = new Map()
+  /** Fixture id -> exact colour mode before a browser music show claimed it. */
+  const beforeMusic = new Map()
   const clientFor = device => ({ lifx, govee, nanoleaf })[device.brand] ?? null
   const dispatch = {
     power: (device, body) => {
@@ -384,6 +384,7 @@ export function createServer({
         if (shapesMatch[2] !== 'identify') {
           registry.claimControl(device.id)
           musicBrightnessOpened.delete(device.id)
+          beforeMusic.delete(device.id)
         }
         const [status, payload] = shapes[shapesMatch[2]](device, body)
         return json(res, status, payload)
@@ -399,6 +400,7 @@ export function createServer({
         const body = await readJSON(req)
         registry.claimControl(device.id)
         musicBrightnessOpened.delete(device.id)
+        beforeMusic.delete(device.id)
         const result = dispatch[action](device, body)
         if (result && result.error) return json(res, 400, result)
         if (!result) return json(res, 503, { error: 'device is not addressable yet' })
@@ -419,6 +421,7 @@ export function createServer({
         }
         const states = Array.isArray(body.states) ? body.states : []
         let applied = 0
+        const failed = []
         const seen = new Set()
         for (const state of states) {
           const id = state && state.fixtureID
@@ -433,17 +436,18 @@ export function createServer({
             if (device.musicOwner && device.musicOwner !== state.owner && performance.now()-(device.musicFrameAt ?? 0)<2000) continue
             if ((state.restoring || state.release) && device.musicOwner !== state.owner) continue
             if (state.release) {
-              registry.patch(id,{musicOwner:null});musicBrightnessOpened.delete(id);shapesBeforeMusic.delete(id);continue
+              registry.patch(id,{musicOwner:null});musicBrightnessOpened.delete(id);beforeMusic.delete(id);continue
             }
             if (!device.musicOwner || device.musicOwner !== state.owner) musicBrightnessOpened.delete(id)
-            // A show starting on a Shapes wall remembers what the wall showed,
-            // so a restore brings back the design or scene, not just a colour.
-            if (device.brand === 'nanoleaf' && !state.restoring && device.musicOwner !== state.owner) {
+            // Keep exact LIFX HSBK, Govee white mode and Shapes designs/scenes.
+            // An RGB approximation cannot restore a white at its original kelvin.
+            if (!state.restoring && device.musicOwner !== state.owner) {
               const shapes = device.shapes ?? {}
-              shapesBeforeMusic.set(id, { owner: state.owner, output: shapes.output, design: shapes.design,
-                effect: shapes.effect, kelvin: device.kelvin })
+              beforeMusic.set(id, { owner: state.owner, output: shapes.output, design: shapes.design,
+                effect: shapes.effect, kelvin: device.kelvin, color: device.color,
+                hsbk: device.hsbk ? { ...device.hsbk } : null })
             }
-            registry.patch(id,{musicOwner:state.restoring?null:state.owner,musicFrameAt:performance.now()})
+            registry.patch(id,{musicOwner:state.owner,musicFrameAt:performance.now()})
           }
           // RGB is chroma; brightness is independent (legacy RGB-only callers
           // still retain the device's current brightness).
@@ -464,26 +468,38 @@ export function createServer({
           }
           // A Shapes wall follows the show as one colour here, paced by its
           // client; its per-panel stream is the native app's.
-          const before = device.brand === 'nanoleaf' && restoring && state.owner ? shapesBeforeMusic.get(id) : undefined
-          if (device.brand === 'nanoleaf' && restoring) shapesBeforeMusic.delete(id)
-          const restoredShapes = before?.owner === state.owner && nanoleaf ? restoreShapes(device, before, level) : null
+          const saved = restoring && state.owner ? beforeMusic.get(id) : undefined
+          const before = saved?.owner === state.owner ? saved : undefined
+          const restoredShapes = device.brand === 'nanoleaf' && before && nanoleaf ? restoreShapes(device, before, level) : null
+          const hsbk = before?.hsbk ? { ...before.hsbk,
+            brightness: level === undefined ? before.hsbk.brightness : percentToU16(level * 100) } : undefined
+          const white = device.brand === 'govee' && before?.kelvin ? before.kelvin : null
           const ok = restoredShapes !== null
             ? restoredShapes
             : device.brand === 'lifx'
-              ? lifx.setColor(device, {rgb,brightnessPercent:level === undefined ? undefined : level*100,
+              ? lifx.setColor(device, {rgb,hsbk,brightnessPercent:level === undefined ? undefined : level*100,
                   durationMS:Number.isFinite(state.transitionDuration)?Math.max(0,Math.min(500,state.transitionDuration*1000)):90})
               : device.brand === 'nanoleaf'
                 ? Boolean(nanoleaf?.setColor(device, {rgb,brightnessPercent:level === undefined ? undefined : level*100,transient:!restoring}))
-                : govee.setColor(device, {rgb:payload})
+                : govee.setColor(device, white ? {kelvin:white} : {rgb:payload})
           if (ok) {
+            if (restoring) {
+              beforeMusic.delete(id)
+              if (state.owner) registry.patch(id, {musicOwner:null})
+            }
             // Colour only: this path never sends a power command, so it must
             // not record a power state it did not set. The device's own status
             // reply is what says whether the light is lit.
-            registry.patch(device.id, { color: payload, ...(level !== undefined ? {brightness: device.brand === 'lifx' || restoring ? level*100 : 100} : {}) })
+            registry.patch(device.id, { color: before?.color ?? payload, kelvin: before?.kelvin ?? null,
+              ...(level !== undefined ? {brightness: device.brand === 'lifx' || restoring ? level*100 : 100} : {}) })
             applied += 1
+          } else {
+            failed.push(id)
           }
         }
-        return json(res, 200, { ok: true, applied, stage: 'accepted-for-local-dispatch' })
+        return json(res, failed.length ? 503 : 200, { ok: failed.length === 0, applied,
+          ...(failed.length ? {error:'Music output could not be queued for every light. Retry when the lights reconnect.',failed} : {}),
+          stage: 'accepted-for-local-dispatch' })
       }
 
       if (store) {

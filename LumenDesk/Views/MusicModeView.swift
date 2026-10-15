@@ -206,6 +206,15 @@ struct MusicModeView: View {
                     .font(.caption).foregroundStyle(Lumen.meter)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            #if os(macOS)
+            if (isRunning ? audioStatus == .systemAudio : selectedSource == .platformAudio) {
+                Toggle("Follow Spotify and Music", isOn: followsPlaybackAppsBinding)
+                    .toggleStyle(LumenRockerStyle())
+                    .help(MusicModeHelp.followPlaybackApps)
+                    .accessibilityHint(MusicModeHelp.followPlaybackApps)
+                helpCaption(MusicModeHelp.followPlaybackApps)
+            }
+            #endif
         }
         .padding(16)
         .lumenCard()
@@ -279,7 +288,8 @@ struct MusicModeView: View {
                     if preset == .custom {
                         configuration.preset = .custom
                     } else {
-                        configuration = .configuration(for: preset)
+                        configuration = MusicModeConfiguration.configuration(for: preset)
+                            .preservingRoomCalibration(from: configuration)
                         if manager.isDemoMode {
                             configuration.usesSyntheticDemoPattern = manager.musicModeConfiguration.usesSyntheticDemoPattern
                         }
@@ -588,6 +598,25 @@ struct MusicModeView: View {
                     .toggleStyle(LumenRockerStyle())
                     .help(MusicModeHelp.phraseAware)
                 helpCaption(MusicModeHelp.phraseAware)
+                helpCaption(MusicModeHelp.energyGears)
+
+                Divider().overlay(Lumen.hairline)
+                LumenFader(label: "Light timing", value: latencyOffsetBinding,
+                           range: -MusicModeConfiguration.latencyOffsetLimit...MusicModeConfiguration.latencyOffsetLimit,
+                           step: 0.01, format: Self.timingLabel, showsScale: false,
+                           onEditingChanged: { editing in if !editing { commitConfiguration() } })
+                    .accessibilityHint(MusicModeHelp.lightTiming)
+                    .help(MusicModeHelp.lightTiming)
+                helpCaption(MusicModeHelp.lightTiming)
+                LightTimingCalibrationView(
+                    controller: manager.musicModeController,
+                    isRunning: isRunning,
+                    currentOffset: configuration.outputLatencyOffset,
+                    showsPlainHelp: showsPlainHelp
+                ) { offset in
+                    configuration.outputLatencyOffset = offset
+                    commitConfiguration()
+                }
                 Text("Auto metre listens for 3/4, 5/4, 6/8 and 7/8. Half-time feels every other beat. Roles and metre stay inside the 3 flashes/second ceiling.")
                     .font(.caption).foregroundStyle(Lumen.textSecondary)
 
@@ -699,6 +728,37 @@ struct MusicModeView: View {
         )
     }
 
+    /// Light timing belongs to the room, not the show, so moving it keeps the
+    /// preset. Every drag value reaches the running show; release saves.
+    private var latencyOffsetBinding: Binding<Double> {
+        Binding(
+            get: { configuration.outputLatencyOffset },
+            set: { value in
+                configuration.outputLatencyOffset = value
+                manager.previewMusicModeConfiguration(configuration)
+                configuration = manager.musicModeConfiguration
+                hasUnsavedChanges = true
+            }
+        )
+    }
+
+    /// Following Spotify and Music is a choice about the source, so it keeps the preset too.
+    private var followsPlaybackAppsBinding: Binding<Bool> {
+        Binding(
+            get: { configuration.followsPlaybackApps },
+            set: { value in
+                configuration.followsPlaybackApps = value
+                commitConfiguration()
+            }
+        )
+    }
+
+    static func timingLabel(_ offset: Double) -> String {
+        let milliseconds = Int((offset * 1000).rounded())
+        if milliseconds == 0 { return "On the beat" }
+        return milliseconds > 0 ? "\(milliseconds) ms earlier" : "\(-milliseconds) ms later"
+    }
+
     private var paletteBinding: Binding<String> {
         Binding(
             get: { configuration.paletteIdentity },
@@ -802,7 +862,7 @@ private struct MusicModeInputStatusView: View {
                     Text("Musical pulse").font(.caption).foregroundStyle(Lumen.meter)
                     Text(tempoLabel).font(.headline.monospacedDigit())
                     Text(controller.latestSnapshot.isTempoLocked
-                         ? "Confidence \(Int(controller.latestSnapshot.beatConfidence * 100))%"
+                         ? "\(controller.latestSnapshot.beatMapActive ? "Beat map · " : "")Confidence \(Int(controller.latestSnapshot.beatConfidence * 100))%"
                          : "No reliable tempo yet")
                         .font(.caption).foregroundStyle(Lumen.meter)
                 }
@@ -822,7 +882,15 @@ private struct MusicModeInputStatusView: View {
                     }.padding(.top, 12)
                     Text("\(controller.latestSnapshot.inputChannels ?? 0) input channels · \(controller.latestSnapshot.droppedBuffers) dropped buffers")
                         .font(.caption.monospacedDigit()).foregroundStyle(Lumen.meter)
+                    Text("Grid \(controller.latestSnapshot.beatMapActive ? "from beat map" : "inferred live") · energy gear \(energyGearLabel) of 5")
+                        .font(.caption.monospacedDigit()).foregroundStyle(Lumen.meter)
                 }
+            }
+            if isRunning, controller.beatMapStatus != .off {
+                Label(controller.beatMapStatus.summary, systemImage: beatMapIcon)
+                    .font(.caption)
+                    .foregroundStyle(controller.beatMapStatus == .automationDenied ? Lumen.warning : Lumen.meter)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             if controller.sourceStatus == .permissionDenied {
                 Text(permissionMessage)
@@ -889,6 +957,20 @@ private struct MusicModeInputStatusView: View {
         }
     }
 
+    private var beatMapIcon: String {
+        switch controller.beatMapStatus {
+        case .analyzingFile, .learning: return "waveform.path.ecg"
+        case .fileReady, .following: return "metronome.fill"
+        case .automationDenied: return "lock.fill"
+        case .off, .noSteadyBeat, .waitingForPlayer: return "waveform"
+        }
+    }
+
+    private var energyGearLabel: String {
+        guard let tier = controller.latestFrames.values.first?.energyTier else { return "–" }
+        return "\(tier)"
+    }
+
     private var healthLabel: String {
         controller.sourceStatus == .midiClock && controller.inputHealth == .waiting
             ? "Waiting for MIDI clock" : controller.inputHealth.displayName
@@ -927,5 +1009,61 @@ private struct MusicModeInputStatusView: View {
         case .systemAudio, .microphone, .syntheticDemo, .filePlayback, .midiClock: return Lumen.success
         case .idle, .requestingPermission: return Lumen.textSecondary
         }
+    }
+}
+
+/// Tap along with the lights to measure how late they land, then adopt the
+/// measurement as the light timing offset. The taps are timed against the beat
+/// grid the show is rendering, on the same clock.
+private struct LightTimingCalibrationView: View {
+    @ObservedObject var controller: AudioReactiveSessionController
+    let isRunning: Bool
+    let currentOffset: Double
+    let showsPlainHelp: Bool
+    let apply: (Double) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                Button("Tap with the lights") { controller.recordCalibrationTap() }
+                    .buttonStyle(LumenSecondaryButtonStyle(compact: true))
+                    .disabled(!isRunning || !controller.hasCalibrationGrid)
+                    .accessibilityHint(MusicModeHelp.tapCalibration)
+                Text(status)
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(Lumen.textSecondary)
+                Spacer(minLength: 8)
+                if controller.calibrationTapCount > 0 {
+                    Button("Start over") { controller.resetCalibrationTaps() }
+                        .buttonStyle(LumenSecondaryButtonStyle(compact: true))
+                }
+                Button("Use measured timing") {
+                    guard let suggested else { return }
+                    apply(suggested)
+                    controller.resetCalibrationTaps()
+                }
+                .buttonStyle(LumenSecondaryButtonStyle(compact: true))
+                .disabled(suggested == nil)
+            }
+            .help(MusicModeHelp.tapCalibration)
+            if showsPlainHelp {
+                Text(MusicModeHelp.tapCalibration)
+                    .font(.caption)
+                    .foregroundStyle(Lumen.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityHidden(true)
+            }
+        }
+    }
+
+    private var suggested: Double? { controller.calibratedLatencyOffset(from: currentOffset) }
+
+    private var status: String {
+        guard isRunning else { return "Start a show to calibrate" }
+        guard controller.hasCalibrationGrid else { return "Waiting for a steady beat" }
+        let count = controller.calibrationTapCount
+        if count < TapCalibrator.minimumTaps { return "\(count) of \(TapCalibrator.minimumTaps) taps" }
+        if let suggested { return "Measured: \(MusicModeView.timingLabel(suggested))" }
+        return "\(count) taps, too uneven. Keep tapping."
     }
 }

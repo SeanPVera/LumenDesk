@@ -4,6 +4,29 @@ What changed in each LumenDesk release. The release workflow copies the
 section whose heading matches the tag into that tag's GitHub release, above
 the install steps, so write each entry for someone deciding whether to update.
 
+## Unreleased
+
+### Music Mode keeps time
+
+- **Beat maps for audio files.** Play a file and LumenDesk maps every beat in
+  it while the show is already running. Once the map is ready the lights follow
+  the file's own clock instead of guessing, and each bar's energy is known
+  before it plays. Maps are saved, so a file you have played before starts
+  mapped. Works in the Mac and iPhone apps and in the browser.
+- **Follow Spotify and Music (Mac).** With the new switch on, LumenDesk asks
+  Spotify or Music where the song is. The first listen of a track teaches it
+  the beats; every later listen plays from that map, and the system audio keeps
+  the clock on the song. macOS asks once for Automation permission. Nothing
+  leaves the Mac.
+- **Light timing.** A slider moves every accent up to 300 ms earlier or later,
+  and **Tap with the lights** measures how late your lights land and sets it
+  for you. It belongs to the room, so changing preset keeps it.
+- **Energy gears.** Shows shift through six gears as songs get louder or
+  quieter. Calm passages ease in and nod on every other beat of a fast song;
+  the loudest parts snap and change colour on the beat. The top gear can ask
+  for a downbeat flash, which No-flash mode still blocks and the
+  three-a-second limit still caps.
+
 ## 1.1.0 - 2026-10-03
 
 The first release with a Mac disk image to download. 1.0.0 shipped as source

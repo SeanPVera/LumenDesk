@@ -120,6 +120,8 @@ export const MUSIC_HELP = {
     "When you play a file, LumenDesk maps every beat in it while the show starts. Once the map is ready the lights follow the file's own clock instead of guessing, and they know each bar's energy before it plays.",
   timing:
     "Moves every accent earlier or later. If the lights land after the beat, move it toward Earlier. Lights on Wi-Fi often need 20 to 80 ms.",
+  calibration:
+    "Tap the button each time you see the lights pulse, for at least eight beats. LumenDesk measures how far behind the beat the pulses land and sets the timing for you. Your tapping has its own lag, so fine-tune by eye afterwards.",
   energy:
     "Music Mode shifts between six energy gears as the song gets louder or quieter. Calm passages ease in and can nod on every other beat; the loudest parts snap and change colour on the beat.",
 } as const;

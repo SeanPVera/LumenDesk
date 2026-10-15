@@ -1,5 +1,5 @@
 import { MusicFeatureAnalyzer } from './analyzer'
-import { analyzeAudioBuffer, applyBeatMap, type BeatMap } from './beat-map'
+import { TapCalibrator, analyzeAudioBuffer, applyBeatMap, type BeatMap } from './beat-map'
 import { MusicChoreographyEngine } from './choreography'
 import { configurationFor, normalizeConfiguration } from './config'
 import { hsvToRgb } from './fixtures'
@@ -150,6 +150,9 @@ export class WebMusicSession {
   private fileStartContextTime = 0
   private fileDuration = 0
   private lastProgressEmit = 0
+  /** The grid the last frame rendered against, which calibration taps are measured from. */
+  private calibrationGrid: { reference: number; interval: number } | null = null
+  private readonly tapCalibrator = new TapCalibrator()
   readonly diagnostics = { analyzedSamples: 0, droppedBuffers: 0, framesGenerated: 0, snapshotAge: 0, renderInterval: 0 }
   version = 0
   controlsVersion = 0
@@ -320,6 +323,9 @@ export class WebMusicSession {
       timestamp,
       this.sequence,
     )
+    this.calibrationGrid = snapshot.isTempoLocked && snapshot.beatInterval > 0 && snapshot.beatReferenceTime > 0
+      ? { reference: snapshot.beatReferenceTime, interval: snapshot.beatInterval }
+      : null
     this.state.frame = frame
     this.onFrame?.(frame)
     this.hasUnrenderedCapture = false
@@ -395,6 +401,30 @@ export class WebMusicSession {
     this.bufferSource = source
     this.state.fileName = file.name
     this.prepareBeatMap(file, buffer, generation)
+  }
+
+  /** Taps recorded since the last reset. */
+  get calibrationTapCount(): number { return this.tapCalibrator.count }
+
+  /** Whether the show has a beat grid to time taps against. */
+  get canCalibrate(): boolean { return this.state.running && this.calibrationGrid != null }
+
+  /** Records one tap, made when the person saw the lights pulse, on the render clock. */
+  recordCalibrationTap(): void {
+    const grid = this.calibrationGrid
+    if (!grid) return
+    this.tapCalibrator.tap(performance.now() / 1000, grid.reference, grid.interval)
+    this.emit()
+  }
+
+  resetCalibrationTaps(): void {
+    this.tapCalibrator.reset()
+    this.emit()
+  }
+
+  /** The light timing offset the taps call for, or null until there are enough consistent taps. */
+  calibratedLatencyOffset(): number | null {
+    return this.tapCalibrator.suggestedOffset(this.state.configuration.outputLatencyOffset ?? 0)
   }
 
   /** Builds (or reuses) the file's beat map while the live show is already playing. */

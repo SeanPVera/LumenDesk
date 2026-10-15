@@ -67,6 +67,10 @@ struct AudioReactiveSnapshot: Equatable {
     var analyzedSamples: Int64 = 0
     var droppedBuffers: Int = 0
     var inputChannels: Int? = nil
+    /// 0…1 energy of the current bar, known in advance when a beat map plays.
+    var barEnergy: Double? = nil
+    /// True when the grid fields come from a beat map rather than live inference.
+    var beatMapActive: Bool = false
 
     /// Stop extrapolating stale capture. Preserve beat count and theme; decay
     /// musical evidence over one second, then let the existing silence policy settle.
@@ -187,6 +191,65 @@ final class AudioCaptureService {
     private var midiSource: MIDIClockSource?
     private var fileTapInstalled = false
     private var securityScopedFileURL: URL?
+
+    // Hop features on host time for beat-map learning and alignment. Appended
+    // on the analysis queue, drained on main each render tick, and bounded so
+    // a stalled main thread cannot grow it.
+    private let hopLogLock = NSLock()
+    private var hopLog: [HopFeature] = []
+    private var hopLoggingEnabled = false
+    private static let maximumLoggedHops = 8_192
+
+    /// Start or stop keeping hop features for `drainHops()`. Off by default;
+    /// only beat-map following needs them.
+    func setHopLogging(_ enabled: Bool) {
+        hopLogLock.lock()
+        hopLoggingEnabled = enabled
+        if !enabled { hopLog.removeAll(keepingCapacity: false) }
+        hopLogLock.unlock()
+    }
+
+    /// Hops analysed since the last call, oldest first, with `time` on the host clock.
+    func drainHops() -> [HopFeature] {
+        hopLogLock.lock()
+        defer { hopLogLock.unlock() }
+        let hops = hopLog
+        hopLog.removeAll(keepingCapacity: true)
+        return hops
+    }
+
+    private func logHop(_ hop: HopFeature, hostTime: TimeInterval) {
+        hopLogLock.lock()
+        defer { hopLogLock.unlock() }
+        guard hopLoggingEnabled else { return }
+        if hopLog.count >= Self.maximumLoggedHops { hopLog.removeFirst(hopLog.count / 2) }
+        hopLog.append(HopFeature(time: hostTime, onset: hop.onset, kick: hop.kick, energy: hop.energy))
+    }
+
+    /// The track position audible at `hostTime`, from the player's own render
+    /// clock. Nil unless a file is playing. Main thread.
+    func filePlaybackPosition(at hostTime: TimeInterval) -> TimeInterval? {
+        guard captureMode == .file, let player = playerNode, let file = playingFile,
+              let nodeTime = player.lastRenderTime, nodeTime.isHostTimeValid, nodeTime.isSampleTimeValid,
+              let playerTime = player.playerTime(forNodeTime: nodeTime) else { return nil }
+        let sampleRate = playerTime.sampleRate
+        let length = Double(file.length) / file.processingFormat.sampleRate
+        guard sampleRate > 0, length > 0 else { return nil }
+        let rendered = Double(playerTime.sampleTime) / sampleRate
+        let position = rendered + (hostTime - AVAudioTime.seconds(forHostTime: nodeTime.hostTime))
+        guard position >= 0 else { return nil }
+        // The file loops by rescheduling, and the player's sample clock keeps counting.
+        return position.truncatingRemainder(dividingBy: length)
+    }
+
+    /// A second reader for the playing file, opened while its security scope
+    /// is held, for ahead-of-time analysis, plus the file's beat-map key.
+    func makeAnalysisFileReader() -> (file: AVAudioFile, key: String)? {
+        guard captureMode == .file, let url = playingFile?.url,
+              let reader = try? AVAudioFile(forReading: url) else { return nil }
+        let key = BeatMapKey.file(url: url, frames: reader.length, sampleRate: reader.processingFormat.sampleRate)
+        return (reader, key)
+    }
 
     private enum CaptureMode {
         case idle
@@ -310,6 +373,7 @@ final class AudioCaptureService {
             guard let self else { return }
             self.analyzerGeneration = generation
             self.analyzer = MusicFeatureAnalyzer(sourceDescription: sourceDescription)
+            self.analyzer.hopObserver = { [weak self] hop, hostTime in self?.logHop(hop, hostTime: hostTime) }
             self.lastPublishedHostTime = -Double.greatestFiniteMagnitude
             self.unpublishedSnapshot = nil
         }
@@ -854,6 +918,9 @@ private extension AVAudioPCMBuffer {
 /// predicted grid instead of on every transient.
 final class MusicFeatureAnalyzer {
     var sourceDescription: String
+    /// Receives every hop's beat-map features (time is stream time) and the
+    /// hop's host time. Called on whatever queue is analysing.
+    var hopObserver: ((HopFeature, TimeInterval) -> Void)?
 
     private static let windowSize = 2_048
     private static let hopSize = 512
@@ -1025,6 +1092,16 @@ final class MusicFeatureAnalyzer {
             if samplesUntilHop <= 0 {
                 samplesUntilHop = Self.hopSize
                 let snapshot = analyzeHop(sampleRate: sampleRate)
+                if let hopObserver {
+                    // The same onset mix the beat tracker consumes.
+                    let feature = HopFeature(
+                        time: Double(processedSamples) / sampleRate,
+                        onset: clamp(snapshot.onset * 0.6 + snapshot.kick * 0.4),
+                        kick: snapshot.kick,
+                        energy: snapshot.energy
+                    )
+                    hopObserver(feature, snapshot.analysisTimestamp ?? feature.time)
+                }
                 // Earlier hits remain audible evidence, but must already have
                 // aged when published at the final hop's analysis timestamp.
                 strongestBeat = max(strongestBeat * transientHopDecay, snapshot.beat)

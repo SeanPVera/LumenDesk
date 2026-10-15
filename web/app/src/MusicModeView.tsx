@@ -4,6 +4,7 @@ import { LATENCY_OFFSET_LIMIT, MUSIC_HELP, PRESET_COPY, ROLE_COPY, SOURCE_COPY, 
 import { GROOVES } from './music/grooves'
 import { hsvToRgb } from './music/fixtures'
 import { WebMusicSession, LatestMusicFrameSender, setFixtureRole, type MusicFrameCommand } from './music/session'
+import { TAP_MINIMUM } from './music/beat-map'
 import { AURORA_PALETTE, SUNSET_PALETTE, OCEAN_PALETTE, CLUB_PALETTE, type AudioSourceKind, type FixtureRole, type MusicModePreset, type MusicModeConfiguration, type MusicFixtureDescriptor } from './music/types'
 
 
@@ -425,6 +426,8 @@ export function MusicModeView({
             onChange={e => configure({ ...state.configuration, outputLatencyOffset: Number(e.target.value) / 1000 })}/>
         </label>
         <p className="note" id="light-timing-help">{MUSIC_HELP.timing}</p>
+        <TimingCalibration session={session}
+          apply={offset => configure({ ...state.configuration, outputLatencyOffset: offset })} />
         <h3>Color palette</h3>
         <div className="palette-choices">{[
           {name:'Aurora', colors:AURORA_PALETTE}, {name:'Sunset', colors:SUNSET_PALETTE},
@@ -561,6 +564,32 @@ function Meter({ label, value }: { label: string; value: number }) {
       <meter min={0} max={1} value={Math.max(0, Math.min(1, value))} />
     </label>
   )
+}
+
+/** Tap along with the lights to measure how late they land, then adopt the measurement. */
+function TimingCalibration({ session, apply }: { session: WebMusicSession; apply: (offset: number) => void }) {
+  useMusicFrame(session)
+  const count = session.calibrationTapCount
+  const suggested = session.calibratedLatencyOffset()
+  const status = !session.state.running ? 'Start a show to calibrate'
+    : !session.canCalibrate ? 'Waiting for a steady beat'
+    : count < TAP_MINIMUM ? `${count} of ${TAP_MINIMUM} taps`
+    : suggested != null ? `Measured: ${timingLabel(suggested)}`
+    : `${count} taps, too uneven. Keep tapping.`
+  return <>
+    <div className="row" role="group" aria-label="Measure light timing">
+      <button disabled={!session.canCalibrate} aria-describedby="calibration-help"
+        onClick={() => session.recordCalibrationTap()}>Tap with the lights</button>
+      <span className="meta" role="status">{status}</span>
+      {count > 0 && <button onClick={() => session.resetCalibrationTaps()}>Start over</button>}
+      <button disabled={suggested == null} onClick={() => {
+        if (suggested == null) return
+        apply(suggested)
+        session.resetCalibrationTaps()
+      }}>Use measured timing</button>
+    </div>
+    <p className="note" id="calibration-help">{MUSIC_HELP.calibration}</p>
+  </>
 }
 
 function timingLabel(offset: number): string {

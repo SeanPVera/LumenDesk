@@ -508,6 +508,59 @@ export class PlaybackClock {
   }
 }
 
+// MARK: - Light timing calibration
+
+export const TAP_MINIMUM = 8;
+const TAP_MAXIMUM = 32;
+/** Taps scattered wider than this (median absolute deviation) are guesses. */
+const TAP_MAXIMUM_SPREAD = 0.06;
+
+/**
+ * Measures how late the lights land by timing taps against the beat grid.
+ * Each tap is made when the person sees a pulse, so its distance from the
+ * nearest beat is the lights' lateness plus the person's own lag. The median
+ * of enough consistent taps moves the light timing offset by that much.
+ *
+ * Kept in lockstep with `TapCalibrator` in `LumenDesk/Services/BeatMap.swift`.
+ */
+export class TapCalibrator {
+  private readonly errors: number[] = [];
+
+  get count(): number { return this.errors.length; }
+
+  tap(time: number, beatReference: number, interval: number): void {
+    if (!(interval >= 0.2 && interval <= 2) || !Number.isFinite(time) || !Number.isFinite(beatReference)) return;
+    const beats = (time - beatReference) / interval;
+    // Math.round rounds halves up where Swift rounds them away from zero;
+    // only an exact half beat, never a usable tap, can differ.
+    this.errors.push((beats - Math.round(beats)) * interval);
+    if (this.errors.length > TAP_MAXIMUM) this.errors.splice(0, this.errors.length - TAP_MAXIMUM);
+  }
+
+  /** Median lateness once there are enough consistent taps. Positive means the lights land after the beat. */
+  get lateness(): number | null {
+    if (this.errors.length < TAP_MINIMUM) return null;
+    const middle = median(this.errors);
+    if (median(this.errors.map(error => Math.abs(error - middle))) > TAP_MAXIMUM_SPREAD) return null;
+    return middle;
+  }
+
+  /** The offset that would cancel the measured lateness, to the nearest 10 ms and inside the offset's limits. */
+  suggestedOffset(current: number, limit = 0.3): number | null {
+    const lateness = this.lateness;
+    if (lateness == null) return null;
+    return Math.max(-limit, Math.min(limit, Math.round((current + lateness) * 100) / 100));
+  }
+
+  reset(): void { this.errors.length = 0; }
+}
+
+function median(values: readonly number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const n = sorted.length;
+  return n % 2 === 1 ? sorted[(n - 1) / 2] : (sorted[n / 2 - 1] + sorted[n / 2]) / 2;
+}
+
 function zScore(values: ArrayLike<number>): Float64Array | null {
   const n = values.length;
   let mean = 0;

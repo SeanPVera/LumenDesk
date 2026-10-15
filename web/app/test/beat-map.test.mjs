@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   ENVELOPE_RATE, PlaybackClock, alignToBeatMap, analyzeAudioBuffer, applyBeatMap, beatMapGridAt,
-  buildBeatMap, isTrustworthyAlignment,
+  TapCalibrator, buildBeatMap, isTrustworthyAlignment,
 } from '../.test-build/beat-map.js'
 import { EnergyTierTracker, MusicChoreographyEngine } from '../.test-build/choreography.js'
 import { configurationFor } from '../.test-build/config.js'
@@ -264,4 +264,24 @@ test('a decoded file is analysed into a map faster than it plays', async () => {
   assert.ok(Math.abs(map.tempo - 120) < 2, `tempo ${map.tempo}`)
   const cancelled = await analyzeAudioBuffer(buffer, undefined, () => false)
   assert.equal(cancelled, null)
+})
+
+test('taps that land consistently late move the timing earlier by that much', () => {
+  const calibrator = new TapCalibrator()
+  for (let beat = 0; beat < 7; beat += 1) calibrator.tap(100 + beat * 0.5 + 0.06, 100, 0.5)
+  assert.equal(calibrator.suggestedOffset(0), null, 'seven taps are not enough')
+  calibrator.tap(100 + 7 * 0.5 + 0.07, 100, 0.5)
+  assert.ok(Math.abs(calibrator.lateness - 0.06) < 0.006, `lateness ${calibrator.lateness}`)
+  assert.ok(Math.abs(calibrator.suggestedOffset(0.02) - 0.08) < 1e-9)
+  assert.equal(calibrator.suggestedOffset(0.28), 0.3)
+
+  const early = new TapCalibrator()
+  for (let beat = 0; beat < 8; beat += 1) early.tap(200 + beat * 0.6 - 0.04, 200, 0.6)
+  assert.ok(Math.abs(early.suggestedOffset(0) + 0.04) < 1e-9)
+
+  const scattered = new TapCalibrator()
+  for (let beat = 0; beat < 10; beat += 1) scattered.tap(300 + beat * 0.5 + (beat % 2 === 0 ? 0.2 : -0.15), 300, 0.5)
+  assert.equal(scattered.lateness, null, 'taps all over the beat measure nothing')
+  scattered.reset()
+  assert.equal(scattered.count, 0)
 })

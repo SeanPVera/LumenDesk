@@ -146,6 +146,7 @@ export class MusicChoreographyEngine {
   private onsetEnvelope = 0;
   private accentEnvelope = 0;
   private lastPaletteHold: number | null = null;
+  private lastPaletteChangeAt: number | null = null;
   private paletteFadeFrom = 0;
   private paletteFadeTo = 0;
   private paletteFadeBar = 0;
@@ -179,6 +180,7 @@ export class MusicChoreographyEngine {
     this.onsetEnvelope = 0;
     this.accentEnvelope = 0;
     this.lastPaletteHold = null;
+    this.lastPaletteChangeAt = null;
     this.paletteFadeFrom = this.paletteFadeTo = this.paletteFadeBar = 0;
     this.paletteHoldsBeats = false;
     this.tiers.reset();
@@ -525,8 +527,13 @@ export class MusicChoreographyEngine {
       if (this.lastPaletteHold != null && stepsPerBeat !== this.paletteHoldsBeats) this.lastPaletteHold = null;
       this.paletteHoldsBeats = stepsPerBeat;
       const where = stepsPerBeat ? clock.beatPosition : clock.barPosition;
-      if (this.lastPaletteHold != null && hold !== this.lastPaletteHold) {
+      // Tempo jitter can alternate the subdivision or cross a hold boundary
+      // on successive renders. Admit new fades on wall time as well as beats.
+      const timestamp = this.lastTimestamp ?? 0;
+      const canAdvance = this.lastPaletteChangeAt == null || timestamp - this.lastPaletteChangeAt >= 1 / 3 - 1e-6;
+      if (this.lastPaletteHold != null && hold !== this.lastPaletteHold && canAdvance) {
         this.paletteFadeFrom = this.paletteProgress; this.paletteFadeTo = this.paletteProgress + 1; this.paletteFadeBar = where;
+        this.lastPaletteChangeAt = timestamp;
       } else if (this.lastPaletteHold == null) {
         this.paletteFadeFrom = this.paletteFadeTo = this.paletteProgress; this.paletteFadeBar = where;
       }

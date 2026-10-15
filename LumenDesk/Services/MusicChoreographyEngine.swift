@@ -161,6 +161,7 @@ final class MusicChoreographyEngine {
     private var onsetEnvelope: Double = 0
     private var accentEnvelope: Double = 0
     private var lastPaletteHold: Int?
+    private var lastPaletteChangeAt: TimeInterval?
     private var paletteFadeFrom: Double = 0
     private var paletteFadeTo: Double = 0
     private var paletteFadeBar: Double = 0
@@ -198,6 +199,7 @@ final class MusicChoreographyEngine {
         onsetEnvelope = 0
         accentEnvelope = 0
         lastPaletteHold = nil
+        lastPaletteChangeAt = nil
         paletteFadeFrom = 0; paletteFadeTo = 0; paletteFadeBar = 0
         paletteHoldsBeats = false
         tiers.reset()
@@ -658,10 +660,15 @@ final class MusicChoreographyEngine {
             if lastPaletteHold != nil, stepsPerBeat != paletteHoldsBeats { lastPaletteHold = nil }
             paletteHoldsBeats = stepsPerBeat
             let place = stepsPerBeat ? clock.beatPosition : clock.barPosition
-            if let previous = lastPaletteHold, hold != previous {
+            // Tempo jitter can alternate the subdivision or cross a hold
+            // boundary each render. New fades also obey the wall-clock limit.
+            let timestamp = lastTimestamp ?? 0
+            let canAdvance = lastPaletteChangeAt.map { timestamp - $0 >= 1 / 3.0 - 1e-6 } ?? true
+            if let previous = lastPaletteHold, hold != previous, canAdvance {
                 paletteFadeFrom = paletteProgress
                 paletteFadeTo = paletteProgress + 1
                 paletteFadeBar = place
+                lastPaletteChangeAt = timestamp
             } else if lastPaletteHold == nil {
                 // Reacquisition adopts the current colour. Never map a new grid
                 // count directly onto the palette and teleport across entries.

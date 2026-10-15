@@ -10,7 +10,7 @@ real browser audio playback, and fake-device UDP integration.
 | Issue and trigger | Fix / regression coverage |
 |---|---|
 | Equal-energy bars gained different ranks by song order, inventing a build-up | Shared average ranks, neutral single-bar rank, version-2 cache invalidation; matching Swift/web beat-map vectors |
-| Double-time high-energy colour steps could exceed three per second | Derive beats per step from the actual felt interval; Swift/web rendered-frame regressions |
+| Double-time high-energy colour steps could exceed three per second; tempo jitter repeatedly reset fades | Derive beats per step from the felt interval and guard fade starts by elapsed time; rendered-frame and threshold-jitter regressions |
 | Native calibration picked whichever room appeared first in a dictionary | Scope-specific grids and measurements; two running rooms with different start times |
 | Stop, lost input, or timing changes left taps usable against old grids | Clear measurements, require fresh render/input evidence and reject expired suggestions; controller/session lifecycle tests |
 | Rapid clicks could produce eight consistent taps without hearing eight beats | Reject taps closer than half a beat and backwards timestamps; matching Swift/web vectors |
@@ -28,7 +28,7 @@ real browser audio playback, and fake-device UDP integration.
 | Browser Stop approximated white lights with RGB, losing LIFX HSBK or Govee white mode | Bridge snapshots exact colour mode under the session owner; actual LIFX HSBK and Govee temperature UDP assertions |
 | A failed transport dispatch returned success and discarded restoration ownership | Return 503 and retain the owner/snapshot for retry; unaddressable light followed by successful exact-state restoration |
 
-Local validation: **123 web tests, 169 bridge tests**, production build, existing
+Local validation: **124 web tests, 169 bridge tests**, production build, existing
 `visual-review.mjs` and `music-setup-review.mjs`, and new `music-timing-review.mjs`.
 The latter decodes and plays a generated 20-second WAV through the production
 AudioContext/worklet/analyzer, checks its silent intro and map, exercises audio
@@ -36,7 +36,15 @@ suspension/recovery and Stop, captures desktop/390-pixel screens, and runs axe
 with no serious or critical violations. Only bridge HTTP responses are mocked
 in the browser review; its audio and rendering paths are real. Native XCTest,
 macOS analysis and iOS builds require the repository's macOS CI; this Linux
-workspace has no Xcode. The rest of this document is the earlier audit history.
+workspace has no Xcode.
+
+Remaining boundaries: the mapper still estimates one global tempo and uses
+four-beat bars, so tempo-changing or odd-metre recordings need further analysis
+work. NSAppleScript polling remains on main and a slow player can still stall it
+until the one-second timeout (then that app rests for ten seconds). Real Spotify/
+Music Automation consent and physical capture-to-light latency need platform and
+hardware checks. These limits are not claimed fixed here. The rest of this
+document is the earlier audit history.
 
 Reviewable patch: [PR #105](https://github.com/SeanPVera/LumenDesk/pull/105), branch
 `fix/music-mode-production-audit`. Nothing was merged, released or installed.

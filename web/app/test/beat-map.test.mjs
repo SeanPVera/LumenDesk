@@ -53,6 +53,24 @@ test('double-time colour steps remain at or below three per second', () => {
   for (let i = 1; i < changes.length; i++) assert.ok(changes[i] - changes[i - 1] >= 1 / 3 - 0.011, 'colour changes exceed 3/s')
 })
 
+test('tempo jitter across the colour subdivision threshold cannot retrigger at render speed', () => {
+  const engine = new MusicChoreographyEngine(), changes = []
+  const config = { ...configurationFor('balanced'), movementAmount: 0, stereoImage: 0 }
+  let previous = null
+  for (let step = 0; step < 300; step++) {
+    const elapsed = step * 0.01, timestamp = 100 + elapsed, beat = Math.floor(elapsed * 3)
+    const interval = step % 2 === 0 ? 0.332 : 0.335
+    const snapshot = { ...emptySnapshot(), analysisTimestamp: timestamp, level: 0.6, energy: 0.6, confidence: 1,
+      beatConfidence: 1, isTempoLocked: true, tempo: 60 / interval, beatInterval: interval, feltInterval: interval,
+      beatReferenceTime: 100 + beat / 3, gridBeatPosition: beat, beatCount: beat, beatInBar: beat % 4, barEnergy: 1 }
+    engine.makeFrame(snapshot, config, { layout: 'leftToRight', fixtureOrder: [], excludedFixtureIDs: [] }, room(), timestamp, step)
+    if (previous != null && engine.paletteFadeBar !== previous) changes.push(timestamp)
+    previous = engine.paletteFadeBar
+  }
+  assert.ok(changes.length >= 3)
+  for (let i = 1; i < changes.length; i++) assert.ok(changes[i] - changes[i - 1] >= 1 / 3 - 1e-6, 'jitter exceeded the colour-change limit')
+})
+
 /**
  * Synthetic hop features: a beat every `interval` seconds starting at
  * `firstBeat`, the downbeat on beat `downbeatBeat` of each four, louder kicks

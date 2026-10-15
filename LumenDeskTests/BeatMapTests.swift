@@ -400,6 +400,31 @@ final class BeatMapTests: XCTestCase {
         }
     }
 
+    func testTempoJitterAtTheColourSubdivisionThresholdDoesNotFreezeFades() {
+        let engine = MusicChoreographyEngine()
+        var config = MusicModeConfiguration.configuration(for: .balanced)
+        config.movementAmount = 0
+        config.stereoImage = 0
+        var hues: Set<String> = []
+        for step in 0..<300 {
+            let elapsed = Double(step) * 0.01, timestamp = 100 + elapsed
+            let beat = Int(floor(elapsed * 3))
+            let interval = step.isMultiple(of: 2) ? 0.332 : 0.335
+            var snapshot = AudioReactiveSnapshot(level: 0.6, energy: 0.6, confidence: 1)
+            snapshot.analysisTimestamp = timestamp
+            snapshot.beatConfidence = 1; snapshot.isTempoLocked = true
+            snapshot.tempo = 60 / interval; snapshot.beatInterval = interval; snapshot.feltInterval = interval
+            snapshot.beatReferenceTime = 100 + Double(beat) / 3
+            snapshot.gridBeatPosition = beat; snapshot.beatCount = beat; snapshot.beatInBar = beat % 4
+            snapshot.barEnergy = 1
+            let frame = engine.makeFrame(snapshot: snapshot, configuration: config,
+                                         topology: FixtureTopology(), fixtures: Self.room,
+                                         timestamp: timestamp, sequenceNumber: UInt64(step))
+            if let state = frame.states.first { hues.insert(String(format: "%.3f", state.hue)) }
+        }
+        XCTAssertGreaterThan(hues.count, 3, "tempo jitter must leave a fade enough time to complete")
+    }
+
     func testTheTopTierAsksForADownbeatFlashOnlyThroughTheLimiter() throws {
         func flashes(safe: Bool) throws -> Int {
             let map = try Self.quietMap(1)

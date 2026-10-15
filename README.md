@@ -469,7 +469,7 @@ You need none of these to run a show. Turn on **Explain the controls** at the to
 | Minimum brightness | Keeps the lights from dropping as dark between beats. |
 | Maximum brightness | Lets a beat push the lights brighter. |
 | Stereo image | Tilts the room with the balance of the recording. At zero every light gets the same level; turn it up and a mix leaning one way brightens the lights at that end of your list. |
-| Light timing | Moves every accent earlier (right) or later (left), up to 300 ms. It belongs to the room, so changing preset keeps it. |
+| Light timing | Moves every accent earlier (right) or later (left), up to 300 ms. One setting for the whole app; changing preset keeps it. |
 
 **Color palette** picks the set of colours the show draws from. Alongside
 Soundcheck, Sunset, Ocean, and Club, every theme in the Lighting Library is

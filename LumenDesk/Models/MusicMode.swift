@@ -207,7 +207,9 @@ struct MusicModeConfiguration: Codable, Equatable {
     var phraseAware: Bool = true
     /// Seconds the show runs ahead of the beat to make up for slow lights.
     /// Positive lands accents earlier; it adds to the engine's fixed 45 ms.
-    /// A property of the room, so presets keep it (`preservingRoomCalibration`).
+    /// One app-wide calibration of the lights and network, not part of a
+    /// show, so presets keep it (`preservingRoomCalibration`). Every room
+    /// shares it.
     var outputLatencyOffset: Double = 0
     /// macOS: ask Spotify and Music where the song is, learn each track on its
     /// first listen and play later listens from its beat map. Off by default,
@@ -440,8 +442,9 @@ struct MusicModeConfiguration: Codable, Equatable {
         return value
     }
 
-    /// A preset describes the show, not the room. Keep the room's timing
-    /// calibration and the playback-following choice across preset changes.
+    /// A preset describes the show, not the setup it plays on. Keep the
+    /// app-wide timing calibration and the playback-following choice across
+    /// preset changes.
     func preservingRoomCalibration(from previous: MusicModeConfiguration) -> MusicModeConfiguration {
         var value = self
         value.outputLatencyOffset = previous.outputLatencyOffset

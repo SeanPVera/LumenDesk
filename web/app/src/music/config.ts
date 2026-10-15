@@ -321,7 +321,7 @@ export function clampLatencyOffset(value: number | undefined): number {
   return Number.isFinite(value) ? Math.max(-LATENCY_OFFSET_LIMIT, Math.min(LATENCY_OFFSET_LIMIT, value as number)) : 0;
 }
 
-/** A preset describes the show, not the room. Keep the room's timing calibration across preset changes. */
+/** A preset describes the show, not the setup. Keep the app-wide timing calibration across preset changes. */
 export function preservingRoomCalibration(next: MusicModeConfiguration, previous: MusicModeConfiguration): MusicModeConfiguration {
   return { ...next, outputLatencyOffset: clampLatencyOffset(previous.outputLatencyOffset) };
 }

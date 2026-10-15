@@ -309,6 +309,8 @@ final class BeatMapCoordinator {
         guard source == .following else { return }
         if automationDenied { status = .automationDenied; return }
         guard let current else { status = .waitingForPlayer; return }
+        // A paused player plays no map and teaches nothing, so don't claim either.
+        guard current.isPlaying else { status = .waitingForPlayer; return }
         if let map {
             status = .following(app: current.app.displayName, title: current.title, tempo: map.tempo)
         } else if let learner {

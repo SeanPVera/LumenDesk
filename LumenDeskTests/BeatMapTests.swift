@@ -458,6 +458,27 @@ final class BeatMapTests: XCTestCase {
     #endif
 
     #if os(macOS)
+    func testAPausedPlayerIsWaitingEvenWhenItsTrackHasAMap() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("BeatMapTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = BeatMapStore(directory: directory)
+        let map = try Self.map()
+        store.save(map, key: PlaybackApp.music.trackKey("42"))
+        let coordinator = BeatMapCoordinator(store: store, now: { 0 })
+        coordinator.beginFollowing()
+        defer { coordinator.stop() }
+        var sample = NowPlayingSample(app: .music, trackID: "42", title: "Song", artist: "Artist",
+                                      duration: 60, position: 10, isPlaying: false, sampledAt: 0)
+        coordinator.receive(sample)
+        XCTAssertEqual(coordinator.status, .waitingForPlayer)
+        XCTAssertFalse(coordinator.apply(to: AudioReactiveSnapshot(), at: 0, filePosition: nil).beatMapActive)
+        sample.isPlaying = true
+        coordinator.receive(sample)
+        XCTAssertEqual(coordinator.status, .following(app: "Music", title: "Song", tempo: map.tempo))
+        XCTAssertTrue(coordinator.apply(to: AudioReactiveSnapshot(), at: 0, filePosition: nil).beatMapActive)
+    }
+
     func testNowPlayingRepliesParseIntoSamples() throws {
         let reply = NSAppleEventDescriptor.list()
         reply.insert(NSAppleEventDescriptor(string: "playing"), at: 1)

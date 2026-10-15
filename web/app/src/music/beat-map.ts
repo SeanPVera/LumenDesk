@@ -178,12 +178,18 @@ export function trackBeats(novelty: ArrayLike<number>, period: number): number[]
   const back = new Int32Array(n).fill(-1);
   const nearest = Math.max(1, Math.round(period / 2));
   const farthest = Math.max(nearest + 1, Math.round(period * 2));
+  // The penalty depends only on the gap, so compute it once per gap rather
+  // than once per frame pair: an hour of audio is millions of pairs.
+  const penalty = new Float64Array(farthest + 1);
+  for (let gap = nearest; gap <= farthest; gap += 1) {
+    const ratio = Math.log(gap / period);
+    penalty[gap] = TIGHTNESS * ratio * ratio;
+  }
   for (let t = 0; t < n; t += 1) {
     let best = -Infinity, from = -1;
     const first = Math.max(0, t - farthest), last = t - nearest;
     for (let p = first; p <= last; p += 1) {
-      const gap = Math.log((t - p) / period);
-      const candidate = score[p] - TIGHTNESS * gap * gap;
+      const candidate = score[p] - penalty[t - p];
       if (candidate > best) { best = candidate; from = p; }
     }
     if (from >= 0 && best > 0) { score[t] = local[t] + best; back[t] = from; }
@@ -272,13 +278,43 @@ export function barEnergies(beats: readonly number[], downbeatOffset: number, en
  * null for audio too short or too irregular to hold a grid.
  */
 export function buildBeatMap(hops: readonly HopFeature[], rate = ENVELOPE_RATE): BeatMap | null {
+  const steps = beatMapSteps(hops, rate);
+  for (;;) {
+    const step = steps.next();
+    if (step.done) return step.value;
+  }
+}
+
+/**
+ * The same build, handing the event loop back between its phases and stopping
+ * as soon as `shouldContinue` says so. Each phase is linear in the track's
+ * length, so an hour-long mix never holds the page for the whole build.
+ */
+export async function buildBeatMapAsync(
+  hops: readonly HopFeature[],
+  shouldContinue: () => boolean = () => true,
+  rate = ENVELOPE_RATE,
+): Promise<BeatMap | null> {
+  const steps = beatMapSteps(hops, rate);
+  for (;;) {
+    if (!shouldContinue()) return null;
+    const step = steps.next();
+    if (step.done) return step.value;
+    await new Promise(resolve => setTimeout(resolve, 0));
+  }
+}
+
+function* beatMapSteps(hops: readonly HopFeature[], rate: number): Generator<void, BeatMap | null, void> {
   const { onset, kick, energy, duration } = resampleHops(hops, rate);
   if (duration < MINIMUM_DURATION) return null;
+  yield;
   const novelty = onsetNovelty(onset, rate);
   const { period, confidence } = estimatePeriod(novelty, rate);
   if (!(period > 0)) return null;
+  yield;
   const frames = trackBeats(novelty, period);
   if (frames.length < MAP_BEATS_PER_BAR * 2) return null;
+  yield;
   const downbeatOffset = pickDownbeatOffset(frames, kick, onset);
   const beats = frames.map(frame => frame / rate);
   return {
@@ -327,7 +363,7 @@ export async function analyzeAudioBuffer(
     }
   }
   onProgress?.(1);
-  return shouldContinue() ? buildBeatMap(hops) : null;
+  return buildBeatMapAsync(hops, shouldContinue);
 }
 
 // MARK: - Playing a map

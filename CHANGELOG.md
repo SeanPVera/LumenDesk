@@ -20,7 +20,7 @@ the install steps, so write each entry for someone deciding whether to update.
   leaves the Mac.
 - **Light timing.** A slider moves every accent up to 300 ms earlier or later,
   and **Tap with the lights** measures how late your lights land and sets it
-  for you. It belongs to the room, so changing preset keeps it.
+  for you. It is one setting for the whole app, and changing preset keeps it.
 - **Energy gears.** Shows shift through six gears as songs get louder or
   quieter. Calm passages ease in and nod on every other beat of a fast song;
   the loudest parts snap and change colour on the beat. The top gear can ask

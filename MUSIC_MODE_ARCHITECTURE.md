@@ -94,8 +94,10 @@ The engine predicts **45 ms plus the user's light timing offset plus 0.8 × the
 current gear's attack time** ahead. The 45 ms component is still an **unmeasured
 assumption**, not device compensation established by testing; the offset
 (`outputLatencyOffset`, ±300 ms, kept across presets by
-`preservingRoomCalibration`) and tap calibration exist so a room can correct it. FFT-window delay, capture latency, render quantization, command queues,
-Wi-Fi and firmware interpolation are separate contributors. A sent UDP packet
+`preservingRoomCalibration`, one value for the whole app, not per scope) and tap
+calibration exist so a setup can correct it. FFT-window delay, capture latency,
+render quantization, command queues, Wi-Fi and firmware interpolation are
+separate contributors. A sent UDP packet
 cannot establish any of the last three or a visible light change.
 
 ## Beat maps and playback clocks

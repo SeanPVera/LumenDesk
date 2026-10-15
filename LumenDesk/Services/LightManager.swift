@@ -3424,7 +3424,7 @@ extension LightManager {
             setMusicModeConfiguration(custom)
             return
         }
-        // A preset describes the show, not the room: keep the room's light
+        // A preset describes the show, not the setup: keep the app-wide light
         // timing and the Spotify and Music choice.
         setMusicModeConfiguration(MusicModeConfiguration.configuration(for: preset)
             .preservingRoomCalibration(from: musicModeConfiguration))

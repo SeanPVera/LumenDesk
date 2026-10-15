@@ -41,7 +41,10 @@ enum NowPlayingPermission: Equatable {
 /// Polls Spotify and Music over Apple Events once a second. Only apps that
 /// are already running are asked, so LumenDesk never launches one, and
 /// compiling a script for an app that is not installed never shows the
-/// "Where is…" dialog. Main thread only: NSAppleScript is not thread-safe.
+/// "Where is…" dialog. Main thread only: Apple lists NSAppleScript as a
+/// main-thread-only class. Because a busy app can hold the main thread (and
+/// the lighting timer) until the script times out, an app that answers slowly
+/// is left alone for a while and the app that last played is asked first.
 final class NowPlayingMonitor {
     var onSample: ((NowPlayingSample?) -> Void)?
     var onPermission: ((NowPlayingPermission) -> Void)?
@@ -49,6 +52,12 @@ final class NowPlayingMonitor {
     private let now: () -> TimeInterval
     private var timer: Timer?
     private var scripts: [PlaybackApp: NSAppleScript] = [:]
+    /// Until when each slow app is skipped.
+    private var restingUntil: [PlaybackApp: TimeInterval] = [:]
+    private var lastPlaying: PlaybackApp?
+    /// A reply slower than this costs the show visible frames.
+    private static let slowReply: TimeInterval = 0.25
+    private static let restAfterSlowReply: TimeInterval = 10
     private(set) var permission: NowPlayingPermission = .unknown {
         didSet { if permission != oldValue { onPermission?(permission) } }
     }
@@ -75,10 +84,16 @@ final class NowPlayingMonitor {
 
     private func poll() {
         var paused: NowPlayingSample?
-        for app in PlaybackApp.allCases where isRunning(app) {
+        let time = now()
+        let order = PlaybackApp.allCases.sorted { lhs, _ in lhs == lastPlaying }
+        for app in order where (restingUntil[app] ?? 0) <= time && isRunning(app) {
             guard let sample = read(app) else { continue }
             // A playing app wins over a paused one.
-            if sample.isPlaying { onSample?(sample); return }
+            if sample.isPlaying {
+                lastPlaying = app
+                onSample?(sample)
+                return
+            }
             if paused == nil { paused = sample }
         }
         onSample?(paused)
@@ -94,6 +109,7 @@ final class NowPlayingMonitor {
         var error: NSDictionary?
         let result = script.executeAndReturnError(&error)
         let after = now()
+        if after - before > Self.slowReply { restingUntil[app] = after + Self.restAfterSlowReply }
         if let error {
             // -1743: the user declined Automation for this app.
             if (error[NSAppleScript.errorNumber] as? Int) == -1743 { permission = .denied }

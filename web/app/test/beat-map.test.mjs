@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   ENVELOPE_RATE, PlaybackClock, alignToBeatMap, analyzeAudioBuffer, applyBeatMap, beatMapGridAt,
-  TapCalibrator, buildBeatMap, isTrustworthyAlignment,
+  TapCalibrator, buildBeatMap, buildBeatMapAsync, isTrustworthyAlignment,
 } from '../.test-build/beat-map.js'
 import { EnergyTierTracker, MusicChoreographyEngine } from '../.test-build/choreography.js'
 import { configurationFor } from '../.test-build/config.js'
@@ -284,4 +284,12 @@ test('taps that land consistently late move the timing earlier by that much', ()
   assert.equal(scattered.lateness, null, 'taps all over the beat measure nothing')
   scattered.reset()
   assert.equal(scattered.count, 0)
+})
+
+test('the phased build matches the one-shot build and stops when cancelled between phases', async () => {
+  const hops = syntheticHops()
+  assert.deepEqual(await buildBeatMapAsync(hops), buildBeatMap(hops))
+  let checks = 0
+  assert.equal(await buildBeatMapAsync(hops, () => ++checks < 3), null)
+  assert.equal(checks, 3, 'it checks again after each phase')
 })

@@ -728,7 +728,7 @@ struct MusicModeView: View {
         )
     }
 
-    /// Light timing belongs to the room, not the show, so moving it keeps the
+    /// Light timing calibrates the lights, not the show, so moving it keeps the
     /// preset. Every drag value reaches the running show; release saves.
     private var latencyOffsetBinding: Binding<Double> {
         Binding(

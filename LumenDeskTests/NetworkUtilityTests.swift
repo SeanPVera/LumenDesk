@@ -208,6 +208,15 @@ final class NetworkUtilityTests: XCTestCase {
                        "192.168.1.57")
     }
 
+    func testGoveeReportedAddressIsNeverUsedAsALogFormat() {
+        // Any host on the LAN can send a scan reply, and the mismatch is
+        // logged. With the claim interpolated into NSLog's format string,
+        // `%@`/`%s` made NSLog read arguments that were never passed and the
+        // app crashed.
+        let forged = String(repeating: "%@", count: 32)
+        XCTAssertEqual(GoveeClient.commandAddress(source: "192.168.1.57", reported: forged), "192.168.1.57")
+    }
+
     func testGoveeDHCPAddressSwapKeepsBothStatusRoutes() {
         var addresses = ["A": "192.0.2.10", "B": "192.0.2.20"]
         var devices = ["192.0.2.10": "A", "192.0.2.20": "B"]

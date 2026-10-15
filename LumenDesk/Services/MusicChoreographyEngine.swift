@@ -649,7 +649,7 @@ final class MusicChoreographyEngine {
             // BPM, so colour never changes more than three times a second) and
             // fade over a quarter beat. Lower tiers hold whole bars and fade
             // over one beat.
-            let beatsPerStep: Double = clock.interval >= 1.0 / 3 ? 1 : 2
+            let beatsPerStep = max(1, ceil(1 / (3 * clock.interval)))
             let barsPerColour = Double(max(1, Int((5 - configuration.colorChangeIntensity * 4).rounded())))
             let hold = stepsPerBeat
                 ? Int(floor(clock.beatPosition / beatsPerStep))

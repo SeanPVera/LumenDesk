@@ -223,7 +223,7 @@ struct MusicModeView: View {
     private var selectedSourceHelp: String {
         switch selectedSource {
         case .platformAudio: return MusicModeHelp.systemAudioSource
-        case .file: return "Choose an audio file now. LumenDesk plays it and follows it when you press Start Music Mode."
+        case .file: return "Choose an audio file now. LumenDesk plays it on repeat and follows it when you press Start Music Mode. Stop ends playback."
         case .midiClock: return MusicModeHelp.midiSource
         }
     }
@@ -610,6 +610,7 @@ struct MusicModeView: View {
                 helpCaption(MusicModeHelp.lightTiming)
                 LightTimingCalibrationView(
                     controller: manager.musicModeController,
+                    scope: scope,
                     isRunning: isRunning,
                     currentOffset: configuration.outputLatencyOffset,
                     showsPlainHelp: showsPlainHelp
@@ -755,7 +756,7 @@ struct MusicModeView: View {
 
     static func timingLabel(_ offset: Double) -> String {
         let milliseconds = Int((offset * 1000).rounded())
-        if milliseconds == 0 { return "On the beat" }
+        if milliseconds == 0 { return "Default timing (0 ms)" }
         return milliseconds > 0 ? "\(milliseconds) ms earlier" : "\(-milliseconds) ms later"
     }
 
@@ -1017,6 +1018,7 @@ private struct MusicModeInputStatusView: View {
 /// grid the show is rendering, on the same clock.
 private struct LightTimingCalibrationView: View {
     @ObservedObject var controller: AudioReactiveSessionController
+    let scope: LightScope
     let isRunning: Bool
     let currentOffset: Double
     let showsPlainHelp: Bool
@@ -1025,15 +1027,16 @@ private struct LightTimingCalibrationView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 10) {
-                Button("Tap with the lights") { controller.recordCalibrationTap() }
+                Button("Tap with the lights") { controller.recordCalibrationTap(scope: scope) }
                     .buttonStyle(LumenSecondaryButtonStyle(compact: true))
-                    .disabled(!isRunning || !controller.hasCalibrationGrid)
+                    .disabled(!isRunning || !controller.hasCalibrationGrid(for: scope))
                     .accessibilityHint(MusicModeHelp.tapCalibration)
                 Text(status)
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(Lumen.textSecondary)
-                Spacer(minLength: 8)
-                if controller.calibrationTapCount > 0 {
+            }
+            HStack(spacing: 10) {
+                if controller.calibrationTapCount(for: scope) > 0 {
                     Button("Start over") { controller.resetCalibrationTaps() }
                         .buttonStyle(LumenSecondaryButtonStyle(compact: true))
                 }
@@ -1056,12 +1059,12 @@ private struct LightTimingCalibrationView: View {
         }
     }
 
-    private var suggested: Double? { controller.calibratedLatencyOffset(from: currentOffset) }
+    private var suggested: Double? { controller.calibratedLatencyOffset(from: currentOffset, scope: scope) }
 
     private var status: String {
         guard isRunning else { return "Start a show to calibrate" }
-        guard controller.hasCalibrationGrid else { return "Waiting for a steady beat" }
-        let count = controller.calibrationTapCount
+        guard controller.hasCalibrationGrid(for: scope) else { return "Waiting for a steady beat in this room" }
+        let count = controller.calibrationTapCount(for: scope)
         if count < TapCalibrator.minimumTaps { return "\(count) of \(TapCalibrator.minimumTaps) taps" }
         if let suggested { return "Measured: \(MusicModeView.timingLabel(suggested))" }
         return "\(count) taps, too uneven. Keep tapping."

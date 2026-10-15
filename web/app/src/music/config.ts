@@ -89,7 +89,7 @@ export const SOURCE_COPY: Record<string, { name: string; plain: string }> = {
   },
   file: {
     name: "Audio file",
-    plain: "Choose a song from this computer, then press Start. The page plays the track and lights to it, which is the most reliable option.",
+    plain: "Choose a song from this computer, then press Start. The page plays the track on repeat until you press Stop and lights to it, which is the most reliable option.",
   },
   midi: {
     name: "MIDI clock",

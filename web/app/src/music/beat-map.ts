@@ -13,7 +13,7 @@ import { clamp01, type AudioReactiveSnapshot, type HopFeature } from "./types";
  * Kept in lockstep with `LumenDesk/Services/BeatMap.swift`. The algorithms,
  * constants and test vectors are the same on both sides.
  */
-export const BEAT_MAP_VERSION = 1;
+export const BEAT_MAP_VERSION = 2;
 /** Samples per second of every envelope a map stores or is built from. */
 export const ENVELOPE_RATE = 100;
 /** Bars in a map always hold four beats; metre overrides still apply on top. */
@@ -269,7 +269,15 @@ export function barEnergies(beats: readonly number[], downbeatOffset: number, en
   if (means.length === 0) return [];
   const order = means.map((value, index) => ({ value, index })).sort((x, y) => x.value - y.value || x.index - y.index);
   const rank = new Float64Array(means.length);
-  order.forEach((entry, position) => { rank[entry.index] = means.length === 1 ? 1 : position / (means.length - 1); });
+  // Equal loudness has equal rank. Breaking ties by time used to invent a
+  // build-up through a steady passage; a single bar gets the neutral rank.
+  for (let first = 0; first < order.length;) {
+    let end = first + 1;
+    while (end < order.length && order[end].value - order[first].value < 1e-9) end++;
+    const percentile = means.length === 1 ? 0.5 : (first + end - 1) / (2 * (means.length - 1));
+    for (let i = first; i < end; i++) rank[order[i].index] = percentile;
+    first = end;
+  }
   return means.map((mean, index) => clamp01(0.6 * clamp01(mean / 0.75) + 0.4 * rank[index]));
 }
 
@@ -561,11 +569,14 @@ const TAP_MAXIMUM_SPREAD = 0.06;
  */
 export class TapCalibrator {
   private readonly errors: number[] = [];
+  private lastTap: number | null = null;
 
   get count(): number { return this.errors.length; }
 
   tap(time: number, beatReference: number, interval: number): void {
     if (!(interval >= 0.2 && interval <= 2) || !Number.isFinite(time) || !Number.isFinite(beatReference)) return;
+    if (this.lastTap != null && time - this.lastTap < interval * 0.5) return;
+    this.lastTap = time;
     const beats = (time - beatReference) / interval;
     // Math.round rounds halves up where Swift rounds them away from zero;
     // only an exact half beat, never a usable tap, can differ.
@@ -588,7 +599,7 @@ export class TapCalibrator {
     return Math.max(-limit, Math.min(limit, Math.round((current + lateness) * 100) / 100));
   }
 
-  reset(): void { this.errors.length = 0; }
+  reset(): void { this.errors.length = 0; this.lastTap = null; }
 }
 
 function median(values: readonly number[]): number {

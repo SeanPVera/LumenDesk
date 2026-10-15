@@ -14,6 +14,15 @@ const configuration = {
 }
 const quiet = () => ({ ...emptySnapshot(), level: .4, energy: .4, confidence: 1 })
 
+test('expired mapped input no longer claims a map or keeps a loud energy gear', () => {
+  const mapped = { ...quiet(), analysisTimestamp: 100, beatMapActive: true, barEnergy: 1,
+    isTempoLocked: true, tempo: 120, beatConfidence: 1 }
+  const expired = freshSnapshot(mapped, 102)
+  assert.equal(expired.beatMapActive, false)
+  assert.equal(expired.barEnergy, undefined)
+  assert.equal(expired.isTempoLocked, false)
+})
+
 function warmedEngine() {
   const engine = new MusicChoreographyEngine()
   for (let i = 0; i < 200; i++) {

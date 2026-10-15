@@ -2,13 +2,56 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   ENVELOPE_RATE, PlaybackClock, alignToBeatMap, analyzeAudioBuffer, applyBeatMap, beatMapGridAt,
-  TapCalibrator, buildBeatMap, buildBeatMapAsync, isTrustworthyAlignment,
+  TapCalibrator, barEnergies, buildBeatMap, buildBeatMapAsync, isTrustworthyAlignment,
 } from '../.test-build/beat-map.js'
 import { EnergyTierTracker, MusicChoreographyEngine } from '../.test-build/choreography.js'
 import { configurationFor } from '../.test-build/config.js'
 import { emptySnapshot } from '../.test-build/types.js'
 
 const HOP = 512 / 48000
+
+test('equally loud bars get the same energy regardless of track order or bar count', () => {
+  const beats = Array.from({ length: 16 }, (_, i) => i * 0.5)
+  const energy = new Float64Array(800).fill(0.45)
+  const bars = barEnergies(beats, 0, energy)
+  assert.equal(bars.length, 4)
+  for (const value of bars) assert.ok(Math.abs(value - 0.56) < 1e-9, `neutral rank: ${value}`)
+  assert.ok(Math.abs(barEnergies(beats.slice(0, 4), 0, energy)[0] - bars[0]) < 1e-9)
+  const mixed = Float64Array.from({ length: 800 }, (_, i) => i < 400 ? 0.2 : 0.8)
+  const ranked = barEnergies(beats, 0, mixed)
+  assert.ok(Math.abs(ranked[0] - ranked[1]) < 1e-9)
+  assert.ok(Math.abs(ranked[2] - ranked[3]) < 1e-9)
+  assert.ok(ranked[2] > ranked[0])
+})
+
+test('rapid or backwards calibration taps cannot count as separate beats', () => {
+  const taps = new TapCalibrator()
+  for (let i = 0; i < 8; i++) taps.tap(100.06 + i * 0.01, 100, 0.5)
+  assert.equal(taps.count, 1)
+  assert.equal(taps.suggestedOffset(0), null)
+  taps.tap(100, 100, 0.5)
+  taps.tap(100.56, 100.5, 0.5)
+  assert.equal(taps.count, 2)
+})
+
+test('double-time colour steps remain at or below three per second', () => {
+  const map = { ...quietMap(1), beats: Array.from({ length: 300 }, (_, i) => i * 0.3) }
+  const engine = new MusicChoreographyEngine()
+  const config = { ...configurationFor('balanced'), timeFeel: 'double', movementAmount: 0, stereoImage: 0 }
+  const changes = []
+  let previous = 0
+  for (let step = 0; step < 1000; step++) {
+    const position = 5 + step * 0.01, timestamp = 1000 + position
+    const snapshot = engineSnapshot(map, position, timestamp)
+    snapshot.timeFeel = 'double'
+    snapshot.feltInterval = snapshot.beatInterval * 0.5
+    engine.makeFrame(snapshot, config, { layout: 'leftToRight', fixtureOrder: [], excludedFixtureIDs: [] }, room(), timestamp, step)
+    if (engine.paletteFadeTo > previous) changes.push(timestamp)
+    previous = engine.paletteFadeTo
+  }
+  assert.ok(changes.length > 10)
+  for (let i = 1; i < changes.length; i++) assert.ok(changes[i] - changes[i - 1] >= 1 / 3 - 0.011, 'colour changes exceed 3/s')
+})
 
 /**
  * Synthetic hop features: a beat every `interval` seconds starting at

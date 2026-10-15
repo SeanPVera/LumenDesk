@@ -21,6 +21,16 @@ const workletSource = await (async () => {
   } finally { globalThis.AudioContext = original }
 })()
 
+test('fixture names and transport metadata refresh without losing assigned roles', () => {
+  const session = new WebMusicSession()
+  session.setDevices([{ id: 'a', name: 'Old lamp', brand: 'lifx', reachable: true }])
+  session.state.fixtures[0].role = 'hit'
+  session.setDevices([{ id: 'a', name: 'Reading lamp', brand: 'govee', reachable: true }])
+  assert.equal(session.state.fixtures[0].label, 'Reading lamp')
+  assert.equal(session.state.fixtures[0].transport, 'goveeLAN')
+  assert.equal(session.state.fixtures[0].role, 'hit')
+})
+
 function capture() {
   let Processor, allocations = 0, frame = 0
   const messages = [], transfers = []
@@ -74,13 +84,78 @@ test('metre overrides preserve learned downbeats and use grid position when chan
       gridBeatPosition: metre * 2 + 1, beatCount: 19 }
     session.tick()
     assert.equal(rendered.at(-1).beatInBar, 0, 'matching metre retains the detected bar offset')
+    assert.equal(session.state.snapshot.metre, metre, 'readout uses the same policy as the renderer')
     session.inputSnapshot = { ...emptySnapshot(), metre: 7, beatInBar: 2,
       gridBeatPosition: metre * 2, beatCount: 19 }
     session.tick()
     assert.equal(rendered.at(-1).beatInBar, 0, 'changed metre follows the locked grid, not earlier fallback onsets')
     assert.equal(rendered.at(-1).beatCount, 19)
     assert.equal(rendered.at(-1).gridBeatPosition, metre * 2)
+    assert.equal(session.state.snapshot.metre, metre)
   }
+})
+
+test('calibration expires with capture and resets on Stop or a timing adjustment', async t => {
+  const { setNow } = withClockAndTap(t)
+  const session = new WebMusicSession()
+  session.setDevices([{ id: 'a', name: 'Lamp', brand: 'lifx', reachable: true }])
+  session.state.running = true
+  session.state.source = 'microphone'
+  for (let beat = 0; beat < 8; beat++) {
+    const time = 100 + beat * 0.5 + 0.06
+    setNow(time)
+    session.inputSnapshot = { ...emptySnapshot(), isTempoLocked: true, beatConfidence: 1,
+      beatReferenceTime: 100 + beat * 0.5, beatInterval: 0.5, feltInterval: 0.5,
+      analysisTimestamp: time, level: 0.5, energy: 0.5 }
+    session.tick()
+    session.recordCalibrationTap()
+  }
+  assert.equal(session.calibrationTapCount, 8)
+  assert.equal(session.calibratedLatencyOffset(), 0.06)
+  setNow(105)
+  session.tick()
+  assert.equal(session.canCalibrate, false, 'a stale locked snapshot is not a calibration grid')
+  assert.equal(session.calibratedLatencyOffset(), null)
+  assert.equal(session.calibrationTapCount, 0)
+
+  session.calibrationGrid = { reference: 105, interval: 0.5, updatedAt: 105 }
+  session.recordCalibrationTap()
+  session.patch({ configuration: { ...session.state.configuration, outputLatencyOffset: 0.1 } })
+  assert.equal(session.calibrationTapCount, 0, 'measurements cannot mix different timing offsets')
+  await session.stop()
+  assert.equal(session.canCalibrate, false)
+  assert.equal(session.calibrationTapCount, 0)
+  assert.equal(session.state.frame, null, 'restored lights must not retain a live generated preview')
+})
+
+test('suspended audio is resumed and never advances the file clock while suspended', async t => {
+  const original = globalThis.AudioContext
+  t.after(() => { globalThis.AudioContext = original })
+  let resumes = 0
+  globalThis.AudioContext = class {
+    state = 'suspended'
+    currentTime = 10
+    audioWorklet = { addModule: async () => undefined }
+    async resume() { resumes++; this.state = 'running'; this.onstatechange?.() }
+    async close() { this.state = 'closed' }
+    getOutputTimestamp() { return { contextTime: 10, performanceTime: 100000 } }
+  }
+  const session = new WebMusicSession()
+  const audio = await session.ensureAudio(0)
+  await Promise.resolve()
+  assert.equal(resumes, 1)
+  assert.equal(session.state.audioSuspended, false)
+  session.fileDuration = 60
+  session.fileStartContextTime = 0
+  assert.equal(session.filePosition(100), 10)
+  audio.state = 'suspended'
+  audio.onstatechange()
+  assert.equal(session.state.audioSuspended, true)
+  assert.equal(session.filePosition(110), null, 'the output timestamp freezes when playback is suspended')
+  await session.resumeAudio()
+  assert.equal(resumes, 2)
+  assert.equal(session.state.audioSuspended, false)
+  await session.stop()
 })
 
 test('actual worklet preserves mono samples and reuses transferred buffers after warmup', () => {

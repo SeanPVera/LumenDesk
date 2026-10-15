@@ -50,6 +50,9 @@ final class NowPlayingMonitor {
     var onPermission: ((NowPlayingPermission) -> Void)?
 
     private let now: () -> TimeInterval
+    private let running: (PlaybackApp) -> Bool
+    private let sampleReader: ((PlaybackApp) -> (NowPlayingSample?, NowPlayingPermission))?
+    private var appPermissions: [PlaybackApp: NowPlayingPermission] = [:]
     private var timer: Timer?
     private var scripts: [PlaybackApp: NSAppleScript] = [:]
     /// Until when each slow app is skipped.
@@ -62,8 +65,14 @@ final class NowPlayingMonitor {
         didSet { if permission != oldValue { onPermission?(permission) } }
     }
 
-    init(now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
+    init(now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+         running: @escaping (PlaybackApp) -> Bool = {
+             !NSRunningApplication.runningApplications(withBundleIdentifier: $0.rawValue).isEmpty
+         },
+         read: ((PlaybackApp) -> (NowPlayingSample?, NowPlayingPermission))? = nil) {
         self.now = now
+        self.running = running
+        self.sampleReader = read
     }
 
     func start() {
@@ -85,25 +94,33 @@ final class NowPlayingMonitor {
     private func poll() {
         var paused: NowPlayingSample?
         let time = now()
-        let order = PlaybackApp.allCases.sorted { lhs, _ in lhs == lastPlaying }
-        for app in order where (restingUntil[app] ?? 0) <= time && isRunning(app) {
+        var order = PlaybackApp.allCases
+        if let lastPlaying { order.removeAll { $0 == lastPlaying }; order.insert(lastPlaying, at: 0) }
+        let runningApps = order.filter(running)
+        for app in runningApps where (restingUntil[app] ?? 0) <= time {
             guard let sample = read(app) else { continue }
             // A playing app wins over a paused one.
             if sample.isPlaying {
+                permission = .granted
                 lastPlaying = app
                 onSample?(sample)
                 return
             }
             if paused == nil { paused = sample }
         }
+        // An allowed idle app must not overwrite a denial from the other app.
+        // A playing allowed app already returned above and can still be followed.
+        permission = runningApps.contains { appPermissions[$0] == .denied } ? .denied
+            : runningApps.contains { appPermissions[$0] == .granted } ? .granted : .unknown
         onSample?(paused)
     }
 
-    private func isRunning(_ app: PlaybackApp) -> Bool {
-        !NSRunningApplication.runningApplications(withBundleIdentifier: app.rawValue).isEmpty
-    }
-
     private func read(_ app: PlaybackApp) -> NowPlayingSample? {
+        if let sampleReader {
+            let (sample, permission) = sampleReader(app)
+            appPermissions[app] = permission
+            return sample
+        }
         guard let script = script(for: app) else { return nil }
         let before = now()
         var error: NSDictionary?
@@ -112,10 +129,10 @@ final class NowPlayingMonitor {
         if after - before > Self.slowReply { restingUntil[app] = after + Self.restAfterSlowReply }
         if let error {
             // -1743: the user declined Automation for this app.
-            if (error[NSAppleScript.errorNumber] as? Int) == -1743 { permission = .denied }
+            appPermissions[app] = (error[NSAppleScript.errorNumber] as? Int) == -1743 ? .denied : .unknown
             return nil
         }
-        permission = .granted
+        appPermissions[app] = .granted
         return Self.parse(result, app: app, sampledAt: (before + after) / 2)
     }
 

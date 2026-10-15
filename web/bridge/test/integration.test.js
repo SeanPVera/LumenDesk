@@ -421,6 +421,58 @@ test('newer manual control revokes music frames and stale restoration', async()=
   await waitFor(()=>Math.abs(bulb.color.brightness-percentToU16(65))<=1)
 })
 
+test('owned Music restores exact LIFX white and saturated HSBK instead of an RGB approximation', async () => {
+  await api('/discover', { method: 'POST' })
+  const device = await waitFor(() => registry.list().find(d => d.brand === 'lifx' && d.hsbk))
+  const headers = { 'Content-Type': 'application/json', Origin: ORIGIN }
+  const send = state => api('/music/frame', { method: 'POST', headers, body: JSON.stringify({ states: [state] }) })
+  for (const [index, color] of [{ kelvin: 2700 }, { rgb: { r: 45, g: 210, b: 90 } }].entries()) {
+    await api(`/devices/${encodeURIComponent(device.id)}/color`, { method: 'POST', headers, body: JSON.stringify(color) })
+    const expected = structuredClone(registry.get(device.id).hsbk)
+    await waitFor(() => JSON.stringify(bulb.color) === JSON.stringify(expected))
+    const frame = { fixtureID: device.id, rgb: { r: 0, g: 0, b: 255 }, brightness: 0.2,
+      owner: `exact-restore-${index}`, controlRevision: registry.get(device.id).controlRevision }
+    assert.equal((await send(frame)).body.applied, 1)
+    await waitFor(() => bulb.color.brightness === percentToU16(20))
+    const restore = { ...frame, restoring: true, rgb: { r: 255, g: 200, b: 180 }, brightness: expected.brightness / 65535 }
+    if (index === 0) {
+      const ip = registry.get(device.id).ip
+      registry.patch(device.id, {ip:null})
+      assert.equal((await send(restore)).status, 503, 'failed queueing must reach the restoration retry UI')
+      assert.equal(registry.get(device.id).musicOwner, frame.owner, 'failed restoration keeps its owner and exact starting state')
+      registry.patch(device.id, {ip})
+    }
+    assert.equal((await send(restore)).body.applied, 1)
+    await waitFor(() => JSON.stringify(bulb.color) === JSON.stringify(expected))
+    assert.deepEqual(bulb.color, expected, 'white mode, saturation, kelvin and brightness all survive Stop')
+  }
+})
+
+test('owned Music restores Govee white with a temperature command', async () => {
+  await api('/discover', {method:'POST'})
+  const device = await waitFor(() => registry.list().find(d => d.brand === 'govee'))
+  registry.claimControl(device.id)
+  // The fake device's status fixture is RGB-only. Seed a known white reading,
+  // then inspect the actual UDP command rather than that optimistic mirror.
+  registry.patch(device.id, {kelvin:3500})
+  const received = []
+  const observe = buffer => received.push(JSON.parse(buffer.toString('utf8')).msg)
+  strip.controlSocket.on('message', observe)
+  const frame = {fixtureID:device.id,rgb:{r:0,g:0,b:255},brightness:0.2,
+    owner:'restore-govee-white',controlRevision:registry.get(device.id).controlRevision}
+  const send = state => api('/music/frame', {method:'POST',headers:{'Content-Type':'application/json',Origin:ORIGIN},
+    body:JSON.stringify({states:[state]})})
+  try {
+    assert.equal((await send(frame)).body.applied, 1)
+    await waitFor(() => received.some(message => message.cmd === 'colorwc' && message.data.color.b === 51))
+    assert.equal((await send({...frame,restoring:true,brightness:0.6})).body.applied, 1)
+    await waitFor(() => received.some(message => message.cmd === 'colorwc' && message.data.colorTemInKelvin === 3500))
+    await waitFor(() => strip.brightness === 60)
+  } finally {
+    strip.controlSocket.off('message', observe)
+  }
+})
+
 test('malformed Govee UDP discoveries cannot poison the registry', async () => {
   const localRegistry = new Registry()
   const sender = dgram.createSocket('udp4')

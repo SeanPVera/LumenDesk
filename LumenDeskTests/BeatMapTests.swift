@@ -10,6 +10,30 @@ import AVFoundation
 final class BeatMapTests: XCTestCase {
     private static let hop = 512.0 / 48_000
 
+    func testEquallyLoudBarsGetEqualEnergyRegardlessOfOrderOrBarCount() {
+        let beats = (0..<16).map { Double($0) * 0.5 }
+        let energy = [Double](repeating: 0.45, count: 800)
+        let bars = BeatMapBuilder.barEnergies(beats: beats, downbeatOffset: 0, energy: energy)
+        XCTAssertEqual(bars.count, 4)
+        for value in bars { XCTAssertEqual(value, 0.56, accuracy: 1e-9) }
+        XCTAssertEqual(BeatMapBuilder.barEnergies(beats: Array(beats.prefix(4)), downbeatOffset: 0, energy: energy)[0], bars[0], accuracy: 1e-9)
+        let mixed = (0..<800).map { $0 < 400 ? 0.2 : 0.8 }
+        let ranked = BeatMapBuilder.barEnergies(beats: beats, downbeatOffset: 0, energy: mixed)
+        XCTAssertEqual(ranked[0], ranked[1], accuracy: 1e-9)
+        XCTAssertEqual(ranked[2], ranked[3], accuracy: 1e-9)
+        XCTAssertGreaterThan(ranked[2], ranked[0])
+    }
+
+    func testRapidOrBackwardsCalibrationTapsCannotCountAsSeparateBeats() {
+        var taps = TapCalibrator()
+        for i in 0..<8 { taps.tap(at: 100.06 + Double(i) * 0.01, beatReference: 100, interval: 0.5) }
+        XCTAssertEqual(taps.count, 1)
+        XCTAssertNil(taps.suggestedOffset(current: 0))
+        taps.tap(at: 100, beatReference: 100, interval: 0.5)
+        taps.tap(at: 100.56, beatReference: 100.5, interval: 0.5)
+        XCTAssertEqual(taps.count, 2)
+    }
+
     /// A beat every `interval` seconds from `firstBeat`, the downbeat on beat
     /// `downbeatBeat` of each four, louder kicks on downbeats, and an energy
     /// step at `loudFrom`.
@@ -343,6 +367,39 @@ final class BeatMapTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(try huesPerBeat(1), 3, "a new colour on most beats")
     }
 
+    func testDoubleTimeColourStepsStayBelowThreePerSecond() throws {
+        var map = try Self.quietMap(1)
+        map.beats = (0..<300).map { Double($0) * 0.3 }
+        let engine = MusicChoreographyEngine()
+        var config = MusicModeConfiguration.configuration(for: .balanced)
+        config.timeFeel = .double
+        config.movementAmount = 0
+        config.stereoImage = 0
+        var previousHue: Double?
+        var previousDelta = 0.0
+        var changes: [Double] = []
+        for step in 0..<1000 {
+            let position = 5 + Double(step) * 0.01, timestamp = 1000 + position
+            var snapshot = Self.engineSnapshot(map, position: position, timestamp: timestamp)
+            snapshot.timeFeel = .double
+            snapshot.feltInterval = snapshot.beatInterval * 0.5
+            let frame = engine.makeFrame(snapshot: snapshot, configuration: config,
+                                         topology: FixtureTopology(), fixtures: Self.room,
+                                         timestamp: timestamp, sequenceNumber: UInt64(step))
+            let hue = try XCTUnwrap(frame.states.first).hue
+            if let previousHue {
+                let delta = abs(hue - previousHue)
+                if delta > 1e-6, previousDelta <= 1e-6 { changes.append(timestamp) }
+                previousDelta = delta
+            }
+            previousHue = hue
+        }
+        XCTAssertGreaterThan(changes.count, 10)
+        for (a, b) in zip(changes, changes.dropFirst()) {
+            XCTAssertGreaterThanOrEqual(b - a, 1 / 3.0 - 0.011)
+        }
+    }
+
     func testTheTopTierAsksForADownbeatFlashOnlyThroughTheLimiter() throws {
         func flashes(safe: Bool) throws -> Int {
             let map = try Self.quietMap(1)
@@ -458,6 +515,61 @@ final class BeatMapTests: XCTestCase {
     #endif
 
     #if os(macOS)
+    func testPauseSeekAndCaptureGapsRestartLearning() {
+        var time = 100.0
+        let coordinator = BeatMapCoordinator(now: { time })
+        coordinator.beginFollowing(startMonitor: false)
+        defer { coordinator.stop() }
+        var sample = NowPlayingSample(app: .music, trackID: UUID().uuidString, title: "Song", artist: "Artist",
+                                      duration: 120, position: 0, isPlaying: true, sampledAt: time)
+        coordinator.receive(sample)
+        func feed(_ start: Double, _ end: Double) {
+            let count = Int((end - start) * 100)
+            coordinator.consume(hops: (0...count).map {
+                HopFeature(time: start + Double($0) / 100, onset: 0.5, kick: 0.5, energy: 0.5)
+            })
+        }
+        feed(100, 110)
+        XCTAssertEqual(coordinator.status, .learning(app: "Music", title: "Song", coverage: 0.05))
+        time = 110; sample.sampledAt = time; sample.position = 10; sample.isPlaying = false
+        coordinator.receive(sample)
+        XCTAssertEqual(coordinator.status, .waitingForPlayer)
+        feed(110, 111)
+        time = 111; sample.sampledAt = time; sample.isPlaying = true
+        coordinator.receive(sample)
+        feed(109, 112) // Queued hops before the resume must be discarded.
+        XCTAssertEqual(coordinator.status, .learning(app: "Music", title: "Song", coverage: 0))
+        time = 112; sample.sampledAt = time; sample.position = 0
+        coordinator.receive(sample)
+        feed(112, 122)
+        XCTAssertEqual(coordinator.status, .learning(app: "Music", title: "Song", coverage: 0.05))
+        feed(124, 125)
+        XCTAssertEqual(coordinator.status, .learning(app: "Music", title: "Song", coverage: 0))
+    }
+
+    func testAnAllowedIdlePlayerDoesNotHideAnotherPlayersAutomationDenial() {
+        let monitor = NowPlayingMonitor(running: { _ in true }, read: { app in
+            (nil, app == .spotify ? .denied : .granted)
+        })
+        monitor.start()
+        defer { monitor.stop() }
+        XCTAssertEqual(monitor.permission, .denied)
+    }
+
+    func testAnAllowedPlayingAppCanBeFollowedWhenTheOtherAppIsDenied() {
+        let sample = NowPlayingSample(app: .music, trackID: "42", title: "Song", artist: "Artist",
+                                      duration: 60, position: 10, isPlaying: true, sampledAt: 0)
+        let monitor = NowPlayingMonitor(running: { _ in true }, read: { app in
+            app == .spotify ? (nil, .denied) : (sample, .granted)
+        })
+        var received: NowPlayingSample?
+        monitor.onSample = { received = $0 }
+        monitor.start()
+        defer { monitor.stop() }
+        XCTAssertEqual(monitor.permission, .granted)
+        XCTAssertEqual(received, sample)
+    }
+
     func testAPausedPlayerIsWaitingEvenWhenItsTrackHasAMap() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("BeatMapTests-\(UUID().uuidString)", isDirectory: true)

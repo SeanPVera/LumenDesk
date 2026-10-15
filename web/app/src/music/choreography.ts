@@ -517,7 +517,7 @@ export class MusicChoreographyEngine {
       // High tiers step colour on the beat (every other beat above 180 BPM,
       // so colour never changes more than three times a second) and fade over
       // a quarter beat. Lower tiers hold whole bars and fade over one beat.
-      const beatsPerStep = clock.interval >= 1 / 3 ? 1 : 2;
+      const beatsPerStep = Math.max(1, Math.ceil(1 / (3 * clock.interval)));
       const hold = stepsPerBeat
         ? Math.floor(clock.beatPosition / beatsPerStep)
         : Math.floor(clock.barPosition / Math.max(1, Math.round(5 - configuration.colorChangeIntensity * 4)));

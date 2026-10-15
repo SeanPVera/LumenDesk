@@ -93,7 +93,10 @@ struct AudioReactiveSnapshot: Equatable {
         next.drop *= weight * exp(-age / 0.3)
         next.bass *= weight
         next.mids *= weight; next.highs *= weight; next.beatConfidence *= weight
-        if weight == 0 { next.isTempoLocked = false; next.tempo = 0 }
+        if weight == 0 {
+            next.isTempoLocked = false; next.tempo = 0
+            next.beatMapActive = false; next.barEnergy = nil
+        }
         return next
     }
 

@@ -66,6 +66,7 @@ struct NanoleafWallCanvas: View {
             let numbers = layout.panelNumbers(rotationDegrees: rotation)
             ZStack {
                 Canvas { context, _ in draw(in: &context, mapping: mapping, numbers: numbers) }
+                    .allowsHitTesting(false)
                     .accessibilityHidden(true)
                 if interactive {
                     accessibilityPanels(mapping: mapping, numbers: numbers)
@@ -92,6 +93,7 @@ struct NanoleafWallCanvas: View {
             .contentShape(Rectangle())
             .gesture(selectionGesture(mapping: mapping), including: interactive ? .all : .none)
         }
+        .allowsHitTesting(interactive)
     }
 
     // MARK: Drawing

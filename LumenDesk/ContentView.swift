@@ -104,12 +104,15 @@ struct ContentView: View {
                 HStack(spacing: 10) {
                     Label(summary, systemImage: "arrow.uturn.backward.circle")
                     Button("Undo") { manager.undo() }.disabled(!manager.canUndo)
-                    Button { manager.dismissLastActionSummary() } label: { Image(systemName: "xmark") }.buttonStyle(.plain)
+                    Button { manager.dismissLastActionSummary() } label: {
+                        Image(systemName: "xmark").lumenInteractiveTarget()
+                    }
+                    .buttonStyle(.plain)
                 }
                 .font(.caption).padding(.horizontal, 14).padding(.vertical, 9)
                 .background(reduceTransparency ? Lumen.void : Lumen.void.opacity(0.9),
                             in: LumenPanelShape(radius: 3, chamfer: 12))
-                .overlay(LumenPanelShape(radius: 3, chamfer: 12).stroke(Lumen.hairlineStrong, lineWidth: 1))
+                .overlay(LumenPanelShape(radius: 3, chamfer: 12).stroke(Lumen.hairlineStrong, lineWidth: 1).allowsHitTesting(false))
                 .padding(.bottom, manager.commandError == nil ? 16 : 70)
                 .accessibilityElement(children: .combine)
             }
@@ -345,6 +348,7 @@ struct ContentView: View {
                         Image(systemName: "xmark.circle.fill")
                             .foregroundStyle(.secondary)
                             .font(.caption)
+                            .lumenInteractiveTarget()
                     }
                     .buttonStyle(.plain)
                     .help("Clear search")
@@ -835,6 +839,7 @@ struct CommandToastView: View {
                 Image(systemName: "xmark")
                     .foregroundStyle(.secondary)
                     .font(.caption)
+                    .lumenInteractiveTarget()
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Dismiss")
@@ -845,6 +850,7 @@ struct CommandToastView: View {
         .overlay(
             LumenPanelShape(radius: 3, chamfer: 12)
                 .stroke(Lumen.warning.opacity(0.55), lineWidth: 1)
+                .allowsHitTesting(false)
         )
         .shadow(color: .black.opacity(0.5), radius: 14, y: 6)
         .frame(maxWidth: 420)

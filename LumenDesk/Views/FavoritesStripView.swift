@@ -19,7 +19,11 @@ struct FavoritesStripView: View {
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
                         Spacer()
-                        Button("Organize") { showingOrganizer = true }.font(.caption).buttonStyle(.plain)
+                        Button { showingOrganizer = true } label: {
+                            Text("Organize").lumenInteractiveTarget()
+                        }
+                        .font(.caption)
+                        .buttonStyle(.plain)
                     }
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 10) {
@@ -132,10 +136,12 @@ private struct FavoriteSceneTile: View {
                         .frame(maxWidth: 220, alignment: .leading)
                 }
             }
+            .favoriteTileStyle()
+            .lumenInteractiveTarget()
+            .contentShape(LumenPanelShape(radius: 3, chamfer: 10))
         }
         .buttonStyle(.plain)
         .disabled(manager.availableDeviceIDs(for: scene).isEmpty)
-        .favoriteTileStyle()
         .contextMenu { Button("Remove Scene Favorite") { manager.toggleFavoriteScene(scene.id) } }
         .sheet(item: $previewScene) { scene in
             ScenePreviewView(scene: scene).environmentObject(manager)
@@ -185,6 +191,6 @@ private extension View {
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
             .background(LumenPanelShape(radius: 3, chamfer: 10).fill(Lumen.surfaceRaised))
-            .overlay(LumenPanelShape(radius: 3, chamfer: 10).stroke(Lumen.hairline, lineWidth: 1))
+            .overlay(LumenPanelShape(radius: 3, chamfer: 10).stroke(Lumen.hairline, lineWidth: 1).allowsHitTesting(false))
     }
 }

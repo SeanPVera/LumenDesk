@@ -151,6 +151,7 @@ struct LumenDeskShellView: View {
                         .disabled(!manager.canUndo)
                     Button { manager.dismissLastActionSummary() } label: {
                         Image(systemName: "xmark")
+                            .lumenInteractiveTarget()
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Dismiss")
@@ -209,8 +210,10 @@ private struct SpectrumNavigation: View {
                                 Spacer(minLength: 0)
                             }
                             .padding(10)
+                            .frame(minHeight: 44)
                             .background(destination == .home && requestedDeviceID == light.id
                                         ? Lumen.floorRaised : Color.clear, in: RoundedRectangle(cornerRadius: 6))
+                            .contentShape(RoundedRectangle(cornerRadius: 6))
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("Edit \(light.label)")
@@ -222,8 +225,10 @@ private struct SpectrumNavigation: View {
                             Label(item.rawValue, systemImage: item.symbol)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(10)
+                                .frame(minHeight: 44)
                                 .background(destination == item ? Lumen.floorRaised : Color.clear,
                                             in: RoundedRectangle(cornerRadius: 6))
+                                .contentShape(RoundedRectangle(cornerRadius: 6))
                         }
                         .buttonStyle(.plain)
                         .accessibilityAddTraits(destination == item ? .isSelected : [])
@@ -253,8 +258,10 @@ private struct SpectrumNavigation: View {
             Label(title, systemImage: symbol)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(10)
+                .frame(minHeight: 44)
                 .background(scope == target ? Lumen.floorRaised : Color.clear,
                             in: RoundedRectangle(cornerRadius: 6))
+                .contentShape(RoundedRectangle(cornerRadius: 6))
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(scope == target ? .isSelected : [])
@@ -311,9 +318,9 @@ private struct DeviceCompactRow: View {
                     Image(systemName: selected ? "checkmark.square.fill" : "square")
                         .font(.system(size: 18, weight: .medium))
                         .foregroundStyle(selected ? Lumen.lit : Lumen.muted)
+                        .lumenInteractiveTarget()
                 }
                 .buttonStyle(.plain)
-                .lumenInteractiveTarget()
                 .accessibilityLabel(selected ? "Deselect \(device.label)" : "Select \(device.label)")
             }
 
@@ -979,9 +986,9 @@ private struct AutomationRoomCard: View {
                         }
                     } label: {
                         Label("Pause", systemImage: "pause")
+                            .lumenInteractiveTarget()
                     }
                     .controlSize(.small)
-                    .lumenInteractiveTarget()
                 }
                 Button("Edit", action: onEdit)
                     .buttonStyle(LumenSecondaryButtonStyle(compact: true))
@@ -991,7 +998,10 @@ private struct AutomationRoomCard: View {
                 HStack {
                     Text("No schedules yet").foregroundStyle(Lumen.textSecondary)
                     Spacer()
-                    Button("Add Schedule", action: onEdit).buttonStyle(.plain).foregroundStyle(Lumen.cyan)
+                    Button(action: onEdit) {
+                        Text("Add Schedule").lumenInteractiveTarget()
+                    }
+                    .buttonStyle(.plain).foregroundStyle(Lumen.cyan)
                 }
                 .font(.callout)
             } else {

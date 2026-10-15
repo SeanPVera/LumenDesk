@@ -57,7 +57,7 @@ struct MenuBarPopoverView: View {
     }
 
     private var emergencyRow: some View {
-        HStack(spacing: 8) {
+        VStack(spacing: 8) {
             Button {
                 manager.setAllPower(on: false)
             } label: {
@@ -67,10 +67,15 @@ struct MenuBarPopoverView: View {
             .buttonStyle(LumenPrimaryButtonStyle())
             .tint(.red)
             .disabled(manager.devices.isEmpty)
-            ForEach([0.1, 0.3, 0.6, 1.0], id: \.self) { value in
-                Button("\(Int(value * 100))%") { manager.setAllBrightness(value) }
-                    .controlSize(.mini)
+            HStack(spacing: 8) {
+                ForEach([0.1, 0.3, 0.6, 1.0], id: \.self) { value in
+                    Button { manager.setAllBrightness(value) } label: {
+                        Text("\(Int(value * 100))%")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(LumenSecondaryButtonStyle(compact: true))
                     .disabled(manager.devices.isEmpty)
+                }
             }
         }
         .padding(.horizontal, 12)
@@ -83,7 +88,9 @@ struct MenuBarPopoverView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
                     ForEach(manager.favoriteScenes) { scene in
-                        Button(scene.name) { previewScene = scene }
+                        Button { previewScene = scene } label: {
+                            Text(scene.name).lumenInteractiveTarget()
+                        }
                             .controlSize(.small)
                             .disabled(manager.availableDeviceIDs(for: scene).isEmpty)
                             .help(manager.availableDeviceIDs(for: scene).isEmpty
@@ -98,9 +105,9 @@ struct MenuBarPopoverView: View {
     }
 
     private var menuBarHeader: some View {
-        HStack {
+        HStack(spacing: 4) {
             LumenMark(size: 18)
-            VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text("LumenDesk")
                     .font(LumenType.display(size: 13, weight: .bold))
                 if manager.isDemoMode {
@@ -108,34 +115,46 @@ struct MenuBarPopoverView: View {
                         .font(LumenType.instrumentLabel(size: 8))
                         .foregroundStyle(Lumen.warning)
                 }
+                HStack(spacing: 4) {
+                    if !manager.commandPendingIDs.isEmpty {
+                        Label("\(manager.commandPendingIDs.count)", systemImage: "arrow.up.circle")
+                            .font(.caption2)
+                            .help("Commands in progress")
+                    }
+                    Text("\(manager.devices.count) light\(manager.devices.count == 1 ? "" : "s")")
+                        .font(LumenType.readout(size: 10))
+                        .foregroundStyle(Lumen.textTertiary)
+                        .accessibilityLabel("\(manager.devices.count) light\(manager.devices.count == 1 ? "" : "s") found")
+                }
+                .lineLimit(1)
             }
             Spacer()
             Button {
                 NSApp.activate(ignoringOtherApps: true)
                 NSApp.windows.first(where: { $0.canBecomeKey })?.makeKeyAndOrderFront(nil)
-            } label: { Image(systemName: "macwindow") }
+            } label: {
+                Image(systemName: "macwindow")
+                    .lumenInteractiveTarget()
+            }
             .buttonStyle(.borderless)
-            .lumenInteractiveTarget()
             .help("Resume in LumenDesk")
+            .accessibilityLabel("Resume in LumenDesk")
             if manager.isScanning {
-                ProgressView().controlSize(.mini)
+                ProgressView()
+                    .controlSize(.mini)
+                    .frame(width: 44, height: 44)
             } else {
                 Button {
                     manager.scan()
                 } label: {
                     Image(systemName: "arrow.clockwise")
                         .font(.caption)
+                        .lumenInteractiveTarget()
                 }
                 .buttonStyle(.borderless)
-                .lumenInteractiveTarget()
                 .help("Scan for lights")
                 .accessibilityLabel("Scan for lights")
             }
-            if !manager.commandPendingIDs.isEmpty { Label("\(manager.commandPendingIDs.count)", systemImage: "arrow.up.circle").font(.caption2).help("Commands in progress") }
-            Text("\(manager.devices.count) light\(manager.devices.count == 1 ? "" : "s")")
-                .font(LumenType.readout(size: 10))
-                .foregroundStyle(Lumen.textTertiary)
-                .accessibilityLabel("\(manager.devices.count) light\(manager.devices.count == 1 ? "" : "s") found")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)

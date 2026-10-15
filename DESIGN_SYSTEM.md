@@ -52,6 +52,13 @@ and accessibility changes. Segment cells and paint targets are at least 44 pt
 where newly implemented. Essential reordering has named Earlier/Later buttons;
 room placement also has row/column/size steppers. No drag-only essential action.
 
+Shared action keys, icon buttons, chips and rockers reserve at least 44 pt in
+their labels. Apply `lumenInteractiveTarget` inside a button or menu label so its
+padding responds to input and takes up layout space. Bound canvas interactions
+after their final frame; visual clipping alone does not constrain hit testing.
+Decorative outlines, focus rings and passive previews do not handle pointer
+events. Informational browser toasts let clicks reach the controls beneath them.
+
 ## Product content
 
 - Fixture marks derive hue and relative intensity from existing state. Text stays

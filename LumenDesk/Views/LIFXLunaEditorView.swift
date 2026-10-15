@@ -148,6 +148,7 @@ struct LIFXLunaEditorView: View {
                             } else {
                                 Color.clear
                                     .frame(maxWidth: .infinity, minHeight: 52)
+                                    .allowsHitTesting(false)
                                     .accessibilityHidden(true)
                             }
                         }
@@ -159,7 +160,8 @@ struct LIFXLunaEditorView: View {
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
                     .fill(Lumen.surfaceRaised)
                     .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .stroke(Lumen.hairline, lineWidth: 0.5))
+                        .stroke(Lumen.hairline, lineWidth: 0.5)
+                        .allowsHitTesting(false))
             )
             .frame(maxWidth: 440)
             .frame(maxWidth: .infinity)
@@ -180,12 +182,14 @@ struct LIFXLunaEditorView: View {
                     RoundedRectangle(cornerRadius: 4, style: .continuous)
                         .stroke(selected ? Color.white : Lumen.hairlineStrong,
                                 lineWidth: selected ? 3 : 0.5)
+                        .allowsHitTesting(false)
                 )
                 .overlay(alignment: .bottomLeading) {
                     Text("\(number)").font(.caption2.monospacedDigit())
                         .foregroundStyle(Lumen.chalk).padding(.horizontal, 5).padding(.vertical, 2)
                         .background(Lumen.stage.opacity(0.85), in: RoundedRectangle(cornerRadius: 3))
                         .padding(5)
+                        .allowsHitTesting(false)
                 }
                 .overlay(alignment: .topTrailing) {
                     if selected {
@@ -194,8 +198,10 @@ struct LIFXLunaEditorView: View {
                             .foregroundStyle(Lumen.stage)
                             .background(Lumen.lit, in: Circle())
                             .padding(5)
+                            .allowsHitTesting(false)
                     }
                 }
+                .contentShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
 
         }
         .buttonStyle(.plain)
@@ -269,7 +275,9 @@ struct LIFXLunaEditorView: View {
                             .overlay(
                                 RoundedRectangle(cornerRadius: 2, style: .continuous)
                                     .stroke(Lumen.hairlineStrong, lineWidth: 1)
+                                    .allowsHitTesting(false)
                             )
+                            .contentShape(RoundedRectangle(cornerRadius: 2, style: .continuous))
                     }
                     .buttonStyle(.plain)
                     .help(swatch.label)
@@ -446,6 +454,7 @@ struct LunaMiniGridView: View {
                 }
             }
         }
+        .allowsHitTesting(false)
         .accessibilityHidden(true)
     }
 }

@@ -85,6 +85,7 @@ struct LightRowView: View {
             if manager.newlyDiscoveredIDs.contains(device.id) {
                 panelShape
                     .stroke(Lumen.beamBright, lineWidth: 2)
+                    .allowsHitTesting(false)
                     .transition(.opacity)
             }
         }
@@ -143,6 +144,7 @@ struct LightRowView: View {
                         .foregroundStyle(Lumen.warning)
                         .padding(1)
                         .background(Lumen.surface)
+                        .allowsHitTesting(false)
                         .accessibilityLabel("Device may be offline")
                 }
             }
@@ -221,6 +223,7 @@ struct LightRowView: View {
                 .overlay(
                     RoundedRectangle(cornerRadius: 2, style: .continuous)
                         .stroke(device.brand.tint.opacity(0.4), lineWidth: 1)
+                        .allowsHitTesting(false)
                 )
                 .foregroundStyle(device.brand.tint)
                 .accessibilityHidden(true)
@@ -464,6 +467,7 @@ struct LightRowView: View {
         .overlay(
             RoundedRectangle(cornerRadius: 3, style: .continuous)
                 .stroke(Lumen.hairline, lineWidth: 1)
+                .allowsHitTesting(false)
         )
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(running.name) is running on \(manager.scopeDisplayName(running.scope)) and controls this light. Stop it to regain manual control.")
@@ -495,7 +499,7 @@ struct LightRowView: View {
             DisclosureGroup("Quick colors") {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 44), spacing: 6)], spacing: 6) {
                     ForEach(Self.colorSwatches, id: \.label) { swatch in
-                        swatchButton(swatch).frame(minWidth: 44, minHeight: 44)
+                        swatchButton(swatch)
                     }
                 }
             }
@@ -603,15 +607,19 @@ struct LightRowView: View {
                     RoundedRectangle(cornerRadius: 2, style: .continuous)
                         .stroke(active ? Color.white.opacity(0.95) : Lumen.hairlineStrong,
                                 lineWidth: active ? 1.5 : 1)
+                        .allowsHitTesting(false)
                 )
                 .overlay(alignment: .center) {
                     if active {
                         Image(systemName: "checkmark")
                             .font(.system(size: 10, weight: .black))
                             .foregroundStyle(.white)
+                            .allowsHitTesting(false)
                     }
                 }
                 .shadow(color: active ? swatch.color.opacity(0.55) : .clear, radius: 6)
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
                 .accessibilityHidden(true)
         }
         .buttonStyle(.plain)

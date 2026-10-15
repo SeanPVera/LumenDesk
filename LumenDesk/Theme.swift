@@ -389,6 +389,7 @@ struct LumenPanelModifier: ViewModifier {
             .overlay {
                 if highlighted {
                     shape.stroke(Lumen.rule, lineWidth: Lumen.hairlineWidth)
+                        .allowsHitTesting(false)
                 }
             }
     }
@@ -489,6 +490,7 @@ private struct LumenKeyFace: View {
             .foregroundStyle(legend)
             .padding(.vertical, compact ? 6 : 9)
             .padding(.horizontal, compact ? 11 : 15)
+            .lumenInteractiveTarget()
             .background(shape.fill(face))
             .opacity(isEnabled ? 1 : 0.35)
             .contentShape(shape)
@@ -503,6 +505,7 @@ struct LumenDangerButtonStyle: ButtonStyle {
             .foregroundStyle(Lumen.fail)
             .padding(.vertical, 9)
             .padding(.horizontal, 15)
+            .lumenInteractiveTarget()
             .background(
                 RoundedRectangle(cornerRadius: Lumen.controlRadius, style: .continuous)
                     .fill(Lumen.fail.opacity(configuration.isPressed ? 0.20 : 0.11))
@@ -580,6 +583,8 @@ extension View {
     /// Gives compact icon and text controls a forgiving click/tap area without
     /// forcing their visible artwork to grow. Forty-four points matches the
     /// platform accessibility guidance and keeps neighboring targets distinct.
+    /// Apply inside a button's label so the space belongs to the control's
+    /// hit region, rather than only to the layout around the button.
     func lumenInteractiveTarget(minimumSize: CGFloat = 44) -> some View {
         frame(minWidth: minimumSize, minHeight: minimumSize)
             .contentShape(Rectangle())

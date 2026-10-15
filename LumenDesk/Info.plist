@@ -30,6 +30,8 @@
     <string>LumenDesk analyzes music and room audio levels locally to animate music-reactive lighting effects.</string>
     <key>NSScreenCaptureUsageDescription</key>
     <string>LumenDesk can capture system audio from music apps locally to drive music-reactive lightshows.</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>When you turn on Follow Spotify and Music, LumenDesk asks those apps which song is playing and where it is, so the lights stay on the beat. Nothing leaves this Mac.</string>
     <key>NSLocalNetworkUsageDescription</key>
     <string>LumenDesk discovers and controls LIFX, Govee, and Nanoleaf Shapes lights on your local network.</string>
     <key>NSAppTransportSecurity</key>

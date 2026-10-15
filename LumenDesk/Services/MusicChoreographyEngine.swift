@@ -34,6 +34,82 @@ struct FlashSafetyLimiter {
     }
 }
 
+/// Six energy gears, 0…5, with hysteresis so a bar sitting on a boundary
+/// does not flip the show back and forth. A beat map supplies the current
+/// bar's energy before it plays; live input can only report the bar just
+/// finished, so live tiers lag by one bar. Without a grid, a two-second
+/// energy average stands in for the bar.
+///
+/// Kept in lockstep with `EnergyTierTracker` in `web/app/src/music/choreography.ts`.
+struct EnergyTierTracker {
+    /// Depth of the beat swell in each tier. Tier 3 is the engine's original depth.
+    static let depth: [Double] = [0.62, 0.74, 0.87, 1, 1.08, 1.15]
+    /// Rise time per tier: calm music eases into a swell, loud music snaps.
+    static let attack: [TimeInterval] = [0.14, 0.14, 0.07, 0.026, 0.026, 0.026]
+
+    private var tierValue = -1
+    private var barIndex: Int?
+    private var barSum = 0.0
+    private var barTime = 0.0
+    private var longEnergy = 0.0
+    private var freeEnergy = 0.0
+    private var primed = false
+
+    /// The current tier; 3 until the first measurement, which is the engine's original behaviour.
+    var tier: Int { tierValue < 0 ? 3 : tierValue }
+
+    @discardableResult
+    mutating func update(energy: Double, dt: Double, barPosition: Double, gridStrength: Double,
+                         mappedBarEnergy: Double? = nil) -> Int {
+        if !primed { longEnergy = energy; freeEnergy = energy; primed = true }
+        longEnergy = Self.follow(longEnergy, toward: energy, dt: dt, timeConstant: 20)
+        if let mappedBarEnergy, mappedBarEnergy.isFinite {
+            barIndex = nil
+            applyTarget(max(0, min(1, mappedBarEnergy)))
+            return tier
+        }
+        if gridStrength > 0, barPosition.isFinite {
+            let bar = Int(floor(barPosition))
+            if let current = barIndex {
+                if bar != current {
+                    if barTime >= 0.2 { applyTarget(liveTarget(barSum / barTime)) }
+                    barIndex = bar; barSum = 0; barTime = 0
+                }
+            } else {
+                barIndex = bar; barSum = 0; barTime = 0
+            }
+            barSum += energy * dt
+            barTime += dt
+            return tier
+        }
+        barIndex = nil
+        freeEnergy = Self.follow(freeEnergy, toward: energy, dt: dt, timeConstant: 2)
+        applyTarget(liveTarget(freeEnergy))
+        return tier
+    }
+
+    mutating func reset() { self = EnergyTierTracker() }
+
+    /// Same 60/40 absolute/relative split a beat map uses for its bars.
+    private func liveTarget(_ mean: Double) -> Double {
+        let absolute = max(0, min(1, mean / 0.75))
+        let relative = max(0, min(1, 0.5 + (mean - longEnergy) / 0.25))
+        return max(0, min(1, 0.6 * absolute + 0.4 * relative))
+    }
+
+    private mutating func applyTarget(_ target: Double) {
+        let x = target * 5
+        if tierValue < 0 { tierValue = max(0, min(5, Int(x.rounded()))); return }
+        while tierValue < 5, x >= Double(tierValue) + 0.65 { tierValue += 1 }
+        while tierValue > 0, x < Double(tierValue) - 0.65 { tierValue -= 1 }
+    }
+
+    private static func follow(_ current: Double, toward target: Double, dt: Double, timeConstant: Double) -> Double {
+        guard timeConstant > 0 else { return target }
+        return current + (target - current) * (1 - exp(-dt / timeConstant))
+    }
+}
+
 /// Pure, vendor-neutral music-to-light mapping. State is limited to musical
 /// envelopes, hysteresis, palette progression, and the flash safety gate.
 ///
@@ -88,6 +164,10 @@ final class MusicChoreographyEngine {
     private var paletteFadeFrom: Double = 0
     private var paletteFadeTo: Double = 0
     private var paletteFadeBar: Double = 0
+    /// Whether the palette is currently stepping per beat (high tiers) or per bar.
+    private var paletteHoldsBeats = false
+    private var tiers = EnergyTierTracker()
+    private var lastClockBeatInBar: Int?
 
     // Topology expansion includes fixture sorting, role resolution, and one
     // target allocation per segment. Palette conversion is also independent
@@ -119,6 +199,9 @@ final class MusicChoreographyEngine {
         accentEnvelope = 0
         lastPaletteHold = nil
         paletteFadeFrom = 0; paletteFadeTo = 0; paletteFadeBar = 0
+        paletteHoldsBeats = false
+        tiers.reset()
+        lastClockBeatInBar = nil
         cachedTopology = nil
         cachedFixtures.removeAll(keepingCapacity: true)
         cachedTargets.removeAll(keepingCapacity: true)
@@ -152,7 +235,24 @@ final class MusicChoreographyEngine {
 
         let dt = max(1 / 120, min(0.25, timestamp - (lastTimestamp ?? timestamp - 1 / 30)))
         lastTimestamp = timestamp
-        let clock = musicalClock(snapshot: snapshot, timestamp: timestamp)
+        // The tier needs this frame's bar position, and the clock needs the
+        // tier (it sets the attack the prediction compensates for, and
+        // half-time). Measure on the plain clock, then build the one the show renders.
+        let plainClock = musicalClock(snapshot: snapshot, timestamp: timestamp, configuration: config,
+                                      attackTime: Self.attackTime, halfTime: false)
+        let tier = tiers.update(energy: snapshot.energy, dt: dt, barPosition: plainClock.barPosition,
+                                gridStrength: plainClock.strength, mappedBarEnergy: snapshot.barEnergy)
+        let attackTime = EnergyTierTracker.attack[tier]
+        // Calm music on a fast grid nods on every other beat, the way a
+        // listener would. Only when time feel is left on Auto and the grid
+        // itself reads straight; an explicit feel always wins.
+        let autoHalfTime = config.timeFeel == .auto && snapshot.timeFeel == .straight
+            && tier <= 2 && plainClock.interval > 0 && plainClock.interval < 0.5
+        let clock = musicalClock(snapshot: snapshot, timestamp: timestamp, configuration: config,
+                                 attackTime: attackTime, halfTime: autoHalfTime)
+        let enteredDownbeat = clock.strength >= 0.5 && clock.beatInBar == 0
+            && lastClockBeatInBar != nil && lastClockBeatInBar != 0
+        lastClockBeatInBar = clock.strength >= 0.5 ? clock.beatInBar : nil
 
         let newBeats = snapshot.beatCount > lastBeatCount ? snapshot.beatCount - lastBeatCount : 0
         lastBeatCount = snapshot.beatCount
@@ -172,7 +272,8 @@ final class MusicChoreographyEngine {
         slowEnergy = Self.follow(slowEnergy, toward: snapshot.energy, dt: dt, timeConstant: 5)
         let energyRise = max(0, fastEnergy - slowEnergy)
 
-        advancePalette(newBeats: newBeats, clock: clock, configuration: config, dt: dt)
+        advancePalette(newBeats: newBeats, clock: clock, configuration: config, dt: dt,
+                       stepsPerBeat: tier >= 4 && !reducedMotion)
         advanceMovement(clock: clock, configuration: config, dt: dt)
 
         let beganSustainedEvent = updateSustainedEnergy(fastEnergy, at: timestamp)
@@ -180,8 +281,11 @@ final class MusicChoreographyEngine {
             snapshot.snare * config.percussionSensitivity,
             snapshot.percussion * config.percussionSensitivity * 0.9
         )
+        // The top tier may ask for a flash on the downbeat. Like every other
+        // request it goes through the limiter, which No-flash mode closes.
         let requestedFlash = max(percussionRequest > 0.62 ? percussionRequest : 0,
-                                 beganSustainedEvent ? 0.8 : 0)
+                                 beganSustainedEvent ? 0.8 : 0,
+                                 tier == 5 && enteredDownbeat ? 0.85 : 0)
         let flashIntensity = flashLimiter.admit(
             at: timestamp,
             requestedIntensity: requestedFlash,
@@ -215,6 +319,7 @@ final class MusicChoreographyEngine {
             * (0.6 + config.effectIntensity * 0.4) * min(1, config.effectIntensity / 0.2)
             * (0.4 + 0.6 * tempoRestraint)
             * (0.12 + 0.88 * dynamicsGate)
+            * EnergyTierTracker.depth[tier]
 
         // Master scales both bounds. Final output is clamped AFTER envelopes/flash.
         let lowerBrightness = config.minimumBrightness * config.masterBrightness
@@ -246,7 +351,7 @@ final class MusicChoreographyEngine {
         let p = pulseDrive.clamped01
         // Broaden only the crest for hit fixtures, preserving half-time gaps.
         let hitPulse = min(1, p + 2 * max(0, p - 0.35) * (1 - p))
-        let attack = 1 - exp(-dt / Self.attackTime)
+        let attack = 1 - exp(-dt / attackTime)
         // Release stays a fraction of the felt beat, relaxed in quiet passages.
         let musicalRelease = min(0.45, max(0.13, feltInterval * 0.26))
         let quietStretch = 1 + max(0, 0.6 - dynamics.clamped01) * 1.2
@@ -344,7 +449,8 @@ final class MusicChoreographyEngine {
             timestamp: timestamp,
             sequenceNumber: sequenceNumber,
             sustainedEnergyEvent: sustainedEnergyEvent,
-            flashApplied: flashIntensity > 0
+            flashApplied: flashIntensity > 0,
+            energyTier: tier
         )
     }
 
@@ -415,8 +521,11 @@ final class MusicChoreographyEngine {
 
     // MARK: - Musical time
 
-    /// Where the frame being rendered sits in the music.
-    private struct MusicalClock {
+    /// Where the frame being rendered sits in the music. Internal so tests
+    /// can check the prediction directly.
+    struct MusicalClock {
+        /// Absolute position in felt beats; its whole part counts beats.
+        var beatPosition: Double = 0
         /// 0…1 position inside the current felt beat, 0 exactly on the beat.
         var phase: Double = 0
         /// Which beat of the current bar this is.
@@ -433,8 +542,15 @@ final class MusicChoreographyEngine {
         var barPosition: Double = 0
     }
 
-    private func musicalClock(snapshot: AudioReactiveSnapshot, timestamp: TimeInterval) -> MusicalClock {
-        let interval = snapshot.feltInterval > 0 ? snapshot.feltInterval : snapshot.beatInterval
+    func musicalClock(
+        snapshot: AudioReactiveSnapshot,
+        timestamp: TimeInterval,
+        configuration: MusicModeConfiguration,
+        attackTime: TimeInterval,
+        halfTime: Bool
+    ) -> MusicalClock {
+        let felt = snapshot.feltInterval > 0 ? snapshot.feltInterval : snapshot.beatInterval
+        let interval = halfTime ? felt * 2 : felt
         let metre = snapshot.metre > 0 ? snapshot.metre : BeatTracker.beatsPerBar
         guard snapshot.isTempoLocked,
               interval > 0,
@@ -447,7 +563,9 @@ final class MusicChoreographyEngine {
         // Evaluating slightly ahead is only meaningful on a predicted grid: it
         // pays for transport, firmware delay, and the envelope's own rise time,
         // so the swell lands on the beat rather than a frame or two behind it.
-        let predicted = timestamp + Self.outputLatencyCompensation + Self.attackTime * 0.8
+        // The user's light timing offset adds to the fixed estimate.
+        let predicted = timestamp + Self.outputLatencyCompensation + configuration.outputLatencyOffset
+            + attackTime * 0.8
         let gridInterval = snapshot.beatInterval > 0 ? snapshot.beatInterval : interval
         let gridBeats = (predicted - snapshot.beatReferenceTime) / gridInterval
         // The reference advances on every detected beat. Include its position
@@ -461,6 +579,7 @@ final class MusicChoreographyEngine {
             + Double(metre))
             .truncatingRemainder(dividingBy: Double(metre)))
         return MusicalClock(
+            beatPosition: beats,
             phase: beats - wholeBeats,
             beatInBar: beatInBar,
             interval: interval,
@@ -521,24 +640,38 @@ final class MusicChoreographyEngine {
         newBeats: Int,
         clock: MusicalClock,
         configuration: MusicModeConfiguration,
-        dt: Double
+        dt: Double,
+        stepsPerBeat: Bool
     ) {
         guard configuration.colorChangeIntensity > 0 else { lastPaletteHold = nil; return }
         if clock.strength > 0, clock.barRate > 0 {
+            // High tiers step colour on the beat (every other beat above 180
+            // BPM, so colour never changes more than three times a second) and
+            // fade over a quarter beat. Lower tiers hold whole bars and fade
+            // over one beat.
+            let beatsPerStep: Double = clock.interval >= 1.0 / 3 ? 1 : 2
             let barsPerColour = Double(max(1, Int((5 - configuration.colorChangeIntensity * 4).rounded())))
-            let hold = Int(floor(clock.barPosition / barsPerColour))
+            let hold = stepsPerBeat
+                ? Int(floor(clock.beatPosition / beatsPerStep))
+                : Int(floor(clock.barPosition / barsPerColour))
+            // A change of hold unit adopts the current colour, like reacquisition.
+            if lastPaletteHold != nil, stepsPerBeat != paletteHoldsBeats { lastPaletteHold = nil }
+            paletteHoldsBeats = stepsPerBeat
+            let place = stepsPerBeat ? clock.beatPosition : clock.barPosition
             if let previous = lastPaletteHold, hold != previous {
                 paletteFadeFrom = paletteProgress
                 paletteFadeTo = paletteProgress + 1
-                paletteFadeBar = clock.barPosition
+                paletteFadeBar = place
             } else if lastPaletteHold == nil {
                 // Reacquisition adopts the current colour. Never map a new grid
                 // count directly onto the palette and teleport across entries.
                 paletteFadeFrom = paletteProgress; paletteFadeTo = paletteProgress
-                paletteFadeBar = clock.barPosition
+                paletteFadeBar = place
             }
             lastPaletteHold = hold
-            let blend = ((clock.barPosition - paletteFadeBar) * Double(clock.metre)).clamped01
+            let blend = stepsPerBeat
+                ? ((place - paletteFadeBar) * 4).clamped01
+                : ((place - paletteFadeBar) * Double(clock.metre)).clamped01
             paletteProgress = paletteFadeFrom + (paletteFadeTo - paletteFadeFrom) * blend
         } else {
             lastPaletteHold = nil

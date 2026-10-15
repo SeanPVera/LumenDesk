@@ -145,9 +145,18 @@ final class AudioReactiveSessionController: ObservableObject {
     @Published private(set) var isAudioPlaying = false
     @Published private(set) var inputHealth: MusicInputHealth = .waiting
     @Published var selectedGrooveID: String = MusicGroove.fourOnTheFloor.id
+    /// What beat maps are doing for the live source: mapping a file,
+    /// following Spotify or Music, or nothing.
+    @Published private(set) var beatMapStatus: BeatMapStatus = .off
+    /// Taps recorded since the last `resetCalibrationTaps()`.
+    @Published private(set) var calibrationTapCount = 0
 
     private let captureService: AudioCaptureService
+    private let beatMaps: BeatMapCoordinator
     private let now: () -> TimeInterval
+    /// The grid the last frame rendered against, which taps are measured from.
+    private var calibrationGrid: (reference: TimeInterval, interval: TimeInterval)?
+    private var tapCalibrator = TapCalibrator()
     private var subscriptionToken: AudioCaptureService.SubscriptionToken?
     private var sessions: [LightScope: Session] = [:]
     private var renderTimer: Timer?
@@ -166,10 +175,16 @@ final class AudioReactiveSessionController: ObservableObject {
 
     init(
         captureService: AudioCaptureService = AudioCaptureService(),
+        beatMaps: BeatMapCoordinator = BeatMapCoordinator(),
         now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
     ) {
         self.captureService = captureService
+        self.beatMaps = beatMaps
         self.now = now
+        beatMaps.onStatusChange = { [weak self] status in
+            // The coordinator reports on main, like every caller of it.
+            MainActor.assumeIsolated { self?.beatMapStatus = status }
+        }
         captureService.onCaptureFailure = { [weak self] in
             // System capture reports failure on main, as it does start results.
             // Handle it before a subsequent restart can change the generation.
@@ -197,6 +212,9 @@ final class AudioReactiveSessionController: ObservableObject {
                 self.hasUnrenderedCapture = true
                 self.publishPlaybackState(Self.isAudible(snapshot))
                 let timestamp = self.now()
+                // While a beat map sets the grid, the render tick publishes the
+                // mapped snapshot; publishing the live one here would flicker.
+                guard !self.beatMapStatus.isPlayingMap else { return }
                 if snapshot.beat > 0 || timestamp - self.lastSnapshotPublishedAt >= self.previewPublicationInterval {
                     self.latestSnapshot = self.analysisSnapshot
                     self.lastSnapshotPublishedAt = timestamp
@@ -258,6 +276,11 @@ final class AudioReactiveSessionController: ObservableObject {
                 case .started:
                     self.sourceStatus = .filePlayback
                     self.sourceActiveSince = self.now()
+                    // Map the file's beats in the background; the live show
+                    // runs meanwhile and switches to the map when it is ready.
+                    if let analysis = self.captureService.makeAnalysisFileReader() {
+                        self.beatMaps.beginFile(reader: analysis.file, key: analysis.key)
+                    }
                 case .needsScreenRecording:
                     self.removeFailedSession(scope)
                     self.sourceStatus = .permissionDenied
@@ -332,7 +355,32 @@ final class AudioReactiveSessionController: ObservableObject {
         session.fixtures = fixtures
         session.reducedMotion = reducedMotion
         session.lastPreviewPublishedAt = -Double.greatestFiniteMagnitude
+        refreshPlaybackFollowing()
     }
+
+    // MARK: - Light timing calibration
+
+    /// Starts a fresh set of calibration taps.
+    func resetCalibrationTaps() {
+        tapCalibrator = TapCalibrator()
+        calibrationTapCount = 0
+    }
+
+    /// Records one tap, made when the person saw the lights pulse. Ignored
+    /// until the show has a beat grid to measure against.
+    func recordCalibrationTap() {
+        guard let grid = calibrationGrid else { return }
+        tapCalibrator.tap(at: now(), beatReference: grid.reference, interval: grid.interval)
+        calibrationTapCount = tapCalibrator.count
+    }
+
+    /// The light timing offset the taps call for, starting from `current`,
+    /// or nil until there are enough consistent taps.
+    func calibratedLatencyOffset(from current: Double) -> Double? {
+        tapCalibrator.suggestedOffset(current: current)
+    }
+
+    var hasCalibrationGrid: Bool { calibrationGrid != nil }
 
     func effectiveConfiguration(for scope: LightScope) -> MusicModeConfiguration? {
         guard let session = sessions[scope] else { return nil }
@@ -392,6 +440,7 @@ final class AudioReactiveSessionController: ObservableObject {
             sourceStatus = .microphone
             #endif
             sourceActiveSince = now()
+            refreshPlaybackFollowing()
         case .needsScreenRecording:
             if let scope { removeFailedSession(scope) }
             sourceStatus = .permissionDenied
@@ -423,8 +472,15 @@ final class AudioReactiveSessionController: ObservableObject {
         let timestamp = now()
         lastRenderInterval = lastRenderAt.map { max(0, timestamp - $0) } ?? 0
         lastRenderAt = timestamp
+        // One shared live source, so one mapped snapshot per tick. A beat map
+        // replaces the inferred grid; loudness and hits stay live.
+        var liveSnapshot = analysisSnapshot
         if sessions.values.contains(where: { !$0.synthetic }) {
-            let fresh = analysisSnapshot.fresh(at: timestamp)
+            if beatMaps.isFollowing { beatMaps.consume(hops: captureService.drainHops()) }
+            let filePosition = sourceStatus == .filePlayback
+                ? captureService.filePlaybackPosition(at: timestamp) : nil
+            liveSnapshot = beatMaps.apply(to: analysisSnapshot, at: timestamp, filePosition: filePosition)
+            let fresh = liveSnapshot.fresh(at: timestamp)
             let health = MusicInputHealth.evaluate(
                 analysisSnapshot, source: sourceStatus, startedAt: sourceActiveSince, now: timestamp)
             if inputHealth != health { inputHealth = health }
@@ -435,13 +491,17 @@ final class AudioReactiveSessionController: ObservableObject {
             }
         }
         sequenceNumber &+= 1
+        var grid: (reference: TimeInterval, interval: TimeInterval)?
         for (scope, session) in sessions {
             let snapshot = Self.applyMusicalPolicy(
                 session.synthetic
                     ? syntheticSnapshot(groove: session.groove, startedAt: session.startedAt, timestamp: timestamp)
-                    : analysisSnapshot,
+                    : liveSnapshot,
                 configuration: session.configuration
             )
+            if grid == nil, snapshot.isTempoLocked, snapshot.beatInterval > 0, snapshot.beatReferenceTime > 0 {
+                grid = (snapshot.beatReferenceTime, snapshot.beatInterval)
+            }
             if session.synthetic {
                 if timestamp - lastSnapshotPublishedAt >= previewPublicationInterval {
                     latestSnapshot = snapshot
@@ -469,7 +529,25 @@ final class AudioReactiveSessionController: ObservableObject {
             }
             session.onFrame(frame)
         }
+        calibrationGrid = grid
         hasUnrenderedCapture = false
+    }
+
+    /// Follows Spotify and Music while a room listens to system audio with
+    /// "Follow Spotify and Music" on; stops as soon as none does. macOS only.
+    private func refreshPlaybackFollowing() {
+        #if os(macOS)
+        let wanted = sourceStatus == .systemAudio && sessions.values.contains {
+            !$0.synthetic && $0.capture == .platformDefault && $0.configuration.followsPlaybackApps
+        }
+        if wanted, !beatMaps.isFollowing {
+            captureService.setHopLogging(true)
+            beatMaps.beginFollowing()
+        } else if !wanted, beatMaps.isFollowing {
+            beatMaps.stop()
+            captureService.setHopLogging(false)
+        }
+        #endif
     }
 
     /// A deterministic pattern for Demo Mode. It reports the same beat grid a
@@ -599,7 +677,13 @@ final class AudioReactiveSessionController: ObservableObject {
 
     private func refreshCaptureAndTimerState() {
         let hasLiveSession = sessions.values.contains { !$0.synthetic }
-        if !hasLiveSession { captureService.stop() }
+        if !hasLiveSession {
+            captureService.stop()
+            beatMaps.stop()
+            captureService.setHopLogging(false)
+        } else {
+            refreshPlaybackFollowing()
+        }
         guard sessions.isEmpty else {
             if sessions.values.allSatisfy(\.synthetic) { sourceStatus = .syntheticDemo }
             return

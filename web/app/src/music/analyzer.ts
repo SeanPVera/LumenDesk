@@ -4,6 +4,7 @@ import {
   SPECTRUM_BINS,
   emptySnapshot,
   type AudioReactiveSnapshot,
+  type HopFeature,
   type Metre,
   type TimeFeel,
 } from "./types";
@@ -34,6 +35,9 @@ const SPECTRUM_RANGES: { first: number; end: number }[] = (() => {
 
 export class MusicFeatureAnalyzer {
   sourceDescription: string;
+  /** Receives every hop's beat-map features on stream time. The object is reused; copy it to keep it. */
+  onHop: ((hop: HopFeature) => void) | null = null;
+  private readonly hopFeature: HopFeature = { time: 0, onset: 0, kick: 0, energy: 0 };
   private readonly fft = new RealFFT(WINDOW);
   private readonly hann = hannWindow(WINDOW);
   /** One ring per channel. A packed FFT averages their power: an (L + R) / 2
@@ -278,6 +282,11 @@ export class MusicFeatureAnalyzer {
     const energy = clamp(level * .4 + bass * .3 + mids * .16 + highs * .14);
     const sampleTime = this.processedSamples / this.sampleRate;
     const beatOnset = clamp(onset * .6 + kick * .4);
+    if (this.onHop) {
+      const hop = this.hopFeature;
+      hop.time = sampleTime; hop.onset = beatOnset; hop.kick = kick; hop.energy = energy;
+      this.onHop(hop);
+    }
     const emitted = this.beatTracker.process(beatOnset, kick, sampleTime);
     const grid = this.beatTracker.grid;
     const coefficient = this.noveltyCoefficient;

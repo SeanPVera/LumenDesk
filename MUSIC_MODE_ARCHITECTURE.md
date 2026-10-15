@@ -90,11 +90,80 @@ not a global mutation. Overrides preserve 3/4, 5/4, 6/8, 7/8 and half/double fee
 Automatic metre and time feel remain heuristics. Syncopated material can still
 select a dotted relative; see the reproducible ambiguity probe in the evidence.
 
-The engine predicts **45 ms plus 0.8 × its 26 ms attack time** ahead. The 45 ms
-component is still an **unmeasured assumption**, not device compensation established
-by testing. FFT-window delay, capture latency, render quantization, command queues,
-Wi-Fi and firmware interpolation are separate contributors. A sent UDP packet
+The engine predicts **45 ms plus the user's light timing offset plus 0.8 × the
+current gear's attack time** ahead. The 45 ms component is still an **unmeasured
+assumption**, not device compensation established by testing; the offset
+(`outputLatencyOffset`, ±300 ms, kept across presets by
+`preservingRoomCalibration`, one value for the whole app, not per scope) and tap
+calibration exist so a setup can correct it. FFT-window delay, capture latency,
+render quantization, command queues, Wi-Fi and firmware interpolation are
+separate contributors. A sent UDP packet
 cannot establish any of the last three or a visible light change.
+
+## Beat maps and playback clocks
+
+`BeatMap.swift` and `web/app/src/music/beat-map.ts` are lockstep ports: same
+constants, same algorithms, same synthetic test vectors (`BeatMapTests.swift`,
+`beat-map.test.mjs`). A map holds beat times, the first downbeat (bars are four
+beats; metre overrides still apply on top), 0…1 energy per bar, a 100 Hz onset
+envelope and a periodicity confidence. Maps below 0.08 confidence never play.
+
+Building (`BeatMapBuilder`): the existing analyzer runs over the whole file
+faster than real time and reports every hop's beat-tracker onset mix, kick and
+energy. Those are resampled to 100 Hz; novelty is the onset envelope minus its
+half-second mean, rectified. Global tempo comes from the novelty's
+autocorrelation under a log-normal prior at 120 BPM, each lag also scoring half
+its double. Beats come from dynamic programming (Ellis 2007, tightness 100),
+silent ends are trimmed, the downbeat is the beat phase with the strongest low
+band, and bar energy is 60 % absolute loudness, 40 % rank within the song. This
+is an offline second pass: unlike the live tracker it sees the whole song, so
+early beats are not guesses.
+
+Playing (`BeatMap.apply`): given a track position on the renderer's clock, the
+map replaces the snapshot's grid fields (`beatReferenceTime`, `beatInterval`,
+`gridBeatPosition`, `beatInBar`, lock and confidence) and adds `barEnergy`;
+loudness, bands and transients stay live. The engine cannot tell a map from a
+confident tracker, so the choreography path is unchanged. A map is applied
+before `applyMusicalPolicy`, so preset metre and feel overrides still win.
+
+Clocks (`BeatMapCoordinator`, main thread, owned by
+`AudioReactiveSessionController`, one per shared source):
+
+- **File:** position comes from `AVAudioPlayerNode.playerTime` mapped to host
+  time, modulo the file length because playback loops by rescheduling. The web
+  uses the `AudioContext` output timestamp from a fixed start time. Maps are
+  cached by file identity (name, size, modification date, length, rate).
+- **Spotify and Music (macOS):** `NowPlayingMonitor` polls running apps once a
+  second over Apple Events (`NSAppleScript`, one-second timeout, never launching
+  an app) for track ID, duration, state and position, timestamped halfway
+  through the request. `PlaybackClock` dead-reckons between reports, drifts a
+  tenth of the way toward reports within 250 ms and re-anchors on anything
+  larger (seek, skip, stall). A track without a map is learned by
+  `BeatMapLearner` from host-timed hops drained each render tick; only one
+  unbroken pass counts, and it must start in the first ten seconds and cover
+  85 % of the track. The map is built just before the track ends or when it
+  changes, stored under `app bundle ID:track ID`, and used from the next listen.
+- **Alignment:** every two seconds the last six seconds of live onsets are
+  cross-correlated with the map within ±400 ms of the clock's position,
+  penalising distance from zero so a neighbouring beat cannot win on a tie. A
+  match needs correlation ≥ 0.3 and a 0.04 margin over the best lag at least
+  60 ms away; the clock then moves 60 % of offsets between 15 and 350 ms.
+
+`BeatMapStore` writes one JSON file per key under Application
+Support/LumenDesk/BeatMaps, named by FNV-1a 64 of the key so titles never become
+paths, pruned to the 400 most recent. Maps from another format version are
+ignored and rebuilt. No audio is stored.
+
+Sandbox and privacy: `com.apple.security.automation.apple-events` plus a
+temporary Apple Events exception for `com.spotify.client` and `com.apple.Music`,
+and `NSAppleEventsUsageDescription`. Following is off by default
+(`followsPlaybackApps`); declined Automation (`-1743`) is reported and the show
+stays live.
+
+Tap calibration (`TapCalibrator`, both platforms): each tap's distance to the
+nearest beat of the grid the last frame rendered against is the lights'
+lateness plus the person's lag. After eight taps whose median absolute
+deviation is under 60 ms, the median moves the offset, rounded to 10 ms.
 
 ## Musical behavior
 
@@ -119,6 +188,15 @@ cannot establish any of the last three or a visible light change.
 - Movement integrates musical bar rate when a usable grid exists. Zero speed
   stops movement. Linear endpoints do not wrap onto the same sine phase; two bulbs
   get a shallow, distinguishable tilt, not the depth of a segmented strip.
+- Six energy gears (`EnergyTierTracker`, lockstep with the web) with ±0.65-gear
+  hysteresis scale accent depth (0.62…1.15 of the original) and rise time (140 ms
+  calm, 26 ms loud). A beat map supplies the playing bar's energy; live input
+  sets a gear when a bar finishes (one bar late), and without a grid a
+  two-second average stands in. Gears 0–2 on beats under 0.5 s pulse every other
+  beat while time feel is Auto and the grid reads straight. Gears 4–5 step the
+  palette each beat (each other beat above 180 BPM, at most three changes a
+  second) unless Reduced Motion is on. Gear 5 may request a downbeat flash
+  through `FlashSafetyLimiter` like any other request.
 - Short/long energy differences and sustained-energy hysteresis provide slow lifts.
   `phraseAware` is retained as a saved key but labeled **Sustained-energy lifts**.
   This is not reliable phrase, chorus or drop recognition.
@@ -158,6 +236,10 @@ HTTP success as acceptance for local dispatch. Legacy RGB-only callers retain th
 previous meaning. Session ownership and manual-control revisions reject stale
 frames/restoration after a newer user command. New/returned fixtures do not silently
 join a running show's membership. Normal source changes/restarts are serialized.
+
+The web builds beat maps for played files (cached for the page's lifetime) and
+has the light timing offset and tap calibration. It cannot follow Spotify or
+Music: a browser has no way to ask another app for its playback position.
 
 Web Music Mode has one all-device scope, active roles and presets; it has no native
 advanced sliders, saved Music Mode configuration, fixture-order editor or segment

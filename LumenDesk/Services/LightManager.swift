@@ -3424,7 +3424,10 @@ extension LightManager {
             setMusicModeConfiguration(custom)
             return
         }
-        setMusicModeConfiguration(.configuration(for: preset))
+        // A preset describes the show, not the setup: keep the app-wide light
+        // timing and the Spotify and Music choice.
+        setMusicModeConfiguration(MusicModeConfiguration.configuration(for: preset)
+            .preservingRoomCalibration(from: musicModeConfiguration))
     }
 
     func fixtureTopology(for scope: LightScope) -> FixtureTopology {

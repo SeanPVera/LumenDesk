@@ -205,6 +205,20 @@ struct MusicModeConfiguration: Codable, Equatable {
     var timeFeel: TimeFeel = .auto
     var stereoImage: Double = 0.7
     var phraseAware: Bool = true
+    /// Seconds the show runs ahead of the beat to make up for slow lights.
+    /// Positive lands accents earlier; it adds to the engine's fixed 45 ms.
+    /// One app-wide calibration of the lights and network, not part of a
+    /// show, so presets keep it (`preservingRoomCalibration`). Every room
+    /// shares it.
+    var outputLatencyOffset: Double = 0
+    /// macOS: ask Spotify and Music where the song is, learn each track on its
+    /// first listen and play later listens from its beat map. Off by default,
+    /// because turning it on asks for Automation permission.
+    var followsPlaybackApps: Bool = false
+
+    /// The light timing offset stays inside ±300 ms; anything wider is a wrong
+    /// setting, not a slow bulb.
+    static let latencyOffsetLimit = 0.3
 
     static let soundcheckPalette = [
         MusicPaletteColor(0xFF3B9D),
@@ -413,6 +427,8 @@ struct MusicModeConfiguration: Codable, Equatable {
         value.flashIntensity = value.flashIntensity.clamped01
         value.maximumFlashFrequency = max(0, min(FlashSafetyLimiter.hardMaximumFrequency, value.maximumFlashFrequency))
         value.stereoImage = value.stereoImage.clamped01
+        value.outputLatencyOffset = value.outputLatencyOffset.isFinite
+            ? max(-Self.latencyOffsetLimit, min(Self.latencyOffsetLimit, value.outputLatencyOffset)) : 0
         if value.palette.isEmpty { value.palette = Self.soundcheckPalette }
         // Keep the user's flash settings while Safe Mode is active so turning
         // it off after the explicit warning restores the chosen limits. The
@@ -425,6 +441,16 @@ struct MusicModeConfiguration: Codable, Equatable {
         }
         return value
     }
+
+    /// A preset describes the show, not the setup it plays on. Keep the
+    /// app-wide timing calibration and the playback-following choice across
+    /// preset changes.
+    func preservingRoomCalibration(from previous: MusicModeConfiguration) -> MusicModeConfiguration {
+        var value = self
+        value.outputLatencyOffset = previous.outputLatencyOffset
+        value.followsPlaybackApps = previous.followsPlaybackApps
+        return value.normalized()
+    }
 }
 
 extension MusicModeConfiguration {
@@ -436,6 +462,7 @@ extension MusicModeConfiguration {
         case flashIntensity, maximumFlashFrequency, palette, silenceBehavior
         case photosensitivitySafeMode, restorePreviousState, usesSyntheticDemoPattern
         case metreOverride, timeFeel, stereoImage, phraseAware
+        case outputLatencyOffset, followsPlaybackApps
     }
 
     // Field-by-field so archives saved before metre, feel, stereo, and phrase
@@ -467,6 +494,8 @@ extension MusicModeConfiguration {
         timeFeel = (try? container.decode(TimeFeel.self, forKey: .timeFeel)) ?? .auto
         stereoImage = (try? container.decode(Double.self, forKey: .stereoImage)) ?? 0.7
         phraseAware = (try? container.decode(Bool.self, forKey: .phraseAware)) ?? true
+        outputLatencyOffset = (try? container.decode(Double.self, forKey: .outputLatencyOffset)) ?? 0
+        followsPlaybackApps = (try? container.decode(Bool.self, forKey: .followsPlaybackApps)) ?? false
     }
 
     func encode(to encoder: Encoder) throws {
@@ -495,6 +524,8 @@ extension MusicModeConfiguration {
         try container.encode(timeFeel, forKey: .timeFeel)
         try container.encode(stereoImage, forKey: .stereoImage)
         try container.encode(phraseAware, forKey: .phraseAware)
+        try container.encode(outputLatencyOffset, forKey: .outputLatencyOffset)
+        try container.encode(followsPlaybackApps, forKey: .followsPlaybackApps)
     }
 }
 
@@ -714,6 +745,8 @@ struct MusicLightingFrame: Equatable {
     let sequenceNumber: UInt64
     let sustainedEnergyEvent: Bool
     let flashApplied: Bool
+    /// 0…5 energy gear the frame was rendered in.
+    var energyTier: Int = 3
 }
 
 extension Double {
@@ -917,6 +950,13 @@ enum MusicModeHelp {
     static let phraseAware = "Adds a slow lift when energy rises and stays high. This is an energy comparison, not reliable verse or chorus recognition."
     static let restorePreviousState = "When you press Stop, put every light back exactly how it was before the show started."
     static let reducedMotion = "If Reduced Motion is on in your system accessibility settings, LumenDesk keeps movement small and never flashes."
+    static let lightTiming = "Moves every accent earlier or later. If the lights land after the beat, move it toward Earlier. Lights on Wi-Fi often need 20 to 80 ms."
+    static let tapCalibration = "Tap the button each time you see the lights pulse, for at least eight beats. LumenDesk measures how far behind the beat the pulses land and sets the timing for you. Your tapping has its own lag, so fine-tune by eye afterwards."
+    static let energyGears = "Music Mode shifts between six energy gears as the song gets louder or quieter. Calm passages ease in and can nod on every other beat; the loudest parts snap and change color on the beat."
+    static let beatMap = "When you play a file, LumenDesk maps every beat in it while the show starts. Once the map is ready the lights follow the file's own clock instead of guessing, and they know each bar's energy before it plays."
+    #if os(macOS)
+    static let followPlaybackApps = "Asks Spotify or Music where the song is. The first time you hear a track, LumenDesk learns its beats; every listen after that plays from what it learned, locked to the song. macOS asks once for permission to talk to those apps. Nothing leaves this Mac."
+    #endif
 
     #if os(macOS)
     static let systemAudioSource = "Listens to whatever this Mac is playing — any app, not just a music app. Needs Screen Recording permission, which is how macOS gates access to system audio."

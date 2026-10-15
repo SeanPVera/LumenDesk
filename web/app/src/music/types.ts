@@ -62,6 +62,19 @@ export interface MusicModeConfiguration {
   timeFeel: TimeFeel;
   stereoImage: number;
   phraseAware: boolean;
+  /** Seconds the show runs ahead of the beat to make up for slow lights.
+   * Positive lands accents earlier; it adds to the engine's fixed 45 ms. */
+  outputLatencyOffset: number;
+}
+
+/** One analysis hop's features, used to build and align beat maps. */
+export interface HopFeature {
+  /** Seconds: stream time while analysing, track position once stored. */
+  time: number;
+  /** The beat tracker's onset input (broadband onset mixed with kick). */
+  onset: number;
+  kick: number;
+  energy: number;
 }
 
 export interface BeatGrid {
@@ -125,6 +138,10 @@ export interface AudioReactiveSnapshot {
   gridBeatPosition?: number;
   analyzedSamples?: number;
   droppedBuffers?: number;
+  /** 0…1 energy of the current bar, known in advance when a beat map plays. */
+  barEnergy?: number;
+  /** True when the grid fields come from a beat map rather than live inference. */
+  beatMapActive?: boolean;
 }
 
 export function emptySnapshot(): AudioReactiveSnapshot {
@@ -200,6 +217,8 @@ export interface MusicLightingFrame {
   sequenceNumber: number;
   sustainedEnergyEvent: boolean;
   flashApplied: boolean;
+  /** 0…5 energy gear the frame was rendered in. */
+  energyTier?: number;
 }
 
 export const SOUNDCHECK_PALETTE: MusicPaletteColor[] = [

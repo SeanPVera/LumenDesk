@@ -153,6 +153,8 @@ The app needs local network permission because it sends and receives UDP packets
 
 Music Mode analyzes **system audio on macOS** through ScreenCaptureKit, **microphone input on iOS**, a **user-selected audio file** on both platforms, and **MIDI beat clock**. Analysis is local, audio is never recorded or retained, and the feature does not receive an Apple Music-only feed.
 
+Music Mode keeps **beat maps** in `Application Support/LumenDesk/BeatMaps`: beat times, energy per bar and a coarse onset curve for a file or track, never audio. With **Follow Spotify and Music** on, LumenDesk asks those two apps over Apple Events which track is playing and where; macOS asks once for Automation permission. Nothing leaves the Mac.
+
 ## Feature guide
 
 ### First-run onboarding
@@ -467,6 +469,7 @@ You need none of these to run a show. Turn on **Explain the controls** at the to
 | Minimum brightness | Keeps the lights from dropping as dark between beats. |
 | Maximum brightness | Lets a beat push the lights brighter. |
 | Stereo image | Tilts the room with the balance of the recording. At zero every light gets the same level; turn it up and a mix leaning one way brightens the lights at that end of your list. |
+| Light timing | Moves every accent earlier (right) or later (left), up to 300 ms. One setting for the whole app; changing preset keeps it. |
 
 **Color palette** picks the set of colours the show draws from. Alongside
 Soundcheck, Sunset, Ocean, and Club, every theme in the Lighting Library is
@@ -492,9 +495,19 @@ Moving a slider changes the running show as you drag; the setting is saved when 
 | Lights do nothing | Nothing is playing, or the permission is not granted yet. On a Mac, check Screen Recording; on iPhone, check the microphone. |
 | One light never joins in | It is set to **Off**, or the eye button excluded it. Both are on purpose, and both need the show stopped to change. |
 | The readout never leaves **Beat** | The music has no steady pulse to lock onto. Rubato, free playing and dense percussion all do this. The show still works. |
-| The room feels behind the music | Check the readout. Until it shows a BPM the show is answering each sound as it arrives, so it always trails a little; give it a few seconds of steady rhythm to lock. On iPhone the microphone also adds the time the sound takes to cross the room, and a congested Wi-Fi network or a slow bulb adds the rest. **Beat sensitivity** will not help here: it changes how hard a pulse hits, not when. |
+| The room feels behind the music | First try **Light timing**, or tap along with **Tap with the lights** and press **Use measured timing**. Then check the readout. Until it shows a BPM the show is answering each sound as it arrives, so it always trails a little; give it a few seconds of steady rhythm to lock. On iPhone the microphone also adds the time the sound takes to cross the room, and a congested Wi-Fi network or a slow bulb adds the rest. **Beat sensitivity** will not help here: it changes how hard a pulse hits, not when. |
 | A second room will not start | Every room in a show shares one audio source. Start the second room on the same source, or stop the first one before switching sources. |
 | Colours never change | **Color-change intensity** is low, or the palette is a set of near-identical colours. |
+
+#### Timing: beat maps, Spotify and Music, and light timing
+
+Live listening only ever hears the past, so it has to guess where the next beat lands. A **beat map** removes the guess: it is the whole song analysed ahead of time, every beat, where each bar starts and how loud each bar is. With a map the show plays against a clock instead of inferring one, and it knows a bar's energy before the bar plays.
+
+- **Audio file.** Press Start and the show begins listening live straight away while LumenDesk maps the file in the background, much faster than the file plays. The input card shows **Mapping beats…** and then **Beat map ready**, and from then on the lights follow the file's own playback clock. Maps are saved, so the same file starts mapped next time. A file with no steady pulse keeps listening live.
+- **Spotify and Music (Mac).** Turn on **Follow Spotify and Music** under the input source. LumenDesk asks whichever of the two is playing for the track and position about once a second. The first time you hear a track it learns the beats while you listen (**Learning…**); every listen after that plays from the map (**Following…**), and the system audio keeps nudging the clock back onto the song every couple of seconds. A track only counts as learned once most of it played through without a skip or seek. macOS asks for Automation permission the first time; if you decline, the card says so and the show keeps listening live. Streaming apps never hand LumenDesk the audio file, so the first listen of any track is always live.
+- **Light timing.** Every bulb, hub and Wi-Fi network adds its own delay. If the lights land after the beat, slide **Light timing** toward Earlier, or start a show, press **Tap with the lights** each time you see a pulse for at least eight beats, then **Use measured timing**. Your own tapping has a little lag, so fine-tune by eye afterwards.
+
+The show also shifts between six **energy gears**. On a map each bar's gear is known in advance; live, a bar's gear is set when the bar finishes. Calm passages ease in, and on a fast song nod on every other beat while the time feel is Auto. The loudest passages snap and change colour on the beat, never more than three times a second. The top gear can ask for a downbeat flash, which still goes through No-flash mode and the three-a-second limit.
 
 #### How Music Mode works
 
@@ -512,6 +525,9 @@ Music Mode is a first-class section of the selected Room workspace. It turns the
 - Reduced Motion limits spatial movement and disables flashes.
 - Demo Mode includes LIFX-style bulbs, Govee bulbs, segmented Govee fixtures, and deterministic grooves (four-on-the-floor, half-time, waltz, odd metre, breaks) with no copyrighted audio.
 - Sources: system audio on macOS, microphone on iOS, a user-selected audio file on both, and MIDI beat clock.
+- Beat maps for files (both platforms) and for Spotify and Music tracks learned on a first listen (macOS), played against the file's playback clock or the app's reported position, with live onset alignment. See [Timing](#timing-beat-maps-spotify-and-music-and-light-timing).
+- Six energy gears with hysteresis that set accent depth, rise time, automatic half-time and per-beat colour.
+- A per-room light timing offset with tap calibration.
 
 Rooms share one live audio source. Start additional rooms with the same source; stop the other shows before choosing a different file or switching between system audio and MIDI. Stop also cancels a pending audio-permission request. A failed start restores the original lighting state regardless of the restore-on-stop preference.
 
@@ -850,6 +866,9 @@ LumenDesk/
 │   └── UXEnhancements.swift        # Diagnostics, preferences, activity, revisions, menu-bar models
 ├── Services/
 │   ├── AudioLevelMonitor.swift     # Local audio-level measurement for music-reactive effects
+│   ├── BeatMap.swift               # Beat maps: building, playing, aligning, learning, storage, tap calibration
+│   ├── BeatMapCoordinator.swift    # Turns beat maps into timing for a running Music Mode show
+│   ├── NowPlayingMonitor.swift     # Asks Spotify and Music where the song is (macOS)
 │   ├── LightManager.swift          # App state, persistence, commands, schedules, scenes, effects, undo/redo
 │   ├── UDPSocket.swift             # BSD socket UDP wrapper for broadcast, multicast, and unicast traffic
 │   ├── LIFX/

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { fetchState, type Device, type RGB } from './bridge'
-import { MUSIC_HELP, PRESET_COPY, ROLE_COPY, SOURCE_COPY, configurationFor } from './music/config'
+import { LATENCY_OFFSET_LIMIT, MUSIC_HELP, PRESET_COPY, ROLE_COPY, SOURCE_COPY, configurationFor, preservingRoomCalibration } from './music/config'
 import { GROOVES } from './music/grooves'
 import { hsvToRgb } from './music/fixtures'
 import { WebMusicSession, LatestMusicFrameSender, setFixtureRole, type MusicFrameCommand } from './music/session'
@@ -343,7 +343,7 @@ export function MusicModeView({
               key={id}
               className={state.configuration.preset === id ? 'chip on' : 'chip'}
               aria-pressed={state.configuration.preset === id}
-              onClick={() => configure(configurationFor(id))}
+              onClick={() => configure(preservingRoomCalibration(configurationFor(id), state.configuration))}
             >
               {PRESET_COPY[id].name}
             </button>
@@ -417,6 +417,14 @@ export function MusicModeView({
               value={state.configuration[key]} onChange={e => adjust(key, Number(e.target.value))}/>
           </label>)}
         </div>
+        <label className="field">
+          Light timing <output>{timingLabel(state.configuration.outputLatencyOffset)}</output>
+          <input aria-label="Light timing" aria-describedby="light-timing-help" type="range"
+            min={-LATENCY_OFFSET_LIMIT * 1000} max={LATENCY_OFFSET_LIMIT * 1000} step="10"
+            value={Math.round(state.configuration.outputLatencyOffset * 1000)}
+            onChange={e => configure({ ...state.configuration, outputLatencyOffset: Number(e.target.value) / 1000 })}/>
+        </label>
+        <p className="note" id="light-timing-help">{MUSIC_HELP.timing}</p>
         <h3>Color palette</h3>
         <div className="palette-choices">{[
           {name:'Aurora', colors:AURORA_PALETTE}, {name:'Sunset', colors:SUNSET_PALETTE},
@@ -449,7 +457,7 @@ function useMusicFrame(session: WebMusicSession) {
 
 function MusicMeters({ session }: { session: WebMusicSession }) {
   useMusicFrame(session)
-  const { snapshot, running, source } = session.state
+  const { snapshot, running, source, beatMap } = session.state
   const [expanded, setExpanded] = useState(false)
   const tempo = snapshot.isTempoLocked && snapshot.tempo > 0 && snapshot.beatConfidence >= .4
     ? `${Math.round(snapshot.feltTempo || snapshot.tempo)} · ${snapshot.metre}/${snapshot.metre === 6 ? 8 : 4}`
@@ -459,8 +467,9 @@ function MusicMeters({ session }: { session: WebMusicSession }) {
     <Meter label="Energy" value={snapshot.energy} />
     <div className="beat-readout">
       <strong>{!running ? 'Stopped' : tempo === 'Beat' ? 'Finding a pulse' : tempo}</strong>
-      <span>{source === 'midi' ? 'Measured MIDI clock · ' : ''}Confidence {Math.round(snapshot.beatConfidence * 100)}%</span>
+      <span>{source === 'midi' ? 'Measured MIDI clock · ' : snapshot.beatMapActive ? 'Following the beat map · ' : ''}Confidence {Math.round(snapshot.beatConfidence * 100)}%</span>
     </div>
+    {running && source === 'file' && <p className="meta" role="status">{beatMapLabel(beatMap)}</p>}
     <p className="note">Audio input and musical interpretation. Generated colors in the light list are not device confirmations.</p>
     <details onToggle={event => setExpanded(event.currentTarget.open)}>
       <summary>Audio diagnostics</summary>
@@ -539,7 +548,7 @@ function MusicDiagnosticsReadout({ session, sender }: { session: WebMusicSession
   return <>
     <p>Source: {state.source} · snapshot age {session.diagnostics.snapshotAge.toFixed(3)} s · samples analyzed {session.diagnostics.analyzedSamples} · capture buffers dropped {session.diagnostics.droppedBuffers}</p>
     <p>Onset {(snapshot.onset ?? 0).toFixed(2)} · beat count {snapshot.beatCount} · confidence {snapshot.beatConfidence.toFixed(2)} · preset {state.configuration.preset}</p>
-    <p>Grid phase now {snapshot.beatInterval > 0 ? (((performance.now()/1000-snapshot.beatReferenceTime)/snapshot.beatInterval)%1).toFixed(2) : "unlocked"} · last render interval {session.diagnostics.renderInterval.toFixed(3)} s (target 0.050 s) · effective brightness {state.configuration.masterBrightness.toFixed(2)} · intensity {state.configuration.effectIntensity.toFixed(2)}</p>
+    <p>Grid phase now {snapshot.beatInterval > 0 ? (((performance.now()/1000-snapshot.beatReferenceTime)/snapshot.beatInterval)%1).toFixed(2) : "unlocked"} · last render interval {session.diagnostics.renderInterval.toFixed(3)} s (target 0.050 s) · effective brightness {state.configuration.masterBrightness.toFixed(2)} · intensity {state.configuration.effectIntensity.toFixed(2)} · energy gear {state.frame?.energyTier ?? '–'} of 5 · grid {snapshot.beatMapActive ? 'beat map' : 'live'}</p>
     <p>Generated {session.diagnostics.framesGenerated} · HTTP submitted {sender.diagnostics.submitted} · accepted {sender.diagnostics.accepted} · coalesced {sender.diagnostics.coalesced} · expired {sender.diagnostics.expired} · errors {sender.diagnostics.failures}</p>
     <p>Preview shows generated frames. HTTP acceptance does not establish device receipt or visible timing. Brightness modulation can still be uncomfortable with flashes disabled.</p>
   </>
@@ -552,6 +561,21 @@ function Meter({ label, value }: { label: string; value: number }) {
       <meter min={0} max={1} value={Math.max(0, Math.min(1, value))} />
     </label>
   )
+}
+
+function timingLabel(offset: number): string {
+  const ms = Math.round(offset * 1000)
+  if (ms === 0) return 'On the beat'
+  return ms > 0 ? `${ms} ms earlier` : `${-ms} ms later`
+}
+
+function beatMapLabel(beatMap: { status: string; progress: number; tempo: number | null }): string {
+  switch (beatMap.status) {
+    case 'analyzing': return `Mapping beats… ${Math.round(beatMap.progress * 100)}%. Live listening runs meanwhile.`
+    case 'ready': return `Beat map ready${beatMap.tempo ? ` · ${Math.round(beatMap.tempo)} BPM` : ''}. ${MUSIC_HELP.beatMap}`
+    case 'unavailable': return 'No steady beat found in this file, so the show keeps listening live.'
+    default: return ''
+  }
 }
 
 function sourceLabel(source: string, fileName: string | null): string {

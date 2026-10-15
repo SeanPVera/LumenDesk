@@ -116,6 +116,12 @@ export const MUSIC_HELP = {
     "Flashing is blocked by default, because flashing light can trigger seizures and migraines in some people. Explicit flash requests are capped at three per second. Ordinary brightness changes can still be uncomfortable; no setting guarantees medical safety.",
   strips:
     "Strip lights follow as a single colour in the browser. Per-segment chases stay in the Mac and iPhone apps for now.",
+  beatMap:
+    "When you play a file, LumenDesk maps every beat in it while the show starts. Once the map is ready the lights follow the file's own clock instead of guessing, and they know each bar's energy before it plays.",
+  timing:
+    "Moves every accent earlier or later. If the lights land after the beat, move it toward Earlier. Lights on Wi-Fi often need 20 to 80 ms.",
+  energy:
+    "Music Mode shifts between six energy gears as the song gets louder or quieter. Calm passages ease in and can nod on every other beat; the loudest parts snap and change colour on the beat.",
 } as const;
 
 export function defaultConfiguration(): MusicModeConfiguration {
@@ -147,6 +153,7 @@ export function configurationFor(preset: MusicModePreset): MusicModeConfiguratio
     timeFeel: "auto",
     stereoImage: 0.7,
     phraseAware: true,
+    outputLatencyOffset: 0,
   };
 
   switch (preset) {
@@ -294,6 +301,7 @@ export function normalizeConfiguration(
   value.flashIntensity = clamp01(value.flashIntensity);
   value.maximumFlashFrequency = Math.max(0, Math.min(FLASH_HARD_CEILING, value.maximumFlashFrequency));
   value.stereoImage = clamp01(value.stereoImage);
+  value.outputLatencyOffset = clampLatencyOffset(value.outputLatencyOffset);
   if (value.palette.length === 0) value.palette = SOUNDCHECK_PALETTE;
   if (reducedMotion) {
     value.movementAmount = Math.min(value.movementAmount, 0.18);
@@ -302,4 +310,16 @@ export function normalizeConfiguration(
     value.maximumFlashFrequency = 0;
   }
   return value;
+}
+
+/** The light timing offset stays inside ±300 ms; anything wider is a wrong setting, not a slow bulb. */
+export const LATENCY_OFFSET_LIMIT = 0.3;
+
+export function clampLatencyOffset(value: number | undefined): number {
+  return Number.isFinite(value) ? Math.max(-LATENCY_OFFSET_LIMIT, Math.min(LATENCY_OFFSET_LIMIT, value as number)) : 0;
+}
+
+/** A preset describes the show, not the room. Keep the room's timing calibration across preset changes. */
+export function preservingRoomCalibration(next: MusicModeConfiguration, previous: MusicModeConfiguration): MusicModeConfiguration {
+  return { ...next, outputLatencyOffset: clampLatencyOffset(previous.outputLatencyOffset) };
 }

@@ -1,4 +1,5 @@
 import { MusicFeatureAnalyzer } from './analyzer'
+import { analyzeAudioBuffer, applyBeatMap, type BeatMap } from './beat-map'
 import { MusicChoreographyEngine } from './choreography'
 import { configurationFor, normalizeConfiguration } from './config'
 import { hsvToRgb } from './fixtures'
@@ -78,7 +79,17 @@ export interface BridgeDevice {
   reachable: boolean
 }
 
+export type BeatMapStatus = 'none' | 'analyzing' | 'ready' | 'unavailable'
+
+export interface BeatMapState {
+  status: BeatMapStatus
+  /** 0…1 while analysing. */
+  progress: number
+  tempo: number | null
+}
+
 export interface MusicSessionState {
+  beatMap: BeatMapState
   running: boolean
   source: AudioSourceKind
   grooveId: string
@@ -133,12 +144,19 @@ export class WebMusicSession {
   private readonly playbackSnapshots: Array<ReturnType<typeof emptySnapshot> | undefined> = new Array(128)
   private playbackRead = 0
   private playbackCount = 0
+  /** Maps survive Stop and Restart for the life of the page, keyed by file identity. */
+  private readonly beatMapCache = new Map<string, BeatMap | null>()
+  private beatMap: BeatMap | null = null
+  private fileStartContextTime = 0
+  private fileDuration = 0
+  private lastProgressEmit = 0
   readonly diagnostics = { analyzedSamples: 0, droppedBuffers: 0, framesGenerated: 0, snapshotAge: 0, renderInterval: 0 }
   version = 0
   controlsVersion = 0
   private onFrame: ((frame: MusicLightingFrame) => void) | null = null
 
   readonly state: MusicSessionState = {
+    beatMap: { status: 'none', progress: 0, tempo: null },
     running: false,
     source: 'demo',
     grooveId: 'four',
@@ -195,6 +213,8 @@ export class WebMusicSession {
     this.clearPlaybackSnapshots()
     this.state.snapshot = emptySnapshot()
     this.state.error = null
+    this.beatMap = null
+    this.state.beatMap = { status: 'none', progress: 0, tempo: null }
     this.state.source = source
     this.state.running = true
     this.startedAt = performance.now() / 1000
@@ -226,6 +246,8 @@ export class WebMusicSession {
     this.inputSnapshot = emptySnapshot()
     this.clearPlaybackSnapshots()
     this.state.snapshot = emptySnapshot()
+    this.beatMap = null
+    this.state.beatMap = { status: 'none', progress: 0, tempo: null }
     if (this.timer != null) {
       window.clearInterval(this.timer)
       this.timer = null
@@ -265,14 +287,20 @@ export class WebMusicSession {
     this.diagnostics.renderInterval = this.lastRenderAt == null ? 0 : timestamp-this.lastRenderAt
     this.lastRenderAt = timestamp
     this.sequence += 1
+    // A playing file with a finished map takes its grid from the map and the
+    // playback clock; loudness and hits still come from live analysis.
+    const position = this.state.source === 'file' && this.beatMap ? this.filePosition(timestamp) : null
+    const live = position != null && this.beatMap
+      ? applyBeatMap(this.inputSnapshot, this.beatMap, position, timestamp)
+      : this.inputSnapshot
     if (this.state.source === 'demo') {
       const groove = GROOVES.find(g => g.id === this.state.grooveId) ?? GROOVES[0]
       this.state.snapshot = syntheticSnapshot(groove as Groove, this.startedAt, timestamp)
     } else {
-      this.state.snapshot = freshSnapshot(this.inputSnapshot, timestamp)
+      this.state.snapshot = freshSnapshot(live, timestamp)
     }
     // The display and engine each age the original snapshot once.
-    const snapshot = this.state.source === 'demo' ? this.state.snapshot : {...this.inputSnapshot}
+    const snapshot = this.state.source === 'demo' ? this.state.snapshot : {...live}
     const config = this.state.configuration
     if (config.metreOverride !== 'auto' && config.metreOverride !== snapshot.metre) {
       snapshot.metre = config.metreOverride
@@ -359,9 +387,61 @@ export class WebMusicSession {
     source.buffer = buffer
     source.loop = true
     this.connectTap(source, audio, true, generation)
-    source.start()
+    // A fixed start time is what the playback clock counts from.
+    const when = audio.currentTime + 0.05
+    source.start(when)
+    this.fileStartContextTime = when
+    this.fileDuration = buffer.duration
     this.bufferSource = source
     this.state.fileName = file.name
+    this.prepareBeatMap(file, buffer, generation)
+  }
+
+  /** Builds (or reuses) the file's beat map while the live show is already playing. */
+  private prepareBeatMap(file: File, buffer: AudioBuffer, generation: number): void {
+    const key = `${file.name}:${file.size}:${file.lastModified}`
+    if (this.beatMapCache.has(key)) {
+      this.useBeatMap(this.beatMapCache.get(key) ?? null)
+      return
+    }
+    this.state.beatMap = { status: 'analyzing', progress: 0, tempo: null }
+    this.emit()
+    void analyzeAudioBuffer(buffer, progress => {
+      if (generation !== this.generation) return
+      this.state.beatMap = { ...this.state.beatMap, progress }
+      const now = performance.now()
+      if (now - this.lastProgressEmit > 150) { this.lastProgressEmit = now; this.emit() }
+    }, () => generation === this.generation).then(map => {
+      if (generation !== this.generation) return
+      this.beatMapCache.set(key, map)
+      this.useBeatMap(map)
+    }, () => {
+      if (generation !== this.generation) return
+      this.useBeatMap(null)
+    })
+  }
+
+  private useBeatMap(map: BeatMap | null): void {
+    this.beatMap = map && map.confidence >= 0.08 ? map : null
+    this.state.beatMap = this.beatMap
+      ? { status: 'ready', progress: 1, tempo: this.beatMap.tempo }
+      : { status: 'unavailable', progress: 1, tempo: null }
+    this.emit()
+  }
+
+  /** Track position audible at `timestamp` (performance seconds), from the output clock. */
+  private filePosition(timestamp: number): number | null {
+    const audio = this.audio
+    if (!audio || !(this.fileDuration > 0)) return null
+    let contextTime = audio.currentTime
+    const output = audio.getOutputTimestamp?.()
+    if (output && output.contextTime != null && output.performanceTime != null &&
+        Number.isFinite(output.contextTime) && Number.isFinite(output.performanceTime) && output.performanceTime > 0) {
+      contextTime = output.contextTime + (timestamp - output.performanceTime / 1000)
+    }
+    const elapsed = contextTime - this.fileStartContextTime
+    if (elapsed < 0) return null
+    return elapsed % this.fileDuration
   }
 
   private async startMidi(generation: number): Promise<void> {

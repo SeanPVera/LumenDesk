@@ -31,6 +31,8 @@ export class FlashSafetyLimiter {
 }
 
 interface MusicalClock {
+  /** Absolute position in felt beats; its whole part counts beats. */
+  beatPosition: number;
   phase: number;
   beatInBar: number;
   interval: number;
@@ -39,6 +41,74 @@ interface MusicalClock {
   metre: number;
   /** Absolute position in bars on the detected grid. */
   barPosition: number;
+}
+
+/** Depth of the beat swell in each energy tier. Tier 3 is the engine's original depth. */
+const TIER_DEPTH = [0.62, 0.74, 0.87, 1, 1.08, 1.15];
+/** Rise time per tier: calm music eases into a swell, loud music snaps. */
+const TIER_ATTACK = [0.14, 0.14, 0.07, 0.026, 0.026, 0.026];
+
+/**
+ * Six energy gears, 0…5, with hysteresis so a bar sitting on a boundary does
+ * not flip the show back and forth. A beat map supplies the current bar's
+ * energy before it plays; live input can only report the bar just finished,
+ * so live tiers lag by one bar. Without a grid, a two-second energy average
+ * stands in for the bar.
+ */
+export class EnergyTierTracker {
+  private tierValue = -1;
+  private barIndex: number | null = null;
+  private barSum = 0;
+  private barTime = 0;
+  private longEnergy = 0;
+  private freeEnergy = 0;
+  private primed = false;
+
+  /** The current tier; 3 until the first measurement, which is the engine's original behaviour. */
+  get tier(): number { return this.tierValue < 0 ? 3 : this.tierValue; }
+
+  update(energy: number, dt: number, barPosition: number, gridStrength: number, mappedBarEnergy?: number): number {
+    if (!this.primed) { this.longEnergy = energy; this.freeEnergy = energy; this.primed = true; }
+    this.longEnergy = follow(this.longEnergy, energy, dt, 20);
+    if (mappedBarEnergy != null && Number.isFinite(mappedBarEnergy)) {
+      this.barIndex = null;
+      this.applyTarget(clamp01(mappedBarEnergy));
+      return this.tier;
+    }
+    if (gridStrength > 0 && Number.isFinite(barPosition)) {
+      const bar = Math.floor(barPosition);
+      if (this.barIndex == null) {
+        this.barIndex = bar; this.barSum = 0; this.barTime = 0;
+      } else if (bar !== this.barIndex) {
+        if (this.barTime >= 0.2) this.applyTarget(this.liveTarget(this.barSum / this.barTime));
+        this.barIndex = bar; this.barSum = 0; this.barTime = 0;
+      }
+      this.barSum += energy * dt;
+      this.barTime += dt;
+      return this.tier;
+    }
+    this.barIndex = null;
+    this.freeEnergy = follow(this.freeEnergy, energy, dt, 2);
+    this.applyTarget(this.liveTarget(this.freeEnergy));
+    return this.tier;
+  }
+
+  reset(): void {
+    this.tierValue = -1; this.barIndex = null; this.barSum = this.barTime = 0;
+    this.longEnergy = this.freeEnergy = 0; this.primed = false;
+  }
+
+  /** Same 60/40 absolute/relative split a beat map uses for its bars. */
+  private liveTarget(mean: number): number {
+    return clamp01(0.6 * clamp01(mean / 0.75) + 0.4 * clamp01(0.5 + (mean - this.longEnergy) / 0.25));
+  }
+
+  private applyTarget(target: number): void {
+    const x = target * 5;
+    if (this.tierValue < 0) { this.tierValue = Math.max(0, Math.min(5, Math.round(x))); return; }
+    while (this.tierValue < 5 && x >= this.tierValue + 0.65) this.tierValue += 1;
+    while (this.tierValue > 0 && x < this.tierValue - 0.65) this.tierValue -= 1;
+  }
 }
 
 /** One-pole follower toward `target` over `timeConstant` seconds. */
@@ -79,6 +149,10 @@ export class MusicChoreographyEngine {
   private paletteFadeFrom = 0;
   private paletteFadeTo = 0;
   private paletteFadeBar = 0;
+  /** Whether the palette is currently stepping per beat (high tiers) or per bar. */
+  private paletteHoldsBeats = false;
+  private readonly tiers = new EnergyTierTracker();
+  private lastClockBeatInBar: number | null = null;
   // Copy cache inputs: live controls may edit their arrays and descriptors in
   // place, so reference identity alone cannot safely invalidate the show.
   private cachedTopology: FixtureTopology | null = null;
@@ -106,6 +180,9 @@ export class MusicChoreographyEngine {
     this.accentEnvelope = 0;
     this.lastPaletteHold = null;
     this.paletteFadeFrom = this.paletteFadeTo = this.paletteFadeBar = 0;
+    this.paletteHoldsBeats = false;
+    this.tiers.reset();
+    this.lastClockBeatInBar = null;
     this.cachedTopology = null;
     this.cachedFixtures = [];
     this.cachedTargets = [];
@@ -133,7 +210,21 @@ export class MusicChoreographyEngine {
 
     const dt = Math.max(1 / 120, Math.min(0.25, timestamp - (this.lastTimestamp ?? timestamp - 1 / 30)));
     this.lastTimestamp = timestamp;
-    const clock = this.musicalClock(snapshot, timestamp);
+    // The tier needs this frame's bar position, and the clock needs the tier
+    // (it sets the attack the prediction compensates for, and half-time).
+    // Measure on the plain clock, then build the one the show renders.
+    const plainClock = this.musicalClock(snapshot, timestamp, config, MusicChoreographyEngine.attackTime, false);
+    const tier = this.tiers.update(snapshot.energy, dt, plainClock.barPosition, plainClock.strength, snapshot.barEnergy);
+    const attackTime = TIER_ATTACK[tier];
+    // Calm music on a fast grid nods on every other beat, the way a listener
+    // would. Only when the user left time feel on Auto and the grid itself
+    // reads straight; an explicit feel always wins.
+    const autoHalfTime = config.timeFeel === "auto" && snapshot.timeFeel === "straight" &&
+      tier <= 2 && plainClock.interval > 0 && plainClock.interval < 0.5;
+    const clock = this.musicalClock(snapshot, timestamp, config, attackTime, autoHalfTime);
+    const enteredDownbeat = clock.strength >= 0.5 && clock.beatInBar === 0 &&
+      this.lastClockBeatInBar != null && this.lastClockBeatInBar !== 0;
+    this.lastClockBeatInBar = clock.strength >= 0.5 ? clock.beatInBar : null;
 
     const newBeats = snapshot.beatCount > this.lastBeatCount ? snapshot.beatCount - this.lastBeatCount : 0;
     this.lastBeatCount = snapshot.beatCount;
@@ -150,7 +241,7 @@ export class MusicChoreographyEngine {
     this.slowEnergy = follow(this.slowEnergy, snapshot.energy, dt, 5);
     const energyRise = Math.max(0, this.fastEnergy - this.slowEnergy);
 
-    this.advancePalette(newBeats, clock, config, dt);
+    this.advancePalette(newBeats, clock, config, dt, tier >= 4 && !reducedMotion);
     this.advanceMovement(clock, config, dt);
 
     const beganSustained = this.updateSustainedEnergy(this.fastEnergy, timestamp);
@@ -158,7 +249,13 @@ export class MusicChoreographyEngine {
       snapshot.snare * config.percussionSensitivity,
       snapshot.percussion * config.percussionSensitivity * 0.9,
     );
-    const requestedFlash = Math.max(percussionRequest > 0.62 ? percussionRequest : 0, beganSustained ? 0.8 : 0);
+    // The top tier may ask for a flash on the downbeat. Like every other
+    // request it goes through the limiter, which No-flash mode closes.
+    const requestedFlash = Math.max(
+      percussionRequest > 0.62 ? percussionRequest : 0,
+      beganSustained ? 0.8 : 0,
+      tier === 5 && enteredDownbeat ? 0.85 : 0,
+    );
     const flashIntensity = this.flashLimiter.admit(timestamp, requestedFlash, config);
 
     // On the grid a pulse is a contour across the felt beat. Off it, a
@@ -184,7 +281,8 @@ export class MusicChoreographyEngine {
       (config.beatSensitivity * 1.57) *
       (0.6 + config.effectIntensity * 0.4) * Math.min(1, config.effectIntensity / 0.2) *
       (0.4 + 0.6 * tempoRestraint) *
-      (0.12 + 0.88 * dynamicsGate);
+      (0.12 + 0.88 * dynamicsGate) *
+      TIER_DEPTH[tier];
 
     const lowerBrightness = config.minimumBrightness * config.masterBrightness;
     const upperBrightness = config.maximumBrightness * config.masterBrightness;
@@ -210,7 +308,7 @@ export class MusicChoreographyEngine {
     const washDepth = this.cachedRoles.has("wash") || this.cachedRoles.has("auto") ? 1 - Math.exp(-Math.max(0, baseDepth * 1.15) * 1.6) : 0;
     const p = clamp01(pulseDrive);
     const hitPulse = Math.min(1, p + 2 * Math.max(0, p - 0.35) * (1 - p));
-    const attack = 1 - Math.exp(-dt / MusicChoreographyEngine.attackTime);
+    const attack = 1 - Math.exp(-dt / attackTime);
     // Release stays a fraction of the felt beat, relaxed in quiet passages.
     const musicalRelease = Math.min(0.45, Math.max(0.13, feltInterval * 0.26));
     const quietStretch = 1 + Math.max(0, 0.6 - clamp01(this.dynamics)) * 1.2;
@@ -297,6 +395,7 @@ export class MusicChoreographyEngine {
       sequenceNumber,
       sustainedEnergyEvent: this.sustainedEnergyEvent,
       flashApplied: flashIntensity > 0,
+      energyTier: tier,
     };
   }
 
@@ -328,19 +427,27 @@ export class MusicChoreographyEngine {
     return this.cachedPalette;
   }
 
-  private musicalClock(snapshot: AudioReactiveSnapshot, timestamp: number): MusicalClock {
-    const interval = snapshot.feltInterval > 0 ? snapshot.feltInterval : snapshot.beatInterval;
+  private musicalClock(
+    snapshot: AudioReactiveSnapshot,
+    timestamp: number,
+    config: MusicModeConfiguration,
+    attackTime: number,
+    halfTime: boolean,
+  ): MusicalClock {
+    const felt = snapshot.feltInterval > 0 ? snapshot.feltInterval : snapshot.beatInterval;
+    const interval = halfTime ? felt * 2 : felt;
     const metre = snapshot.metre || 4;
     const blank: MusicalClock = {
-      phase: 0, beatInBar: 0, interval: 0, strength: 0, barRate: 0, metre, barPosition: 0,
+      beatPosition: 0, phase: 0, beatInBar: 0, interval: 0, strength: 0, barRate: 0, metre, barPosition: 0,
     };
     if (!snapshot.isTempoLocked || interval <= 0 || snapshot.beatReferenceTime <= 0) return blank;
     if (timestamp - snapshot.beatReferenceTime >= interval * 6) return blank;
 
     // Compensate for transport, firmware delay, and the envelope's own rise
     // time, or the swell lands consistently late.
+    // The user's light timing offset adds to the fixed estimate.
     const predicted =
-      timestamp + MusicChoreographyEngine.outputLatency + MusicChoreographyEngine.attackTime * 0.8;
+      timestamp + MusicChoreographyEngine.outputLatency + (config.outputLatencyOffset ?? 0) + attackTime * 0.8;
     const gridInterval = snapshot.beatInterval > 0 ? snapshot.beatInterval : interval;
     const gridBeats = (predicted - snapshot.beatReferenceTime) / gridInterval;
     // The reference advances on every detected beat. Include its position on
@@ -351,6 +458,7 @@ export class MusicChoreographyEngine {
     const whole = Math.floor(beats);
     const beatInBar = (((snapshot.beatInBar + Math.floor(gridBeats)) % metre) + metre) % metre;
     return {
+      beatPosition: beats,
       phase: beats - whole,
       beatInBar,
       interval,
@@ -397,19 +505,36 @@ export class MusicChoreographyEngine {
    * this replaces quantized to its own boundaries, which drifted relative to
    * the bar and changed colour about twice a second at the default setting.
    */
-  private advancePalette(_newBeats: number, clock: MusicalClock, configuration: MusicModeConfiguration, dt: number): void {
+  private advancePalette(
+    _newBeats: number,
+    clock: MusicalClock,
+    configuration: MusicModeConfiguration,
+    dt: number,
+    stepsPerBeat: boolean,
+  ): void {
     if (configuration.colorChangeIntensity <= 0) { this.lastPaletteHold = null; return; }
     if (clock.strength > 0 && clock.barRate > 0) {
-      const barsPerColour = Math.max(1,Math.round(5-configuration.colorChangeIntensity*4));
-      const hold = Math.floor(clock.barPosition/barsPerColour);
+      // High tiers step colour on the beat (every other beat above 180 BPM,
+      // so colour never changes more than three times a second) and fade over
+      // a quarter beat. Lower tiers hold whole bars and fade over one beat.
+      const beatsPerStep = clock.interval >= 1 / 3 ? 1 : 2;
+      const hold = stepsPerBeat
+        ? Math.floor(clock.beatPosition / beatsPerStep)
+        : Math.floor(clock.barPosition / Math.max(1, Math.round(5 - configuration.colorChangeIntensity * 4)));
+      // A change of hold unit adopts the current colour, like reacquisition.
+      if (this.lastPaletteHold != null && stepsPerBeat !== this.paletteHoldsBeats) this.lastPaletteHold = null;
+      this.paletteHoldsBeats = stepsPerBeat;
+      const where = stepsPerBeat ? clock.beatPosition : clock.barPosition;
       if (this.lastPaletteHold != null && hold !== this.lastPaletteHold) {
-        this.paletteFadeFrom=this.paletteProgress;this.paletteFadeTo=this.paletteProgress+1;this.paletteFadeBar=clock.barPosition;
+        this.paletteFadeFrom = this.paletteProgress; this.paletteFadeTo = this.paletteProgress + 1; this.paletteFadeBar = where;
       } else if (this.lastPaletteHold == null) {
-        this.paletteFadeFrom=this.paletteFadeTo=this.paletteProgress;this.paletteFadeBar=clock.barPosition;
+        this.paletteFadeFrom = this.paletteFadeTo = this.paletteProgress; this.paletteFadeBar = where;
       }
-      this.lastPaletteHold=hold;
-      const blend=clamp01((clock.barPosition-this.paletteFadeBar)*clock.metre);
-      this.paletteProgress=this.paletteFadeFrom+(this.paletteFadeTo-this.paletteFadeFrom)*blend;
+      this.lastPaletteHold = hold;
+      const blend = stepsPerBeat
+        ? clamp01((where - this.paletteFadeBar) * 4)
+        : clamp01((where - this.paletteFadeBar) * clock.metre);
+      this.paletteProgress = this.paletteFadeFrom + (this.paletteFadeTo - this.paletteFadeFrom) * blend;
     } else {
       this.lastPaletteHold=null;
       this.paletteProgress+=dt*configuration.colorChangeIntensity*.08;

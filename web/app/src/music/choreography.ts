@@ -138,7 +138,12 @@ export class MusicChoreographyEngine {
   private highEnergyBeganAt: number | null = null;
   private sustainedEnergyEvent = false;
   private lastTimestamp: number | null = null;
-  private brightnessEnvelopes = new Map<string, number>();
+  // Optimization: Indexed array for brightness envelopes avoids Map string lookups in hot frame loop.
+  private cachedBrightnessEnvelopes = new Float64Array(0);
+  // Optimization: Pre-cached role codes (0: wash/auto, 1: hit, 2: accent, 3: motion) avoid string checks per frame.
+  private cachedRoleCodes = new Uint8Array(0);
+  // Optimization: Reusable HSB color object avoids heap allocations in inner frame loop.
+  private reusableColor: HSB = { hue: 0, saturation: 0, brightness: 0 };
   private flashLimiter = new FlashSafetyLimiter();
   private dynamics = 0;
   private fastEnergy = 0;
@@ -172,7 +177,8 @@ export class MusicChoreographyEngine {
     this.highEnergyBeganAt = null;
     this.sustainedEnergyEvent = false;
     this.lastTimestamp = null;
-    this.brightnessEnvelopes.clear();
+    this.cachedBrightnessEnvelopes = new Float64Array(0);
+    this.cachedRoleCodes = new Uint8Array(0);
     this.flashLimiter.reset();
     this.dynamics = 0;
     this.fastEnergy = 0;
@@ -208,6 +214,17 @@ export class MusicChoreographyEngine {
     const targets = this.expandedTargets(topology, fixtures);
     if (targets.length === 0) {
       return { states: [], timestamp, sequenceNumber, sustainedEnergyEvent: false, flashApplied: false };
+    }
+    if (this.cachedBrightnessEnvelopes.length !== targets.length) {
+      this.cachedBrightnessEnvelopes = new Float64Array(targets.length);
+      this.cachedBrightnessEnvelopes.fill(-1);
+    }
+    if (this.cachedRoleCodes.length !== targets.length) {
+      this.cachedRoleCodes = new Uint8Array(targets.length);
+      for (let i = 0; i < targets.length; i += 1) {
+        const r = targets[i].role;
+        this.cachedRoleCodes[i] = r === "hit" ? 1 : r === "accent" ? 2 : r === "motion" ? 3 : 0;
+      }
     }
 
     const dt = Math.max(1 / 120, Math.min(0.25, timestamp - (this.lastTimestamp ?? timestamp - 1 / 30)));
@@ -331,10 +348,12 @@ export class MusicChoreographyEngine {
       // Centred on 1 so movement tilts the room rather than dimming it.
       const spatialWeight = (1 - motionDepth * 0.5 + motionDepth * wave) * Math.max(0.6, Math.min(1.4, stereoBias));
 
-      const isHit = target.role === "hit";
-      const isAccent = target.role === "accent";
-      const isMotion = target.role === "motion";
-      const isWash = target.role === "wash" || target.role === "auto";
+      // Optimization: Role check via pre-cached numeric codes (0: wash/auto, 1: hit, 2: accent, 3: motion)
+      const roleCode = this.cachedRoleCodes[index];
+      const isWash = roleCode === 0;
+      const isHit = roleCode === 1;
+      const isAccent = roleCode === 2;
+      const isMotion = roleCode === 3;
 
       // The bed: where this fixture rests between accents.
       let bedLevel = commonBed;
@@ -362,27 +381,29 @@ export class MusicChoreographyEngine {
         Math.min(upperBrightness, rawBrightness),
       );
 
-      const envelopeKey = this.cachedEnvelopeKeys[index];
-      const previous = this.brightnessEnvelopes.get(envelopeKey) ?? rawBrightness;
+      // Optimization: Fast Float64Array access instead of Map string lookup
+      const prevEnv = this.cachedBrightnessEnvelopes[index];
+      const previous = prevEnv < 0 ? rawBrightness : prevEnv;
       const coefficient = rawBrightness > previous ? attack : release;
       let brightness = previous + (rawBrightness - previous) * coefficient;
       brightness += flashIntensity * Math.max(0, upperBrightness - brightness);
       brightness = Math.max(brightnessFloor, Math.min(upperBrightness, brightness));
-      this.brightnessEnvelopes.set(envelopeKey, brightness);
+      this.cachedBrightnessEnvelopes[index] = brightness;
 
       // A palette entry held for a whole number of bars and cross-faded over
       // one beat at the bar line, plus a spatial offset so the room reads as
       // one gradient.
       const paletteMotion =
         target.position * spread * paletteSpan + this.paletteProgress + (isAccent && palette.length > 1 ? 1 : 0);
-      const color = paletteColor(palette, paletteMotion / paletteCount);
-      if (flashIntensity > 0) color.saturation *= 1 - flashIntensity * 0.8;
+      paletteColorInto(palette, paletteMotion / paletteCount, this.reusableColor);
+      let sat = this.reusableColor.saturation;
+      if (flashIntensity > 0) sat *= 1 - flashIntensity * 0.8;
 
       states.push({
         fixtureID: target.fixtureID,
         segmentID: target.segmentID,
-        hue: color.hue,
-        saturation: clamp01(color.saturation),
+        hue: this.reusableColor.hue,
+        saturation: clamp01(sat),
         brightness: clamp01(brightness),
         // The transition covers the gap to the next frame, so a fixture
         // interpolates between commands instead of stepping.
@@ -416,6 +437,13 @@ export class MusicChoreographyEngine {
       this.cachedTargets = expandedTargets(topology, fixtures);
       this.cachedEnvelopeKeys = this.cachedTargets.map(target => `${target.fixtureID}#${target.segmentID ?? -1}`);
       this.cachedRoles = new Set(this.cachedTargets.map(target => target.role));
+      this.cachedBrightnessEnvelopes = new Float64Array(this.cachedTargets.length);
+      this.cachedBrightnessEnvelopes.fill(-1);
+      this.cachedRoleCodes = new Uint8Array(this.cachedTargets.length);
+      for (let i = 0; i < this.cachedTargets.length; i += 1) {
+        const r = this.cachedTargets[i].role;
+        this.cachedRoleCodes[i] = r === "hit" ? 1 : r === "accent" ? 2 : r === "motion" ? 3 : 0;
+      }
     }
     return this.cachedTargets;
   }
@@ -702,9 +730,16 @@ function toHsb(color: MusicPaletteColor): HSB {
   return { hue: wrapUnit(hue), saturation: max === 0 ? 0 : delta / max, brightness: max };
 }
 
-function paletteColor(palette: HSB[], position: number): HSB {
-  if (palette.length === 0) return { hue: 0, saturation: 0, brightness: 1 };
-  if (palette.length === 1) return { ...palette[0] };
+function paletteColorInto(palette: HSB[], position: number, out: HSB): void {
+  if (palette.length === 0) {
+    out.hue = 0; out.saturation = 0; out.brightness = 1;
+    return;
+  }
+  if (palette.length === 1) {
+    const p0 = palette[0];
+    out.hue = p0.hue; out.saturation = p0.saturation; out.brightness = p0.brightness;
+    return;
+  }
   // Cyclic, matching the Swift engine. A clamped ramp reaches the last entry
   // and snaps back to the first, which the native app never did.
   const wrapped = wrapUnit(position) * palette.length;
@@ -712,11 +747,15 @@ function paletteColor(palette: HSB[], position: number): HSB {
   const t = wrapped - Math.floor(wrapped);
   const a = palette[index];
   const b = palette[(index + 1) % palette.length];
-  return {
-    hue: a.saturation <= 0.08 ? b.hue : b.saturation <= 0.08 ? a.hue : lerpHue(a.hue, b.hue, t),
-    saturation: a.saturation + (b.saturation - a.saturation) * t,
-    brightness: a.brightness + (b.brightness - a.brightness) * t,
-  };
+  out.hue = a.saturation <= 0.08 ? b.hue : b.saturation <= 0.08 ? a.hue : lerpHue(a.hue, b.hue, t);
+  out.saturation = a.saturation + (b.saturation - a.saturation) * t;
+  out.brightness = a.brightness + (b.brightness - a.brightness) * t;
+}
+
+function paletteColor(palette: HSB[], position: number): HSB {
+  const out = { hue: 0, saturation: 0, brightness: 0 };
+  paletteColorInto(palette, position, out);
+  return out;
 }
 
 function lerpHue(a: number, b: number, t: number): number {

@@ -423,6 +423,8 @@ private struct RoomCanvasSidebar: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(.plain)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .layoutPriority(1)
             .accessibilityAddTraits(selected ? .isSelected : [])
 
             Menu {
@@ -435,6 +437,7 @@ private struct RoomCanvasSidebar: View {
             }
             .accessibilityLabel("Actions for \(room.name)")
             .help("Rename or delete \(room.name)")
+            .fixedSize()
         }
         .padding(9)
         .background(

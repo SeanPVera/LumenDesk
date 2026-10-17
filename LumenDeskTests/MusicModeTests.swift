@@ -751,6 +751,74 @@ final class MusicModeTests: XCTestCase {
     }
 
     @MainActor
+    func testLunaMusicUsesEveryPhysicalZoneWithASpatialGradient() throws {
+        let manager = LightManager(persistenceStore: MusicModePersistenceSpy())
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+        let luna = try XCTUnwrap(manager.devices.first { $0.isLIFXLuna })
+        let matrix = try XCTUnwrap(manager.lifxMatrixState(for: luna))
+        let fixtures = manager.musicFixtureDescriptors(in: .all)
+        let descriptor = try XCTUnwrap(fixtures.first { $0.id == luna.id })
+        XCTAssertEqual(descriptor.transport, .lifxLAN)
+        XCTAssertEqual(descriptor.segmentCount, 26)
+        XCTAssertEqual(descriptor.segmentPositions?.count, matrix.zoneCount)
+        var config = MusicModeConfiguration.configuration(for: .balanced)
+        config.colorChangeIntensity = 0
+        config.palette = [MusicPaletteColor(0xFF0000), MusicPaletteColor(0x0000FF)]
+        let frame = MusicChoreographyEngine().makeFrame(
+            snapshot: AudioReactiveSnapshot(level: 0.5, energy: 0.5, confidence: 1), configuration: config,
+            topology: manager.fixtureTopology(for: .all), fixtures: fixtures, timestamp: 100, sequenceNumber: 1)
+        let zones = frame.states.filter { $0.fixtureID == luna.id }
+        XCTAssertEqual(zones.map(\.segmentID), (0..<26).map { Optional($0) })
+        XCTAssertGreaterThan(Set(zones.map(\.hue)).count, 1)
+    }
+
+    @MainActor
+    func testLateLunaGeometryRefreshesARunningShowWithoutRestartingCaptureOrChangingItsSettings() async throws {
+        let backend = MusicCaptureStub()
+        var time = ProcessInfo.processInfo.systemUptime
+        let controller = AudioReactiveSessionController(
+            captureService: AudioCaptureService(makeSystemAudioCapture: { _ in backend }), now: { time })
+        let manager = LightManager(persistenceStore: MusicModePersistenceSpy(), musicModeController: controller)
+        defer { manager.stopAllEffects(restore: false) }
+        let mac = "001122334455"
+        let id = "lifx:\(mac)"
+        @MainActor func waitFor(_ condition: () -> Bool) async throws {
+            let deadline = Date().addingTimeInterval(3)
+            while !condition(), Date() < deadline { try await Task.sleep(nanoseconds: 10_000_000) }
+            XCTAssertTrue(condition(), "Timed out waiting for the LIFX callback")
+        }
+        manager.lifxDiscovered(macHex: mac, address: "192.0.2.45")
+        try await waitFor { manager.devices.contains { $0.id == id } }
+        manager.lifxDidIdentify(macHex: mac, vendorID: 1, productID: 219)
+        try await waitFor { manager.devices.first { $0.id == id }?.isLIFXLuna == true }
+        var config = MusicModeConfiguration.configuration(for: .concert)
+        config.effectIntensity = 0.37
+        config.colorChangeIntensity = 0
+        config.palette = [MusicPaletteColor(0xFF0000), MusicPaletteColor(0x0000FF)]
+        manager.startMusicMode(configuration: config)
+        controller.renderNowForTesting()
+        let originalSettings = try XCTUnwrap(controller.effectiveConfiguration(for: .all))
+        let initial = try XCTUnwrap(controller.latestFrame(for: .all)).states.filter { $0.fixtureID == id }
+        XCTAssertEqual(initial.count, 1)
+        XCTAssertNil(initial.first?.segmentID)
+        XCTAssertEqual(backend.completions.count, 1)
+
+        let matrix = LIFXMatrixState.demoLuna()
+        manager.lifxDidUpdateMatrix(macHex: mac, productID: 219, width: matrix.width, height: matrix.height,
+                                   colors: matrix.colors.map(\.hsbk))
+        try await waitFor { manager.lifxMatrixStates[id] != nil }
+        time += 0.05
+        controller.renderNowForTesting()
+        let zones = try XCTUnwrap(controller.latestFrame(for: .all)).states.filter { $0.fixtureID == id }
+        XCTAssertEqual(zones.map(\.segmentID), (0..<26).map { Optional($0) })
+        XCTAssertGreaterThan(Set(zones.map(\.hue)).count, 1)
+        XCTAssertEqual(controller.effectiveConfiguration(for: .all), originalSettings)
+        XCTAssertEqual(controller.activeScopeIDs, [.all])
+        XCTAssertEqual(backend.completions.count, 1, "Geometry must not restart the audio source")
+    }
+
+    @MainActor
     func testReduceMotionReachesShowsStartedOutsideTheMusicScreen() throws {
         let manager = LightManager(persistenceStore: MusicModePersistenceSpy())
         manager.enterDemoMode()

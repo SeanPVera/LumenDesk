@@ -17,6 +17,33 @@ function fixture(id, overrides={}) {
 }
 function topology() { return {layout:'leftToRight',fixtureOrder:[],excludedFixtureIDs:[]} }
 
+test('each bar or panel fixture keeps its full gradient beside a much longer strip', () => {
+  const room = [fixture('a-wall', {segmentCount: 4}), fixture('b-strip', {segmentCount: 200}),
+    fixture('c-bar', {segmentCount: 4})]
+  for (const intensity of [0, .1, 1]) {
+    const settings = {...config(), colorChangeIntensity: intensity}
+    const frame = new MusicChoreographyEngine().makeFrame(snapshot, settings, topology(), room, 100, 1)
+    for (const id of ['a-wall', 'c-bar']) {
+      const states = frame.states.filter(state => state.fixtureID === id)
+      assert.equal(new Set(states.map(state => state.hue)).size, 4)
+      assert.equal(states[0].hue, 0, `${id} starts at the first palette color`)
+      assert.ok(Math.abs(states.at(-1).hue - 2/3) < 1e-12, `${id} reaches the last palette color`)
+    }
+  }
+})
+
+test('locked beat transitions finish within one render tick while unmetered audio eases', () => {
+  const room = [fixture('a')], settings = config()
+  for (const interval of [.3, .4, .5, 1]) {
+    const frame = new MusicChoreographyEngine().makeFrame({...snapshot, beatInterval: interval, feltInterval: interval},
+      settings, topology(), room, 100, 1)
+    assert.ok(frame.states[0].transitionDuration <= .05)
+    assert.ok(frame.states[0].transitionDuration <= interval * .12)
+  }
+  const live = new MusicChoreographyEngine().makeFrame({...snapshot, isTempoLocked: false}, settings, topology(), room, 100, 1)
+  assert.equal(live.states[0].transitionDuration, .09)
+})
+
 test('live topology edits reorder, exclude, and restore cached targets',()=>{
   const engine=new MusicChoreographyEngine(), room=[fixture('a'),fixture('b'),fixture('c')], layout=topology(), settings=config()
   const frame=t=>engine.makeFrame(snapshot,settings,layout,room,t,Math.round((t-100)*20)+1)

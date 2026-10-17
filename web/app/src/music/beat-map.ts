@@ -28,6 +28,8 @@ const TIGHTNESS = 100;
 const MINIMUM_DURATION = 8;
 
 export interface BeatMap {
+  /** Streamed maps only drive sections actually heard. Absent on file/older maps. */
+  learnedRanges?: { start: number; end: number }[];
   version: number;
   /** Seconds of audio the map covers, measured from the start of the track. */
   duration: number;
@@ -378,6 +380,7 @@ export async function analyzeAudioBuffer(
 
 /** Where `position` falls on the map, or null before the first beat or after the last. */
 export function beatMapGridAt(map: BeatMap, position: number): BeatMapGrid | null {
+  if (map.learnedRanges && !map.learnedRanges.some(range => position >= range.start && position <= range.end)) return null;
   const beats = map.beats;
   if (beats.length < 2 || !Number.isFinite(position)) return null;
   if (position < beats[0] - 0.05) return null;

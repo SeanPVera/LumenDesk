@@ -95,6 +95,20 @@ function syntheticHops({ seconds = 60, interval = 0.5, firstBeat = 0.25, downbea
   return hops
 }
 
+test('learned maps fall back to live timing inside unheard sections and preserve coverage on disk', () => {
+  const map = buildBeatMap(syntheticHops())
+  map.learnedRanges = [{start: 0, end: 5}, {start: 9, end: map.duration}]
+  assert.equal(beatMapGridAt(map, 7), null)
+  assert.ok(beatMapGridAt(map, 20))
+  const live = {...emptySnapshot(), beatCount: 900}
+  const applied = applyBeatMap(live, map, 7, 100)
+  assert.equal(applied.beatMapActive, false)
+  assert.equal(applied.beatCount, live.beatCount)
+  const restored = JSON.parse(JSON.stringify(map))
+  assert.equal(beatMapGridAt(restored, 7), null)
+  assert.ok(beatMapGridAt(restored, 20))
+})
+
 test('a 120 BPM grid is recovered with its beats, downbeat and louder second half', () => {
   const map = buildBeatMap(syntheticHops())
   assert.ok(map, 'map')
@@ -232,7 +246,7 @@ function quietMap(energy) {
   return { ...map, barEnergy: map.barEnergy.map(() => energy) }
 }
 
-test('calm music on a fast grid nods every other beat unless the feel is set by hand', () => {
+test('calm music keeps the detected fast beat in Auto without silently switching to half-time', () => {
   // Counts where brightness starts to climb: one per felt beat.
   const rises = timeFeel => {
     const map = quietMap(0.2)
@@ -254,7 +268,7 @@ test('calm music on a fast grid nods every other beat unless the feel is set by 
     return count
   }
   const auto = rises('auto'), straight = rises('straight')
-  assert.ok(auto <= 3, `auto half-time rises ${auto}`)
+  assert.equal(auto, straight, 'energy tiers must not change the detected beat clock')
   assert.ok(straight >= 5, `straight rises ${straight}`)
 })
 

@@ -175,20 +175,63 @@ final class BeatMapTests: XCTestCase {
 
     // MARK: - Learning, storing and calibrating
 
-    func testALearnerKeepsOneUnbrokenPassAndBuildsAMapOnlyWhenItCoversTheTrack() throws {
+    func testALearnerKeepsHeardSectionsAcrossSeeksAndBuildsAMapWhenItCoversTheTrack() throws {
         let hops = Self.syntheticHops(seconds: 40)
         var learner = BeatMapLearner(key: "spotify:x", duration: 40)
         for hop in hops.prefix(hops.count / 2) { learner.add(hop, position: hop.time) }
         XCTAssertFalse(learner.isComplete)
         XCTAssertNil(learner.makeMap())
-        // A seek backwards starts the pass over.
+        let coverage = learner.coverage
+        // Replaying a heard section neither erases nor doubles its coverage.
         learner.add(hops[10], position: hops[10].time)
-        XCTAssertLessThan(learner.coverage, 0.01)
+        XCTAssertEqual(learner.coverage, coverage)
         learner.restart()
+        XCTAssertEqual(learner.coverage, coverage, "a pause breaks interpolation, not learning")
         for hop in hops { learner.add(hop, position: hop.time) }
         XCTAssertTrue(learner.isComplete)
         let map = try XCTUnwrap(learner.makeMap())
         XCTAssertEqual(map.tempo, 120, accuracy: 1.5)
+    }
+
+    func testPartialLearningSurvivesStoreRecreationWithoutCountingUnheardGaps() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let key = "com.spotify.client:track:partial"
+        let hops = Self.syntheticHops(seconds: 40)
+        var learner = BeatMapLearner(key: key, duration: 40)
+        for hop in hops where hop.time < 10 { learner.add(hop, position: hop.time) }
+        learner.restart()
+        for hop in hops where hop.time >= 30 { learner.add(hop, position: hop.time) }
+        XCTAssertEqual(learner.coverage, 0.5, accuracy: 0.01)
+        XCTAssertFalse(learner.isComplete, "seeking over the middle does not teach it")
+        BeatMapStore(directory: directory).saveLearning(learner)
+        let store = BeatMapStore(directory: directory)
+        var restored = try XCTUnwrap(store.loadLearning(key: key, duration: 40))
+        XCTAssertEqual(restored.coverage, learner.coverage)
+        XCTAssertNil(store.loadLearning(key: key, duration: 90))
+        for hop in hops where hop.time >= 10 && hop.time < 30 { restored.add(hop, position: hop.time) }
+        XCTAssertTrue(restored.isComplete)
+        let map = try XCTUnwrap(restored.makeMap())
+        XCTAssertEqual(map.tempo, 120, accuracy: 1.5)
+        store.save(map, key: key)
+        store.removeLearning(key: key)
+        XCTAssertEqual(BeatMapStore(directory: directory).load(key: key), map)
+        XCTAssertNil(store.loadLearning(key: key, duration: 40))
+    }
+
+    func testLearnedMapsUseLiveTimingInSectionsSkippedDuringLearning() throws {
+        var learner = BeatMapLearner(key: "skipped-bridge", duration: 40)
+        for hop in Self.syntheticHops(seconds: 40) where hop.time < 5 || hop.time >= 9 {
+            learner.add(hop, position: hop.time)
+        }
+        XCTAssertTrue(learner.isComplete)
+        let map = try XCTUnwrap(learner.makeMap())
+        XCTAssertNil(map.grid(at: 7), "an unheard bridge must not claim a learned grid")
+        XCTAssertNotNil(map.grid(at: 20))
+        XCTAssertFalse(map.apply(to: AudioReactiveSnapshot(), position: 7, timestamp: 100).beatMapActive)
+        let restored = try JSONDecoder().decode(BeatMap.self, from: JSONEncoder().encode(map))
+        XCTAssertEqual(restored.learnedRanges, map.learnedRanges)
+        XCTAssertNil(restored.grid(at: 7))
     }
 
     func testTheStoreRoundTripsMapsUnderHashedNamesAndPrunesToCapacity() throws {
@@ -309,7 +352,7 @@ final class BeatMapTests: XCTestCase {
         return topology
     }
 
-    func testCalmMusicOnAFastGridNodsEveryOtherBeatUnlessTheFeelIsSetByHand() throws {
+    func testCalmMusicKeepsTheDetectedBeatInAutoWithoutSwitchingToHalfTime() throws {
         func rises(_ feel: TimeFeel) throws -> Int {
             let map = try Self.quietMap(0.2)
             let engine = MusicChoreographyEngine()
@@ -339,7 +382,7 @@ final class BeatMapTests: XCTestCase {
             return count
         }
         let auto = try rises(.auto), straight = try rises(.straight)
-        XCTAssertLessThanOrEqual(auto, 3, "auto half-time rises \(auto)")
+        XCTAssertEqual(auto, straight, "energy tiers must not change the detected clock")
         XCTAssertGreaterThanOrEqual(straight, 5, "straight rises \(straight)")
     }
 
@@ -540,11 +583,18 @@ final class BeatMapTests: XCTestCase {
     #endif
 
     #if os(macOS)
-    func testPauseSeekAndCaptureGapsRestartLearning() {
+    func testPauseSeekAndCaptureGapsPreserveLearningAndDiscardOldQueuedHops() {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let learningQueue = DispatchQueue(label: "test.learning-discontinuities")
         var time = 100.0
-        let coordinator = BeatMapCoordinator(now: { time })
+        let coordinator = BeatMapCoordinator(store: BeatMapStore(directory: directory),
+                                             learningQueue: learningQueue, now: { time })
         coordinator.beginFollowing(startMonitor: false)
-        defer { coordinator.stop() }
+        defer {
+            coordinator.stop()
+            learningQueue.sync {}
+            try? FileManager.default.removeItem(at: directory)
+        }
         var sample = NowPlayingSample(app: .music, trackID: UUID().uuidString, title: "Song", artist: "Artist",
                                       duration: 120, position: 0, isPlaying: true, sampledAt: time)
         coordinator.receive(sample)
@@ -563,13 +613,118 @@ final class BeatMapTests: XCTestCase {
         time = 111; sample.sampledAt = time; sample.isPlaying = true
         coordinator.receive(sample)
         feed(109, 112) // Queued hops before the resume must be discarded.
-        XCTAssertEqual(coordinator.status, .learning(app: "Music", title: "Song", coverage: 0))
+        XCTAssertEqual(coordinator.status, .learning(app: "Music", title: "Song", coverage: 0.05))
         time = 112; sample.sampledAt = time; sample.position = 0
         coordinator.receive(sample)
         feed(112, 122)
         XCTAssertEqual(coordinator.status, .learning(app: "Music", title: "Song", coverage: 0.05))
         feed(124, 125)
-        XCTAssertEqual(coordinator.status, .learning(app: "Music", title: "Song", coverage: 0))
+        XCTAssertEqual(coordinator.status, .learning(app: "Music", title: "Song", coverage: 0.1))
+    }
+
+    func testStopAndRestartReusePartialLearningBeforeItsDiskWriteCompletes() {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let queue = DispatchQueue(label: "test.suspended-learning")
+        queue.suspend()
+        defer { queue.resume(); queue.sync {} }
+        var time = 100.0
+        let coordinator = BeatMapCoordinator(store: BeatMapStore(directory: directory), learningQueue: queue, now: { time })
+        var sample = NowPlayingSample(app: .music, trackID: "partial", title: "Song", artist: "Artist",
+                                      duration: 120, position: 0, isPlaying: true, sampledAt: time)
+        coordinator.beginFollowing(startMonitor: false)
+        coordinator.receive(sample)
+        coordinator.consume(hops: Self.syntheticHops(seconds: 10).map {
+            HopFeature(time: 100 + $0.time, onset: $0.onset, kick: $0.kick, energy: $0.energy)
+        })
+        let progress = coordinator.status
+        coordinator.stop()
+        time = 200
+        sample.sampledAt = time
+        coordinator.beginFollowing(startMonitor: false)
+        coordinator.receive(sample)
+        XCTAssertEqual(coordinator.status, progress)
+        XCTAssertEqual(progress, .learning(app: "Music", title: "Song", coverage: 0.05))
+        coordinator.stop()
+    }
+
+    func testStoppingDuringAnEarlierBuildCheckpointsNewlyHeardSections() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = BeatMapStore(directory: directory)
+        let queue = DispatchQueue(label: "test.in-flight-learning")
+        queue.suspend()
+        var suspended = true
+        defer { if suspended { queue.resume() }; queue.sync {} }
+        var time = 100.0
+        let coordinator = BeatMapCoordinator(store: store, learningQueue: queue, now: { time })
+        coordinator.beginFollowing(startMonitor: false)
+        coordinator.receive(NowPlayingSample(app: .music, trackID: "in-flight", title: "Song", artist: "Artist",
+                                              duration: 40, position: 0, isPlaying: true, sampledAt: time))
+        let hops = Self.syntheticHops(seconds: 40)
+        func feed(_ section: [HopFeature]) {
+            coordinator.consume(hops: section.map {
+                HopFeature(time: 100 + $0.time, onset: $0.onset, kick: $0.kick, energy: $0.energy)
+            })
+        }
+        time = 135
+        feed(hops.filter { $0.time < 35 }) // 87.5% starts the queued build.
+        time = 138
+        feed(hops.filter { $0.time >= 35 && $0.time < 38 }) // Another 7.5% is heard.
+        coordinator.stop()
+        queue.resume()
+        suspended = false
+        queue.sync {}
+        let restored = try XCTUnwrap(store.loadLearning(key: PlaybackApp.music.trackKey("in-flight"), duration: 40))
+        XCTAssertGreaterThan(restored.coverage, 0.94, "Stop must persist the newer learner, not just the old build's snapshot")
+        XCTAssertGreaterThan(try XCTUnwrap(restored.hops.last).time, 37.9)
+    }
+
+    func testLearningFinishesBeforeTheOutroAndAnImmediateRepeatReusesTheMap() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = BeatMapStore(directory: directory)
+        var time = 100.0
+        let learningQueue = DispatchQueue(label: "test.beat-map-learning")
+        let coordinator = BeatMapCoordinator(store: store, learningQueue: learningQueue, now: { time })
+        coordinator.beginFollowing(startMonitor: false)
+        defer { coordinator.stop() }
+        var sample = NowPlayingSample(app: .music, trackID: "repeat", title: "Song", artist: "Artist",
+                                      duration: 40, position: 0, isPlaying: true, sampledAt: time)
+        coordinator.receive(sample)
+        let ready = expectation(description: "the completed map follows the repeated track")
+        ready.assertForOverFulfill = false
+        coordinator.onStatusChange = { status in
+            if case .following = status { ready.fulfill() }
+        }
+        let recorded = Self.syntheticHops(seconds: 35)
+        time = 135
+        coordinator.consume(hops: recorded.map {
+            HopFeature(time: 100 + $0.time, onset: $0.onset, kick: $0.kick, energy: $0.energy)
+        })
+        // Repeat the same track before its background build finishes.
+        sample.sampledAt = time
+        sample.position = 0
+        coordinator.receive(sample)
+        wait(for: [ready], timeout: 5)
+        let key = PlaybackApp.music.trackKey("repeat")
+        let stored = try XCTUnwrap(BeatMapStore(directory: directory).load(key: key))
+        XCTAssertTrue(stored.isPlayable)
+        XCTAssertTrue(coordinator.status.isPlayingMap)
+        // Keep recording the outro while the early map is already playing.
+        time = 175
+        coordinator.consume(hops: Self.syntheticHops(seconds: 40).filter { $0.time >= 35 }.map {
+            HopFeature(time: 135 + $0.time, onset: $0.onset, kick: $0.kick, energy: $0.energy)
+        })
+        learningQueue.sync {}
+        XCTAssertGreaterThan(try XCTUnwrap(store.load(key: key)).duration, 39,
+                             "an early usable map must keep extending through the outro")
+        coordinator.stop()
+        let restarted = BeatMapCoordinator(store: BeatMapStore(directory: directory), now: { time })
+        restarted.beginFollowing(startMonitor: false)
+        defer { restarted.stop() }
+        restarted.receive(sample)
+        XCTAssertTrue(restarted.status.isPlayingMap, "a later app session must reuse the saved map")
     }
 
     func testAnAllowedIdlePlayerDoesNotHideAnotherPlayersAutomationDenial() {

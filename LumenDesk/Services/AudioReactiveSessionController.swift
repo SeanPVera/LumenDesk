@@ -369,6 +369,14 @@ final class AudioReactiveSessionController: ObservableObject {
         refreshPlaybackFollowing()
     }
 
+    /// Geometry can arrive after a show starts. Re-expand fixtures without
+    /// replacing that session's configuration, capture, or musical clock.
+    func updateFixtures(scope: LightScope, fixtures: [MusicFixtureDescriptor]) {
+        guard let session = sessions[scope], session.fixtures != fixtures else { return }
+        session.fixtures = fixtures
+        session.lastPreviewPublishedAt = -Double.greatestFiniteMagnitude
+    }
+
     // MARK: - Light timing calibration
 
     /// Starts a fresh set of calibration taps.

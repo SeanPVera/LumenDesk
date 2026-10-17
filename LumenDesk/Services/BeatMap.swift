@@ -2,13 +2,18 @@ import AVFoundation
 import Foundation
 
 /// One analysis hop's features, used to build and align beat maps.
-struct HopFeature: Equatable {
+struct HopFeature: Codable, Equatable {
     /// Seconds: stream or host time while analysing, track position once stored.
     var time: TimeInterval
     /// The beat tracker's onset input (broadband onset mixed with kick).
     var onset: Double
     var kick: Double
     var energy: Double
+}
+
+struct BeatMapSpan: Codable, Equatable {
+    let start: TimeInterval
+    let end: TimeInterval
 }
 
 /// A whole song analysed ahead of time: every beat, where each bar starts,
@@ -43,6 +48,9 @@ struct BeatMap: Codable, Equatable {
     var envelope: [Double]
     /// 0…1: how periodic the onset envelope is at the chosen tempo.
     var confidence: Double
+    /// Streamed maps only drive sections actually heard. Older and file maps
+    /// omit this optional field, preserving their cached format and behavior.
+    var learnedRanges: [BeatMapSpan]? = nil
 
     /// Maps below this confidence describe no steady beat and are never played.
     static let minimumPlayableConfidence = 0.08
@@ -362,6 +370,9 @@ enum BeatMapBuilder {
 extension BeatMap {
     /// Where `position` falls on the map, or nil before the first beat or after the last.
     func grid(at position: TimeInterval) -> BeatMapGrid? {
+        if let learnedRanges, !learnedRanges.contains(where: { position >= $0.start && position <= $0.end }) {
+            return nil
+        }
         guard beats.count >= 2, position.isFinite, position >= beats[0] - 0.05 else { return nil }
         var lo = 0, hi = beats.count - 1
         while lo < hi {
@@ -592,54 +603,92 @@ struct TapCalibrator {
 // MARK: - Learning a streamed track
 
 /// Records a streamed track's analysis against its playback position on the
-/// first listen, so the second listen can play from a map. Only one unbroken
-/// pass counts: a seek, a skip or a pause long enough to re-anchor the clock
-/// starts the recording over, because stitched passes would put beats in the
-/// wrong place.
-struct BeatMapLearner {
+/// first listen, so later listens can play from a map. Samples are indexed by
+/// track position, so pauses, seeks and later listens retain heard sections.
+/// Only contiguous hops are interpolated; a seek never fills unheard audio.
+struct BeatMapLearner: Codable {
     let key: String
     let duration: TimeInterval
-    private(set) var hops: [HopFeature] = []
-    private var lastPosition: TimeInterval?
+    private var samples: [Int: HopFeature] = [:]
+    private var previous: HopFeature?
+    private var firstPosition: TimeInterval?
+
+    var hops: [HopFeature] { samples.values.sorted { $0.time < $1.time } }
 
     init(key: String, duration: TimeInterval) {
         self.key = key
         self.duration = duration
-        hops.reserveCapacity(Int(max(0, duration) * 90))
     }
 
-    /// The span of the track heard so far, as a fraction of its length.
+    /// Unique audio actually heard, so seeks and repeated sections do not
+    /// inflate coverage or erase earlier progress.
     var coverage: Double {
-        guard duration > 0, let first = hops.first?.time, let last = hops.last?.time else { return 0 }
-        return max(0, min(1, (last - first) / duration))
+        guard duration > 0 else { return 0 }
+        return max(0, min(1, Double(samples.count) / (duration * BeatMap.envelopeRate + 1)))
     }
 
     /// Whether what was heard is enough to build a map from.
     var isComplete: Bool {
-        guard let first = hops.first?.time else { return false }
+        guard let first = firstPosition else { return false }
         return coverage >= 0.85 && first <= 10
     }
 
     mutating func add(_ hop: HopFeature, position: TimeInterval) {
-        guard position.isFinite, position >= 0, duration <= 0 || position <= duration + 1 else { return }
-        if let lastPosition {
-            let step = position - lastPosition
-            // Hops are about 11 ms apart. Anything going backwards, or skipping
-            // more than half a second, breaks the pass.
-            if step < -0.05 || step > 0.5 { restart() }
+        guard position.isFinite, position >= 0, duration > 0, position <= duration,
+              hop.onset.isFinite, hop.kick.isFinite, hop.energy.isFinite else { return }
+        let rate = BeatMap.envelopeRate
+        let index = Int((position * rate).rounded())
+        let next = HopFeature(time: Double(index) / rate, onset: hop.onset, kick: hop.kick, energy: hop.energy)
+        if let previous {
+            let step = position - previous.time
+            if step > 0, step <= 0.5 {
+                let start = Int((previous.time * rate).rounded()) + 1
+                if start < index {
+                    for frame in start..<index {
+                        let time = Double(frame) / rate
+                        let fraction = (time - previous.time) / (next.time - previous.time)
+                        samples[frame] = HopFeature(time: time,
+                            onset: previous.onset + (next.onset - previous.onset) * fraction,
+                            kick: previous.kick + (next.kick - previous.kick) * fraction,
+                            energy: previous.energy + (next.energy - previous.energy) * fraction)
+                    }
+                }
+            }
         }
-        lastPosition = position
-        hops.append(HopFeature(time: position, onset: hop.onset, kick: hop.kick, energy: hop.energy))
+        samples[index] = next
+        previous = next
+        firstPosition = min(firstPosition ?? position, position)
     }
 
     mutating func restart() {
-        hops.removeAll(keepingCapacity: true)
-        lastPosition = nil
+        previous = nil
     }
 
     func makeMap() -> BeatMap? {
         guard isComplete else { return nil }
-        return BeatMapBuilder.build(hops: hops)
+        guard let end = samples.keys.max() else { return nil }
+        // Missing sections stay silent rather than smearing the two ends of
+        // a seek into a fabricated onset envelope.
+        let recorded = (0...end).map { frame in
+            samples[frame] ?? HopFeature(time: Double(frame) / BeatMap.envelopeRate,
+                                        onset: 0, kick: 0, energy: 0)
+        }
+        guard var map = BeatMapBuilder.build(hops: recorded) else { return nil }
+        let frames = samples.keys.sorted()
+        var start = frames[0], previous = start
+        var ranges: [BeatMapSpan] = []
+        for frame in frames.dropFirst() {
+            if frame > previous + 1 {
+                ranges.append(BeatMapSpan(start: Double(start) / BeatMap.envelopeRate,
+                                          end: Double(previous) / BeatMap.envelopeRate))
+                start = frame
+            }
+            previous = frame
+        }
+        ranges.append(BeatMapSpan(start: Double(start) / BeatMap.envelopeRate,
+                                  end: Double(previous) / BeatMap.envelopeRate))
+        map.learnedRanges = ranges
+        return map
     }
 }
 
@@ -685,6 +734,34 @@ final class BeatMapStore {
         }
     }
 
+    func loadLearning(key: String, duration: TimeInterval) -> BeatMapLearner? {
+        guard let data = try? Data(contentsOf: learningURL(for: key)),
+              var learner = try? JSONDecoder().decode(BeatMapLearner.self, from: data),
+              learner.key == key, abs(learner.duration - duration) < 1 else { return nil }
+        learner.restart()
+        return learner
+    }
+
+    func saveLearning(_ learner: BeatMapLearner) {
+        let url = learningURL(for: learner.key)
+        do {
+            try fileManager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try JSONEncoder().encode(learner).write(to: url, options: .atomic)
+            prune(directory: url.deletingLastPathComponent())
+        } catch {
+            // Live listening and this session's in-memory progress still work.
+        }
+    }
+
+    func removeLearning(key: String) {
+        try? fileManager.removeItem(at: learningURL(for: key))
+    }
+
+    private func learningURL(for key: String) -> URL {
+        directory.appendingPathComponent("Learning", isDirectory: true)
+            .appendingPathComponent(Self.fileName(for: key))
+    }
+
     func url(for key: String) -> URL {
         directory.appendingPathComponent(Self.fileName(for: key))
     }
@@ -699,9 +776,11 @@ final class BeatMapStore {
         return String(format: "%016llx.json", hash)
     }
 
-    private func prune() {
+    private func prune(directory: URL? = nil) {
+        let directory = directory ?? self.directory
         guard let files = try? fileManager.contentsOfDirectory(
-            at: directory, includingPropertiesForKeys: [.contentModificationDateKey], options: [.skipsHiddenFiles]),
+            at: directory, includingPropertiesForKeys: [.contentModificationDateKey], options: [.skipsHiddenFiles])
+            .filter({ $0.pathExtension == "json" }),
               files.count > capacity else { return }
         let dated = files.map { file -> (URL, Date) in
             let date = (try? file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast

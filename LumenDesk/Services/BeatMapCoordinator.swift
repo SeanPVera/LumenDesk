@@ -26,7 +26,7 @@ enum BeatMapStatus: Equatable {
             return "Waiting for Spotify or Music to play."
         case .learning(let app, let title, let coverage):
             let name = title.isEmpty ? "this track" : "“\(title)”"
-            return "Learning \(name) from \(app) · \(Int((coverage * 100).rounded()))%. The next listen plays from its beat map."
+            return "Learning \(name) from \(app) · \(Int((coverage * 100).rounded()))%. Progress is saved between listens."
         case .following(let app, let title, let tempo):
             let name = title.isEmpty ? "the track" : "“\(title)”"
             return "Following \(name) in \(app) from its beat map · \(Int(tempo.rounded())) BPM."
@@ -73,6 +73,13 @@ final class BeatMapCoordinator {
 
     private(set) var clock = PlaybackClock()
     private var learner: BeatMapLearner?
+    private let learningQueue: DispatchQueue
+    /// Makes an immediate repeat independent of an outstanding disk write.
+    private var savedLearning: [String: BeatMapLearner] = [:]
+    private var savedLearningOrder: [String] = []
+    private var buildsInFlight: Set<String> = []
+    private var builtCoverage: [String: Double] = [:]
+    private var lastCheckpointAt = -Double.greatestFiniteMagnitude
     private var current: NowPlayingSample?
     private var liveOnsets: [HopFeature] = []
     private var lastAlignment = -Double.greatestFiniteMagnitude
@@ -87,8 +94,10 @@ final class BeatMapCoordinator {
     private static let alignmentInterval: TimeInterval = 2
 
     init(store: BeatMapStore = BeatMapStore(),
+         learningQueue: DispatchQueue = DispatchQueue(label: "LumenDesk.beat-map-learning", qos: .utility),
          now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
         self.store = store
+        self.learningQueue = learningQueue
         self.now = now
     }
 
@@ -203,13 +212,21 @@ final class BeatMapCoordinator {
             endTrack()
             clock.reset()
             resetLiveHistory(since: sample.sampledAt)
-            if let cached = store.load(key: key), cached.isPlayable {
-                map = cached
-                learner = nil
+            let progress = savedLearning[key].flatMap { abs($0.duration - sample.duration) < 1 ? $0 : nil }
+                ?? store.loadLearning(key: key, duration: sample.duration)
+            if let cached = store.load(key: key) {
+                map = cached.isPlayable ? cached : nil
+                // Extend an early map through the rest of the track while it
+                // already drives the show. Existing full maps need no learner.
+                learner = progress ?? (cached.duration < sample.duration * 0.98
+                    ? BeatMapLearner(key: key, duration: sample.duration) : nil)
             } else {
                 map = nil
-                learner = BeatMapLearner(key: key, duration: sample.duration)
+                if !buildsInFlight.contains(key) { builtCoverage.removeValue(forKey: key) }
+                learner = progress ?? BeatMapLearner(key: key, duration: sample.duration)
             }
+            learner?.restart()
+            lastCheckpointAt = sample.sampledAt
         }
         current = sample
         let wasPlaying = clock.isPlaying
@@ -241,11 +258,14 @@ final class BeatMapCoordinator {
            let drop = liveOnsets.firstIndex(where: { $0.time >= newest - Self.alignmentWindow - 1 }), drop > 0 {
             liveOnsets.removeFirst(drop)
         }
-        // A track heard to its end becomes a map before it ends, so a repeat
-        // or a replay plays from it straight away.
-        if let learner, learner.isComplete, let current,
-           clock.position(at: now()) >= current.duration - 3 {
-            finishLearning(learner)
+        // Build as soon as enough audio is known. Waiting for the last three
+        // seconds loses the map to crossfade, skip and same-track repeat.
+        if let learner {
+            if needsBuild(learner) {
+                finishLearning(learner)
+            } else if now() - lastCheckpointAt >= 15 {
+                checkpoint(learner)
+            }
         }
         updateFollowingStatus()
     }
@@ -304,27 +324,60 @@ final class BeatMapCoordinator {
         }
     }
 
-    /// Saves what the learner heard if it covers the track; a track cut short is dropped.
+    private func checkpoint(_ progress: BeatMapLearner) {
+        savedLearning[progress.key] = progress
+        savedLearningOrder.removeAll { $0 == progress.key }
+        savedLearningOrder.append(progress.key)
+        // Disk remains the durable cache; keep only a few recent recordings in RAM.
+        if savedLearningOrder.count > 8 {
+            savedLearning.removeValue(forKey: savedLearningOrder.removeFirst())
+        }
+        lastCheckpointAt = now()
+        let store = self.store
+        learningQueue.async { store.saveLearning(progress) }
+    }
+
+    /// Save partial progress too. A pause, skip, Stop or relaunch must not
+    /// require another uninterrupted playthrough from the beginning.
     private func endTrack() {
         guard let learner else { return }
         self.learner = nil
-        guard learner.isComplete else { return }
-        let store = self.store
-        DispatchQueue.global(qos: .utility).async {
-            if let built = learner.makeMap() { store.save(built, key: learner.key) }
+        if needsBuild(learner), !buildsInFlight.contains(learner.key) {
+            finishLearning(learner)
+        } else if (builtCoverage[learner.key] ?? 0) < 0.99 {
+            checkpoint(learner)
         }
     }
 
+    private func needsBuild(_ progress: BeatMapLearner) -> Bool {
+        let built = builtCoverage[progress.key] ?? 0
+        return progress.isComplete && (progress.coverage - built >= 0.05
+            || (progress.coverage >= 0.99 && built < 0.99))
+    }
+
     private func finishLearning(_ finished: BeatMapLearner) {
-        learner = nil
+        guard buildsInFlight.insert(finished.key).inserted else { return }
+        builtCoverage[finished.key] = finished.coverage
+        checkpoint(finished)
         let store = self.store
-        DispatchQueue.global(qos: .utility).async { [weak self] in
+        learningQueue.async { [weak self] in
             let built = finished.makeMap()
-            if let built { store.save(built, key: finished.key) }
+            if let built {
+                store.save(built, key: finished.key)
+                if finished.coverage >= 0.99 { store.removeLearning(key: finished.key) }
+            }
             DispatchQueue.main.async { [weak self] in
-                guard let self, let built, built.isPlayable, self.source == .following,
+                guard let self else { return }
+                self.buildsInFlight.remove(finished.key)
+                if built != nil, finished.coverage >= 0.99 {
+                    self.savedLearning.removeValue(forKey: finished.key)
+                    self.savedLearningOrder.removeAll { $0 == finished.key }
+                }
+                guard self.source == .following,
                       let current = self.current, current.app.trackKey(current.trackID) == finished.key else { return }
-                self.map = built
+                // A failed refinement must not replace an already usable map.
+                if let built, built.isPlayable { self.map = built }
+                if finished.coverage >= 0.99 { self.learner = nil }
                 self.updateFollowingStatus()
             }
         }
@@ -343,7 +396,7 @@ final class BeatMapCoordinator {
             status = .learning(app: current.app.displayName, title: current.title,
                                coverage: (learner.coverage * 20).rounded(.down) / 20)
         } else {
-            status = .waitingForPlayer
+            status = .noSteadyBeat
         }
     }
 }

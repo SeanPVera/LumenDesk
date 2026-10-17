@@ -36,23 +36,44 @@ export function due({ rooms, previous, now }) {
 
 /** Latest matching minute in (previous, now], preserving local-time/DST stepping. */
 function latestOccurrence(schedule, previous, now) {
-  const cursor = new Date(previous.getTime())
-  cursor.setSeconds(0, 0)
-  cursor.setMinutes(cursor.getMinutes() + 1)
-  let latest = null
+  const weekdays = schedule.weekdays
+  if (!weekdays || weekdays.length === 0) return null
 
-  // Do not replace this with elapsed milliseconds: setMinutes follows the
-  // existing local-clock behavior across daylight-saving transitions.
-  while (cursor <= now) {
-    const matchesDay = (schedule.weekdays ?? []).includes(weekdayOf(cursor))
-    const matchesTime =
-      cursor.getHours() === schedule.hour && cursor.getMinutes() === schedule.minute
-    if (matchesDay && matchesTime && cursor > previous) {
-      latest = new Date(cursor.getTime()) // one firing per rule: its newest missed action
+  // Optimization: Instead of stepping minute-by-minute over the time range (which
+  // requires O(minutes) iterations and thousands of Date allocations after sleep/gaps),
+  // search candidate dates backwards from `now` to `previous`. Re-constructing
+  // `candidate` for each day avoids hour drift across daylight saving time transitions.
+  const dayCursor = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+
+  while (true) {
+    const candidate = new Date(
+      dayCursor.getFullYear(),
+      dayCursor.getMonth(),
+      dayCursor.getDate(),
+      schedule.hour,
+      schedule.minute,
+      0,
+      0
+    )
+
+    if (candidate <= previous) {
+      break
     }
-    cursor.setMinutes(cursor.getMinutes() + 1)
+
+    if (candidate <= now) {
+      if (
+        weekdays.includes(weekdayOf(candidate)) &&
+        candidate.getHours() === schedule.hour &&
+        candidate.getMinutes() === schedule.minute
+      ) {
+        return candidate
+      }
+    }
+
+    dayCursor.setDate(dayCursor.getDate() - 1)
   }
-  return latest
+
+  return null
 }
 
 const DIM_LEVELS = new Map([

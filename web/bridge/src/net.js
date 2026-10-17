@@ -46,14 +46,10 @@ export function isContiguousMask(mask) {
   return (((inverted + 1) >>> 0) & inverted) === 0
 }
 
+/** For a valid contiguous netmask, counting leading zeros of its bitwise inverse
+ *  gives the prefix length in O(1) CPU instruction time without a bit-shift loop. */
 export function prefixLength(mask) {
-  let count = 0
-  let n = mask >>> 0
-  while (n) {
-    count += n & 1
-    n >>>= 1
-  }
-  return count
+  return Math.clz32(~mask)
 }
 
 /** Active, non-loopback IPv4 interfaces with a broadcast domain worth scanning. */

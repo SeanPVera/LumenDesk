@@ -468,12 +468,12 @@ private struct RoomCanvasWorkspace: View {
                 headerActions
             }
             VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .top, spacing: 10) {
-                    roomHeading(showsInstruction: false)
-                    Spacer(minLength: 4)
+                roomHeading(showsInstruction: false)
+                HStack(spacing: 10) {
                     roomStatus
+                    Spacer(minLength: 4)
+                    headerActions
                 }
-                headerActions
             }
         }
         .padding(.horizontal, 20)
@@ -586,6 +586,9 @@ private struct DirectionARoomField: View {
 
     var body: some View {
         GeometryReader { geometry in
+            let compact = geometry.size.width < 520
+            let horizontalInset: CGFloat = compact ? 34 : 54
+            let verticalInset: CGFloat = compact ? 42 : 46
             ZStack {
                 RoundedRectangle(cornerRadius: 24, style: .continuous)
                     .fill(Lumen.floor)
@@ -603,19 +606,31 @@ private struct DirectionARoomField: View {
                         light: light,
                         selected: selection.contains(light.id),
                         status: RoomCanvasStatus.resolve([light], manager: manager),
+                        compact: compact,
                         select: { toggle(light.id) }
                     )
-                    .frame(width: nodeWidth(for: light), height: 82)
+                    .frame(width: nodeWidth(for: light, compact: compact),
+                           height: compact ? 64 : 82)
                     .position(
-                        x: 54 + (geometry.size.width - 108) * anchor.x + offset.width,
-                        y: 46 + (geometry.size.height - 92) * anchor.y + offset.height
+                        x: horizontalInset
+                            + (geometry.size.width - horizontalInset * 2) * anchor.x
+                            + offset.width,
+                        y: verticalInset
+                            + (geometry.size.height - verticalInset * 2) * anchor.y
+                            + offset.height
                     )
                     .gesture(
                         DragGesture(minimumDistance: 8)
                             .onChanged { value in dragOffsets[light.id] = value.translation }
                             .onEnded { value in
-                                let x = anchor.x + Double(value.translation.width / max(1, geometry.size.width - 108))
-                                let y = anchor.y + Double(value.translation.height / max(1, geometry.size.height - 92))
+                                let x = anchor.x + Double(
+                                    value.translation.width
+                                        / max(1, geometry.size.width - horizontalInset * 2)
+                                )
+                                let y = anchor.y + Double(
+                                    value.translation.height
+                                        / max(1, geometry.size.height - verticalInset * 2)
+                                )
                                 manager.setPlanAnchor(PlanAnchor(x: x, y: y), for: light.id, in: room.id)
                                 dragOffsets[light.id] = nil
                             }
@@ -673,7 +688,13 @@ private struct DirectionARoomField: View {
         .accessibilityHidden(true)
     }
 
-    private func nodeWidth(for light: LightDevice) -> CGFloat {
+    private func nodeWidth(for light: LightDevice, compact: Bool) -> CGFloat {
+        if compact {
+            switch manager.themeCapability(for: light) {
+            case .segments, .matrix, .panels: return 68
+            case .solid: return 64
+            }
+        }
         switch manager.themeCapability(for: light) {
         case .segments: return 126
         case .matrix, .panels: return 104
@@ -703,6 +724,7 @@ private struct FixtureCanvasNode: View {
     @ObservedObject var light: LightDevice
     let selected: Bool
     let status: RoomCanvasStatus
+    let compact: Bool
     let select: () -> Void
 
     var body: some View {
@@ -719,28 +741,30 @@ private struct FixtureCanvasNode: View {
                                     endRadius: 34
                                 )
                             )
-                            .frame(width: 74, height: 64)
+                            .frame(width: compact ? 54 : 74, height: compact ? 46 : 64)
                     }
                     RoundedRectangle(cornerRadius: 7, style: .continuous)
                         .fill(Lumen.graphite)
-                        .frame(width: 38, height: 30)
+                        .frame(width: compact ? 32 : 38, height: compact ? 26 : 30)
                     Image(systemName: fixtureSymbol)
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.system(size: compact ? 12 : 14, weight: .semibold))
                         .foregroundStyle(light.isOn ? light.color : Lumen.canvas.opacity(0.66))
                     Image(systemName: status.symbol)
-                        .font(.system(size: 10, weight: .bold))
+                        .font(.system(size: compact ? 8 : 10, weight: .bold))
                         .foregroundStyle(status.color)
-                        .padding(3)
+                        .padding(compact ? 2 : 3)
                         .background(Lumen.floor, in: Circle())
-                        .offset(x: 20, y: -17)
+                        .offset(x: compact ? 17 : 20, y: compact ? -15 : -17)
                 }
                 Text(light.label)
-                    .font(LumenType.body(size: 11, weight: .semibold))
+                    .font(LumenType.body(size: compact ? 9 : 11, weight: .semibold))
                     .foregroundStyle(Lumen.graphite)
-                    .lineLimit(1)
+                    .lineLimit(compact ? 2 : 1)
+                    .multilineTextAlignment(.center)
+                    .minimumScaleFactor(0.82)
             }
-            .padding(.horizontal, 7)
-            .padding(.vertical, 5)
+            .padding(.horizontal, compact ? 4 : 7)
+            .padding(.vertical, compact ? 3 : 5)
             .background(Lumen.floor.opacity(selected ? 0.98 : 0.78), in: RoundedRectangle(cornerRadius: 10))
             .overlay(
                 RoundedRectangle(cornerRadius: 10)
@@ -748,6 +772,7 @@ private struct FixtureCanvasNode: View {
             )
         }
         .buttonStyle(.plain)
+        .help(light.label)
         .accessibilityLabel(light.label)
         .accessibilityValue("\(selected ? "Selected, " : "")\(status.title), \(light.isOn ? "on" : "off"), \(Int(light.brightness * 100)) percent")
         .accessibilityAddTraits(selected ? .isSelected : [])

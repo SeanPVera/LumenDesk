@@ -138,7 +138,7 @@ export class MusicChoreographyEngine {
   private highEnergyBeganAt: number | null = null;
   private sustainedEnergyEvent = false;
   private lastTimestamp: number | null = null;
-  private brightnessEnvelopes = new Map<string, number>();
+  private cachedEnvelopeValues: Float64Array | null = null;
   private flashLimiter = new FlashSafetyLimiter();
   private dynamics = 0;
   private fastEnergy = 0;
@@ -172,7 +172,7 @@ export class MusicChoreographyEngine {
     this.highEnergyBeganAt = null;
     this.sustainedEnergyEvent = false;
     this.lastTimestamp = null;
-    this.brightnessEnvelopes.clear();
+    if (this.cachedEnvelopeValues) this.cachedEnvelopeValues.fill(NaN);
     this.flashLimiter.reset();
     this.dynamics = 0;
     this.fastEnergy = 0;
@@ -322,12 +322,17 @@ export class MusicChoreographyEngine {
     const paletteCount = Math.max(1, palette.length);
     const transitionDuration = silence ? 0.55 : flashIntensity > 0 ? 0.04 : 0.09;
 
+    const stereoFactor = (snapshot.stereo - 0.5) * 2 * config.stereoImage;
+    const isCircularLayout = topology.layout === "circular";
+    const movementDirection = config.movementDirection;
+    const envValues = this.cachedEnvelopeValues;
+
     const states: MusicLightingState[] = [];
     for (let index = 0; index < targets.length; index += 1) {
       const target = targets[index];
-      const phase = spatialPhase(topology.layout === "circular" ? target.position : target.position * 0.75, config.movementDirection, this.movementPhase);
+      const phase = spatialPhase(isCircularLayout ? target.position : target.position * 0.75, movementDirection, this.movementPhase);
       const wave = 0.5 + 0.5 * Math.sin(phase * 2 * Math.PI);
-      const stereoBias = 1 + (snapshot.stereo - 0.5) * 2 * config.stereoImage * (target.position - 0.5) * 2;
+      const stereoBias = 1 + stereoFactor * (target.position - 0.5) * 2;
       // Centred on 1 so movement tilts the room rather than dimming it.
       const spatialWeight = (1 - motionDepth * 0.5 + motionDepth * wave) * Math.max(0.6, Math.min(1.4, stereoBias));
 
@@ -362,13 +367,14 @@ export class MusicChoreographyEngine {
         Math.min(upperBrightness, rawBrightness),
       );
 
-      const envelopeKey = this.cachedEnvelopeKeys[index];
-      const previous = this.brightnessEnvelopes.get(envelopeKey) ?? rawBrightness;
+      // Indexed Float64Array replaces Map<string, number> lookup/insertion in the hot loop.
+      const previousValue = envValues ? envValues[index] : NaN;
+      const previous = Number.isNaN(previousValue) ? rawBrightness : previousValue;
       const coefficient = rawBrightness > previous ? attack : release;
       let brightness = previous + (rawBrightness - previous) * coefficient;
       brightness += flashIntensity * Math.max(0, upperBrightness - brightness);
       brightness = Math.max(brightnessFloor, Math.min(upperBrightness, brightness));
-      this.brightnessEnvelopes.set(envelopeKey, brightness);
+      if (envValues) envValues[index] = brightness;
 
       // A palette entry held for a whole number of bars and cross-faded over
       // one beat at the bar line, plus a spatial offset so the room reads as
@@ -376,13 +382,14 @@ export class MusicChoreographyEngine {
       const paletteMotion =
         target.position * spread * paletteSpan + this.paletteProgress + (isAccent && palette.length > 1 ? 1 : 0);
       const color = paletteColor(palette, paletteMotion / paletteCount);
-      if (flashIntensity > 0) color.saturation *= 1 - flashIntensity * 0.8;
+      let saturation = color.saturation;
+      if (flashIntensity > 0) saturation *= 1 - flashIntensity * 0.8;
 
       states.push({
         fixtureID: target.fixtureID,
         segmentID: target.segmentID,
         hue: color.hue,
-        saturation: clamp01(color.saturation),
+        saturation: clamp01(saturation),
         brightness: clamp01(brightness),
         // The transition covers the gap to the next frame, so a fixture
         // interpolates between commands instead of stepping.
@@ -416,6 +423,7 @@ export class MusicChoreographyEngine {
       this.cachedTargets = expandedTargets(topology, fixtures);
       this.cachedEnvelopeKeys = this.cachedTargets.map(target => `${target.fixtureID}#${target.segmentID ?? -1}`);
       this.cachedRoles = new Set(this.cachedTargets.map(target => target.role));
+      this.cachedEnvelopeValues = new Float64Array(this.cachedTargets.length).fill(NaN);
     }
     return this.cachedTargets;
   }

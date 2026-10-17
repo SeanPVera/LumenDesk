@@ -1853,6 +1853,9 @@ final class MusicModeTests: XCTestCase {
         manager.enterDemoMode()
         var config = MusicModeConfiguration.configuration(for: .balanced)
         config.usesSyntheticDemoPattern = true
+        let secondRoomID = try XCTUnwrap(manager.addRoom(named: "Second Room"))
+        let secondRoomDevice = try XCTUnwrap(manager.devices.last)
+        manager.assign(lightID: secondRoomDevice.id, toRoom: secondRoomID)
         let roomScopes = manager.rooms.map { LightScope.room($0.id) }
         XCTAssertEqual(roomScopes.count, 2)
 

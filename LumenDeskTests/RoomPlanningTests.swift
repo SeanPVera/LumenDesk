@@ -350,7 +350,7 @@ final class RoomWorkspaceTests: XCTestCase {
         target.isOn = true
         target.brightness = 0.37
         target.color = Color(red: 0.92, green: 0.24, blue: 0.12)
-        let savedColor = target.color
+        let savedColor = target.color.lifxReportedEquivalent
         let look = try XCTUnwrap(manager.captureLook(name: "Ember", deviceIDs: [target.id]))
 
         target.isOn = false

@@ -733,7 +733,8 @@ final class DomainTests: XCTestCase {
         let manager = LightManager(defaults: isolatedDefaults(), persistenceStore: temporaryPersistenceStore())
         manager.enterDemoMode()
         defer { manager.exitDemoMode() }
-        let room = try XCTUnwrap(manager.favoriteRooms.first)
+        let room = try XCTUnwrap(manager.rooms.first)
+        manager.toggleFavoriteRoom(room.id)
         manager.reconcileFavoriteOrder()
         let reference = FavoriteReference(kind: .room, rawID: room.id.uuidString)
         let retainedFavorites = manager.favoriteOrder.filter { $0 != reference }
@@ -993,7 +994,9 @@ final class DomainTests: XCTestCase {
         manager.enterDemoMode()
         defer { manager.exitDemoMode() }
         let firstRoom = try XCTUnwrap(manager.rooms.first)
-        let failed = try XCTUnwrap(manager.devices.first { $0.brand == .govee && !firstRoom.lightIDs.contains($0.id) })
+        let failed = try XCTUnwrap(manager.devices.first { $0.brand == .govee })
+        let retryRoomID = try XCTUnwrap(manager.addRoom(named: "Retry Room"))
+        manager.assign(lightID: failed.id, toRoom: retryRoomID)
         failed.brightness = 0.41
         manager.captureScene(name: "Retry offline")
         let scene = try XCTUnwrap(manager.scenes.last)

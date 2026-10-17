@@ -48,7 +48,7 @@ final class GoveeClient {
         } catch {
             // iOS denies multicast membership without the restricted
             // entitlement; discovery still works via the unicast sweep below.
-            NSLog("Govee multicast join failed: \(error)")
+            NSLog("Govee multicast join failed: %@", String(describing: error))
         }
         socket.onReceive = { [weak self] data, host, _ in
             self?.handle(data: data, from: host)
@@ -322,7 +322,8 @@ final class GoveeClient {
     /// address; this makes Govee agree.
     static func commandAddress(source: String, reported: String?) -> String {
         guard let reported, !reported.isEmpty, reported != source else { return source }
-        NSLog("Govee device reports \(reported) but answered from \(source); using \(source)")
+        // `reported` comes off the network, so it is an argument, never part of the format.
+        NSLog("Govee device reports %@ but answered from %@; using %@", reported, source, source)
         return source
     }
 

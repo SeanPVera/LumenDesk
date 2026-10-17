@@ -8,6 +8,7 @@ import AppKit
 struct MenuBarPopoverView: View {
     @EnvironmentObject private var manager: LightManager
     @AppStorage("LumenDesk.menuBarRoom.v2") private var selectedRoomValue = ""
+    @AppStorage(AppPreferenceKey.roomCanvasOpenRequest) private var openRoomRequest = ""
 
     private var room: Room? {
         if let id = UUID(uuidString: selectedRoomValue),
@@ -167,6 +168,10 @@ struct MenuBarPopoverView: View {
     }
 
     private func openMainWindow() {
+        // The menu-bar scene and the window own independent view state. Hand
+        // the chosen room across explicitly before activating the window; the
+        // Room Canvas consumes and clears this request.
+        openRoomRequest = room?.id.uuidString ?? ""
         NSApp.activate(ignoringOtherApps: true)
         NSApp.windows.first(where: { $0.canBecomeKey })?.makeKeyAndOrderFront(nil)
     }

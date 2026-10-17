@@ -242,6 +242,8 @@ final class CommandCoordinator {
         refresh: @escaping @MainActor () -> Void,
         timedOut: @escaping @MainActor () -> Void
     ) {
+        settlingTasks[deviceID]?.cancel()
+        settlingTasks[deviceID] = nil
         markQueued(deviceID, summary: summary)
         let taskKey = "\(deviceID)|\(coalescingKey)"
         commandTasks[taskKey]?.cancel()
@@ -263,7 +265,23 @@ final class CommandCoordinator {
                         updatedAt: self.now()
                     )
                 }
-                if failed { simulated.didFail() }
+                if failed {
+                    simulated.didFail()
+                } else {
+                    self.settlingTasks[deviceID] = Task { @MainActor [weak self] in
+                        guard let self,
+                              await self.awaitDelay(self.timing.appliedDisplayNanoseconds),
+                              self.state.commandStates[deviceID]?.phase == .applied else { return }
+                        self.updateState {
+                            self.state.commandStates[deviceID] = DeviceCommandState(
+                                lifecycle: .confirmed,
+                                summary: "Simulated: \(summary)",
+                                updatedAt: self.now(),
+                                retryCount: self.state.commandStates[deviceID]?.retryCount ?? 0
+                            )
+                        }
+                    }
+                }
             }
             return
         }

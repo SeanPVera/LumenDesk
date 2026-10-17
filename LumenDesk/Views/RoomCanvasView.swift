@@ -16,11 +16,20 @@ final class RoomCanvasSessionStore: ObservableObject {
     @Published var showingLive = false
     @Published var showingSettings = false
     @Published var editorDeviceID: String?
+    private var selectionRoomID: UUID?
 
     func select(_ room: Room, devices: [LightDevice]) {
         selectedRoomID = room.id
         selectedFixtureIDs = Set(devices.map(\.id))
+        selectionRoomID = room.id
         editorDeviceID = nil
+    }
+
+    @discardableResult
+    func select(roomID: UUID, rooms: [Room], devices: [LightDevice]) -> Bool {
+        guard let room = rooms.first(where: { $0.id == roomID }) else { return false }
+        select(room, devices: devices.filter { room.lightIDs.contains($0.id) })
+        return true
     }
 
     func reconcile(rooms: [Room], devices: [LightDevice]) {
@@ -29,11 +38,20 @@ final class RoomCanvasSessionStore: ObservableObject {
         }
         guard let room = rooms.first(where: { $0.id == selectedRoomID }) else {
             selectedFixtureIDs = []
+            selectionRoomID = nil
             return
         }
-        let available = Set(devices.filter { room.lightIDs.contains($0.id) }.map(\.id))
-        selectedFixtureIDs.formIntersection(available)
-        if selectedFixtureIDs.isEmpty { selectedFixtureIDs = available }
+        let knownIDs = Set(devices.map(\.id))
+        let available = room.lightIDs.filter(knownIDs.contains)
+        if selectionRoomID != room.id {
+            selectedFixtureIDs = Set(available)
+            selectionRoomID = room.id
+        } else {
+            selectedFixtureIDs = RoomWorkspaceSelection.reconciled(
+                selected: selectedFixtureIDs,
+                available: available
+            )
+        }
         if let editorDeviceID, !available.contains(editorDeviceID) {
             self.editorDeviceID = nil
         }
@@ -118,6 +136,7 @@ struct RoomCanvasStatusBadge: View {
 struct RoomCanvasShellView: View {
     @EnvironmentObject private var manager: LightManager
     @StateObject private var session = RoomCanvasSessionStore()
+    @AppStorage(AppPreferenceKey.roomCanvasOpenRequest) private var openRoomRequest = ""
     let startInSetup: Bool
     let onPrepared: () -> Void
     @State private var handledInitialSetup = false
@@ -162,6 +181,7 @@ struct RoomCanvasShellView: View {
         .overlay(alignment: .bottom) { statusOverlays }
         .onAppear {
             session.reconcile(rooms: manager.rooms, devices: manager.devices)
+            consumeOpenRoomRequest(openRoomRequest)
             if startInSetup, !handledInitialSetup {
                 handledInitialSetup = true
                 session.showingAddOrRepair = true
@@ -169,9 +189,13 @@ struct RoomCanvasShellView: View {
         }
         .onReceive(manager.$rooms) { rooms in
             session.reconcile(rooms: rooms, devices: manager.devices)
+            consumeOpenRoomRequest(openRoomRequest)
         }
         .onReceive(manager.$devices) { devices in
             session.reconcile(rooms: manager.rooms, devices: devices)
+        }
+        .onChange(of: openRoomRequest) { request in
+            consumeOpenRoomRequest(request)
         }
         .sheet(isPresented: $session.showingComposer, onDismiss: {
             manager.stopSceneRehearsal(restore: true)
@@ -210,6 +234,21 @@ struct RoomCanvasShellView: View {
                     .environmentObject(manager)
             }
         }
+    }
+
+    private func consumeOpenRoomRequest(_ request: String) {
+        guard !request.isEmpty else { return }
+        guard let roomID = UUID(uuidString: request) else {
+            openRoomRequest = ""
+            return
+        }
+        guard session.select(roomID: roomID, rooms: manager.rooms, devices: manager.devices) else {
+            // A restore can publish rooms after the scene receives the request.
+            // Keep it until the room collection arrives instead of opening the
+            // wrong room and silently discarding the user's menu-bar choice.
+            return
+        }
+        openRoomRequest = ""
     }
 
     private var roomCanvasDemoBanner: some View {
@@ -266,6 +305,8 @@ struct RoomCanvasShellView: View {
 private struct RoomCanvasSidebar: View {
     @EnvironmentObject private var manager: LightManager
     @ObservedObject var session: RoomCanvasSessionStore
+    @State private var renamingRoomID: UUID?
+    @State private var renamedRoomName = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -331,51 +372,85 @@ private struct RoomCanvasSidebar: View {
         }
         .background(Lumen.deck)
         .navigationTitle("LumenDesk")
+        .alert("Rename room", isPresented: Binding(
+            get: { renamingRoomID != nil },
+            set: { if !$0 { renamingRoomID = nil } }
+        )) {
+            TextField("Room name", text: $renamedRoomName)
+            Button("Cancel", role: .cancel) { renamingRoomID = nil }
+            Button("Save") {
+                if let renamingRoomID {
+                    manager.renameRoom(renamingRoomID, to: renamedRoomName)
+                }
+                renamingRoomID = nil
+            }
+            .disabled(renamedRoomName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        } message: {
+            Text("The new name appears anywhere this room can be opened or controlled.")
+        }
     }
 
     private func roomButton(_ room: Room) -> some View {
         let lights = manager.devices(in: room)
         let selected = room.id == session.selectedRoomID
         let status = RoomCanvasStatus.resolve(lights, manager: manager)
-        return Button {
-            session.select(room, devices: lights)
-        } label: {
-            HStack(spacing: 10) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 5, style: .continuous)
-                        .fill(selected ? Lumen.ember : Lumen.graphite.opacity(0.08))
-                        .frame(width: 34, height: 34)
-                    Image(systemName: "square.split.2x2")
-                        .foregroundStyle(selected ? Lumen.canvas : Lumen.graphite)
+        return HStack(spacing: 4) {
+            Button {
+                session.select(room, devices: lights)
+            } label: {
+                HStack(spacing: 10) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                            .fill(selected ? Lumen.ember : Lumen.graphite.opacity(0.08))
+                            .frame(width: 34, height: 34)
+                        Image(systemName: "square.split.2x2")
+                            .foregroundStyle(selected ? Lumen.canvas : Lumen.graphite)
+                    }
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(room.name)
+                            .font(LumenType.display(size: 16, weight: .semibold))
+                            .lineLimit(1)
+                        Text("\(lights.count) fixture\(lights.count == 1 ? "" : "s")")
+                            .font(LumenType.body(size: 11))
+                            .foregroundStyle(Lumen.meter)
+                    }
+                    Spacer(minLength: 4)
+                    Image(systemName: status.symbol)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(status.color)
+                        .accessibilityLabel(status.title)
                 }
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(room.name)
-                        .font(LumenType.display(size: 16, weight: .semibold))
-                        .lineLimit(1)
-                    Text("\(lights.count) fixture\(lights.count == 1 ? "" : "s")")
-                        .font(LumenType.body(size: 11))
-                        .foregroundStyle(Lumen.meter)
-                }
-                Spacer(minLength: 4)
-                Image(systemName: status.symbol)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(status.color)
-                    .accessibilityLabel(status.title)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(9)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .fill(selected ? Lumen.floor : Color.clear)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .stroke(selected ? Lumen.ember.opacity(0.38) : Color.clear, lineWidth: 1)
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(selected ? .isSelected : [])
+
+            Menu {
+                Button("Rename Room") { beginRenaming(room) }
+                Button("Delete Room", role: .destructive) { manager.deleteRoom(room.id) }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .frame(width: 24, height: 34)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("Actions for \(room.name)")
+            .help("Rename or delete \(room.name)")
         }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(selected ? .isSelected : [])
+        .padding(9)
+        .background(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(selected ? Lumen.floor : Color.clear)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .stroke(selected ? Lumen.ember.opacity(0.38) : Color.clear, lineWidth: 1)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+    }
+
+    private func beginRenaming(_ room: Room) {
+        renamedRoomName = room.name
+        renamingRoomID = room.id
     }
 }
 
@@ -567,12 +642,14 @@ private struct RoomCanvasWorkspace: View {
     }
 
     private func reconcileSelection(forceAll: Bool = false) {
-        let available = Set(lights.map(\.id))
+        let available = lights.map(\.id)
         if forceAll {
-            session.selectedFixtureIDs = available
+            session.selectedFixtureIDs = Set(available)
         } else {
-            session.selectedFixtureIDs.formIntersection(available)
-            if session.selectedFixtureIDs.isEmpty { session.selectedFixtureIDs = available }
+            session.selectedFixtureIDs = RoomWorkspaceSelection.reconciled(
+                selected: session.selectedFixtureIDs,
+                available: available
+            )
         }
     }
 }
@@ -798,6 +875,8 @@ private struct RoomSelectionInspector: View {
     let compose: () -> Void
     let edit: (String) -> Void
     @StateObject private var output: RoomOutputState
+    @State private var renamingFixtureID: String?
+    @State private var renamedFixtureName = ""
 
     init(room: Room, targets: [LightDevice], compose: @escaping () -> Void,
          edit: @escaping (String) -> Void) {
@@ -810,9 +889,14 @@ private struct RoomSelectionInspector: View {
 
     private var ids: Set<String> { Set(targets.map(\.id)) }
     private var averageBrightness: Double { RoomOutputState.level(of: targets) }
-    private var averageKelvin: Double {
-        guard !targets.isEmpty else { return 3500 }
-        return Double(targets.reduce(0) { $0 + $1.kelvin }) / Double(targets.count)
+    private var averageKelvin: Double { RoomOutputState.kelvin(of: targets) }
+    private var brightnessValueLabel: String {
+        let value = "\(Int(averageBrightness * 100))%"
+        return RoomOutputState.hasMixedBrightness(targets) ? "Mixed · \(value) average" : value
+    }
+    private var kelvinValueLabel: String {
+        let value = "\(Int(averageKelvin)) K"
+        return RoomOutputState.hasMixedKelvin(targets) ? "Mixed · \(value) average" : value
     }
 
     var body: some View {
@@ -851,7 +935,7 @@ private struct RoomSelectionInspector: View {
                             set: { manager.setBrightness(deviceIDs: ids, value: $0) }
                         ),
                         range: 0.01...1,
-                        valueLabel: "\(Int(averageBrightness * 100))%"
+                        valueLabel: brightnessValueLabel
                     )
 
                     inspectorSlider(
@@ -862,7 +946,7 @@ private struct RoomSelectionInspector: View {
                         ),
                         range: 2500...9000,
                         step: 100,
-                        valueLabel: "\(Int(averageKelvin)) K"
+                        valueLabel: kelvinValueLabel
                     )
 
                     ColorPicker("Output colour", selection: Binding(
@@ -898,6 +982,21 @@ private struct RoomSelectionInspector: View {
             .padding(18)
         }
         .background(Lumen.floor.opacity(0.66))
+        .alert("Rename fixture", isPresented: Binding(
+            get: { renamingFixtureID != nil },
+            set: { if !$0 { renamingFixtureID = nil } }
+        )) {
+            TextField("Fixture name", text: $renamedFixtureName)
+            Button("Cancel", role: .cancel) { renamingFixtureID = nil }
+            Button("Save") {
+                if let renamingFixtureID {
+                    manager.setCustomName(renamingFixtureID, name: renamedFixtureName)
+                }
+                renamingFixtureID = nil
+            }
+        } message: {
+            Text("Leave the field empty to return to the name reported by the fixture.")
+        }
     }
 
     private var selectionTitle: String {
@@ -942,9 +1041,16 @@ private struct RoomSelectionInspector: View {
                 Text(capabilitySummary(device))
                     .font(LumenType.body(size: 12))
                     .foregroundStyle(Lumen.meter)
-                if hasSpatialEditor(device) {
-                    Button("Edit \(capabilityObject(device))") { edit(device.id) }
-                        .buttonStyle(.bordered)
+                HStack(spacing: 8) {
+                    Button("Rename fixture") {
+                        renamedFixtureName = device.label
+                        renamingFixtureID = device.id
+                    }
+                    .buttonStyle(.bordered)
+                    if hasSpatialEditor(device) {
+                        Button("Edit \(capabilityObject(device))") { edit(device.id) }
+                            .buttonStyle(.bordered)
+                    }
                 }
             }
             .padding(12)
@@ -1153,7 +1259,7 @@ private enum LookBrush: String, CaseIterable, Identifiable {
         switch self {
         case .spatialWash: return "One key colour fills the room; spatial fixtures hold a quiet secondary tone."
         case .gradient: return "The palette travels through fixture order and across supported surfaces."
-        case .exactFixture: return "Selected fixtures take explicit palette positions in room order."
+        case .exactFixture: return "Choose the exact palette colour each selected fixture should hold."
         }
     }
 }
@@ -1204,6 +1310,7 @@ private struct LookComposerView: View {
     @State private var scope: LookComposerScope
     @State private var lookName = "Ember & Moss"
     @State private var transitionSeconds = 1.8
+    @State private var exactAssignments: [String: Int] = [:]
 
     init(room: Room, initialSelection: Set<String>) {
         self.room = room
@@ -1215,13 +1322,24 @@ private struct LookComposerView: View {
     private var roomIDs: Set<String> { Set(currentRoom.lightIDs) }
     private var targetIDs: Set<String> {
         if scope == .selection {
-            let selected = initialSelection.intersection(roomIDs)
-            return selected.isEmpty ? roomIDs : selected
+            return RoomWorkspaceSelection.targets(
+                selected: initialSelection,
+                available: currentRoom.lightIDs
+            )
         }
         return roomIDs
     }
     private var selectedPalette: ComposerPalette {
         ComposerPalette.choices.first(where: { $0.id == paletteID }) ?? ComposerPalette.choices[0]
+    }
+    private var orderedTargetLights: [LightDevice] {
+        manager.devices(in: currentRoom).filter { targetIDs.contains($0.id) }
+    }
+    private var paletteAssignments: [String: Int]? {
+        guard brush == .exactFixture else { return nil }
+        return Dictionary(uniqueKeysWithValues: orderedTargetLights.map { light in
+            (light.id, exactAssignment(for: light))
+        })
     }
     private var authoredTheme: LightingTheme {
         let source = selectedPalette.theme
@@ -1270,7 +1388,13 @@ private struct LookComposerView: View {
         .font(LumenType.body())
         .foregroundStyle(Lumen.graphite)
         .sheetFrame(minWidth: 680, idealWidth: 1040, minHeight: 620, idealHeight: 780)
-        .onChange(of: paletteID) { _ in lookName = selectedPalette.name }
+        .onAppear { synchronizeExactAssignments() }
+        .onChange(of: paletteID) { _ in
+            lookName = selectedPalette.name
+            synchronizeExactAssignments()
+        }
+        .onChange(of: scope) { _ in synchronizeExactAssignments() }
+        .onChange(of: brush) { _ in synchronizeExactAssignments() }
     }
 
     private var previewColumn: some View {
@@ -1330,13 +1454,70 @@ private struct LookComposerView: View {
                     .foregroundStyle(Lumen.meter)
             }
 
+            exactAssignmentEditor
+
             ComposerRoomPreview(
                 room: currentRoom,
                 lights: manager.devices(in: currentRoom),
                 targetIDs: targetIDs,
-                theme: authoredTheme
+                theme: authoredTheme,
+                paletteAssignments: paletteAssignments
             )
             .frame(minHeight: 300)
+        }
+    }
+
+    @ViewBuilder
+    private var exactAssignmentEditor: some View {
+        if brush == .exactFixture {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Fixture assignments")
+                    .font(LumenType.body(size: 13, weight: .semibold))
+                Text("Each fixture keeps the chosen swatch. Addressable strips, matrices, and panels repeat it across their surface.")
+                    .font(LumenType.body(size: 11))
+                    .foregroundStyle(Lumen.meter)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                ForEach(orderedTargetLights) { light in
+                    HStack(spacing: 10) {
+                        Text(light.label)
+                            .font(LumenType.body(size: 12, weight: .semibold))
+                            .lineLimit(1)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        HStack(spacing: 7) {
+                            ForEach(selectedPalette.theme.colors.indices, id: \.self) { index in
+                                Button {
+                                    exactAssignments[light.id] = index
+                                } label: {
+                                    Circle()
+                                        .fill(selectedPalette.theme.colors[index].color)
+                                        .frame(width: 22, height: 22)
+                                        .padding(3)
+                                        .overlay(
+                                            Circle()
+                                                .stroke(
+                                                    exactAssignment(for: light) == index
+                                                        ? Lumen.graphite : Color.clear,
+                                                    lineWidth: 2
+                                                )
+                                        )
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Assign palette colour \(index + 1) to \(light.label)")
+                                .accessibilityAddTraits(
+                                    exactAssignment(for: light) == index ? .isSelected : []
+                                )
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(Lumen.floor, in: RoundedRectangle(cornerRadius: 9))
+                    .overlay(RoundedRectangle(cornerRadius: 9).stroke(Lumen.rule, lineWidth: 1))
+                }
+            }
+            .padding(14)
+            .background(Lumen.deck.opacity(0.72), in: RoundedRectangle(cornerRadius: 12))
         }
     }
 
@@ -1377,7 +1558,12 @@ private struct LookComposerView: View {
                 Text("Adaptation")
                     .font(LumenType.instrumentLabel(size: 10))
                     .foregroundStyle(Lumen.meter)
-                Text(manager.lookAdaptationSummary(authoredTheme, deviceIDs: targetIDs)
+                Text(manager.lookAdaptationSummary(
+                    authoredTheme,
+                    deviceIDs: targetIDs,
+                    in: .room(currentRoom.id),
+                    paletteAssignments: paletteAssignments
+                )
                      ?? "Every selected fixture can carry this composition directly.")
                     .font(LumenType.body(size: 12))
                     .fixedSize(horizontal: false, vertical: true)
@@ -1405,8 +1591,13 @@ private struct LookComposerView: View {
                 .buttonStyle(.bordered)
                 .disabled(manager.rehearsalSceneID == nil)
                 Button("Preview") {
-                    manager.startLookPreview(authoredTheme, deviceIDs: targetIDs,
-                                             transitionDuration: transitionSeconds)
+                    manager.startLookPreview(
+                        authoredTheme,
+                        deviceIDs: targetIDs,
+                        in: .room(currentRoom.id),
+                        paletteAssignments: paletteAssignments,
+                        transitionDuration: transitionSeconds
+                    )
                 }
                 .buttonStyle(.bordered)
             }
@@ -1427,13 +1618,39 @@ private struct LookComposerView: View {
     }
 
     private func save() {
-        if manager.rehearsalSceneID == nil {
-            manager.startLookPreview(authoredTheme, deviceIDs: targetIDs,
-                                     transitionDuration: transitionSeconds)
-        }
+        // Re-plan even when a preview is already active: the palette, brush,
+        // scope, or an Exact assignment may have changed since that preview.
+        manager.startLookPreview(
+            authoredTheme,
+            deviceIDs: targetIDs,
+            in: .room(currentRoom.id),
+            paletteAssignments: paletteAssignments,
+            transitionDuration: transitionSeconds
+        )
         manager.stopSceneRehearsal(restore: false)
         _ = manager.captureLook(name: lookName, deviceIDs: targetIDs)
         dismiss()
+    }
+
+    private func exactAssignment(for light: LightDevice) -> Int {
+        let count = selectedPalette.theme.colors.count
+        guard count > 0 else { return 0 }
+        let fallback = orderedTargetLights.firstIndex(where: { $0.id == light.id }) ?? 0
+        return min(count - 1, max(0, exactAssignments[light.id] ?? fallback % count))
+    }
+
+    private func synchronizeExactAssignments() {
+        let count = selectedPalette.theme.colors.count
+        guard count > 0 else {
+            exactAssignments = [:]
+            return
+        }
+        var updated: [String: Int] = [:]
+        for (index, light) in orderedTargetLights.enumerated() {
+            let existing = exactAssignments[light.id] ?? index % count
+            updated[light.id] = min(count - 1, max(0, existing))
+        }
+        exactAssignments = updated
     }
 }
 
@@ -1443,12 +1660,23 @@ private struct ComposerRoomPreview: View {
     let lights: [LightDevice]
     let targetIDs: Set<String>
     let theme: LightingTheme
+    let paletteAssignments: [String: Int]?
 
     private var plans: [String: ThemeFixturePlan] {
         let fixtures = lights.filter { targetIDs.contains($0.id) }.map {
             ThemeFixture(id: $0.id, capability: manager.themeCapability(for: $0), kelvin: $0.kelvin)
         }
-        return Dictionary(uniqueKeysWithValues: ThemePlanner.plan(theme, fixtures: fixtures).fixtures.map { ($0.fixtureID, $0) })
+        let plan: ThemePlan
+        if let paletteAssignments {
+            plan = ThemePlanner.planExact(
+                theme,
+                fixtures: fixtures,
+                paletteIndices: paletteAssignments
+            )
+        } else {
+            plan = ThemePlanner.plan(theme, fixtures: fixtures)
+        }
+        return Dictionary(uniqueKeysWithValues: plan.fixtures.map { ($0.fixtureID, $0) })
     }
 
     var body: some View {
@@ -1509,6 +1737,7 @@ private struct AddOrRepairRoomView: View {
     @State private var targetRoomID: UUID?
     @State private var newRoomName = ""
     @State private var showingManualPairing = false
+    @State private var fixtureNameDrafts: [String: String] = [:]
 
     private var targetRoom: Room? {
         manager.rooms.first { $0.id == targetRoomID }
@@ -1691,6 +1920,23 @@ private struct AddOrRepairRoomView: View {
             Button("Identify") { manager.identify(device) }
                 .buttonStyle(.bordered)
                 .disabled(device.isStale)
+
+            HStack(spacing: 8) {
+                TextField("Fixture name", text: fixtureNameBinding(device))
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { saveFixtureName(device) }
+                Button("Save name") { saveFixtureName(device) }
+                    .buttonStyle(.bordered)
+                    .disabled(!fixtureNameHasChanges(device))
+            }
+            if let warning = manager.duplicateNameMessage(
+                fixtureNameDrafts[device.id] ?? device.label,
+                excludingDeviceID: device.id
+            ) {
+                Text(warning)
+                    .font(LumenType.body(size: 10))
+                    .foregroundStyle(Lumen.warn)
+            }
         }
         .padding(13)
         .background(Lumen.floor, in: RoundedRectangle(cornerRadius: 11))
@@ -1845,6 +2091,24 @@ private struct AddOrRepairRoomView: View {
         newRoomName = ""
     }
 
+    private func fixtureNameBinding(_ device: LightDevice) -> Binding<String> {
+        Binding(
+            get: { fixtureNameDrafts[device.id] ?? device.label },
+            set: { fixtureNameDrafts[device.id] = $0 }
+        )
+    }
+
+    private func fixtureNameHasChanges(_ device: LightDevice) -> Bool {
+        guard let draft = fixtureNameDrafts[device.id] else { return false }
+        return draft.trimmingCharacters(in: .whitespacesAndNewlines) != device.label
+    }
+
+    private func saveFixtureName(_ device: LightDevice) {
+        let draft = fixtureNameDrafts[device.id] ?? device.label
+        manager.setCustomName(device.id, name: draft)
+        fixtureNameDrafts[device.id] = device.label
+    }
+
     private func stepHeading(_ title: String, _ subtitle: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title).font(LumenType.display(size: 28, weight: .bold))
@@ -1954,6 +2218,7 @@ private struct RoomLiveView: View {
                             }
                         }
                         .pickerStyle(.segmented)
+                        .disabled(isRunning)
                         if input == .file {
                             HStack {
                                 Text(audioFile?.lastPathComponent ?? "No audio file selected")
@@ -1963,6 +2228,7 @@ private struct RoomLiveView: View {
                                 Spacer()
                                 Button("Choose file") { choosingFile = true }
                                     .buttonStyle(.bordered)
+                                    .disabled(isRunning)
                             }
                         } else {
                             Text(platformInputDetail)
@@ -2000,7 +2266,13 @@ private struct RoomLiveView: View {
                                     )
                                 }
                                 .buttonStyle(.plain)
+                                .disabled(isRunning)
                             }
+                        }
+                        if isRunning {
+                            Text("Stop and restore before changing the input or response.")
+                                .font(LumenType.body(size: 11, weight: .semibold))
+                                .foregroundStyle(Lumen.meter)
                         }
                     }
 
@@ -2114,7 +2386,7 @@ private struct LiveInputStatus: View {
                     .foregroundStyle(Lumen.meter)
             }
             Spacer()
-            if controller.sourceStatus != .idle {
+            if controller.sourceStatus.isActiveCapture {
                 Text("LIVE")
                     .font(LumenType.instrumentLabel(size: 10))
                     .foregroundStyle(Lumen.ember)
@@ -2249,6 +2521,21 @@ final class RoomOutputState: ObservableObject {
 
     static func level(of lights: [LightDevice]) -> Double {
         lights.isEmpty ? 0 : lights.reduce(0) { $0 + $1.brightness } / Double(lights.count)
+    }
+
+    static func kelvin(of lights: [LightDevice]) -> Double {
+        guard !lights.isEmpty else { return 3_500 }
+        return Double(lights.reduce(0) { $0 + $1.kelvin }) / Double(lights.count)
+    }
+
+    static func hasMixedBrightness(_ lights: [LightDevice], tolerance: Double = 0.005) -> Bool {
+        guard let first = lights.first?.brightness else { return false }
+        return lights.dropFirst().contains { abs($0.brightness - first) > tolerance }
+    }
+
+    static func hasMixedKelvin(_ lights: [LightDevice], tolerance: Int = 50) -> Bool {
+        guard let first = lights.first?.kelvin else { return false }
+        return lights.dropFirst().contains { abs($0.kelvin - first) > tolerance }
     }
 }
 

@@ -271,6 +271,27 @@ final class RoomWorkspaceTests: XCTestCase {
         session.reconcile(rooms: [roomA], devices: Array(devices.prefix(2)))
         XCTAssertEqual(session.selectedRoomID, roomA.id)
         XCTAssertEqual(session.selectedFixtureIDs, ["a", "b"])
+
+        XCTAssertTrue(session.select(roomID: roomB.id, rooms: [roomA, roomB], devices: devices))
+        XCTAssertEqual(session.selectedRoomID, roomB.id)
+        XCTAssertEqual(session.selectedFixtureIDs, ["c"])
+    }
+
+    @MainActor
+    func testRoomCanvasSessionDoesNotExpandAStaleSelection() {
+        let room = Room(name: "Room", lightIDs: ["a", "b"])
+        let a = LightDevice(id: "a", brand: .lifx, backendID: "a", name: "A", address: "test")
+        let b = LightDevice(id: "b", brand: .govee, backendID: "b", name: "B", address: "test")
+        let session = RoomCanvasSessionStore()
+
+        session.select(room, devices: [a, b])
+        session.selectedFixtureIDs = ["a"]
+        let afterMove = Room(id: room.id, name: room.name, lightIDs: ["b"])
+        session.reconcile(rooms: [afterMove], devices: [b])
+
+        XCTAssertEqual(session.selectedFixtureIDs, ["a"],
+                       "a removed fixture remains as an empty-target sentinel")
+        XCTAssertTrue(session.selectedFixtureIDs.intersection(afterMove.lightIDs).isEmpty)
     }
 
     @MainActor
@@ -283,8 +304,19 @@ final class RoomWorkspaceTests: XCTestCase {
         let b = try XCTUnwrap(manager.devices.last)
         a.brightness = 0.2
         b.brightness = 0.6
+        a.kelvin = 2_700
+        b.kelvin = 5_000
         b.isStale = true
         XCTAssertEqual(RoomOutputState.level(of: [a, b]), 0.4, accuracy: 0.001)
+        XCTAssertEqual(RoomOutputState.kelvin(of: [a, b]), 3_850, accuracy: 0.001)
+        XCTAssertTrue(RoomOutputState.hasMixedBrightness([a, b]))
+        XCTAssertTrue(RoomOutputState.hasMixedKelvin([a, b]))
+        b.brightness = a.brightness
+        b.kelvin = a.kelvin
+        XCTAssertFalse(RoomOutputState.hasMixedBrightness([a, b]))
+        XCTAssertFalse(RoomOutputState.hasMixedKelvin([a, b]))
+        b.brightness = 0.6
+        b.kelvin = 5_000
         let aggregate = RoomOutputState(lights: [a, b])
         var updates = 0
         let token = aggregate.objectWillChange.sink { updates += 1 }
@@ -433,6 +465,47 @@ final class RoomWorkspaceTests: XCTestCase {
         XCTAssertEqual(b.color, before)
         manager.undo()
         XCTAssertFalse(outside.isOn)
+    }
+
+    @MainActor
+    func testLookPreviewUsesPersistedRoomOrderInsteadOfDiscoveryOrder() throws {
+        let manager = LightManager(defaults: UserDefaults(suiteName: UUID().uuidString)!,
+                                   persistenceStore: temporaryPersistenceStore())
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+        let initialRoom = try XCTUnwrap(manager.rooms.first)
+        let initialTargets = manager.devices(in: initialRoom)
+        let candidate = try XCTUnwrap(initialTargets.dropFirst().first { device in
+            guard !device.isStale else { return false }
+            if case .solid = manager.themeCapability(for: device) { return true }
+            return false
+        })
+        let initialIndex = try XCTUnwrap(initialRoom.lightIDs.firstIndex(of: candidate.id))
+        for _ in 0..<initialIndex {
+            manager.moveLight(candidate.id, in: initialRoom.id, by: -1)
+        }
+
+        let reorderedRoom = try XCTUnwrap(manager.rooms.first { $0.id == initialRoom.id })
+        let orderedTargets = manager.devices(in: reorderedRoom)
+        XCTAssertEqual(orderedTargets.first?.id, candidate.id)
+        let theme = try XCTUnwrap(LightingCatalog.theme(withID: "sapphire-hour"))
+        let fixtures = orderedTargets.map {
+            ThemeFixture(id: $0.id, capability: manager.themeCapability(for: $0), kelvin: $0.kelvin)
+        }
+        let expected = try XCTUnwrap(
+            ThemePlanner.plan(theme, fixtures: fixtures).fixtures.first { $0.fixtureID == candidate.id }
+        )
+
+        manager.startLookPreview(
+            theme,
+            deviceIDs: Set(reorderedRoom.lightIDs),
+            in: .room(reorderedRoom.id),
+            transitionDuration: 0
+        )
+        defer { manager.stopSceneRehearsal(restore: true) }
+
+        XCTAssertLessThan(candidate.color.rgbDistance(to: expected.tone.displayColor), 0.001)
+        XCTAssertEqual(candidate.brightness, expected.brightness, accuracy: 0.001)
     }
 
     func testSelectionNeverExpandsAStaleSelectionToTheWholeRoom() {

@@ -3078,10 +3078,15 @@ extension LightManager {
     func startLookPreview(
         _ theme: LightingTheme,
         deviceIDs: Set<String>,
+        in scope: LightScope = .all,
+        paletteAssignments: [String: Int]? = nil,
         transitionDuration: TimeInterval = 1.8
     ) {
         stopSceneRehearsal(restore: true)
-        let targets = devices.filter { deviceIDs.contains($0.id) }
+        // `devices(in:)` preserves the room's explicit fixture order. Filtering
+        // the global discovery array here would make a composed gradient land
+        // on different fixtures than the room-ordered visual preview.
+        let targets = devices(in: scope).filter { deviceIDs.contains($0.id) }
         guard !targets.isEmpty else {
             publishError("Select at least one fixture to preview this Look.")
             return
@@ -3092,7 +3097,7 @@ extension LightManager {
         rehearsalSnapshot = targets.map(snapshot)
         rehearsalSceneID = UUID()
 
-        let plan = ThemePlanner.plan(theme, fixtures: targets.map(themeFixture))
+        let plan = plannedLook(theme, targets: targets, paletteAssignments: paletteAssignments)
         let plans = Dictionary(plan.fixtures.map { ($0.fixtureID, $0) },
                                uniquingKeysWith: { first, _ in first })
         for device in targets {
@@ -3100,7 +3105,12 @@ extension LightManager {
             applyThemePlan(fixturePlan, to: device, transitionDuration: transitionDuration)
         }
         var summary = "Previewing “\(theme.name)”"
-        if let adaptation = lookAdaptationSummary(theme, deviceIDs: deviceIDs) {
+        if let adaptation = lookAdaptationSummary(
+            theme,
+            deviceIDs: deviceIDs,
+            in: scope,
+            paletteAssignments: paletteAssignments
+        ) {
             summary += " — \(adaptation)"
         }
         lastActionSummary = summary
@@ -3109,11 +3119,13 @@ extension LightManager {
     /// Plain-language, capability-aware disclosure for the composer.
     func lookAdaptationSummary(
         _ theme: LightingTheme,
-        deviceIDs: Set<String>
+        deviceIDs: Set<String>,
+        in scope: LightScope = .all,
+        paletteAssignments: [String: Int]? = nil
     ) -> String? {
-        let targets = devices.filter { deviceIDs.contains($0.id) }
+        let targets = devices(in: scope).filter { deviceIDs.contains($0.id) }
         guard !targets.isEmpty else { return nil }
-        let plan = ThemePlanner.plan(theme, fixtures: targets.map(themeFixture))
+        let plan = plannedLook(theme, targets: targets, paletteAssignments: paletteAssignments)
         var parts: [String] = []
         if plan.solidCount > 0, theme.colors.count > 1 {
             parts.append("\(plan.solidCount) single-colour fixture\(plan.solidCount == 1 ? "" : "s") hold one palette colour each")
@@ -3125,6 +3137,22 @@ extension LightManager {
             parts.append("\(plan.zoneLimitedCount) fixture\(plan.zoneLimitedCount == 1 ? " is" : "s are") limited to its active zones")
         }
         return parts.isEmpty ? nil : parts.joined(separator: "; ") + "."
+    }
+
+    private func plannedLook(
+        _ theme: LightingTheme,
+        targets: [LightDevice],
+        paletteAssignments: [String: Int]?
+    ) -> ThemePlan {
+        let fixtures = targets.map(themeFixture)
+        if let paletteAssignments {
+            return ThemePlanner.planExact(
+                theme,
+                fixtures: fixtures,
+                paletteIndices: paletteAssignments
+            )
+        }
+        return ThemePlanner.plan(theme, fixtures: fixtures)
     }
 
     func applyScene(_ scene: LightingScene) {

@@ -309,6 +309,8 @@ final class CommandCoordinatorTests: XCTestCase {
         XCTAssertEqual(sendCount, 0)
         XCTAssertEqual(failureCount, 0)
         XCTAssertFalse(coordinator.pendingDeviceIDs.contains("demo:1"))
+        await waitUntil { coordinator.commandState(for: "demo:1").phase == .idle }
+        XCTAssertEqual(coordinator.commandState(for: "demo:1").lifecycle, .confirmed)
 
         coordinator.enqueue(
             deviceID: "demo:2",

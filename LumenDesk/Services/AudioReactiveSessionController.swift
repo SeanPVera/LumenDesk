@@ -25,6 +25,18 @@ enum MusicAudioSourceStatus: Equatable {
         case .unavailable: return "Audio source unavailable"
         }
     }
+
+    /// Whether samples can currently drive a room. Permission negotiation and
+    /// terminal error states are deliberately excluded so the UI never labels
+    /// a failed or not-yet-started capture as LIVE.
+    var isActiveCapture: Bool {
+        switch self {
+        case .systemAudio, .microphone, .syntheticDemo, .filePlayback, .midiClock:
+            return true
+        case .idle, .requestingPermission, .permissionDenied, .unavailable:
+            return false
+        }
+    }
 }
 
 enum MusicCapturePreference: Equatable {

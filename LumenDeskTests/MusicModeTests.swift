@@ -364,6 +364,18 @@ final class MusicModeTests: XCTestCase {
         XCTAssertEqual(MusicInputHealth.evaluate(stopped, source: .midiClock, startedAt: 100, now: 160), .waiting)
     }
 
+    func testOnlyCapturingAudioSourcesReportLive() {
+        let inactive: [MusicAudioSourceStatus] = [
+            .idle, .requestingPermission, .permissionDenied, .unavailable
+        ]
+        XCTAssertTrue(inactive.allSatisfy { !$0.isActiveCapture })
+
+        let active: [MusicAudioSourceStatus] = [
+            .systemAudio, .microphone, .syntheticDemo, .filePlayback, .midiClock
+        ]
+        XCTAssertTrue(active.allSatisfy(\.isActiveCapture))
+    }
+
     func testAudiblePredicateIsSharedAcrossSubscribeAndRender() {
         var quiet = AudioReactiveSnapshot()
         XCTAssertFalse(AudioReactiveSessionController.isAudible(quiet))

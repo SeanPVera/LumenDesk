@@ -145,13 +145,45 @@ enum ThemePlanner {
         return ThemePlan(themeID: theme.id, fixtures: plans)
     }
 
+    /// Plans the Exact fixture brush. Each fixture receives the palette entry
+    /// explicitly assigned to its stable device ID; an addressable fixture
+    /// repeats that one entry across its own surface instead of inventing an
+    /// alternating pattern. Missing assignments get a deterministic room-order
+    /// default so a newly added fixture is immediately editable and visible.
+    static func planExact(
+        _ theme: LightingTheme,
+        fixtures: [ThemeFixture],
+        paletteIndices: [String: Int]
+    ) -> ThemePlan {
+        let palette = theme.normalizedTones
+        guard !fixtures.isEmpty, !palette.isEmpty else {
+            return ThemePlan(themeID: theme.id, fixtures: [])
+        }
+
+        let plans = fixtures.enumerated().map { position, fixture in
+            let requested = paletteIndices[fixture.id] ?? position % palette.count
+            let index = min(palette.count - 1, max(0, requested))
+            return plan(theme, palette: [palette[index]], fixture: fixture,
+                        position: 0, of: 1, preserveSingleToneLevel: true)
+        }
+        return ThemePlan(themeID: theme.id, fixtures: plans)
+    }
+
     // MARK: Per fixture
 
-    private static func plan(_ theme: LightingTheme, palette: [PaletteTone],
-                             fixture: ThemeFixture, position: Int, of total: Int) -> ThemeFixturePlan {
+    private static func plan(
+        _ theme: LightingTheme,
+        palette: [PaletteTone],
+        fixture: ThemeFixture,
+        position: Int,
+        of total: Int,
+        preserveSingleToneLevel: Bool = false
+    ) -> ThemeFixturePlan {
         switch fixture.capability {
         case .solid:
-            let tone = soloTone(theme, palette: palette, position: position, of: total)
+            let tone = preserveSingleToneLevel
+                ? palette[0]
+                : soloTone(theme, palette: palette, position: position, of: total)
             return ThemeFixturePlan(
                 fixtureID: fixture.id,
                 tone: tone,

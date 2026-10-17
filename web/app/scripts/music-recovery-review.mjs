@@ -48,10 +48,10 @@ context.on('request', request => {
 const newPage = async ({ emulateClock = false, pageContext = context } = {}) => {
   const page = await pageContext.newPage()
   page.on('pageerror', error => errors.push(error.message))
-  if (emulateClock) await page.clock.install()
   await page.goto(appURL)
   await page.getByRole('button', { name: 'Music', exact: true }).click()
   await expect(page.getByRole('button', { name: 'Start', exact: true })).toBeEnabled()
+  if (emulateClock) await page.clock.install()
   return page
 }
 const start = async (page, { beforeClaimed } = {}) => {

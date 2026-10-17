@@ -410,15 +410,15 @@ private struct RoomCanvasSidebar: View {
                         Text(room.name)
                             .font(LumenType.display(size: 16, weight: .semibold))
                             .lineLimit(1)
-                        Text("\(lights.count) fixture\(lights.count == 1 ? "" : "s")")
-                            .font(LumenType.body(size: 11))
-                            .foregroundStyle(Lumen.meter)
+                        HStack(spacing: 5) {
+                            Text("\(lights.count) fixture\(lights.count == 1 ? "" : "s")")
+                            Image(systemName: status.symbol)
+                                .accessibilityLabel(status.title)
+                        }
+                        .font(LumenType.body(size: 11))
+                        .foregroundStyle(status == .confirmed ? Lumen.meter : status.color)
                     }
-                    Spacer(minLength: 4)
-                    Image(systemName: status.symbol)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(status.color)
-                        .accessibilityLabel(status.title)
+                    .layoutPriority(1)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -437,6 +437,7 @@ private struct RoomCanvasSidebar: View {
             }
             .accessibilityLabel("Actions for \(room.name)")
             .help("Rename or delete \(room.name)")
+            .menuIndicator(.hidden)
             .fixedSize()
         }
         .padding(9)

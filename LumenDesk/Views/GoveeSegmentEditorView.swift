@@ -582,7 +582,7 @@ struct GoveeSegmentEditorView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Paint").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 44), spacing: 6)], spacing: 6) {
-                ForEach(LightRowView.colorSwatches, id: \.label) { swatch in
+                ForEach(FixtureColorSwatches.values, id: \.label) { swatch in
                     Button {
                         paintColor = swatch.color
                         paintTargets(with: swatch.color)

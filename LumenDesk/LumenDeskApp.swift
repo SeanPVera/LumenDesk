@@ -15,7 +15,7 @@ struct LumenDeskApp: App {
         WindowGroup {
             RootView()
                 .environmentObject(manager)
-                .preferredColorScheme(.dark)
+                .preferredColorScheme(.light)
         }
         #endif
     }
@@ -26,7 +26,7 @@ struct LumenDeskApp: App {
             RootView()
                 .environmentObject(manager)
                 .frame(minWidth: 620, minHeight: 540)
-                .preferredColorScheme(.dark)
+                .preferredColorScheme(.light)
         }
         .windowResizability(.automatic)
         .commands {
@@ -36,24 +36,14 @@ struct LumenDeskApp: App {
                     manager.scan()
                 }
                     .keyboardShortcut("r", modifiers: .command)
-                Button("Toggle All Lights") {
-                    manager.setAllPower(on: !manager.devices.contains(where: { $0.isOn }))
-                }
-                .keyboardShortcut("p", modifiers: [.command, .shift])
                 Divider()
                 Button("Cancel Queued Light Commands") { manager.cancelQueuedCommands() }
                     .keyboardShortcut(".", modifiers: .command)
                     .disabled(manager.commandPendingIDs.isEmpty)
             }
             CommandGroup(after: .importExport) {
-                Button("Export Configuration\u{2026}") { exportConfiguration() }
-                Button("Import Configuration\u{2026}") { importConfiguration() }
-            }
-            CommandMenu("View") {
-                Picker("Density", selection: Binding(
-                    get: { UserDefaults.standard.string(forKey: "LumenDesk.interfaceDensity.v1") ?? InterfaceDensity.comfortable.rawValue },
-                    set: { UserDefaults.standard.set($0, forKey: "LumenDesk.interfaceDensity.v1") }
-                )) { ForEach(InterfaceDensity.allCases) { Text($0.title).tag($0.rawValue) } }
+                Button("Back Up Rooms & Looks\u{2026}") { exportConfiguration() }
+                Button("Restore Rooms & Looks\u{2026}") { importConfiguration() }
             }
             CommandGroup(replacing: .undoRedo) {
                 Button("Undo Light Change") { manager.undo() }
@@ -66,15 +56,15 @@ struct LumenDeskApp: App {
         }
 
         Settings {
-            LumenDeskSettingsView()
+            NavigationStack { RoomCanvasSettingsView() }
                 .environmentObject(manager)
-                .preferredColorScheme(.dark)
+                .preferredColorScheme(.light)
         }
 
         MenuBarExtra {
             MenuBarPopoverView()
                 .environmentObject(manager)
-                .preferredColorScheme(.dark)
+                .preferredColorScheme(.light)
         } label: {
             LumenMark(size: 16, monochrome: true)
                 .foregroundStyle(moodColor)
@@ -99,8 +89,8 @@ struct LumenDeskApp: App {
     private func exportConfiguration() {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.json]
-        panel.nameFieldStringValue = "LumenDesk-Configuration.json"
-        panel.title = "Export LumenDesk Configuration"
+        panel.nameFieldStringValue = "LumenDesk-Rooms-and-Looks.json"
+        panel.title = "Back Up Rooms & Looks"
         // Dismissing the panel is a cancel, not a failure.
         guard panel.runModal() == .OK, let url = panel.url else { return }
         manager.exportConfiguration(to: url)
@@ -111,10 +101,10 @@ struct LumenDeskApp: App {
         panel.allowedContentTypes = [.json]
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
-        panel.title = "Import LumenDesk Configuration"
+        panel.title = "Restore Rooms & Looks"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         guard let data = try? Data(contentsOf: url) else {
-            manager.publishError("Import failed \u{2014} could not read \u{201C}\(url.lastPathComponent)\u{201D}.")
+            manager.publishError("Restore failed \u{2014} could not read \u{201C}\(url.lastPathComponent)\u{201D}.")
             return
         }
 
@@ -135,15 +125,10 @@ struct RootView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        ZStack {
-            if hasOnboarded {
-                LumenDeskShellView()
-                    .transition(.opacity)
-            } else {
-                OnboardingView(onFinish: { hasOnboarded = true })
-                    .transition(.opacity)
-            }
-        }
+        RoomCanvasShellView(
+            startInSetup: !hasOnboarded,
+            onPrepared: { hasOnboarded = true }
+        )
         .animation(reduceMotion || quietInterface ? nil : .easeInOut(duration: 0.18), value: hasOnboarded)
         .managedActionConfirmations(manager)
         .onAppear { startReturningWorkspace() }
@@ -152,9 +137,9 @@ struct RootView: View {
     }
 
     private func startReturningWorkspace() {
-        // Prepare explains network access; an early skip explicitly names the
-        // scan and permission prompt. Demo does not initialize live discovery.
-        if hasOnboarded { manager.start() }
+        // First-run Prepare owns the first scan and permission prompt. The
+        // transport actors still initialize so its Find step can scan.
+        manager.start(discover: hasOnboarded)
     }
 }
 

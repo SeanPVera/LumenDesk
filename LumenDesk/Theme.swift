@@ -5,13 +5,21 @@ import AppKit
 import UIKit
 #endif
 
-// MARK: - LumenDesk design system — Spectrum Studio
+// MARK: - LumenDesk design system — Direction A / Room Canvas
 //
-// Achromatic structure contains lighting color. Room state, selection and
-// connectivity also have text or shape. Saved placement is relative, never
-// calibrated architecture. See DESIGN_SYSTEM.md for implemented tokens and limits.
+// The room is the instrument: a warm drawing surface carries literal fixture
+// colour while a compact four-colour system carries product meaning. Status
+// always pairs colour with wording and geometry. See
+// `docs/direction-a-implementation.md` for the source-to-code contract.
 
 enum Lumen {
+
+    // MARK: Direction A anchors
+
+    static let graphite = Color(hex: 0x20272B)
+    static let canvas = Color(hex: 0xF4EADF)
+    static let ember = Color(hex: 0xEF5F4F)
+    static let verdigris = Color(hex: 0x35A982)
 
     // MARK: The sheet — cold neutrals
     //
@@ -20,20 +28,20 @@ enum Lumen {
     // its own and not a property of the surface it lands on.
 
     /// Ground beneath everything, and the well a control recesses into.
-    static let stage        = Color(hex: 0x17191C)
+    static let stage        = canvas
     /// Large working areas: the inspector, sheets, secondary panels.
-    static let deck         = Color(hex: 0x202328)
+    static let deck         = Color(hex: 0xE8DDD0)
     /// A room's floor, and the standard panel fill everywhere else.
     ///
     /// The whole cool ramp from here up was lifted one step after the first
     /// build rendered: at the original values a room read as a hole in the
     /// page and the walls barely separated from the floor they enclosed. A
     /// drawing needs its sheet to be visibly lighter than the dark around it.
-    static let floor        = Color(hex: 0x24272C)
+    static let floor        = Color(hex: 0xFFF9F1)
     /// The selected room's floor, and any hovered or raised surface.
-    static let floorRaised  = Color(hex: 0x30343B)
+    static let floorRaised  = Color(hex: 0xF7DCD4)
     /// The loudest surface in the system, used for grouped controls.
-    static let stripLoud    = Color(hex: 0x32373A)
+    static let stripLoud    = Color(hex: 0xDDD0C2)
 
     // MARK: Walls
     //
@@ -42,44 +50,44 @@ enum Lumen {
     // reads as having thickness rather than as a hairline.
 
     /// The filled band a wall line sits on.
-    static let poche      = Color(hex: 0x282D30)
+    static let poche      = Color(hex: 0xD3C6B8)
     /// Interior partitions.
-    static let wall       = Color(hex: 0x50595E)
+    static let wall       = Color(hex: 0x8A8982)
     /// The exterior envelope, and any structural edge.
-    static let wallOuter  = Color(hex: 0x879094)
+    static let wallOuter  = graphite
 
     // MARK: Separators
     //
     // Used sparingly. Plan separates surfaces by value and by wall; a rule only
     // appears where two areas share a value and still need a boundary.
 
-    static let ruleSoft = Color(hex: 0x303539)
-    static let rule     = Color(hex: 0x50585D)
+    static let ruleSoft = Color(hex: 0xD3C6B8)
+    static let rule     = Color(hex: 0xA89F94)
 
     // MARK: Text
 
-    static let chalk = Color(hex: 0xEDF0F1)
-    static let meter = Color(hex: 0xBCC3C7)
-    static let muted = Color(hex: 0xA0A9AE)
-    static let faint = Color(hex: 0x778187)
+    static let chalk = graphite
+    static let meter = Color(hex: 0x586064)
+    static let muted = Color(hex: 0x737A7D)
+    static let faint = Color(hex: 0x92918B)
 
     /// Illumination. A lit key face, a fader cap, a powered legend.
-    static let lit = Color(hex: 0xF8FAFA)
+    static let lit = graphite
 
     /// Selection and annotations share the neutral foreground.
-    static let mark = Color(hex: 0xEDF0F1)
+    static let mark = graphite
     /// Studio actions use warm amber; output colors remain device content.
-    static let studioAccent = Color(hex: 0xFFBC72)
+    static let studioAccent = ember
 
     // MARK: Network and status
 
-    static let link    = Color(hex: 0xB8C8C5)
-    static let linkDim = Color(hex: 0x2C6E6A)
+    static let link    = verdigris
+    static let linkDim = Color(hex: 0x20765E)
 
     /// Status. Both are rare and both always ship with an icon, because hue
     /// alone cannot carry meaning on a screen full of coloured fixtures.
-    static let warn = Color(hex: 0xF0B03C)
-    static let fail = Color(hex: 0xE38A7C)
+    static let warn = Color(hex: 0xB16B19)
+    static let fail = Color(hex: 0xB83B31)
 
     // MARK: Row wash
     //
@@ -161,7 +169,7 @@ enum Lumen {
 
     static let hairline       = ruleSoft
     static let hairlineStrong = rule
-    static let edgeHighlight  = Color(hex: 0xFFFFFF, alpha: 0.04)
+    static let edgeHighlight  = Color(hex: 0xFFFFFF, alpha: 0.42)
 
     static let beam       = chalk
     static let beamBright = lit
@@ -174,7 +182,7 @@ enum Lumen {
     static let signal       = chalk
     static let signalBright = lit
     static let cyan         = link
-    static let focus        = lit
+    static let focus        = ember
 
     /// A confirmed device is a network fact, so it speaks in link cyan.
     static let success = link
@@ -188,18 +196,18 @@ enum Lumen {
     static let strip        = floor
     static let stripRaised  = floorRaised
 
-    static let violet       = meter
-    static let violetBright = meter
-    static let copper       = meter
-    static let copperBright = meter
-    static let coral        = meter
-    static let magenta      = meter
+    static let violet       = graphite
+    static let violetBright = graphite
+    static let copper       = ember
+    static let copperBright = ember
+    static let coral        = ember
+    static let magenta      = ember
 
     /// Motion and music are states of the desk rather than of the network, so
     /// they read as illumination.
-    static let pink       = chalk
-    static let pinkBright = lit
-    static let acid       = link
+    static let pink       = ember
+    static let pinkBright = ember
+    static let acid       = verdigris
     static let gold       = warn
     static let goldBright = warn
 
@@ -211,7 +219,7 @@ enum Lumen {
     /// The bench backdrop is flat now. Elevation comes from value, so a
     /// gradient behind everything only muddies the strips sitting on it.
     static let backdropGradient = LinearGradient(
-        colors: [stage, stage],
+        colors: [canvas, canvas],
         startPoint: .top,
         endPoint: .bottom
     )
@@ -222,13 +230,9 @@ enum Lumen {
     static let chamfer: CGFloat = 0
     static let iconBubble: CGFloat = 34
 }
-
-/// Three voices, all system faces, none of them condensed.
-///
-/// Spectral Bench put SF Pro Condensed on titles and uppercase mono on labels,
-/// which made every line of the app weigh the same and stripped proper nouns
-/// of their shape. Wash carries hierarchy in size and weight so a fixture name
-/// gets to look like language.
+/// Direction A's two bundled type families. DejaVu Sans Condensed gives the
+/// room and Look names their editorial voice; Open Sans carries controls and
+/// measurements. The font files and licenses ship in `Resources/Fonts`.
 enum LumenType {
     /// The smallest size anything in the product renders at.
     ///
@@ -257,12 +261,12 @@ enum LumenType {
     }
     #endif
 
-    /// Names and titles. Standard-width SF Pro, sentence case at call sites.
+    /// Names and titles.
     static func display(size: CGFloat, weight: Font.Weight = .semibold) -> Font {
         #if os(macOS)
-        return .system(size: max(size, minimumSize), weight: weight)
+        return .custom("DejaVuSansCondensed", size: max(size, minimumSize)).weight(weight)
         #else
-        return .system(textStyle(for: size), design: .default, weight: weight)
+        return .custom("DejaVuSansCondensed", size: max(size, minimumSize), relativeTo: textStyle(for: size)).weight(weight)
         #endif
     }
 
@@ -270,9 +274,17 @@ enum LumenType {
     /// opt into a monospace face at their call site.
     static func readout(size: CGFloat, weight: Font.Weight = .medium) -> Font {
         #if os(macOS)
-        return .system(size: max(size, minimumSize), weight: weight).monospacedDigit()
+        return .custom("OpenSans", size: max(size, minimumSize)).weight(weight).monospacedDigit()
         #else
-        return .system(textStyle(for: size), design: .default, weight: weight).monospacedDigit()
+        return .custom("OpenSans", size: max(size, minimumSize), relativeTo: textStyle(for: size)).weight(weight).monospacedDigit()
+        #endif
+    }
+
+    static func body(size: CGFloat = 15, weight: Font.Weight = .regular) -> Font {
+        #if os(macOS)
+        return .custom("OpenSans", size: max(size, minimumSize)).weight(weight)
+        #else
+        return .custom("OpenSans", size: max(size, minimumSize), relativeTo: textStyle(for: size)).weight(weight)
         #endif
     }
 
@@ -281,9 +293,9 @@ enum LumenType {
     /// rather than as engraving.
     static func instrumentLabel(size: CGFloat = 10) -> Font {
         #if os(macOS)
-        return .system(size: max(size + 1, minimumSize), weight: .semibold)
+        return .custom("OpenSans-Semibold", size: max(size + 1, minimumSize))
         #else
-        return .system(textStyle(for: size + 1), design: .default, weight: .semibold)
+        return .custom("OpenSans-Semibold", size: max(size + 1, minimumSize), relativeTo: textStyle(for: size + 1))
         #endif
     }
 }
@@ -706,4 +718,16 @@ enum PlatformOpener {
         }
         #endif
     }
+}
+enum FixtureColorSwatches {
+    static let values: [(label: String, color: Color)] = [
+        ("Warm White", Color(red: 1.0, green: 0.64, blue: 0.25)),
+        ("Neutral", Color(red: 1.0, green: 0.87, blue: 0.67)),
+        ("Daylight", Color(red: 0.93, green: 0.95, blue: 1.0)),
+        ("Red", Color(hue: 0, saturation: 1, brightness: 1)),
+        ("Orange", Color(hue: 0.08, saturation: 1, brightness: 1)),
+        ("Green", Color(hue: 0.35, saturation: 1, brightness: 1)),
+        ("Blue", Color(hue: 0.62, saturation: 1, brightness: 1)),
+        ("Purple", Color(hue: 0.77, saturation: 1, brightness: 1))
+    ]
 }

@@ -477,7 +477,7 @@ struct NanoleafShapesStudio: View {
             Group {
                 DisclosureGroup("Quick colors") {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 44), spacing: 6)], spacing: 6) {
-                        ForEach(LightRowView.colorSwatches, id: \.label) { swatch in
+                        ForEach(FixtureColorSwatches.values, id: \.label) { swatch in
                             Button { recolor(panelColor(swatch.color), layout: layout) } label: {
                                 RoundedRectangle(cornerRadius: 2).fill(swatch.color).frame(width: 44, height: 32)
                                     .overlay(RoundedRectangle(cornerRadius: 2).stroke(Lumen.rule, lineWidth: 1))

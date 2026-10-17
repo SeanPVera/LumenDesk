@@ -18,15 +18,8 @@ env:
   SCHEME: LumenDesk
 
 jobs:
-  bridge-packages:
-    name: Package browser bridge
-    uses: ./.github/workflows/bridge-packages.yml
-    with:
-      version: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || inputs.version }}
-
   package:
     name: Package macOS app
-    needs: bridge-packages
     runs-on: macos-15
     timeout-minutes: 60
     permissions:
@@ -170,13 +163,6 @@ jobs:
             dist/*.sha256
           if-no-files-found: error
 
-      - name: Download browser bridge bundles
-        uses: actions/download-artifact@v4
-        with:
-          pattern: LumenDesk-Bridge-*
-          path: dist/bridge
-          merge-multiple: true
-
       # Always written, so a manual run shows in its summary exactly what a
       # tag would publish.
       - name: Write release notes
@@ -197,17 +183,6 @@ jobs:
             echo
             echo "Requires macOS 13 Ventura or later. On first launch, allow the Local Network"
             echo "prompt so discovery can reach your bulbs."
-            echo
-            echo "The browser app is also included in the **LumenDesk-Bridge** downloads for"
-            echo "macOS (choose arm64 for Apple silicon or x64 for Intel), Windows x64 and Linux x64."
-            echo "These include Node and the web app. Open the Mac app, extract the Windows zip"
-            echo "and open LumenDesk Bridge.exe, or use Install LumenDesk.sh on Linux."
-            echo "The bridge opens the browser and runs until you choose Quit or Stop;"
-            echo "it does not install a startup service. See READ ME.txt in the bundle."
-            echo
-            echo "The bridge preview is not notarized on macOS and is unsigned on Windows."
-            echo "For a blocked Mac download, use System Settings > Privacy & Security >"
-            echo "Open Anyway after the first launch attempt."
             echo
             if [[ "$MODE" != "notarized" ]]; then
               echo "### This build is not notarized"
@@ -250,8 +225,7 @@ jobs:
             --title "LumenDesk ${TAG#v}" \
             --notes-file "$RUNNER_TEMP/notes.md" \
             --verify-tag \
-            "$DMG" "$DMG.sha256" \
-            dist/bridge/*
+            "$DMG" "$DMG.sha256"
 
       - name: Clean up keychain
         if: always()

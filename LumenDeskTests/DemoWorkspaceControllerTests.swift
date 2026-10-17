@@ -62,7 +62,7 @@ final class DemoWorkspaceControllerTests: XCTestCase {
         // Six lamps and strips plus the simulated Shapes wall.
         XCTAssertEqual(manager.devices.count, 7)
         XCTAssertTrue(manager.devices.allSatisfy { $0.id.hasPrefix("demo:") })
-        XCTAssertEqual(manager.rooms.map(\.name), ["Demo Office", "Demo Lounge"])
+        XCTAssertEqual(manager.rooms.map(\.name), ["Sample Room"])
         XCTAssertTrue(manager.automationOverrides.isEmpty)
 
         manager.renameRoom(manager.rooms[0].id, to: "Changed Demo Room")
@@ -126,8 +126,8 @@ final class DemoWorkspaceControllerTests: XCTestCase {
         XCTAssertEqual(reloaded.rooms.map(\.name), ["Persisted Live Room"])
         XCTAssertEqual(reloaded.scenes.map(\.name), ["Persisted Live Scene"])
         XCTAssertEqual(reloaded.customBrightnessPresets, [0.44])
-        XCTAssertEqual(reloaded.sunriseHour, 8)
-        XCTAssertEqual(reloaded.sunriseMinute, 5)
+        XCTAssertEqual(reloaded.sunriseHour, 6)
+        XCTAssertEqual(reloaded.sunriseMinute, 30)
         XCTAssertTrue(reloaded.favoriteIDs.isEmpty)
         XCTAssertTrue(reloaded.favoriteRoomIDs.isEmpty)
         XCTAssertTrue(reloaded.favoriteSceneIDs.isEmpty)
@@ -206,7 +206,7 @@ final class DemoWorkspaceControllerTests: XCTestCase {
         manager.resetDemoMode()
 
         XCTAssertTrue(manager.isDemoMode)
-        XCTAssertEqual(manager.rooms.map(\.name), ["Demo Office", "Demo Lounge"])
+        XCTAssertEqual(manager.rooms.map(\.name), ["Sample Room"])
         XCTAssertEqual(manager.musicModeConfiguration.preset, .balanced)
         XCTAssertTrue(manager.musicModeConfiguration.usesSyntheticDemoPattern)
         XCTAssertTrue(manager.fixtureTopologies.isEmpty)

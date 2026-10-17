@@ -1,1010 +1,132 @@
 # LumenDesk
 
-**One desk for every local light.**
+LumenDesk is a native SwiftUI room-lighting instrument for macOS, iPhone, and
+iPad. Direction A, **Room Canvas**, makes the physical room the primary
+interface: select and place fixtures directly, shape one composition across
+unequal hardware, see what each light confirmed, and restore the room when an
+experiment ends.
 
-LumenDesk is a native SwiftUI smart-lighting controller for **macOS** and **iOS**. It controls supported **LIFX**, **Govee**, and **Nanoleaf Shapes and Aurora** lights directly on your local network. Nanoleaf uses a one-time physical pairing step and stores its local API credential in Keychain. See [the brand identity](BRAND_IDENTITY.md) for the product strategy, mark, color, typography, and voice.
+There is no account, cloud authority, browser client, local web server, or
+listening service. LumenDesk talks directly to supported fixtures while the app
+is active.
 
-The app is designed for day-to-day lighting control as well as richer home-lighting workflows: discovery, rooms, favorites, scenes, color themes, animated effects, schedules, command recovery, diagnostics, import/export, and a macOS menu bar controller.
+## Room Canvas
 
-## What LumenDesk does
+- A room-only navigator replaces feature-level destinations.
+- The live canvas shows literal fixture colour, output level, reachability, and
+  relative placement.
+- Selection exposes shared power, brightness, white point, and colour controls.
+- Segment, matrix, and panel tools appear only for a fixture with that
+  capability.
+- Status is explicit: **Confirmed**, **Pending**, **Changed elsewhere**, or
+  **Needs attention**. Every state uses wording, geometry, and colour.
+- **Add or repair room** is one Prepare → Find/identify → Place → Verify flow.
 
-- Discovers supported LIFX, Govee, and Nanoleaf Shapes and Aurora lights on the same LAN.
-- Controls individual bulbs, rooms, selected groups, or every light at once.
-- Supports power, brightness, full-color RGB control, and white color temperature control.
-- Detects the LIFX SuperColor Luna (LFXCAP8/RGBW/WH) and paints its 26 matrix zones with individual colors, gradients, and curated Luna looks over the local LAN.
-- Paints individual segments on Govee RGBIC devices (COB strips, string lights, neon ropes) with per-segment color and brightness, gradient blending, and live preview — the same specificity as the Govee Home app, without the cloud.
-- Groups lights into vendor-agnostic rooms, so LIFX and Govee bulbs can live in the same room.
-- Treats a Nanoleaf Shapes or Aurora wall as individually addressable panels: sets its orientation, paints panels one by one, stores designs on the controller and streams per-panel effects and Music Mode.
-- Saves and recalls scenes captured from your current lighting state.
-- Applies curated static lighting themes and animated effects.
-- Choreographs local music into beat, frequency, and spatial lighting through a configurable Music Mode.
-- Runs room schedules, including fixed times and sunrise/sunset-style actions.
-- Provides undo/redo for recent lighting changes.
-- Tracks command progress, failures, confirmations, discovery changes, and activity history.
-- Offers a safe demo mode for trying the interface without controlling physical lights.
-- Runs as a full app and, on macOS, as a menu bar lighting controller.
+## Looks
 
-## Supported platforms
+A Look is a saved room composition. The canvas includes immediate Evening,
+Reading, Movie, and Bright templates, saved Looks, and **Save current**.
+The built-in collection includes 48 curated static themes, all rendered through
+the same capability-aware planner.
 
-| Platform | Support |
-| --- | --- |
-| macOS | macOS 13 Ventura or later |
-| iOS | iOS 16 or later |
-| UI framework | SwiftUI |
-| Build system | Xcode project, optionally regenerated with XcodeGen |
+The Look Composer offers Spatial wash, Gradient, and Exact fixture brushes.
+The pure capability renderer distributes one palette across normal bulbs,
+Govee RGBIC segments, LIFX Luna zones, and Nanoleaf panels. It states every
+adaptation instead of implying all fixtures can render the same detail.
 
-The same `LumenDesk` target is multiplatform and can be built for Mac or iPhone from the same scheme.
+Preview changes real output but remains recoverable: **Restore before preview**
+returns the opening snapshot. **Save Look** keeps the preview and stores the
+result. Apply and shared controls use the existing per-device command
+coordinator, so partial results remain visible beside their fixtures.
 
-### In a browser
+Existing saved scenes migrate as Looks without losing device snapshots.
 
-There is also a web client at <https://seanpvera.github.io/LumenDesk/> that controls the same LIFX, Govee and Nanoleaf Shapes and Aurora lights.
+## Live
 
-Browsers cannot open the raw UDP sockets these protocols need, so the web client pairs with a small local bridge that does the networking for you. Get a **LumenDesk Bridge** preview from the latest successful **main** run of [Package browser bridge](https://github.com/SeanPVera/LumenDesk/actions/workflows/bridge-packages.yml?query=branch%3Amain). Sign in to GitHub, scroll to Artifacts, choose your computer's platform and unpack the downloaded zip. The package includes the runtime and browser app; open the launcher to start the bridge and your browser, and keep it running while using lights or schedules. The macOS menu and Windows tray offer Open and Quit; Linux includes Start and Stop shortcuts. See [bridge packaging](docs/BRIDGE_DISTRIBUTION.md) for first-run instructions.
+Live is a foreground room response, not a show-authoring console:
 
-Release Assets may also contain `LumenDesk-Bridge` packages; older releases without those files do not include the bridge. To run from source with [Node.js](https://nodejs.org/) 20 or newer:
+- choose system audio on macOS, microphone on iPhone/iPad, or an audio file;
+- choose **Calm**, **Pulse**, or **Spatial**;
+- stop and restore the exact opening room state.
+
+Audio analysis is local and is not retained. The simplified surface does not
+expose cue stacks, timelines, MIDI mapping, beat-map authoring, schedules, or
+unattended automation.
+
+## Supported local hardware
+
+- LIFX LAN bulbs and the LIFX SuperColor Luna matrix
+- Govee LAN lights, including recognized RGBIC segment and fixed-zone models
+- Nanoleaf Shapes and Aurora, including pairing, controller layouts, per-panel
+  designs, and live panel output
+
+Unknown or partially reported hardware falls back to a safe single-colour
+capability. Physical output is best-effort: the app distinguishes a sent
+command from a state the fixture actually reported.
+
+## Persistence and privacy
+
+Rooms and Looks are ordered first-class rows in
+`Application Support/LumenDesk/RoomCanvas.sqlite3`. Supporting capability state
+is committed in the same SQLite transaction. The store is schema-versioned and
+maintains `RoomCanvas.sqlite3.backup` after every successful save.
+
+On first Direction A launch, the previous `ApplicationState.json` is decoded,
+normalized, preserved as `RoomCanvas.sqlite3.legacy.json`, and migrated. Rooms
+and scenes become Rooms and Looks. Removed schedule and novelty data remains in
+that preserved legacy file but is neither executed nor copied into the active
+store.
+
+**Back Up Rooms & Looks** exports portable versioned JSON. Nanoleaf credentials
+remain in Keychain and never enter SQLite backups or exported files.
+
+## Build
+
+Requirements:
+
+- Xcode 16 or newer
+- macOS 13+ target or iOS/iPadOS 16+ target
+
+Open `LumenDesk.xcodeproj`, select the `LumenDesk` scheme, and build. The target
+links the system SQLite library and bundles the licensed DejaVu Sans Condensed
+and Open Sans font files in `LumenDesk/Resources/Fonts`.
+
+Command-line verification on macOS:
 
 ```sh
-git clone --depth 1 https://github.com/SeanPVera/LumenDesk.git
-cd LumenDesk/web/bridge
-npm run app
+xcodebuild \
+  -project LumenDesk.xcodeproj \
+  -scheme LumenDesk \
+  -configuration Debug \
+  -destination 'platform=macOS' \
+  CODE_SIGNING_ALLOWED=NO \
+  CODE_SIGNING_REQUIRED=NO \
+  test
 ```
 
-That serves the app from the bridge itself at <http://127.0.0.1:8765> — one origin for the page and the lights, so no browser permission is involved. Leave the terminal open while you use it.
-
-First-time setup guides you through finding lights, creating a room, assigning lights and trying its controls. Discovery reports include Govee LAN Control and Nanoleaf pairing instructions. The web client opens on **Room**, with one selected scope shared by **Light**, **Scenes** and **Music**. Light offers fixture selection and grouped power, brightness, color and white controls; Scenes captures that room and applies saved scenes to their original fixtures. **Favorites** filters starred fixtures. Saved scenes show their fixture and room targets before recall, including lights outside the selected room. **Schedules** supports Edit, and **Devices** names use explicit Save and Cancel. **Settings** stays separate. Govee RGBIC segment editing and LIFX matrix control remain native-app features. Browser Music sends one color per fixture; it does not invent segment transport. See [the redesign report](REDESIGN_REPORT.md) for implementation and validation evidence.
-
-The published page at <https://seanpvera.github.io/LumenDesk/> can also drive the bridge (`npm start`, API only), but current browsers gate a website's access to your local network behind a permission prompt, so that route may be blocked. Everything still stays on your own network — the page talks only to the bridge on `127.0.0.1`, with no account and no cloud. The web client currently covers discovery, power, brightness, colour and white, scenes, schedules, Music Mode, and Nanoleaf pairing, orientation and panel painting; segment control and per-panel streaming remain native. See [`web/README.md`](web/README.md) for details.
-
-## Installing the Mac app
-
-Grab the disk image from the [latest release](https://github.com/SeanPVera/LumenDesk/releases/latest), open it, and drag **LumenDesk** into Applications. It needs macOS 13 Ventura or later. On first launch, allow the **Local Network** prompt so discovery can reach your bulbs. [`CHANGELOG.md`](CHANGELOG.md) lists what changed in each release.
-
-Releases are not notarized, so macOS blocks the app the first time you open it. Clear the download quarantine once and it stops:
-
-```sh
-xattr -dr com.apple.quarantine /Applications/LumenDesk.app
-```
-
-If you would rather click than type: on Ventura and Sonoma, Control-click the app and choose **Open**. Sequoia removed that shortcut, so there you let the first launch get blocked, then open **System Settings → Privacy & Security** and click **Open Anyway**.
-
-### Build your own disk image
-
-```sh
-git clone https://github.com/SeanPVera/LumenDesk.git
-cd LumenDesk
-./scripts/package_macos.sh
-```
-
-The script archives a Release build and writes `dist/LumenDesk-<version>.dmg` alongside its SHA-256. It uses only Xcode and macOS tooling. With a Developer ID certificate and an App Store Connect notary key in the environment, the same command produces a signed, notarized, stapled image that opens with a double-click on any Mac. [`DISTRIBUTION.md`](DISTRIBUTION.md) covers the credential setup, the CI secrets, and why a stable signature matters for the Screen Recording and Local Network grants this app relies on.
-
-## Supported lighting systems
-
-### Nanoleaf Shapes and Aurora
-
-LumenDesk treats a Shapes wall (controller model **NL42**, hexagons, triangles and mini triangles in any mix) and an original Aurora wall (Light Panels, controller model **NL22**, the large triangles) as what they are: one fixture made of individually addressable panels. Power, master brightness, colour and white (**1,200–6,500 K**) still work on the whole wall, and every panel can be selected, painted and animated on its own.
-
-To connect:
-
-1. Set up the wall in the Nanoleaf app and join the same local network.
-2. Open **Devices → Pair Nanoleaf Shapes or Aurora** (also available during onboarding). Select a discovered controller, or enter its IP address or local hostname. Manual connections default to port `16021`; discovery uses the port advertised by the controller.
-3. Hold the controller's power button for **5–7 seconds** until its LED flashes, then press **Pair** within **30 seconds**.
-
-Discovery uses Bonjour (`_nanoleafapi._tcp`, plus `_nanoleafms._tcp`, which Aurora controllers on older firmware advertise). Paired controllers reconnect using credentials stored in this device's Keychain; these credentials are excluded from configuration exports, logs and error messages. A controller reset or revoked credential requires pairing again. If multicast discovery is blocked, use the manual address entry.
-
-Pairing keeps the controller's chosen hostname or IP address and port. Discovery cannot move a saved credential to a different endpoint. A paired hostname can continue resolving after a DHCP change; if a controller paired by IP moves to a new address, pair it again at that address.
-
-**Where the panel controls are.** In **Room → Light**, select the wall on its own: its panel studio opens under the room, in working order. The same studio opens as a sheet from the wall's row (**Shapes panels** or **Aurora panels**) or its context menu (**Shapes Panels…** or **Aurora Panels…**).
-
-- **Arrangement.** The wall is drawn from the layout the controller reports, with each panel's true shape and, on Shapes, the controller as a dashed marker (an Aurora never reports its controller). Panels are known by controller and panel ID, so a reordered or partly damaged reading never moves a colour to the wrong panel; a damaged reading keeps the last trusted layout and says so.
-- **Orientation.** Turn the drawing with the 90° buttons or type degrees, check it against the **Up on the wall** reference, then **Apply orientation**. LumenDesk writes the controller's global orientation and counts it only once the controller reports it back; **Reset** drops a draft. Orientation changes how the wall is viewed and aimed, never the panels themselves: the drawing, panel numbers, hit testing, selection, spatial effects, themes and Music Mode all use the same transform.
-- **Selecting panels.** Click, drag a marquee, or use the arrow keys (they move across the wall as it hangs). Select all, none, invert, pick a saved group, or, on Shapes, turn on **Select by touching the wall** and tap real panels (Aurora panels have no touch sensing, so the option is hidden for them). **Identify on the wall** breathes one panel for four seconds using a temporary display, so the wall's own scene comes back by itself.
-- **Painting.** Painting starts explicitly from what the wall shows, a saved design, or a colour of your choosing when the wall is playing something LumenDesk can't read panel by panel. Then paint swatches, a picker colour or an exact hex, set each panel's intensity, turn panels off (black), run a gradient across the selection or fill with a theme. Undo and redo cover whole gestures. **Preview on the wall as I edit** is optional; nothing reaches the wall until you preview or **Apply to wall**.
-- **Brightness, once.** A panel's intensity lives in its colour. The wall's master brightness applies on top of it once, never twice, and the canvas says which one you are looking at.
-- **Saving.** Keep a design in LumenDesk, or store it on the controller as a static scene. LumenDesk never deletes scenes; storing under a name that already exists asks first, and the result is read back from the controller.
-- **Controller scenes.** Stored scenes can be played, painted from, or opened in the scene editor to change their palette and motion options, preview them on the wall and save the result under a new name.
-- **Live output.** LumenDesk effects and Music Mode stream per-panel frames over Nanoleaf's documented external control at up to ten frames a second, newest frame first. Shapes take version 2 on UDP port 60222. An Aurora takes version 1, with one-byte panel IDs, on the UDP port its controller names when the stream starts; frames still go only to the controller's own address. Master brightness is held at full while a stream runs (the controller treats it as a multiplier) and restored afterwards. A stream stops when its effect or show stops, when anything else takes the wall (the Nanoleaf app, a button, HomeKit, a scene choice), on disconnect and in Demo Mode. A frame sent over UDP is reported as sent, not as displayed.
-- **Everything else.** Themes land panel by panel along the oriented wall; scenes capture and restore designs, stored scene names and white mode; schedules apply those scenes; undo covers design changes. Designs, groups and last trusted layouts survive relaunch and round-trip through import/export. The controller's event stream tells LumenDesk when something else changes the wall, so stale designs and streams are released rather than reasserted.
-- **Demo Mode** shows a simulated wall and never sends anything to a controller.
-
-The web client pairs with Shapes and Aurora walls through the bridge too (see [In a browser](#in-a-browser)): orientation, panel selection, painting with a draft, undo and redo, identify and controller scenes. Browser Music Mode drives a wall as one colour at up to five updates a second; per-panel streaming, saved designs and groups, storing scenes on the controller, scene editing and touch selection are native-app features.
-
-Not implemented: screen mirroring, the controller's own touch-action configuration, schedules stored in the Nanoleaf app, and anything that needs a Nanoleaf account or cloud service. Firmware updates and factory resets are never performed. [`NANOLEAF_SHAPES_PARITY.md`](NANOLEAF_SHAPES_PARITY.md) compares every Nanoleaf workflow with what LumenDesk does, with the evidence and the remaining limits.
-
-Protocol references: [Nanoleaf pairing and authentication](https://support.nanoleaf.me/hc/en-us/articles/41108368751892-API-Authentication-Security), [Nanoleaf OpenAPI reference](https://nanoleaf.atlassian.net/wiki/spaces/nlapid/pages/2789310530/Nanoleaf+Light+Panels+Open+API+Documentation).
-
-Automated tests use a simulated HTTP controller, a recording UDP sender and, for the bridge, a fake controller over real HTTP on loopback. Physical pairing, Bonjour discovery on a real network and what real panels display still require hardware verification.
-
-### LIFX
-
-LumenDesk speaks the LIFX LAN protocol directly:
-
-- Discovery uses UDP broadcast on port `56700` with `GetService` packets.
-- Control uses LIFX LAN packets such as power and color/HSBK commands.
-- State refresh reads back bulb information after discovery and changes where supported.
-
-### Govee
-
-LumenDesk speaks the Govee LAN API directly:
-
-- Discovery uses UDP multicast `239.255.255.250:4001` on platforms that allow multicast.
-- Govee devices reply on UDP `4002`.
-- Commands are sent on UDP `4003`.
-- Each Govee bulb must have **LAN Control** enabled in the Govee Home app.
-
-For segmented RGBIC devices, LumenDesk additionally speaks two community-documented LAN extensions:
-
-- `razer` — the real-time streaming mode used by Razer Chroma sync ("DreamView"), for live per-segment preview while editing.
-- `ptReal` — relays the same 20-byte Bluetooth-format commands the Govee Home app writes (segment color, per-segment brightness, gradient toggle), so applied layouts persist on the device.
-
-Not every Govee device supports the LAN API. If a device does not expose LAN Control in the Govee Home app, LumenDesk cannot control it locally.
-
-## Privacy and networking model
-
-LumenDesk is intentionally local-first:
-
-- No LIFX cloud login.
-- No Govee cloud login.
-- No vendor API keys.
-- No remote relay server.
-- No analytics service in the app codebase.
-- Lighting commands are sent directly to devices on your LAN.
-
-The app needs local network permission because it sends and receives UDP packets on your network. On iOS, the first scan triggers Apple's Local Network privacy prompt; you must allow it for discovery and control to work.
-
-Music Mode analyzes **system audio on macOS** through ScreenCaptureKit, **microphone input on iOS**, a **user-selected audio file** on both platforms, and **MIDI beat clock**. Analysis is local, audio is never recorded or retained, and the feature does not receive an Apple Music-only feed.
-
-Music Mode keeps **beat maps** in `Application Support/LumenDesk/BeatMaps`: beat times, energy per bar and a coarse onset curve for a file or track, never audio. With **Follow Spotify and Music** on, LumenDesk asks those two apps over Apple Events which track is playing and where; macOS asks once for Automation permission. Nothing leaves the Mac.
-
-## Feature guide
-
-### First-run onboarding
-
-On a fresh install, LumenDesk shows a guided setup flow that helps you:
-
-1. Understand the local-network requirements.
-2. Prepare LIFX and Govee bulbs.
-3. Run discovery.
-4. Create rooms.
-5. Assign discovered lights to rooms.
-6. Enter the main workspace.
-
-You can skip setup and use the main app immediately, but discovery and room organization are easier through the walkthrough.
-
-### Discovery
-
-Use **Scan** or press **⌘R** on macOS to search for lights. LumenDesk scans for both LIFX and Govee devices, updates its device list, and records discovery changes.
-
-Discovery-related UI includes:
-
-- Current scan status and phase.
-- Last scan date.
-- Number of scan responses.
-- Newly discovered devices.
-- Devices that came back online.
-- Devices whose address changed.
-- Devices that are still missing or offline.
-- A Discovery Inbox for reviewing scan changes.
-
-### Individual light controls
-
-Each light row supports:
-
-- Power toggle.
-- Brightness slider.
-- Color picker.
-- Color/white mode switching.
-- White color temperature adjustment.
-- Custom display names.
-- Favorite/unfavorite.
-- Command status feedback.
-- Offline/stale indicators.
-- Recent colors and useful presets where available.
-- A Segment Studio row on recognized Govee RGBIC devices, with a live mini-preview of the saved layout.
-- A Luna Color Studio row on LIFX Luna lamps, with a 26-zone face preview and multi-color editor.
-
-LumenDesk keeps a brand-agnostic device model while still sending the correct vendor-specific packets behind the scenes.
-
-### Luna Color Studio (LIFX SuperColor Luna)
-
-LumenDesk recognizes LIFX Luna product IDs 219 and 220 and reads the lamp's matrix geometry and colors through the official LIFX LAN protocol. The Luna editor includes:
-
-- A visual 26-zone lamp face with individual and multi-zone selection.
-- Color swatches and a full custom color picker.
-- Two-color gradients across all zones or only the selected zones.
-- Aurora, Sunset, Ocean, Rainbow, and Warm Glow starter looks.
-- Reload from Lamp and Apply to Luna actions.
-- Matrix-aware brightness control that preserves multi-color layouts.
-- Scene capture, rehearsal, undo, and effect restoration for Luna layouts.
-
-The demo workspace includes a simulated Luna, so the editor can be explored without the physical lamp.
-
-### Segment Studio (Govee strip lights, COB strips, string lights, neon ropes, and uplighters)
-
-Govee RGBIC devices are individually addressable in zones, and the Govee Home app lets you color each zone separately. LumenDesk's **Segment Studio** brings that same specificity to the LAN:
-
-- A hardware-aware editor: continuous segmented tape for Strip Light S and COB models, numbered bead or bulb strands for string lights, curtain columns, numbered segments along the chain of bars for the H6062 Glide Wall Light, and named physical-zone cards for the H60B0 uplighter.
-- **Uplighter Color Studio** knows the H60B0 lights only two of its three zones at a time. Each zone card has its own switch, one-tap combinations (Upper + Middle, Upper + Lower, Middle + Lower) pick a pair outright, and switching a third zone on hands the slot over from whichever has been lit longest and says so. A switched-off zone keeps the color it is holding, so turning it back on restores it. Scenes, undo, Music Mode, and the held-layout re-apply all follow the same choice, and no LumenDesk path asks the lamp for three lit zones.
-- **String Light Studio** follows the physical strand from the controller in numbered rows. H70C1 exposes all 100 Uni-IC beads; H70C2 and H70C4 expose all 200. Outdoor bulb strings use their actual bulb counts, including 30 for H7021 and 15 for H7020/H7028, with expandable models remaining adjustable.
-- H70B1 is treated as a curtain instead of a one-dimensional string. LumenDesk edits its 20 locally addressable vertical column groups; per-bead pixel artwork remains in Govee Home.
-- Tap or drag across segments to select them; paint the selection with swatches, recent colors, or the system color picker. Choose All to paint the whole strip; with nothing selected, painting is disabled.
-- Selection tools: All, None, Invert, Every Other, and shift-left/right to rotate the layout along the strip.
-- **Per-segment brightness** — dim any selection independently of the rest of the strip.
-- **Blend Across Selection** — fade from one color to another across the selected segments.
-- **Gradient blending** on supported RGBIC and RGBICW strips, matching the Govee app's gradient switch.
-- **Live preview** streams edits to the light in real time (razer mode). The preview is volatile, so closing the studio without applying is a true cancel.
-- **Glide Wall Light (H6062)** is recognised as a wall light of straight bars and corner pieces chained from one controller. It has 28 segments, the controller's addressable zones as Govee's own platform API reports them, numbered from the controller along the chain; a segment is not one physical piece. The count stays adjustable in case your kit differs. Its layout is applied with the same durable write as COB strips; that has not yet been confirmed on a physical H6062.
-- **Apply to Light** makes the layout durable. Supported COB strips and neon ropes store it in their own firmware through app-native commands relayed over the LAN. H612B Strip Light S, multi-zone lamps such as H60B0, string lights, curtain lights, and permanent-outdoor lights expose their editable layouts through the live streaming channel, so LumenDesk holds and restores those layouts while it runs.
-- 12 built-in segment presets (Rainbow Flow, Sunset Glow, Candy Cane, Fairy Dust, …) plus your own saved presets, automatically re-rendered to each device's segment count.
-- An adjustable unit count for expandable and unrecognized models. Fixed hardware such as H60B0 and H70C Christmas strings stays locked to its real physical topology, including how many zones can be lit together.
-
-Known SKU families (H612B Strip Light S, H619x/H61Cx COB strips, H61Ax/H61Dx neon ropes, H6062 Glide Wall Light, H60B0 three-zone uplighter lamps, H70Cx Christmas strings, H702x outdoor bulb strings, H70Bx curtains, and more) are detected from discovery and get the right layout and defaults automatically. Any other Govee light can still open the studio from its context menu.
-
-Segment layouts are captured into scenes, restored by undo/redo, re-applied after Identify flashes, and survive stopping an animated effect. The demo workspace includes a simulated COB strip, string lights, and an H60B0 uplighter so the studio — zone limit included — can be explored without hardware.
-
-Open the studio from the editor row on a light, or right-click its hardware-specific studio command. H60B0 uses **Uplighter Color Studio…**, string lights use **String Light Studio…**, and curtains use **Curtain Column Studio…**.
-
-### Rooms
-
-Rooms are user-defined groups of lights. A room can contain lights from either vendor, and room actions fan out to all assigned lights.
-
-Room features include:
-
-- Create, rename, reorder, and delete rooms.
-- Assign or unassign lights.
-- Drag-and-drop assignment from the unassigned area into rooms.
-- Collapse and expand room sections.
-- Favorite rooms.
-- View room power status, online/offline counts, pending command counts, and active schedules.
-- Turn an entire room on or off.
-- Set room brightness.
-- Set room color.
-- Set room white temperature.
-- Apply themes and animated effects to a room.
-- Pause and resume automation for a room.
-
-The **Room** workspace keeps the selected room or All lights visible above its fixture field. Nothing selected means room-wide output. Select one fixture for its precise inspector, or several for shared power, brightness, color and white controls. Offline fixtures remain visible and are excluded from live group commands. The running show names the scope it owns and offers **Stop & restore** or **Keep current light** before manual editing. **Room actions** contains assignment, membership, naming and optional relative arrangement; no architectural scale is implied.
-
-Deleted rooms can be restored with the app's undo affordances when available.
-
-### Favorites
-
-LumenDesk has a favorites strip for fast access to important items. Favorites can include:
-
-- Individual lights.
-- Rooms.
-- Scenes.
-
-Favorites are persisted and ordered, so the shortcuts you pin remain available across app launches.
-
-### Search, filters, and layout
-
-The main workspace includes tools for finding and narrowing what you see:
-
-- Search text persisted across launches.
-- Search scopes for all content, lights, rooms, or scenes.
-- Filter to only powered-on lights.
-- Filter to offline devices.
-- Filter by vendor.
-- Automatic, list, and grid workspace layouts.
-- Comfortable and compact density modes.
-
-Press **⌘F** to focus search in the main workspace.
-
-### Bulk selection and group actions
-
-Selection mode lets you pick multiple visible lights and apply actions in one step. Bulk actions include:
-
-- Turn selected lights on.
-- Turn selected lights off.
-- Adjust selected brightness.
-- Assign selected lights to a room.
-- Clear or exit selection.
-
-The app warns when selected devices are hidden by active filters, so you know if a bulk action includes lights you cannot currently see.
-
-### Scenes
-
-A scene is a saved lighting snapshot. Scenes include named per-device states such as:
-
-- Power state.
-- Brightness.
-- Hue and saturation.
-- White color temperature.
-- Govee segment layouts (per-segment colors, per-segment brightness, gradient), when one is showing.
-
-Scene features include:
-
-- Save the current lighting state as a named scene.
-- Search saved scenes.
-- Rename scenes.
-- Delete scenes.
-- Favorite scenes.
-- Preview/rehearse scenes before committing them. A rehearsal puts exactly what
-  applying would put on each light, including captured Govee segment layouts and
-  LIFX Luna matrix layouts, and ending it restores the prior state.
-- Apply scenes with options around whether devices may be turned off.
-- Retry only failed lights, preserving the applied scene version and its option
-  around turning lights off. Lights that already succeeded stay untouched.
-- Track scene revisions and drafts.
-- Undo recent scene-related changes where supported.
-
-Saving or leaving a scene editor ends its rehearsal and restores the starting
-lighting. Previous saved versions are restored through scene History. On Mac,
-open **Scenes** from the sidebar; on iPhone, open **Room → Scenes**.
-
-### Lighting themes
-
-The Lighting Library includes 48 curated static themes across nine moods. Every
-theme's name, palette, output level, and intended spread is listed in
-[THEME_CATALOG.md](THEME_CATALOG.md).
-
-| Mood | Themes | What it is for |
-| --- | --- | --- |
-| Warmth | 5 | Low and close. Mulled Wine, Lantern Street, Cocoa Rose, Brass & Smoke, Paper Lantern. |
-| Nature | 9 | Landscape light, mostly desaturated. Aurora Veil, Tidepool, Forest Bath, Wildflowers, Petrichor, Salt Flat, Kelp Forest, Glacier Melt, Thunder Plain. |
-| Atmosphere | 6 | Afterglow, Moon Garden, Ember & Ash, Candy Cloud, Desert Modern, Pocket Galaxy. |
-| Jewel | 5 | One saturated stone, one metal, somewhere dark to sit. Emerald Study, Sapphire Hour, Ruby Velvet, Amethyst Court, Malachite & Ink. |
-| Nightlife | 5 | Sign colours at high output. Tokyo Rain, Acid House, Last Call, Blacklight, Chrome Bass. |
-| Celebration | 4 | Synthwave, Arcade Tokens, Festival Lanterns, Ice Cream Social. |
-| Dreamy | 5 | Soft, low chroma, nothing competing. Linen Dusk, Peony Fade, Sea Glass, Cashmere, Nightlight. |
-| Focus | 4 | Deep Work, Reading Nook, Creative Spark, Quiet Mind. |
-| Everyday | 5 | Light you can live under. Morning Desk, Kitchen Noon, Supper Table, Hallway Low, Wind Down. |
-
-Themes can be applied to all lights or to a specific room, and every one of them
-is also selectable as a Music Mode palette.
-
-#### How a theme lands on your lights
-
-A theme is a palette plus a **spread**: where those colours are meant to go.
-LumenDesk reads what each light in the scope can actually address and plans the
-whole room in one pass.
-
-- **One colour-capable bulb** takes the theme's key colour at the theme's own
-  brightness, so a one-bulb room reads as the theme rather than as one arbitrary
-  slice of it.
-- **Several ordinary bulbs** split the palette by the theme's spread: an even
-  wash puts one colour everywhere, an anchored theme keeps its key on most
-  fixtures and places accents on the rest, a gradient ramps from the first light
-  to the last, alternating changes light by light, and scattered guarantees no
-  two neighbours match.
-- **Govee RGBIC segments and LIFX matrices** run the same spread along their own
-  segments or zones, so a strip carries the whole palette instead of one colour.
-  Gradient and wash themes switch on segment blending; crisp themes leave it off.
-  Long strips quantise a ramp to at most 16 stops so a 200-bead string stays one
-  sensible packet batch.
-- **Mixed groups** are planned together and reported plainly. Applying a theme to
-  a room holding two bulbs, a strip, and an uplighter says so in the toast —
-  "2 single-colour lights hold one palette colour each; one fixture lights 2 of
-  its 3 zones" — rather than dropping the detail silently. A fixture that can
-  only run some of its zones at once keeps the zones you already had lit.
-
-Palettes are authored as chroma plus level. The colour goes to the light at full
-value and the level rides the brightness channel, so a LIFX bulb and a Govee bulb
-given the same palette entry emit the same thing, and a near-white theme carries
-a white point so it arrives at the temperature it was designed for.
-
-Applying a theme never starts an animation and never introduces flashing.
-
-### Music Mode
-
-Music Mode makes your lights follow whatever music is playing. Open Room, choose a room, open Music, choose a preset, then press Start. That is the whole thing.
-
-The rest of this section is the plain-English guide. The technical description follows it under [How Music Mode works](#how-music-mode-works), and the data flow lives in [Music Mode architecture](MUSIC_MODE_ARCHITECTURE.md).
-
-#### Get a show running in three steps
-
-**On a Mac**
-
-1. **Play a song in Apple Music.** Use **Open Apple Music** in Music Mode, or open it yourself. No track import is needed. Other apps playing audio on this Mac are included too.
-2. **Pick a room and a preset.** Choose the room in the workspace header, then pick a preset. **Balanced** is the safe first choice.
-3. **Choose System audio, a preset and lights, then press Start Music Mode.** The first time, macOS asks for **Screen Recording** (or **Screen & System Audio Recording**) permission. Enable LumenDesk in System Settings, come back, and press Start again. Nothing is recorded or saved.
-
-The input card shows **Waiting for audio** until something plays and **Audio is silent** when playback is quiet or paused. System audio can stop delivering sound entirely while nothing plays, so neither one is treated as a fault. **No audio received** means the capture itself failed. If Apple Music is audible on this Mac but the meter stays empty, use **Restart system audio** to reconnect without losing the room’s settings or its saved pre-show lighting. Capture interruptions are reported instead of leaving a connected label indefinitely. Audio diagnostics includes channel and dropped-buffer counts. LumenDesk measures stereo channel energy separately so wide or opposite-phase material cannot disappear in a mono downmix, and short callback bursts no longer reset beat analysis.
-
-**On an iPhone or iPad**
-
-1. **Play the music out loud.** Music Mode listens through the microphone, so it has to be able to hear the room. Grant microphone access the first time you press Start.
-2. **Pick a room and a preset.**
-3. **Press Start Music Mode.** To follow a track the microphone cannot hear — headphones, or a noisy room — choose **Audio file**, use **Choose audio file** to pick the song, then press **Start Music Mode**.
-
-A phone call, Siri, an alarm or a headphone change takes the microphone away. The input card says so, and Music Mode reconnects once the microphone is free again; **Restart microphone** retries straight away.
-
-Press **Stop** when you are done. Unless you turn it off, every light goes back exactly how it was before the show started.
-
-#### Which preset should I pick?
-
-| Preset | What it feels like | Good for |
-| --- | --- | --- |
-| **Balanced** | Lights pulse with the beat, change colour as the music changes, move a little. | Anything, if you are not sure |
-| **Ambient** | A quiet glow that drifts. Nothing jumps out at you. | Dinner, reading, background music |
-| **Concert** | Loud and punchy. Drums land hard, colour travels fast. | Parties, rock, pop |
-| **Cinematic** | Slow, wide swells that build and release. | Film scores, ambient records |
-| **Club** | Steady pulse on every beat, hard punch on beat one. | House, techno, dance |
-| **Half-time** | Pulses every other beat, so the room nods instead of strobing. | Hip-hop, slow heavy music |
-| **Waltz** | Counts in threes. Beat one takes the room, two and three breathe. | Waltzes, jazz in three, folk |
-| **Soundcheck** | The look LumenDesk had before Music Mode, minus the harsh flashing. | Anyone who liked the old one |
-| **Custom** | Whatever you last changed by hand. | Your own settings |
-
-You can change presets while the music is playing. Moving any slider switches the preset to **Custom**, and picking a named preset afterwards writes over those values, so a customised setup does not survive a trip through the other presets.
-
-Presets shape rhythmic accents over a sustained light level. **Concert** and **Club** hit hardest, **Ambient** barely moves, and none of them flash unless you turn no-flash mode off yourself after the warning. If a preset feels too calm in a bright room, **Beat sensitivity** and **Effect intensity** are the two sliders that deepen the accent.
-
-#### Giving each light a job
-
-Under **Which light does what**, every light in the room gets a job. **Auto** picks one for you and is fine for most rooms — only change a light if you want that specific light doing something else.
-
-| Job | What that light does |
-| --- | --- |
-| **Auto** | LumenDesk decides from the light itself. Anything with segments gets the travelling colour. A light with "kick" or "downstage" in its name takes the punch, one with "rear" or "accent" takes the second colour, the rest fill the room. Rename a light to steer this. |
-| **Wash** | Fills the room. Bright and steady with a soft pulse underneath. |
-| **Hit** | Punches on the beat. Give it to the light you want the kick drum to land in. |
-| **Accent** | Answers the snare and cymbals in a second colour. Best off to one side. |
-| **Motion** | Colour runs across it in time with the music. Best on a strip. |
-| **Off** | Sits the show out and keeps whatever it is showing right now. |
-
-The list order matters, because movement travels down it. Put the lights in the order they actually sit in the room using the arrows, which are the only thing that reorders the list. The layout picker beside it is a label for the order you have already set: **Left to right**, **Front to back** and **Custom order** all sweep from the first light to the last. **Circular** is the one that changes the show, wrapping the sweep from the last light back to the first. The eye button leaves a light out entirely, and both the eye button and Off are locked while a show is running, so stop it first.
-
-#### What the meters are telling you
-
-The bars show what LumenDesk is hearing right now: overall volume, then bass, mids and highs. The dot flashes on each beat.
-
-Under the dot is a label. It reads **Beat** at first, then changes to something like **128 · 4/4** once LumenDesk works out the tempo — usually about four seconds of steady rhythm. That means it found 128 beats per minute, four beats to a bar, and the show is now counting along instead of just reacting. While it still reads **Beat**, the lights answer the music as it happens, which is normal and correct for ambient, spoken word, and freely-played acoustic music.
-
-If the label says **No audio playing**, LumenDesk is connected to the right source but hearing silence.
-
-#### The sliders, in plain words
-
-You need none of these to run a show. Turn on **Explain the controls** at the top of Music Mode and the app prints these same lines under each slider.
-
-| Control | What moving it up does |
-| --- | --- |
-| Master brightness | Makes the whole show brighter. Turn it down late at night. |
-| Effect intensity | Makes everything more dramatic. Low is a shimmer, high swings hard between dark and bright. |
-| Beat sensitivity | Makes the lights answer the beat harder. Turn it down if the room feels twitchy. |
-| Bass sensitivity | Gives the kick drum and bass line more control over the lights. |
-| Percussion sensitivity | Brings out snares, hats and claps as accents. |
-| Color-change intensity | Changes colour more often, and spreads the palette further across the room. Low holds one colour a long time and keeps the room near a single shade. |
-| Movement amount | Sends the brightness wave further across the room. At zero the wave stops, though colour spread and the stereo tilt still vary from light to light. |
-| Movement speed | Makes that travel faster. |
-| Minimum brightness | Keeps the lights from dropping as dark between beats. |
-| Maximum brightness | Lets a beat push the lights brighter. |
-| Stereo image | Tilts the room with the balance of the recording. At zero every light gets the same level; turn it up and a mix leaning one way brightens the lights at that end of your list. |
-| Light timing | Moves every accent earlier (right) or later (left), up to 300 ms. One setting for the whole app; changing preset keeps it. |
-
-**Color palette** picks the set of colours the show draws from. Alongside
-Soundcheck, Sunset, Ocean, and Club, every theme in the Lighting Library is
-listed there by mood, so a show can run on Emerald Study or Tokyo Rain. Choosing
-a palette swaps the colours and nothing else: the music still owns timing,
-intensity, and where movement travels, and a palette can never turn flashing on.
-Your flash settings, safe mode, and every slider stay exactly where you left them.
-
-Three switches are worth knowing:
-
-- **No-flash mode** is on by default and blocks explicit flash requests. Ordinary brightness changes can still be uncomfortable. The maximum of three explicit flashes per second is a software limit, not a guarantee of medical safety.
-- **Restore previous state when stopped** puts every light back how it was when you press Stop. On by default.
-- **Sustained-energy lifts** follows slower changes in measured energy. It is not reliable chorus, phrase or drop recognition.
-
-If **Reduced Motion** is on in your system accessibility settings, LumenDesk keeps movement small and never flashes, whatever the preset says. That holds for shows started from a favorite or a scene card too, and switching the setting reaches a running show straight away, whichever screen is open.
-
-Moving a slider changes the running show as you drag; the setting is saved when you let go.
-
-#### Things that trip people up
-
-| What you see | What is going on |
-| --- | --- |
-| Lights do nothing | Nothing is playing, or the permission is not granted yet. On a Mac, check Screen Recording; on iPhone, check the microphone. |
-| One light never joins in | It is set to **Off**, or the eye button excluded it. Both are on purpose, and both need the show stopped to change. |
-| The readout never leaves **Beat** | The music has no steady pulse to lock onto. Rubato, free playing and dense percussion all do this. The show still works. |
-| The room feels behind the music | First try **Light timing**, or tap along with **Tap with the lights** and press **Use measured timing**. Then check the readout. Until it shows a BPM the show is answering each sound as it arrives, so it always trails a little; give it a few seconds of steady rhythm to lock. On iPhone the microphone also adds the time the sound takes to cross the room, and a congested Wi-Fi network or a slow bulb adds the rest. **Beat sensitivity** will not help here: it changes how hard a pulse hits, not when. |
-| A second room will not start | Every room in a show shares one audio source. Start the second room on the same source, or stop the first one before switching sources. |
-| Colours never change | **Color-change intensity** is low, or the palette is a set of near-identical colours. |
-
-#### Timing: beat maps, Spotify and Music, and light timing
-
-Live listening only ever hears the past, so it has to guess where the next beat lands. A **beat map** removes the guess: it is the whole song analysed ahead of time, every beat, where each bar starts and how loud each bar is. With a map the show plays against a clock instead of inferring one, and it knows a bar's energy before the bar plays.
-
-- **Audio file.** Press Start and the show begins listening live straight away while LumenDesk maps the file in the background, much faster than the file plays. The input card shows **Mapping beats…** and then **Beat map ready**, and from then on the lights follow the file's own playback clock. Maps are saved, so the same file starts mapped next time. A file with no steady pulse keeps listening live.
-- **Spotify and Music (Mac).** Turn on **Follow Spotify and Music** under the input source. LumenDesk asks whichever of the two is playing for the track and position about once a second. It learns beats while you listen (**Learning…**) and saves progress across pauses, seeks, skips and app restarts. Once most of the track is learned, it starts following the map (**Following…**) and keeps filling in the remaining sections. Replays reuse the saved map, and system audio nudges the clock onto the song every couple of seconds. macOS asks for Automation permission the first time; if you decline, the card says so and the show keeps listening live. Streaming apps never hand LumenDesk the audio file, so unheard sections start with live analysis.
-- **Light timing.** Every bulb, hub and Wi-Fi network adds its own delay. If the lights land after the beat, slide **Light timing** toward Earlier, or start a show, press **Tap with the lights** each time you see a pulse for at least eight beats, then **Use measured timing**. Your own tapping has a little lag, so fine-tune by eye afterwards.
-
-The show also shifts between six **energy gears**. On a map each bar's gear is known in advance; live, a bar's gear is set when the bar finishes. Calm passages ease in while keeping the detected beat. The loudest passages snap and change colour on the beat, never more than three times a second. The top gear can ask for a downbeat flash, which still goes through No-flash mode and the three-a-second limit.
-
-Timing calibration uses the selected room's fresh beat grid. Stop or a source/timing change clears its taps, and rapid repeated clicks do not count as separate beats. The zero position means **Default timing (0 ms)**, not a measured guarantee of synchronization. Browser audio that pauses exposes **Resume audio**; file playback repeats until **Stop**.
-
-#### How Music Mode works
-
-Music Mode is a first-class section of the selected Room workspace. It turns the existing `music-pulse` effect into a configurable choreography session while preserving that identifier for saved-state compatibility.
-
-- Real beat tracking. LumenDesk estimates the tempo of what is playing and choreographs to the beat grid it predicts, rather than reacting to every transient. The kick band is scored separately from the full spectrum to resist dense hi-hats. Continuous synthetic kick/hat and chord tests exercise this, but syncopation can still produce a wrong relative tempo. The tracker also listens for 3/4, 5/4, 6/8 and 7/8, and for half- or double-time feel, with manual overrides when automatic metre or feel is wrong. The detected tempo and metre are shown next to the beat indicator once it locks; music with no clear pulse falls back to a smooth energy-driven show automatically.
-- Brightness is a resting level plus an accent. The resting level follows how loud the music is over about half a second, so quiet passages, breakdowns and sustained notes genuinely pull the room back, and a beat lifts the light above that level rather than dropping it to the floor and back. Colour is held for whole bars and crossed over on a bar line. The intended result is a lit room with recognizable accents; turn **Beat sensitivity** up if you want the accents harder.
-- Built-in presets: Ambient, Balanced, Concert, Cinematic, Soundcheck, Club, Half-time, and Waltz, plus a persisted Custom configuration.
-- Fixture roles. Each light can be wash, hit, accent, motion, or off. Auto assigns RGBIC strips to motion, downstage to hit, rear to accent, and everything else to wash, so a mixed room layers without tagging every fixture.
-- Beat, bass, percussion, color-change, brightness, movement, silence, palette, metre, feel, stereo, and restoration controls.
-- Explicit left-to-right, front-to-back, circular, or custom fixture topology. Rooms with no saved topology use deterministic label-and-ID ordering rather than discovery order.
-- Vendor-neutral lighting frames translated to combined LIFX HSBK, efficient ordinary Govee LAN color, or volatile Govee RGBIC segment streaming.
-- Independent transport ceilings and latest-frame coalescing so a slower bulb does not hold back an RGBIC stream.
-- No-flash mode is enabled by default. Flash requests are disabled in safe mode and are always subject to an absolute 3-per-second ceiling plus the user's lower configured limit.
-- Reduced Motion limits spatial movement and disables flashes.
-- Demo Mode includes LIFX-style bulbs, Govee bulbs, segmented Govee fixtures, and deterministic grooves (four-on-the-floor, half-time, waltz, odd metre, breaks) with no copyrighted audio.
-- Sources: system audio on macOS, microphone on iOS, a user-selected audio file on both, and MIDI beat clock.
-- Beat maps for files (both platforms) and for Spotify and Music tracks learned on a first listen (macOS), played against the file's playback clock or the app's reported position, with live onset alignment. See [Timing](#timing-beat-maps-spotify-and-music-and-light-timing).
-- Six energy gears with hysteresis that set accent depth, rise time and per-beat colour while preserving the detected or selected beat.
-- A per-room light timing offset with tap calibration.
-
-Rooms share one live audio source. Start additional rooms with the same source; stop the other shows before choosing a different file or switching between system audio and MIDI. Stop also cancels a pending audio-permission request. A failed start restores the original lighting state regardless of the restore-on-stop preference.
-
-During a show, you can change an included fixture between wash, hit, accent, motion, and auto. Stop first to change inclusion or move a fixture into or out of Off. The restore-on-stop preference can be changed while the show runs. Half-time pulses span two detected beats while palette and movement timing retain the detected bar length.
-
-On macOS the default source is system audio and requires Screen Recording permission. On iPhone and iPad the default source is the microphone. The Audio file source uses the existing user-selected file grant so iOS can follow a track the microphone cannot hear. MIDI clock needs a MIDI interface or IAC bus. See [Music Mode architecture](MUSIC_MODE_ARCHITECTURE.md), [production evidence](MUSIC_MODE_EVIDENCE.md), and the [control audit](CONTROLS_AUDIT.md) for tested behavior and limitations. The diagnostics disclosure distinguishes generated frames from local transport submission. The 45 ms timing bias remains unmeasured, and an installed app must be matched to its source revision before comparing behavior.
-
-### Animated effects
-
-The Lighting Library includes the following non-music animated effects:
-
-- Color Flow.
-- Ocean Wave.
-- Breathe.
-- Candlelight.
-- Prism Shuffle.
-- Summer Storm.
-- Golden Sunrise.
-- Slow Sunset.
-
-Effects can run against all lights or a specific room. Multiple effects may run at the same time as long as their device scopes do not overlap. Effects can be stopped individually or all at once, and LumenDesk can restore previous light states when stopping effects.
-
-While an effect owns a fixture it repaints that light's color and brightness on every frame, so the light's own color, brightness, and white-balance instruments are disabled for as long as the effect runs. The light's row names the running effect and offers a Stop button, and the instruments come back the moment the effect stops. Room- and library-level color, white-balance, theme, and scene actions stop the effect first and then apply, so those keep working during a show.
-
-Soundcheck now lives inside Music Mode as a built-in compatibility preset.
-
-### Schedules and automation
-
-Each room can have up to 12 schedules. The editor shows the limit and keeps a
-rejected draft open. Schedule entries support:
-
-- Enable/disable per entry.
-- Weekday selection.
-- Fixed hour and minute.
-- Offset minutes for solar-style entries.
-- Actions such as turning on, turning off, or dimming to common brightness levels.
-- Sunrise and sunset style actions using configurable sunrise/sunset times.
-
-A schedule that reaches lights in a running show or effect stops it. Those lights first return to how they looked before the show, then the scheduled action applies, so a timed dim never leaves the room on a random show color. **Run Test** works the same way and can be undone.
-
-Automation controls include:
-
-- Pause until the next schedule.
-- Pause for one hour.
-- Pause until manually resumed.
-- Resume room automation.
-- Review missed automations.
-
-LumenDesk checks schedules periodically while the app is running.
-Fixed times follow the local clock across daylight-saving changes. A missing
-02:30 moves to 03:30; a repeated time runs once. Solar offsets apply before or
-after the configured local sunrise or sunset time.
-
-Fixed times keep their local wall-clock hour on daylight-saving transition days. A nonexistent time moves forward by the daylight-saving gap, and a repeated time runs at its first occurrence. Solar offsets can cross midnight; weekday selection applies to the sunrise or sunset's base day.
-
-### Nap Mode
-
-Nap Mode is a one-click lighting routine intended for rest:
-
-1. Gradually dims active lights.
-2. Holds them low.
-3. Brightens them gently again.
-
-The header button shows the current nap countdown and can cancel an active nap routine.
-
-### Undo, redo, and recovery
-
-LumenDesk tracks recent lighting changes and supports:
-
-- **⌘Z** to undo a light change.
-- **⇧⌘Z** to redo a light change.
-- Undo prompts for some destructive actions such as deleted rooms or scenes.
-- Toasts for command failures with recovery actions when possible.
-- Command cancellation for queued light commands with **⌘.** on macOS.
-
-### Diagnostics and activity history
-
-LumenDesk includes operational tools for understanding what the app is doing:
-
-- Diagnostics Center.
-- Activity Log.
-- Discovery Inbox.
-- Missed Automations view.
-- Command state tracking: queued, sending, applied, failed, confirmed.
-- Confirmed device state tracking.
-- Exportable activity history.
-
-These tools are useful when diagnosing Wi-Fi isolation, offline bulbs, unsupported Govee devices, or command failures.
-
-### macOS menu bar controller
-
-On macOS, LumenDesk also installs a menu bar extra. The menu bar controller can show different scopes depending on settings:
-
-- Favorites.
-- Active rooms.
-- All rooms.
-
-It gives quick access to common lighting controls without opening the full window. The menu bar icon reflects the current aggregate mood color of powered-on lights.
-
-### Import and export
-
-On macOS, use the app menu commands to export or import a JSON configuration.
-
-Export includes app-managed configuration such as:
-
-- Rooms.
-- Favorites.
-- Favorite ordering.
-- Scenes.
-- Custom light names.
-- Brightness presets.
-- Sunrise and sunset preferences.
-- White-mode preferences.
-
-Import replaces the current local configuration and shows a warning before overwriting rooms, scenes, favorites, and custom names.
-
-Malformed schedule times or weekdays disable the imported rule for review. Scene brightness, color channels, and white temperature are bounded before they reach a light.
-
-### Demo Mode
-
-Demo Mode lets you explore LumenDesk without controlling physical lights. In demo mode, the interface uses sample lights and rooms, shows a clear **SAFE DEMO** banner, and provides a **Return to Live** action.
-
-Demo Mode is useful for screenshots, testing UI flows, or learning the app before scanning your real network.
-
-### Interface
-
-The native Mac app uses **Spectrum Studio**: a room and device sidebar, a room overview with a lane for each light, and an integrated device editor. Graphite surfaces and amber controls frame actual fixture colors. A scene shelf recalls scenes to their saved fixture IDs; Save current lighting captures current output, excluding unapplied drafts.
-
-The room overview identifies **Entire room** or the selected light count. Selections persist per room during navigation and opening a device editor does not replace them. Room power, brightness, color, white temperature and **Color schemes** act on those targets, including an attempt to reach lights marked stale. A manual change stops any show touching those lights; other lights in that show return to their saved state. Color schemes use each fixture’s supported panels and zones. Saved scenes still recall their original saved fixture IDs.
-
-Nanoleaf panels, Govee regions, and Luna zones pair a spatial canvas with an exact-value table. Select regions to edit HEX and intensity; **None** disables selection-based edits, and **All** explicitly targets the entire fixture. Nanoleaf RGB includes panel intensity, while Govee and Luna retain separate intensity channels. Unapplied Govee and Luna drafts survive navigation for the current app session; Nanoleaf keeps its existing editing sessions. Leaving an editor ends its temporary preview.
-
-Native menus, alerts, color pickers, sheets and keyboard controls retain platform behavior. iOS retains its room tabs and gains the shared editor refinements. The browser keeps its existing room workspace. [Design system](DESIGN_SYSTEM.md) records tokens and validation boundaries; [Spectrum implementation](SPECTRUM_STUDIO.md) describes the native workspace.
-
-### Accessibility and interface preferences
-
-The UI honors system accessibility settings where applicable, including reduced motion and reduced transparency. Interface preferences include:
-
-- Quiet Interface.
-- Workspace layout on iOS.
-- Interface density, including compact room rows on Mac.
-- Menu bar content scope.
-- Menu bar urgent-only mode.
-- Confirmation policy.
-
-## Keyboard shortcuts
-
-| Shortcut | Action |
-| --- | --- |
-| `⌘R` | Scan for lights |
-| `⇧⌘P` | Toggle all lights |
-| `⌘.` | Cancel queued light commands |
-| `⌘Z` | Undo light change |
-| `⇧⌘Z` | Redo light change |
-| `⌘F` | Focus search |
-| `⇧⌘S` | Open the Lighting Library |
-
-The app also includes an in-app Keyboard Shortcuts view.
-
-## Requirements
-
-### Development requirements
-
-- macOS 13 Ventura or later for Mac development.
-- Xcode 15 or later.
-- SwiftUI-compatible Apple platform SDKs.
-- Optional: XcodeGen if you want to regenerate the Xcode project from `project.yml`.
-
-### Runtime requirements
-
-- Mac or iPhone on the same Wi-Fi/LAN as the bulbs.
-- Local Network permission accepted on iOS.
-- LIFX bulbs reachable by UDP on the local network.
-- Govee bulbs with **LAN Control** enabled.
-- A network that allows device-to-device UDP traffic.
-
-## Building and running
-
-### Run on macOS
-
-1. Open `LumenDesk.xcodeproj` in Xcode.
-2. Select the `LumenDesk` scheme.
-3. Choose **My Mac** as the run destination.
-4. Press **⌘R**.
-5. If prompted by macOS firewall or privacy dialogs, allow local network communication.
-6. Run a scan from the app or with **⌘R**.
-
-To produce a `.app` you can keep or hand to someone else, use `./scripts/package_macos.sh` rather than the DerivedData build. See [`DISTRIBUTION.md`](DISTRIBUTION.md).
-
-### Run on iPhone
-
-1. Connect your iPhone over USB, or pair it wirelessly from **Window → Devices and Simulators** in Xcode.
-2. Open `LumenDesk.xcodeproj`.
-3. Select the `LumenDesk` scheme.
-4. Choose your iPhone in Xcode's destination picker.
-5. In **Signing & Capabilities**, select your Apple ID team. A free personal team is enough for local development.
-6. Press **⌘R**.
-7. If iOS blocks the unsigned developer app, approve it in **Settings → General → VPN & Device Management**.
-8. Launch LumenDesk and accept the **Local Network** permission prompt.
-9. Run discovery.
-
-### How a scan actually finds lights
-
-A scan does not rely on one broadcast. `255.255.255.255` is not routed: the kernel picks a single interface from the default route, so on a Mac holding a VPN route, bridging a Thunderbolt link, or running a container network, that one datagram leaves by an interface with no lights on it. The same goes for multicast with no outgoing interface set. Every scan therefore uses three routes at once, on both platforms:
-
-- **Subnet-directed broadcast per interface.** `192.168.1.255` and its equivalents have a connected route, so the kernel picks the interface that matches. Govee multicast is sent once per interface with the outgoing interface pinned, and the group is joined per interface too.
-- **The limited broadcast**, as a fallback for anything the directed form misses.
-- **A unicast probe of every host on those subnets.** Bulbs answer a probe addressed straight to them, and the reply is an ordinary unicast datagram that no router or OS gates. This is what carries discovery on routers with client isolation or broadcast filtering, and on iOS, where Apple restricts broadcast and multicast without the `com.apple.developer.networking.multicast` entitlement.
-
-The broadcast rounds are repeated a few times a fraction of a second apart, because Wi-Fi carries broadcast unacknowledged at its lowest rate and a bulb in power save will drop a single one. The unicast sweep is paced in small bursts and runs twice with a short gap. macOS parks a single datagram per unresolved neighbour while it resolves ARP and drops it if resolution is slow, so a cold cache eats most of a single pass; the second pass runs against warm entries. A network wider than a `/24` is capped to the `/24` around your own address, and a narrower netmask is honoured exactly.
-
-Discovery diagnostics report what each pass actually put on the wire, in three separate counts:
-
-- **Probes** — datagrams that left the machine.
-- **Addresses empty** — the kernel could not resolve a link-layer address, so nothing is at that address. On a home `/24` holding a handful of devices this is most of the subnet, and a line like `9 probes on en0 192.168.1.57/24 · 499 addresses empty` is a healthy scan, not a fault.
-- **Refused** — the system rejected the send: no permission, no route to the network, no buffers. These are real faults and are the only count that colours the row.
-
-That split is what separates "nothing on this network answered" from "nothing we sent ever left the machine."
-
-## Optional: regenerate the Xcode project
-
-If you prefer to regenerate the project from `project.yml`, install XcodeGen and run:
-
-```sh
-brew install xcodegen
-xcodegen generate
-```
-
-This rewrites `LumenDesk.xcodeproj` from the declarative project configuration.
-
-## How to use LumenDesk
-
-### 1. Prepare your network
-
-- Put your Mac or iPhone and bulbs on the same Wi-Fi/LAN.
-- Disable client isolation for the Wi-Fi network used by the bulbs.
-- Avoid guest networks unless they explicitly allow local device communication.
-- For Govee, enable **LAN Control** for each supported device in the Govee Home app.
-
-### 2. Discover lights
-
-- Open LumenDesk.
-- Complete or skip onboarding.
-- Click **Scan** or press **⌘R**.
-- Wait for discovered lights to appear.
-- Open the Discovery Inbox if you want to review new, changed, or missing devices.
-
-### 3. Name and organize lights
-
-- Rename lights so they match their physical location.
-- Create rooms such as Living Room, Office, Bedroom, or Kitchen.
-- Assign each light to a room.
-- Pin frequently used lights, rooms, or scenes as favorites.
-
-### 4. Control lights
-
-- Use each light row for individual power, brightness, color, and white temperature.
-- Use room controls to change every light in a room.
-- Use the global controls to affect all lights.
-- Use selection mode for temporary groups.
-
-### 5. Save scenes
-
-- Set your lights exactly how you want them.
-- Open the Lighting Library with **⇧⌘S**.
-- Go to **My Scenes**.
-- Save the current lighting state with a meaningful name.
-- Favorite the scene if you want it in the favorites strip or menu bar.
-
-### 6. Apply themes and effects
-
-- Open the Lighting Library.
-- Choose **Themes** for curated static palettes.
-- Choose **Effects** for animated lighting.
-- Pick whether to apply to all lights or a room.
-- Stop effects from the library header or room controls when finished.
-
-### 7. Light a room to music
-
-- Play music on this device, or have it playing out loud if you are on an iPhone or iPad.
-- Open **Room → Music**.
-- Pick the room you want at the top, and pick a preset — **Balanced** if you are not sure.
-- Press **Start Music Mode** and grant the permission macOS or iOS asks for the first time.
-- Press **Stop** when you are done; your lights go back to how they were.
-
-### 8. Add schedules
-
-- Open a room's menu.
-- Choose **Edit Schedules**.
-- Add a schedule entry.
-- Pick weekdays, time or solar-style timing, and an action.
-- Use automation pause controls when you want to temporarily stop scheduled changes.
-
-### 9. Use the menu bar on macOS
-
-- Open the LumenDesk menu bar extra.
-- Control favorites or rooms quickly.
-- Change what appears in the menu bar from Settings.
-
-### 10. Back up configuration
-
-- On macOS, choose **Export Configuration…** from the app commands.
-- Save the JSON file somewhere safe. LumenDesk confirms where it wrote the file,
-  and says so plainly if the write failed, so an export that never landed is
-  never mistaken for a backup.
-- Use **Import Configuration…** to restore or move the setup to another Mac.
-  The archive carries rooms, plans, scenes, schedules, favorites, custom names,
-  brightness presets, solar times, Govee segment layouts and presets, Music Mode
-  settings, fixture topologies, and which lights are in white mode. Local history
-  — activity log, scene revisions and drafts, recent colors, and any automation
-  pause in effect — stays on the machine that made it.
-
-## Project layout
-
-```text
-scripts/                            # Release packaging and brand asset generation
-└── package_macos.sh                # Archive, sign, notarize, and wrap the Mac app in a DMG
-web/                                # Browser client and the local bridge it talks to
-├── app/                            # React web client, published to GitHub Pages
-└── bridge/                         # Node UDP bridge: LIFX/Govee LAN protocols over a loopback HTTP API
-design-prototype/                   # Simulated UX mockup, published under /prototype/
-LumenDesk/
-├── LumenDeskApp.swift              # App entry point, macOS commands, settings scene, menu bar extra
-├── ContentView.swift               # Main workspace, header, search, filters, bulk actions, shortcut sheet
-├── Theme.swift                     # Spectrum Studio tokens, surfaces, button styles, mark
-├── DesignControls.swift            # Instrument controls: fader, power key, rocker, chips, selector, lens, meters
-├── Info.plist                      # Local network and platform privacy metadata
-├── LumenDesk.entitlements          # Sandbox and network entitlements
-├── Models/
-│   ├── GoveeSegments.swift         # Segment capability catalog, layouts, and presets for Govee RGBIC devices
-│   ├── LightDevice.swift           # Brand-agnostic light model
-│   ├── LightingCatalog.swift       # Built-in themes and animated effects
-│   ├── LightingScene.swift         # Saved scene model
-│   ├── Room.swift                  # Room and light-scope models
-│   ├── ScheduleEntry.swift         # Schedule actions and schedule entries
-│   └── UXEnhancements.swift        # Diagnostics, preferences, activity, revisions, menu-bar models
-├── Services/
-│   ├── AudioLevelMonitor.swift     # Local audio-level measurement for music-reactive effects
-│   ├── BeatMap.swift               # Beat maps: building, playing, aligning, learning, storage, tap calibration
-│   ├── BeatMapCoordinator.swift    # Turns beat maps into timing for a running Music Mode show
-│   ├── NowPlayingMonitor.swift     # Asks Spotify and Music where the song is (macOS)
-│   ├── LightManager.swift          # App state, persistence, commands, schedules, scenes, effects, undo/redo
-│   ├── UDPSocket.swift             # BSD socket UDP wrapper for broadcast, multicast, and unicast traffic
-│   ├── LIFX/
-│   │   ├── LIFXClient.swift        # LIFX discovery and command transport
-│   │   └── LIFXProtocol.swift      # LIFX packet builders and parsers
-│   └── Govee/
-│       ├── GoveeClient.swift       # Govee discovery and command transport
-│       └── GoveeProtocol.swift     # Govee LAN JSON messages
-└── Views/
-    ├── FavoritesStripView.swift    # Favorite lights, rooms, and scenes
-    ├── GoveeSegmentEditorView.swift # Segment Studio: per-segment painting for Govee RGBIC devices
-    ├── LightRowView.swift          # Per-light controls
-    ├── MenuBarPopoverView.swift    # macOS menu bar UI
-    ├── OnboardingView.swift        # First-run guided setup
-    ├── RoomSectionView.swift       # Room controls, schedules, room menus, room effects
-    ├── ScenesView.swift            # Lighting Library: scenes, themes, and effects
-    ├── ScheduleEditorView.swift    # Room schedule editor
-    └── UXCenterViews.swift         # Diagnostics, activity log, settings, discovery, missed automation views
-```
-
-## Troubleshooting
-
-### No bulbs found
-
-Open **Discovery diagnostics** first — it names the cause instead of leaving you to guess. The rows to read are **Network interface** (which interfaces the scan used) and **LIFX/Govee probes** (how many datagrams went out and how many the system refused).
-
-- **"No probe reached the network"** — nothing left the machine. A VPN is almost always holding the default route; disconnect it, or exclude the local subnet, and scan again.
-- **"Some sends were refused"** — a firewall or filtering VPN is intercepting local traffic. Allow LumenDesk to send and receive local UDP. Note that *addresses empty* is not a refusal: on a typical home network most of the subnet is empty and that count will be large.
-- **Probes went out and nothing answered** — the packets are on the wire and the lights are not replying. Work through the list below.
-- **The interface shown is not the one your lights are on** — a Thunderbolt bridge, a container network, or a phone tether can be listed alongside your real network. Discovery probes all of them, so this is informational unless the real one is missing entirely.
-
-Then:
-
-- Confirm the computer/phone and bulbs are on the same LAN or VLAN.
-- Make sure the Wi-Fi network does not enable client isolation.
-- Govee LAN control is 2.4 GHz only; a controller on a 5 GHz or 6 GHz SSID that is isolated from the 2.4 GHz one will not reach them.
-- Avoid guest Wi-Fi networks for either the controller or bulbs.
-- On macOS 15 and later, check **System Settings → Privacy & Security → Local Network** and confirm LumenDesk is enabled. A denied grant drops packets silently, with no error at the socket. The **Local Network** button in Discovery diagnostics opens that pane.
-- Debug builds run from a temporary DerivedData path, which macOS treats as a different app each time it is rebuilt; the Local Network grant does not carry over. Use a stable signed build for permission testing (see [`DISTRIBUTION.md`](DISTRIBUTION.md)).
-- Try running Scan again after power-cycling a bulb.
-
-### Govee lights are found but commands fail with "no route to host"
-
-LumenDesk sends commands to the address a scan reply arrived *from*, not the address the device announces in that reply. Govee firmware fixes its announced address when it joins the network and keeps announcing it after a DHCP renewal, so the two can disagree; when they do, the app logs the mismatch and uses the address that provably works.
-
-If a light still stops answering, it has usually powered off or moved networks. LumenDesk marks it as not seen recently rather than raising an error, and a rescan picks it back up at its new address.
-
-### Govee bulbs do not appear
-
-- Open the Govee Home app.
-- Select the device.
-- Open device settings.
-- Enable **LAN Control**.
-- Confirm the model supports Govee's LAN API.
-- Quit other LAN-control tools that might already be bound to UDP `4002` on the same machine.
-
-### LIFX bulbs appear but do not respond
-
-- Check that the bulbs and controller are on the same subnet.
-- Some routers treat broadcast and UDP replies differently across bands or VLANs; try the same Wi-Fi band.
-- Reboot the bulb and scan again.
-- Confirm no firewall rule is blocking UDP `56700`.
-
-### iPhone finds fewer lights than Mac
-
-- Without Apple's multicast entitlement, iOS has only the unicast sweep, so a light that answers broadcast but not a direct probe is invisible there.
-- Make sure the iPhone's IP address is in the same subnet range as the bulbs.
-- If your home network is larger than a `/24` or segmented, only the `/24` around the phone's own address is probed; test from the same Wi-Fi segment as the bulbs.
-
-### Govee bind errors
-
-If LumenDesk reports a bind failure for Govee, another app may already be listening on UDP `4002`. Quit other Govee LAN clients, Home Assistant integrations running locally, command-line experiments, or bridge tools, then reopen LumenDesk.
-
-### Schedules do not fire
-
-- LumenDesk must be running for schedules to be evaluated.
-- Confirm the schedule entry is enabled.
-- Confirm the selected weekdays include today.
-- Check the room automation pause state.
-- Review Missed Automations for skipped entries.
-- Verify configured sunrise and sunset times if using solar-style actions.
-
-### Segment colors do not change
-
-- Confirm the device is a segmented RGBIC or RGBICW model (including H612B Strip Light S, COB strips, string lights, neon ropes, curtains, and supported multi-zone lamps). Single-zone bulbs and plain RGB strips ignore segment commands.
-- Make sure **LAN Control** is enabled and normal color changes from LumenDesk already work.
-- If an adjustable strip or expandable bulb string does not line up with the editor, set its unit count to match Govee Home. H60B0 and H70C Christmas strings use their fixed hardware counts.
-- Live preview and applied layouts are separate: preview uses a volatile streaming mode, while **Apply to Light** writes the durable state. If a layout disappears when the studio closes, it was previewed but never applied.
-- On string, curtain, and permanent-outdoor lights (H70Cx, H70Bx, H702x, H705x), applied layouts are **held by LumenDesk**, not stored in the light — their firmware has no segment memory. The layout re-applies automatically while LumenDesk runs; if LumenDesk quits, the lights fall back to their built-in state until it next launches.
-- A firmware update in the Govee Home app can help on devices that predate LAN segment support.
-
-### Music Mode does not respond
-
-- On **macOS**, Music Mode reacts to **system audio from any app**. Make sure something is actually playing; there is no musical input to analyze during silence. **Audio file** and **MIDI clock** are the other sources when the system mix is not what you want.
-- Grant **Screen Recording** to LumenDesk (macOS) or **microphone** access (iOS) when prompted. MIDI clock needs the MIDI entitlement and a connected interface or IAC bus.
-- Open **Room → Music**, choose a room and preset, then select **Start**.
-- Confirm the audio is loud enough for the input being monitored.
-- Stop and restart Music Mode after changing permissions.
-- A fixture set to **Off** or excluded from the topology is left untouched on purpose.
-
-### Music Mode is not in time with the music
-
-- Watch the readout under the beat indicator. It shows **BPM** once the tempo locks, which normally takes about four seconds of steady rhythm, and reads **Beat** while no tempo is detected.
-- While it reads **Beat**, the show is reacting to onsets instead of following a grid. That is expected for ambient, spoken word, freely-timed acoustic material, and the opening seconds of a track.
-- Rubato, heavy tempo drift, and dense percussion with no clear pulse are the usual reasons a tempo never locks.
-- The show follows the tempo, not your preset: raise **Beat sensitivity** for a deeper pulse and **Color change** for more frequent colour changes on bar lines.
-
-### Music Mode and system audio (Screen Recording, macOS)
-
-On macOS, Music Mode analyzes the **system-audio mix** as its **default** source. It is not an Apple Music-specific feed and does not use the microphone, so room noise never mixes into the analysis. System audio is captured through ScreenCaptureKit, which macOS gates behind the **Screen Recording** permission:
-
-- The first time you start Music Mode without the permission, macOS shows the Screen Recording prompt. Turn on **LumenDesk** in System Settings, return to LumenDesk, and start Music Mode again. LumenDesk re-checks the permission live on every start, so a relaunch is normally unnecessary.
-- If the permission is still off, LumenDesk shows a message pointing you to **System Settings → Privacy & Security → Screen & System Audio Recording** (called **Screen Recording** before macOS 15). Enable LumenDesk there and start Music Mode again.
-- macOS shows the permission prompt only the first time; after that LumenDesk points you to System Settings instead. LumenDesk **never** silently falls back to the microphone on macOS — if it can't read system audio, it tells you why instead of reacting to room noise.
-
-> **Note (developer builds):** Debug builds disable Xcode's automatic Launch Services registration so test products in temporary DerivedData folders do not become permission-relaunch candidates. Music Mode refreshes the currently running bundle's registration immediately before asking for access. A Screen Recording grant is also tied to the app's code signature. An unsigned or ad-hoc-signed build can still be re-prompted after rebuilding, so `project.yml` and the committed project both set `DEVELOPMENT_TEAM` to `SW2N54YNK3` for a stable signing identity. If you are not on that team, pick your own in **Signing & Capabilities** (a free personal team is enough); Xcode opens `LumenDesk.xcodeproj`, so editing `project.yml` on its own changes nothing unless you also run `xcodegen generate`.
-
-On **iOS**, Music Mode uses the **microphone** by default (there is no system-audio capture on iOS); grant microphone access when prompted. **Audio file → Choose audio file → Start Music Mode** is the path for a track the microphone cannot hear.
-
-## Protocol references
-
-- LIFX LAN protocol: <https://lan.developer.lifx.com/docs>
-- Govee LAN API: <https://app-h5.govee.com/user-manual/wlan-guide>
-- Govee `razer` streaming packets (community-documented, used for live segment preview): OpenRGB's Govee controller, <https://gitlab.com/CalcProgrammer1/OpenRGB>
-- Govee `ptReal` Bluetooth-format command relay (community-documented, used for durable segment layouts): govee2mqtt, <https://github.com/wez/govee2mqtt>
-
-## Development notes
-
-- LumenDesk uses SwiftUI and an `ObservableObject` manager for app state.
-- Persistent app state is stored through user defaults and JSON-encoded values.
-- Network transport is implemented with local UDP sockets rather than vendor SDKs.
-- The app is sandboxed and uses network client/server entitlements for LAN communication.
-- The macOS target includes a Settings scene, command menus, import/export panels, and a menu bar extra.
+The CI workflow also builds a generic iOS device target and runs static
+analysis. LAN discovery, permissions, VoiceOver, and real fixture rendering
+still require device-level verification.
+
+## Architecture
+
+- `RoomCanvasView.swift` — room session, live canvas, selection inspector,
+  Looks, commissioning, and simplified Live UI
+- `ThemePlanner.swift` — pure, deterministic capability-aware Look planning
+- `LightManager.swift` — foreground command transactions, recovery snapshots,
+  observation reconciliation, and vendor orchestration
+- `CommandCoordinator.swift` — bounded/coalesced command lifecycle and
+  best-effort confirmation
+- `SQLiteStateDatabase.swift` — versioned SQLite Rooms/Looks store and backup
+- `PersistenceStore.swift` — migration and portable Room/Look archive boundary
+- `Services/LIFX`, `Services/Govee`, `Services/Nanoleaf` — native local protocol
+  implementations
+
+The source-to-implementation matrix and environment-limited verification log
+are in [`docs/direction-a-implementation.md`](docs/direction-a-implementation.md).
 
 ## License
 
-LumenDesk is released under the [MIT License](LICENSE).
+LumenDesk source is available under the repository [`LICENSE`](LICENSE).
+Bundled font notices are retained beside their binaries in
+`LumenDesk/Resources/Fonts`.

@@ -53,6 +53,10 @@ final class LightManager: ObservableObject {
     @Published private(set) var activeEffects: [LightScope: String] = [:]
     @Published private(set) var activityEvents: [ActivityEvent] = []
     @Published private(set) var lastSceneResult: SceneApplicationResult?
+    /// Fixtures whose observed state changed without a LumenDesk command in
+    /// flight. Direction A keeps this fact in the room instead of quietly
+    /// replacing the user's intent or hiding another controller's action.
+    @Published private(set) var externallyChangedDeviceIDs: Set<String> = []
     @Published private(set) var favoriteOrder: [FavoriteReference] = []
     @Published private(set) var parliamentMembers: [ParliamentMember] = []
     @Published private(set) var parliamentSessions: [ParliamentSession] = []
@@ -337,14 +341,16 @@ final class LightManager: ObservableObject {
         }
         if discover { scan() }
         startBackgroundServices()
-        logActivity(.system, title: "LumenDesk started", detail: "Local automation and discovery services are active.")
+        logActivity(.system, title: "LumenDesk started", detail: "Foreground discovery and room reconciliation are active.")
     }
 
     private func startBackgroundServices() {
         guard !hasStartedBackgroundServices else { return }
         hasStartedBackgroundServices = true
         scheduleRefresh()
-        startScheduleTimer()
+        // Direction A is deliberately foreground-only. Existing schedule data
+        // remains in backups for lossless migration, but no in-app scheduler
+        // is started and no command can run while the app is absent.
     }
 
     func scan() {
@@ -535,15 +541,23 @@ final class LightManager: ObservableObject {
         device.isStale = false
         let rgb = device.color.rgbComponents
         let hex = String(format: "#%02X%02X%02X", Int(rgb.r * 255), Int(rgb.g * 255), Int(rgb.b * 255))
+        let observed = ConfirmedDeviceState(
+            isOn: device.isOn,
+            brightness: device.brightness,
+            colorHex: hex,
+            kelvin: device.kelvin,
+            confirmedAt: Date()
+        )
+        if !confirmsPendingCommand,
+           !commandPendingIDs.contains(device.id),
+           !isEffectAnimating(device.id),
+           let previous = confirmedStates[device.id],
+           Self.materiallyDiffers(previous, observed) {
+            externallyChangedDeviceIDs.insert(device.id)
+        }
         commandCoordinator.recordObservation(
             deviceID: device.id,
-            confirmedState: ConfirmedDeviceState(
-                isOn: device.isOn,
-                brightness: device.brightness,
-                colorHex: hex,
-                kelvin: device.kelvin,
-                confirmedAt: Date()
-            ),
+            confirmedState: observed,
             confirmsPendingCommand: confirmsPendingCommand
         )
         if wasStale {
@@ -552,6 +566,20 @@ final class LightManager: ObservableObject {
             // which clears the razer overlay stream-hold layouts live in.
             reassertStreamHoldIfNeeded(device, forceModeEnable: true)
         }
+    }
+
+    private static func materiallyDiffers(
+        _ lhs: ConfirmedDeviceState,
+        _ rhs: ConfirmedDeviceState
+    ) -> Bool {
+        lhs.isOn != rhs.isOn
+            || abs(lhs.brightness - rhs.brightness) > 0.03
+            || lhs.colorHex != rhs.colorHex
+            || abs(lhs.kelvin - rhs.kelvin) > 100
+    }
+
+    func acknowledgeExternalChange(deviceIDs: Set<String>) {
+        externallyChangedDeviceIDs.subtract(deviceIDs)
     }
 
     private func reportedStateMatchesExpectation(
@@ -689,6 +717,7 @@ final class LightManager: ObservableObject {
     // MARK: - Command queue and confirmed state
 
     private func enqueueCommand(for device: LightDevice, coalescingKey: String, summary: String, debounce: TimeInterval = 0.08, operation: @escaping @MainActor () -> Void) {
+        externallyChangedDeviceIDs.remove(device.id)
         let simulated = isDemoMode ? CommandCoordinator.SimulatedCommand(
             isStale: { [weak device] in device?.isStale ?? true },
             didFail: { [weak self, weak device] in
@@ -974,7 +1003,7 @@ final class LightManager: ObservableObject {
 
         var message = "Applied “\(theme.name)” to \(targets.count) light\(targets.count == 1 ? "" : "s")\(suffix)."
         if let adaptation = plan.adaptationSummary { message += " \(adaptation)" }
-        publishError(message)
+        lastActionSummary = message
         logActivity(.command, title: "Theme applied",
                     detail: "\(theme.name): \(targets.count) lights, \(theme.distribution.displayName.lowercased())")
     }
@@ -1018,7 +1047,11 @@ final class LightManager: ObservableObject {
     /// Sends one fixture's share of a theme down whichever path its hardware
     /// understands. Undo was recorded once for the whole batch and the toast is
     /// published once at the end, so every call here stays quiet.
-    private func applyThemePlan(_ plan: ThemeFixturePlan, to device: LightDevice) {
+    private func applyThemePlan(
+        _ plan: ThemeFixturePlan,
+        to device: LightDevice,
+        transitionDuration: TimeInterval = 1.8
+    ) {
         device.isOn = true
         device.kelvin = plan.kelvin
         sendPower(device, on: true)
@@ -1028,7 +1061,8 @@ final class LightManager: ObservableObject {
             // value is bookkeeping for the UI rather than a second command.
             device.brightness = plan.brightness
             device.color = plan.tone.displayColor
-            applyLIFXMatrix(device, state: matrix, recordUndo: false, turnOn: false, announce: false)
+            applyLIFXMatrix(device, state: matrix, recordUndo: false, turnOn: false,
+                            announce: false, transitionDuration: transitionDuration)
             return
         }
 
@@ -1047,7 +1081,8 @@ final class LightManager: ObservableObject {
                 tones: tones.map { (hue: $0.hue, saturation: $0.saturation, level: $0.level) },
                 layout: layout, rotationDegrees: Double(shapes.displayOrientation(device.id)))
             device.brightness = plan.brightness
-            showShapesDesign(design, on: device)
+            showShapesDesign(design, on: device,
+                             transition: max(1, Int((transitionDuration * 10).rounded())))
             sendBrightness(device, value: plan.brightness)
             return
         }
@@ -1059,7 +1094,7 @@ final class LightManager: ObservableObject {
         let color = plan.tone.displayColor
         device.brightness = plan.brightness
         device.color = color
-        sendColor(device, color: color)
+        sendColor(device, color: color, transitionDuration: transitionDuration)
         if device.brand == .govee { sendBrightness(device, value: plan.brightness) }
     }
 
@@ -1533,7 +1568,12 @@ final class LightManager: ObservableObject {
         }
     }
 
-    private func sendColor(_ device: LightDevice, color: Color, debounce: TimeInterval = 0.08) {
+    private func sendColor(
+        _ device: LightDevice,
+        color: Color,
+        debounce: TimeInterval = 0.08,
+        transitionDuration: TimeInterval = 0.2
+    ) {
         if device.brand == .lifx { markLIFXMatrixInactive(device) }
         expectColor(device, color: color)
         expectNanoleafAppearance(device, appearance: .init(colorMode: "hs"))
@@ -1544,7 +1584,11 @@ final class LightManager: ObservableObject {
             case .lifx:
                 let hsb = color.hsbComponents
                 let lifxColor = LIFXHSBK(hue: UInt16(hsb.h * 65535), saturation: UInt16(hsb.s * 65535), brightness: UInt16(self.boundedBrightness(device.brightness) * 65535), kelvin: UInt16(min(9000, max(1200, device.kelvin))))
-                self.lifx?.setColor(macHex: device.backendID, color: lifxColor)
+                self.lifx?.setColor(
+                    macHex: device.backendID,
+                    color: lifxColor,
+                    durationMS: UInt32(max(0, min(60_000, Int(transitionDuration * 1_000))))
+                )
             case .nanoleaf:
                 let hsb = color.hsbComponents
                 self.shapes.outputReplaced(device.id, by: .solid)
@@ -2312,7 +2356,8 @@ extension LightManager {
 
     func applyLIFXMatrix(_ device: LightDevice, state: LIFXMatrixState,
                          recordUndo: Bool = true, turnOn: Bool = true,
-                         announce: Bool = true) {
+                         announce: Bool = true,
+                         transitionDuration: TimeInterval = 0.25) {
         guard device.isLIFXLuna else { return }
         if recordUndo {
             if device.isStale {
@@ -2338,7 +2383,8 @@ extension LightManager {
             lifx?.setMatrixColors(
                 macHex: device.backendID,
                 colors: next.colors.map(\.hsbk),
-                width: next.width
+                width: next.width,
+                durationMS: UInt32(max(0, min(60_000, Int(transitionDuration * 1_000))))
             )
         }
         if announce {
@@ -2975,6 +3021,112 @@ extension LightManager {
         logActivity(.scene, title: "Scene captured", detail: "\(trimmed): \(snapshots.count) lights")
     }
 
+    /// Direction A's durable room composition. `LightingScene` remains the
+    /// archive type so every existing scene migrates losslessly; the product
+    /// now presents the object consistently as a Look.
+    @discardableResult
+    func captureLook(name: String, deviceIDs: Set<String>) -> LightingScene? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let targets = devices.filter { deviceIDs.contains($0.id) }
+        guard !trimmed.isEmpty, !targets.isEmpty else { return nil }
+
+        var snapshots: [String: DeviceSnapshot] = [:]
+        for device in targets {
+            let hsb = device.color.hsbComponents
+            snapshots[device.id] = DeviceSnapshot(
+                isOn: device.isOn,
+                brightness: device.brightness,
+                hue: hsb.h,
+                saturation: hsb.s,
+                kelvin: device.kelvin,
+                segments: activeSegmentState(for: device.id),
+                matrix: activeLIFXMatrixState(for: device.id),
+                nanoleafAppearance: device.nanoleafAppearance,
+                nanoleafDesign: device.brand == .nanoleaf
+                    ? shapes.showingDesign(for: device.id) : nil
+            )
+        }
+        let look = LightingScene(name: trimmed, snapshots: snapshots)
+        scenes.append(look)
+        persistApplicationState()
+        lastActionSummary = "Saved Look “\(trimmed)”"
+        logActivity(.scene, title: "Look saved", detail: "\(trimmed): \(snapshots.count) fixtures")
+        return look
+    }
+
+    /// Applies only the part of a migrated or saved Look that belongs to the
+    /// open room. A Look can therefore survive fixture moves without reaching
+    /// into a different room.
+    func applyLook(_ look: LightingScene, deviceIDs: Set<String>) {
+        let snapshots = look.snapshots.filter { deviceIDs.contains($0.key) }
+        guard !snapshots.isEmpty else {
+            publishError("“\(look.name)” has no fixtures in this room.")
+            return
+        }
+        applyScene(
+            LightingScene(id: look.id, name: look.name,
+                          snapshots: snapshots, createdAt: look.createdAt),
+            allowTurningOff: true,
+            reviewed: true,
+            allowUnavailableTargets: true
+        )
+    }
+
+    /// A live, reversible preview using the same pure renderer and transport
+    /// branches as Apply. Leaving the composer restores the exact opening
+    /// power, brightness, colour, segment, matrix, and panel state.
+    func startLookPreview(
+        _ theme: LightingTheme,
+        deviceIDs: Set<String>,
+        transitionDuration: TimeInterval = 1.8
+    ) {
+        stopSceneRehearsal(restore: true)
+        let targets = devices.filter { deviceIDs.contains($0.id) }
+        guard !targets.isEmpty else {
+            publishError("Select at least one fixture to preview this Look.")
+            return
+        }
+        cancelIdentifications(deviceIDs: deviceIDs, restore: true)
+        stopEffects(touching: deviceIDs)
+        cancelPendingBrightness(deviceIDs: deviceIDs)
+        rehearsalSnapshot = targets.map(snapshot)
+        rehearsalSceneID = UUID()
+
+        let plan = ThemePlanner.plan(theme, fixtures: targets.map(themeFixture))
+        let plans = Dictionary(plan.fixtures.map { ($0.fixtureID, $0) },
+                               uniquingKeysWith: { first, _ in first })
+        for device in targets {
+            guard let fixturePlan = plans[device.id] else { continue }
+            applyThemePlan(fixturePlan, to: device, transitionDuration: transitionDuration)
+        }
+        var summary = "Previewing “\(theme.name)”"
+        if let adaptation = lookAdaptationSummary(theme, deviceIDs: deviceIDs) {
+            summary += " — \(adaptation)"
+        }
+        lastActionSummary = summary
+    }
+
+    /// Plain-language, capability-aware disclosure for the composer.
+    func lookAdaptationSummary(
+        _ theme: LightingTheme,
+        deviceIDs: Set<String>
+    ) -> String? {
+        let targets = devices.filter { deviceIDs.contains($0.id) }
+        guard !targets.isEmpty else { return nil }
+        let plan = ThemePlanner.plan(theme, fixtures: targets.map(themeFixture))
+        var parts: [String] = []
+        if plan.solidCount > 0, theme.colors.count > 1 {
+            parts.append("\(plan.solidCount) single-colour fixture\(plan.solidCount == 1 ? "" : "s") hold one palette colour each")
+        }
+        if plan.spatialCount > 0 {
+            parts.append("\(plan.spatialCount) spatial fixture\(plan.spatialCount == 1 ? " carries" : "s carry") the palette across its surface")
+        }
+        if plan.zoneLimitedCount > 0 {
+            parts.append("\(plan.zoneLimitedCount) fixture\(plan.zoneLimitedCount == 1 ? " is" : "s are") limited to its active zones")
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: "; ") + "."
+    }
+
     func applyScene(_ scene: LightingScene) {
         applyScene(scene, allowTurningOff: true, reviewed: false)
     }
@@ -2985,8 +3137,8 @@ extension LightManager {
         confirmationCoordinator.request(
             .init(
                 title: "Delete “\(scene.name)”?",
-                message: "The scene will be removed from the library and favorites. You can undo the deletion afterward.",
-                confirmTitle: "Delete Scene",
+                message: "The Look will be removed from this room’s shelf. You can undo the deletion afterward.",
+                confirmTitle: "Delete Look",
                 role: .destructive
             ),
             action: { [weak self] in self?.performDeleteScene(sceneID) }
@@ -3000,7 +3152,7 @@ extension LightManager {
         scenes.remove(at: idx)
         favoriteSceneIDs.remove(sceneID)
         reconcileFavoriteOrder()
-        publishError("Scene “\(deleted.name)” deleted.") { self.undoDeleteScene() }
+        publishError("Look “\(deleted.name)” deleted.") { self.undoDeleteScene() }
     }
 
     func undoDeleteScene() {
@@ -3965,7 +4117,7 @@ extension LightManager {
             return "Neither protocol could open a socket. Another app may hold UDP 4002, or the app was denied network access."
         }
         if govee == nil {
-            return "Govee could not bind UDP 4002. Quit the Govee Home desktop app, the LumenDesk web bridge, or a second copy of LumenDesk, then scan again."
+            return "Govee could not bind UDP 4002. Quit another local lighting app or a second copy of LumenDesk, then scan again."
         }
         if scanInterfaces.isEmpty {
             return "No active IPv4 network interface. Join a Wi-Fi network or plug in Ethernet, then scan again."
@@ -4159,6 +4311,11 @@ extension LightManager {
         lastSceneResult = SceneApplicationResult(scene: scene, allowTurningOff: allowTurningOff,
                                                 succeededIDs: result.succeeded, failedIDs: result.failed,
                                                 skippedOffIDs: result.skipped)
+        if result.failed.isEmpty {
+            lastActionSummary = "Applied Look “\(scene.name)” to \(result.succeeded.count) fixture\(result.succeeded.count == 1 ? "" : "s")"
+        } else {
+            publishError("Applied “\(scene.name)” to \(result.succeeded.count) fixture\(result.succeeded.count == 1 ? "" : "s"); \(result.failed.count) need\(result.failed.count == 1 ? "s" : "") attention.")
+        }
         logActivity(.scene, title: "Scene applied", detail: "\(scene.name): \(result.succeeded.count) succeeded, \(result.failed.count) need retry", isFailure: !result.failed.isEmpty)
     }
 

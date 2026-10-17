@@ -386,7 +386,6 @@ struct ScenePreviewView: View {
 
 struct LumenDeskSettingsView: View {
     @EnvironmentObject var manager: LightManager
-    @AppStorage("LumenDesk.workspaceLayout.v1") private var layout = WorkspaceLayout.automatic.rawValue
     @AppStorage("LumenDesk.interfaceDensity.v1") private var density = InterfaceDensity.comfortable.rawValue
     @AppStorage(AppPreferenceKey.quietInterface) private var quietInterface = false
     @AppStorage(AppPreferenceKey.confirmationPolicy) private var confirmationPolicy = ConfirmationPolicy.balanced.rawValue
@@ -397,7 +396,6 @@ struct LumenDeskSettingsView: View {
     var body: some View {
         TabView {
             Form {
-                Picker("Workspace layout", selection: $layout) { ForEach(WorkspaceLayout.allCases) { Text($0.title).tag($0.rawValue) } }
                 Picker("Interface density", selection: $density) { ForEach(InterfaceDensity.allCases) { Text($0.title).tag($0.rawValue) } }
                 Picker("Confirmation policy", selection: $confirmationPolicy) { ForEach(ConfirmationPolicy.allCases) { Text($0.title).tag($0.rawValue) } }
                 Text("Balanced runs reversible actions immediately with Undo; imports always confirm. Cautious also confirms broad, scene, and delete actions.").font(.caption).foregroundStyle(.secondary)
@@ -405,7 +403,7 @@ struct LumenDeskSettingsView: View {
 
             Form {
                 Toggle("Quiet interface", isOn: $quietInterface)
-                Text("Removes ornamental motion, translucent decoration, and nonessential visual activity. System Reduce Motion and Reduce Transparency are respected automatically.").font(.caption).foregroundStyle(.secondary)
+                Text("Reduces decorative motion and color glow while keeping light output and status visible. System Reduce Motion and Reduce Transparency are also respected.").font(.caption).foregroundStyle(.secondary)
             }.padding(20).tabItem { Label("Appearance", systemImage: "paintbrush") }
 
             Form {

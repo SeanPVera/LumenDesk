@@ -136,7 +136,7 @@ try {
   await music.getByRole('button', { name: 'Microphone', exact: true }).click()
   await expect(music.getByText(/Selected for the next start: Microphone/)).toBeVisible()
   assert.equal((await requests()).microphone, beforeMicrophone)
-  await expect(music.locator('.music-transport')).toContainText('Running · Demo groove')
+  await expect(music.locator('.music-transport-controls')).toContainText('Running · Demo groove')
   const beforeFailedRestart = restores().length
   await music.getByRole('button', { name: 'Restart', exact: true }).click()
   await expect(music.getByRole('alert')).toContainText('Microphone access denied.')
@@ -172,7 +172,7 @@ try {
   // while idle room selection remains usable. Retry must unblock Start.
   await expectRoom('lounge', 'Reading lamp')
   await music.getByRole('button', { name: 'Start', exact: true }).click()
-  await expect(music.locator('.music-transport')).toContainText('Running · Demo groove')
+  await expect(music.locator('.music-transport-controls')).toContainText('Running · Demo groove')
   refuseRestore = true
   await music.getByRole('button', { name: 'Stop', exact: true }).click()
   await expect(music.getByRole('alert')).toContainText('Starting light output could not be sent.')

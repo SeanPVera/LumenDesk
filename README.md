@@ -39,9 +39,9 @@ The same `LumenDesk` target is multiplatform and can be built for Mac or iPhone 
 
 There is also a web client at <https://seanpvera.github.io/LumenDesk/> that controls the same LIFX, Govee and Nanoleaf Shapes and Aurora lights.
 
-Browsers cannot open the raw UDP sockets these protocols need, so the web client pairs with a small local bridge that does the networking for you. Download the **LumenDesk Bridge** package for your computer from [Releases](https://github.com/SeanPVera/LumenDesk/releases). The package includes the runtime and browser app; open the launcher to start the bridge and your browser, and keep it running while using lights or schedules. The macOS menu and Windows tray offer Open and Quit; Linux includes Start and Stop shortcuts. See [bridge packaging](docs/BRIDGE_DISTRIBUTION.md) for first-run instructions.
+Browsers cannot open the raw UDP sockets these protocols need, so the web client pairs with a small local bridge that does the networking for you. Get a **LumenDesk Bridge** preview from the latest successful **main** run of [Package browser bridge](https://github.com/SeanPVera/LumenDesk/actions/workflows/bridge-packages.yml?query=branch%3Amain). Sign in to GitHub, scroll to Artifacts, choose your computer's platform and unpack the downloaded zip. The package includes the runtime and browser app; open the launcher to start the bridge and your browser, and keep it running while using lights or schedules. The macOS menu and Windows tray offer Open and Quit; Linux includes Start and Stop shortcuts. See [bridge packaging](docs/BRIDGE_DISTRIBUTION.md) for first-run instructions.
 
-Bridge packages are produced by this change and become release downloads when the next release is published. If your release does not list them yet, build from source with [Node.js](https://nodejs.org/) 20 or newer:
+Release Assets may also contain `LumenDesk-Bridge` packages; older releases without those files do not include the bridge. To run from source with [Node.js](https://nodejs.org/) 20 or newer:
 
 ```sh
 git clone --depth 1 https://github.com/SeanPVera/LumenDesk.git

@@ -4,6 +4,8 @@ import SwiftUI
 /// lights, rooms, and scenes. Hidden entirely when nothing is pinned.
 struct FavoritesStripView: View {
     @EnvironmentObject var manager: LightManager
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @AppStorage(AppPreferenceKey.quietInterface) private var quietInterface = false
     @State private var showingOrganizer = false
 
     var body: some View {
@@ -34,10 +36,10 @@ struct FavoritesStripView: View {
                         .padding(.vertical, 2)
                     }
                 }
-                .transition(.opacity.combined(with: .move(edge: .top)))
+                .transition(reduceMotion || quietInterface ? .identity : .opacity.combined(with: .move(edge: .top)))
             }
         }
-        .animation(.spring(duration: 0.35), value: hasFavorites)
+        .animation(reduceMotion || quietInterface ? nil : .spring(duration: 0.35), value: hasFavorites)
         .onAppear { manager.reconcileFavoriteOrder() }
         .onChange(of: hasFavorites) { _ in manager.reconcileFavoriteOrder() }
         .sheet(isPresented: $showingOrganizer) { FavoriteOrganizerView().environmentObject(manager) }

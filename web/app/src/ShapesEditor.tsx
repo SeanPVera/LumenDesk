@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type SetStateAction } from 'react'
 import { type Device, type RGB, hexToRGB, rgbToHex } from './bridge'
 import { type Direction, bounds, createScreenTransform, fit, neighbor, normalizeDegrees, panelNumbers } from './shapes/geometry'
 import { type Tone, toRGB, toTone } from './shapes/tone'
@@ -9,6 +9,65 @@ import { type Tone, toRGB, toTone } from './shapes/tone'
 // as one static per-panel display. Nothing reaches the wall before Apply.
 
 type Draft = Record<number, Tone>
+type DraftSession = { draft: Draft | null; selected: number[]; undo: Draft[]; redo: Draft[] }
+
+// The editor unmounts when a wall is deselected or the user changes rooms or
+// sections. Keep unapplied work per wall for as long as this browser tab lives.
+const draftSessions = new Map<string, DraftSession>()
+const draftListeners = new Map<string, Set<() => void>>()
+const emptyDraftSession: DraftSession = { draft: null, selected: [], undo: [], redo: [] }
+
+function draftSession(deviceID: string): DraftSession {
+  return draftSessions.get(deviceID) ?? emptyDraftSession
+}
+
+function updateDraftSession(deviceID: string, update: (current: DraftSession) => DraftSession) {
+  const current = draftSession(deviceID)
+  const next = update(current)
+  if (next === current) return
+  if (!next.draft && !next.selected.length && !next.undo.length && !next.redo.length) draftSessions.delete(deviceID)
+  else draftSessions.set(deviceID, next)
+  draftListeners.get(deviceID)?.forEach(listener => listener())
+}
+
+function useDraftSession(deviceID: string) {
+  const subscribe = useCallback((listener: () => void) => {
+    const listeners = draftListeners.get(deviceID) ?? new Set<() => void>()
+    listeners.add(listener)
+    draftListeners.set(deviceID, listeners)
+    return () => {
+      listeners.delete(listener)
+      if (!listeners.size) draftListeners.delete(deviceID)
+    }
+  }, [deviceID])
+  const session = useSyncExternalStore(subscribe, useCallback(() => draftSession(deviceID), [deviceID]), () => emptyDraftSession)
+  const [restoredDraft, setRestoredDraft] = useState(() => Boolean(draftSession(deviceID).draft))
+  useEffect(() => { if (!session.draft) setRestoredDraft(false) }, [session.draft])
+  const setSelected = (next: SetStateAction<number[]>) => {
+    updateDraftSession(deviceID, current => ({ ...current,
+      selected: typeof next === 'function' ? next(current.selected) : next }))
+  }
+  const setDraft = (next: SetStateAction<Draft | null>) => {
+    updateDraftSession(deviceID, current => {
+      const value = typeof next === 'function' ? next(current.draft) : next
+      // Apply can finish after navigation. Compare against the latest shared
+      // draft, so an older response cannot erase work made in the new editor.
+      return value === current.draft ? current : { ...current, draft: value }
+    })
+    const value = draftSession(deviceID).draft
+    if (!value) setRestoredDraft(false)
+  }
+  const setUndo = (next: SetStateAction<Draft[]>) => {
+    updateDraftSession(deviceID, current => ({ ...current,
+      undo: typeof next === 'function' ? next(current.undo) : next }))
+  }
+  const setRedo = (next: SetStateAction<Draft[]>) => {
+    updateDraftSession(deviceID, current => ({ ...current,
+      redo: typeof next === 'function' ? next(current.redo) : next }))
+  }
+  return { selected: session.selected, setSelected, draft: session.draft, setDraft,
+    undo: session.undo, setUndo, redo: session.redo, setRedo, restoredDraft }
+}
 
 export interface ShapesActions {
   orientation: (degrees: number) => Promise<unknown>
@@ -79,12 +138,9 @@ export function ShapesEditor({ device, actions }: { device: Device; actions: Sha
   const shapes = device.shapes!
   const geometry = shapes.geometry!
   const key = useId().replace(/:/g, '')
-  const [selected, setSelected] = useState<number[]>([])
+  const { selected, setSelected, draft, setDraft, undo, setUndo, redo, setRedo, restoredDraft } = useDraftSession(device.id)
   const [cursor, setCursor] = useState<number | null>(null)
   const [draftDegrees, setDraftDegrees] = useState<number | null>(null)
-  const [draft, setDraft] = useState<Draft | null>(null)
-  const [undo, setUndo] = useState<Draft[]>([])
-  const [redo, setRedo] = useState<Draft[]>([])
   const [startHex, setStartHex] = useState('#ffffff')
   const [hexText, setHexText] = useState('')
   const [message, setMessage] = useState<string | null>(null)
@@ -228,6 +284,7 @@ export function ShapesEditor({ device, actions }: { device: Device; actions: Sha
       </div>
       {shapes.problem && <p className="note attention">The latest layout reading was damaged, so the last good layout is shown. {shapes.problem}</p>}
       {shapes.lastFailure && <p className="note attention">{shapes.lastFailure}</p>}
+      {restoredDraft && draft && <p className="note" role="status">Your unapplied panel draft was restored. Your panel selection and undo history are here too. Apply it to the wall or discard it when finished.</p>}
       {device.needsPairing && <p className="note attention">The controller no longer accepts this bridge. Pair it again in Devices.</p>}
       {missing > 0 && <p className="note attention">{missing} selected panel{missing === 1 ? ' is' : 's are'} no longer in the wall’s layout.</p>}
       <div className="shapes-layout">
@@ -272,8 +329,17 @@ export function ShapesEditor({ device, actions }: { device: Device; actions: Sha
               )
             })}
           </svg>
+          <p className="note shapes-panel-buttons-intro">Select a panel by number:</p>
+          <div className="shapes-panel-buttons" role="group" aria-label="Select panels by number">
+            {ordered.map(panel => <button key={panel.panelID} type="button"
+              aria-label={`Panel ${numbers[panel.panelID]}, ${panel.name}`}
+              aria-pressed={selection.includes(panel.panelID)}
+              onClick={() => { setCursor(panel.panelID); toggle(panel.panelID) }}>
+              {numbers[panel.panelID]}
+            </button>)}
+          </div>
           <p className="note">
-            {draft ? 'Draft: not on the wall until you apply it.' : 'What the wall shows now.'} A tick and a white
+            {draft ? 'Draft: not on the wall until you apply it. It stays in this browser tab if you leave this wall.' : 'What the wall shows now.'} A tick and a white
             edge mark a selected panel, a dashed edge an unlit one, hatching and a ? a colour that can’t be read.
             Colours are drawn before the wall’s brightness ({device.brightness}%).
           </p>

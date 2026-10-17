@@ -18,8 +18,10 @@ telemetry. The bridge binds loopback only (`127.0.0.1`) by default.
 
 The **Package browser bridge** workflow builds self-contained previews for
 macOS Apple silicon and Intel, Windows x64, and Linux x64. Download an artifact
-from a successful [workflow run](https://github.com/SeanPVera/LumenDesk/actions/workflows/bridge-packages.yml)
-and unpack the Actions artifact first. Tagged releases attach the resulting
+from the latest successful **main** [workflow run](https://github.com/SeanPVera/LumenDesk/actions/workflows/bridge-packages.yml?query=branch%3Amain).
+Sign in to GitHub, scroll to **Artifacts**, choose your platform and unpack the
+outer Actions zip first. Artifacts expire after 14 days; use a newer successful
+run if needed. Tagged releases attach the resulting
 `LumenDesk-Bridge-<version>-<platform>-<architecture>` packages alongside the
 native macOS app. Existing releases made before this packaging change do not
 contain bridge downloads.

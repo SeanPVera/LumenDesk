@@ -1185,8 +1185,10 @@ struct SettingsWorkspaceView: View {
     @AppStorage("LumenDesk.interfaceDensity.v1") private var density = InterfaceDensity.comfortable.rawValue
     @AppStorage(AppPreferenceKey.quietInterface) private var quietInterface = false
     @AppStorage(AppPreferenceKey.confirmationPolicy) private var confirmationPolicy = ConfirmationPolicy.balanced.rawValue
+    #if os(macOS)
     @AppStorage(AppPreferenceKey.menuBarScope) private var menuBarScope = MenuBarScope.activeRooms.rawValue
     @AppStorage(AppPreferenceKey.showMenuBarUrgentOnly) private var urgentOnly = false
+    #endif
     @AppStorage(AppPreferenceKey.audioPrivacyAcknowledged) private var audioAcknowledged = false
     @AppStorage("LumenDesk.hasOnboarded.v1") private var hasOnboarded = true
 
@@ -1217,10 +1219,11 @@ struct SettingsWorkspaceView: View {
 
                 SettingsSection(title: "Appearance & accessibility", icon: "accessibility") {
                     Toggle("Quiet interface", isOn: $quietInterface)
-                    Text("System Reduce Motion and Reduce Transparency settings are respected automatically. Status always includes text or a symbol.")
+                    Text("Reduces decorative motion and color glow while keeping light output and status visible. System Reduce Motion and Reduce Transparency are also respected.")
                         .font(.caption).foregroundStyle(Lumen.textSecondary)
                 }
 
+                #if os(macOS)
                 SettingsSection(title: "Menu bar", icon: "menubar.rectangle") {
                     SettingSelectorRow(title: "Content", selection: $menuBarScope,
                                        options: MenuBarScope.allCases.map {
@@ -1228,6 +1231,7 @@ struct SettingsWorkspaceView: View {
                                        })
                     Toggle("Show only rooms needing attention", isOn: $urgentOnly)
                 }
+                #endif
 
                 SettingsSection(title: "Privacy", icon: "hand.raised") {
                     Toggle("I understand local audio analysis", isOn: $audioAcknowledged)

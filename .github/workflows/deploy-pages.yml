@@ -99,6 +99,7 @@ jobs:
           node scripts/legacy-bridge-review.mjs
           node scripts/music-setup-review.mjs
           node scripts/music-timing-review.mjs
+          node scripts/music-recovery-review.mjs
 
       - name: Upload web visual review
         if: always()

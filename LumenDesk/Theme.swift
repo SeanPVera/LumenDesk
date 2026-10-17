@@ -239,22 +239,52 @@ enum LumenType {
     /// somebody writes.
     static let minimumSize: CGFloat = 12
 
+    /// Match existing point-size tiers to iOS Dynamic Type styles. macOS
+    /// keeps the existing point sizes and minimum below.
+    #if !os(macOS)
+    private static func textStyle(for size: CGFloat) -> Font.TextStyle {
+        switch max(size, minimumSize) {
+        case ...12: return .caption
+        case ...13: return .footnote
+        case ...15: return .subheadline
+        case ...17: return .body
+        case ...18: return .headline
+        case ...20: return .title3
+        case ...25: return .title2
+        case ...31: return .title
+        default: return .largeTitle
+        }
+    }
+    #endif
+
     /// Names and titles. Standard-width SF Pro, sentence case at call sites.
     static func display(size: CGFloat, weight: Font.Weight = .semibold) -> Font {
-        .system(size: max(size, minimumSize), weight: weight)
+        #if os(macOS)
+        return .system(size: max(size, minimumSize), weight: weight)
+        #else
+        return .system(textStyle(for: size), design: .default, weight: weight)
+        #endif
     }
 
     /// Measured values use system text with tabular digits. Technical identifiers
     /// opt into a monospace face at their call site.
     static func readout(size: CGFloat, weight: Font.Weight = .medium) -> Font {
-        .system(size: max(size, minimumSize), weight: weight).monospacedDigit()
+        #if os(macOS)
+        return .system(size: max(size, minimumSize), weight: weight).monospacedDigit()
+        #else
+        return .system(textStyle(for: size), design: .default, weight: weight).monospacedDigit()
+        #endif
     }
 
     /// Control labels. Sentence case in new code; the face is sans so that
     /// legacy call sites still uppercasing their text read as small caps
     /// rather than as engraving.
     static func instrumentLabel(size: CGFloat = 10) -> Font {
-        .system(size: max(size + 1, minimumSize), weight: .semibold)
+        #if os(macOS)
+        return .system(size: max(size + 1, minimumSize), weight: .semibold)
+        #else
+        return .system(textStyle(for: size + 1), design: .default, weight: .semibold)
+        #endif
     }
 }
 
@@ -484,9 +514,17 @@ private struct LumenKeyFace: View {
         return configuration.isPressed ? Lumen.lit : Lumen.chalk
     }
 
+    private var buttonFont: Font {
+        #if os(macOS)
+        return .system(size: compact ? 11.5 : 12.5, weight: .medium)
+        #else
+        return LumenType.display(size: compact ? 11.5 : 12.5, weight: .medium)
+        #endif
+    }
+
     var body: some View {
         configuration.label
-            .font(.system(size: compact ? 11.5 : 12.5, weight: .medium))
+            .font(buttonFont)
             .foregroundStyle(legend)
             .padding(.vertical, compact ? 6 : 9)
             .padding(.horizontal, compact ? 11 : 15)

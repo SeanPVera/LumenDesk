@@ -2,9 +2,17 @@
 
 The browser bridge packages include a pinned Node runtime, the built browser app,
 the local lighting bridge, and a launcher. Users do not need Node, git, npm, or a
-terminal. Packages become available in [Releases](https://github.com/SeanPVera/LumenDesk/releases)
-when the next release is published; pull requests also produce downloadable CI
-preview artifacts.
+terminal. Packaged previews are available from the
+[Package browser bridge workflow](https://github.com/SeanPVera/LumenDesk/actions/workflows/bridge-packages.yml?query=branch%3Amain).
+Sign in to GitHub, open the latest successful **main** run, and scroll to
+**Artifacts**. Choose `LumenDesk-Bridge-` followed by your computer's platform,
+download it, and unpack the outer Actions zip before opening the package inside.
+Artifacts expire after 14 days; use a newer successful run if a download has expired.
+
+Tagged [Releases](https://github.com/SeanPVera/LumenDesk/releases) include the same
+packages when their Assets section lists `LumenDesk-Bridge` files. Older releases
+without those files do not include the browser bridge. If you cannot use GitHub
+artifact downloads, follow [Run from source](../web/bridge/README.md#run-from-source).
 
 ## Install and open
 
@@ -18,8 +26,10 @@ preview artifacts.
 The launcher opens `http://127.0.0.1:8765` in your browser. On Mac, the **LD**
 menu-bar item offers Open and Quit. On Windows, use the tray icon. On Linux, use
 the **Stop LumenDesk Bridge** shortcut to stop the helper. Closing a browser tab
-keeps the bridge and schedules running. Stop Music and wait for its restoration
-before closing the browser.
+keeps the bridge and schedules running. Stop Music for immediate restoration.
+If its page closes or stops responding, the current bridge restores its starting
+output after five seconds without frames or heartbeats. Keep the bridge running
+until restoration finishes; newer manual changes take priority.
 
 Mac packages require macOS 13.5 or newer. Preview packages are ad-hoc signed and
 not notarized: after a blocked first launch, use **System Settings → Privacy &

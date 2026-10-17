@@ -18,8 +18,8 @@ enum ScheduleAction: String, Codable, CaseIterable {
         case .dim25:     return "Dim to 25%"
         case .dim50:     return "Dim to 50%"
         case .dim75:     return "Dim to 75%"
-        case .atSunrise: return "At Sunrise"
-        case .atSunset:  return "At Sunset"
+        case .atSunrise: return "Turn On at Sunrise"
+        case .atSunset:  return "Turn Off at Sunset"
         }
     }
 

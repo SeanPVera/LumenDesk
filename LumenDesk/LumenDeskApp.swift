@@ -50,11 +50,6 @@ struct LumenDeskApp: App {
                 Button("Import Configuration\u{2026}") { importConfiguration() }
             }
             CommandMenu("View") {
-                Picker("Layout", selection: Binding(
-                    get: { UserDefaults.standard.string(forKey: "LumenDesk.workspaceLayout.v1") ?? WorkspaceLayout.automatic.rawValue },
-                    set: { UserDefaults.standard.set($0, forKey: "LumenDesk.workspaceLayout.v1") }
-                )) { ForEach(WorkspaceLayout.allCases) { Text($0.title).tag($0.rawValue) } }
-                Divider()
                 Picker("Density", selection: Binding(
                     get: { UserDefaults.standard.string(forKey: "LumenDesk.interfaceDensity.v1") ?? InterfaceDensity.comfortable.rawValue },
                     set: { UserDefaults.standard.set($0, forKey: "LumenDesk.interfaceDensity.v1") }
@@ -136,6 +131,7 @@ struct LumenDeskApp: App {
 struct RootView: View {
     @EnvironmentObject var manager: LightManager
     @AppStorage("LumenDesk.hasOnboarded.v1") private var hasOnboarded = false
+    @AppStorage(AppPreferenceKey.quietInterface) private var quietInterface = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -148,7 +144,7 @@ struct RootView: View {
                     .transition(.opacity)
             }
         }
-        .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: hasOnboarded)
+        .animation(reduceMotion || quietInterface ? nil : .easeInOut(duration: 0.18), value: hasOnboarded)
         .managedActionConfirmations(manager)
         .onAppear { startReturningWorkspace() }
         .onChange(of: hasOnboarded) { _ in startReturningWorkspace() }
@@ -156,8 +152,8 @@ struct RootView: View {
     }
 
     private func startReturningWorkspace() {
-        // First-run network access begins only after Prepare explains it.
-        // Exploring the demo does not initialize live discovery services.
+        // Prepare explains network access; an early skip explicitly names the
+        // scan and permission prompt. Demo does not initialize live discovery.
         if hasOnboarded { manager.start() }
     }
 }

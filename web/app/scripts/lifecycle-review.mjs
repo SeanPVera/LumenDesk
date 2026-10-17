@@ -34,7 +34,7 @@ function initialState() {
   }
 }
 
-async function mockApp(browser, origin, { crossOrigin = false, prepareState } = {}) {
+async function mockApp(browser, origin, { crossOrigin = false, prepareState, prepareHandlers, waitForReady = true } = {}) {
   const context = await browser.newContext()
   await context.addInitScript(() => window.localStorage.setItem('LumenDesk.roomSetupDismissed.v1', 'true'))
   const page = await context.newPage()
@@ -44,10 +44,13 @@ async function mockApp(browser, origin, { crossOrigin = false, prepareState } = 
   const state = initialState()
   prepareState?.(state)
   const commands = []
-  const handlers = { paint: null, poll: null, restore: null }
+  const requests = []
+  const handlers = { paint: null, poll: null, restore: null, command: null }
+  prepareHandlers?.(handlers)
   await context.route('**/*', async route => {
     const url = new URL(route.request().url())
     const path = url.pathname
+    requests.push({ path, origin: url.origin })
     if (path === '/health') {
       if (crossOrigin && url.origin === origin) return route.fulfill({ status: 404, json: {} })
       return route.fulfill({ json: { ok: true, service: 'lumendesk-bridge' } })
@@ -59,6 +62,24 @@ async function mockApp(browser, origin, { crossOrigin = false, prepareState } = 
     if (route.request().method() === 'POST') {
       const data = route.request().postDataJSON()
       commands.push({ path, data })
+      const command = path.match(/^\/devices\/([^/]+)\/(power|brightness|color)$/)
+      if (command) {
+        if (handlers.command) return handlers.command(route, data, command)
+        const device = state.devices.find(device => device.id === decodeURIComponent(command[1]))
+        if (device) {
+          if (command[2] === 'power') device.power = data.on
+          if (command[2] === 'brightness') device.brightness = data.value
+          if (data.rgb) device.color = data.rgb
+          if (data.kelvin) device.kelvin = data.kelvin
+        }
+        return route.fulfill({ json: { device } })
+      }
+      if (path.match(/^\/rooms\/[^/]+\/schedules\/[^/]+$/) && url.searchParams.has('delete')) {
+        const [, , roomID, , scheduleID] = path.split('/')
+        const room = state.rooms.find(room => room.id === roomID)
+        room.schedules = room.schedules.filter(schedule => schedule.id !== scheduleID)
+        return route.fulfill({ json: { ok: true } })
+      }
       if (path.endsWith('/panels')) {
         if (handlers.paint) return handlers.paint(route, data)
         const wall = state.devices[1]
@@ -79,8 +100,8 @@ async function mockApp(browser, origin, { crossOrigin = false, prepareState } = 
     return route.abort()
   })
   await page.goto(origin)
-  await page.getByRole('heading', { name: 'Fixtures', exact: true }).waitFor()
-  return { context, page, state, commands, handlers, errors }
+  if (waitForReady) await page.getByRole('heading', { name: 'Fixtures', exact: true }).waitFor()
+  return { context, page, state, commands, requests, handlers, errors }
 }
 
 const frames = app => app.commands.filter(command => command.path === '/music/frame')
@@ -126,6 +147,15 @@ async function reviewPainting(browser, origin) {
     await expect(page.locator('.shapes-panel polygon').first()).not.toHaveAttribute('fill', '#304050')
     await page.getByRole('button', { name: 'Redo', exact: true }).click()
     await expect(page.locator('.shapes-panel polygon').first()).toHaveAttribute('fill', '#304050')
+    // Ordinary navigation and fixture selection must preserve unapplied work.
+    await page.getByRole('button', { name: 'Scenes', exact: true }).click()
+    await page.getByRole('button', { name: 'Light', exact: true }).click()
+    await page.getByRole('button', { name: /^Test wall, / }).click()
+    await expect(page.locator('.shapes-panel polygon').first()).toHaveAttribute('fill', '#304050')
+    await expect(page.getByRole('button', { name: 'Undo', exact: true })).toBeEnabled()
+    await page.getByRole('button', { name: /^Test wall, / }).click()
+    await page.getByRole('button', { name: /^Test wall, / }).click()
+    await expect(page.locator('.shapes-panel polygon').first()).toHaveAttribute('fill', '#304050')
     handlers.paint = null
     await page.getByRole('button', { name: 'Apply to wall' }).click()
     await page.getByRole('button', { name: 'Paint from what the wall shows' }).waitFor()
@@ -146,6 +176,117 @@ async function reviewPainting(browser, origin) {
     gate.resolve()
     await expect(page.getByRole('button', { name: 'Apply to wall' })).toBeEnabled()
     await expect(page.locator('.shapes-panel polygon').first()).toHaveAttribute('fill', '#708090')
+    const oldWrite = deferred()
+    handlers.paint = async (route, data) => {
+      await oldWrite.promise
+      app.state.devices[1].shapes.design = data.colors
+      await route.fulfill({ json: { device: app.state.devices[1] } })
+    }
+    await page.getByRole('button', { name: 'Apply to wall' }).click()
+    await page.getByRole('button', { name: 'Scenes', exact: true }).click()
+    await page.getByRole('button', { name: 'Light', exact: true }).click()
+    await page.getByRole('button', { name: /^Test wall, / }).click()
+    await page.getByLabel('Hex', { exact: true }).fill('#90A0B0')
+    await page.getByRole('button', { name: 'Set', exact: true }).click()
+    oldWrite.resolve()
+    await expect(page.locator('.shapes-panel polygon').first()).toHaveAttribute('fill', '#90a0b0')
+    await page.getByRole('button', { name: 'Scenes', exact: true }).click()
+    await page.getByRole('button', { name: 'Light', exact: true }).click()
+    await page.getByRole('button', { name: /^Test wall, / }).click()
+    await expect(page.locator('.shapes-panel polygon').first()).toHaveAttribute('fill', '#90a0b0')
+    assert.deepEqual(app.errors, [])
+  } finally { await app.context.close() }
+}
+
+async function reviewConnectionRecovery(browser, origin) {
+  const failed = await mockApp(browser, origin, {
+    waitForReady: false,
+    prepareHandlers: handlers => { handlers.poll = route => route.abort('connectionrefused') },
+  })
+  try {
+    await failed.page.getByRole('heading', { name: 'Connect your local lights' }).waitFor()
+    await expect(failed.page.getByRole('link', { name: 'Get a packaged preview' }))
+      .toHaveAttribute('href', /actions\/workflows\/bridge-packages/)
+    await expect(failed.page.getByRole('alert')).toContainText('could not load its lighting data')
+    await expect(failed.page.getByRole('alert')).toContainText('/state')
+    failed.handlers.poll = null
+    await failed.page.getByRole('button', { name: 'Connect', exact: true }).click()
+    await failed.page.getByRole('heading', { name: 'Fixtures', exact: true }).waitFor()
+    assert.deepEqual(failed.errors, [])
+  } finally { await failed.context.close() }
+
+  const app = await mockApp(browser, origin, { crossOrigin: true })
+  try {
+    app.handlers.poll = route => route.abort('connectionrefused')
+    await app.page.clock.runFor(1500)
+    await app.page.getByText(/Reconnecting automatically/).waitFor()
+    await app.page.getByRole('button', { name: 'Settings', exact: true }).click()
+    await expect(app.page.getByLabel('Bridge port', { exact: true })).toBeEnabled()
+    await expect(app.page.getByRole('button', { name: 'Rescan the network' })).toBeDisabled()
+    await expect(app.page.getByRole('main')).toBeFocused()
+    app.handlers.poll = null
+    await app.page.getByLabel('Bridge port', { exact: true }).fill('9876')
+    await app.page.getByRole('button', { name: 'Connect to port' }).click()
+    await expect(app.page.getByRole('button', { name: 'Rescan the network' })).toBeEnabled()
+    assert.ok(app.requests.some(request => request.origin === 'http://127.0.0.1:9876' && request.path === '/health'))
+    assert.ok(app.requests.some(request => request.origin === 'http://127.0.0.1:9876' && request.path === '/state'))
+    assert.deepEqual(app.errors, [])
+  } finally { await app.context.close() }
+}
+
+async function reviewRapidCommands(browser, origin) {
+  const app = await mockApp(browser, origin)
+  try {
+    const { page, state, handlers, commands } = app
+    await page.getByRole('button', { name: /^Test lamp, / }).click()
+    const gate = deferred(), started = deferred()
+    handlers.command = async (route, data, match) => {
+      const device = state.devices.find(device => device.id === decodeURIComponent(match[1]))
+      if (match[2] === 'brightness' && data.value === 25) {
+        started.resolve()
+        await gate.promise
+      }
+      if (match[2] === 'brightness') device.brightness = data.value
+      if (match[2] === 'power') device.power = data.on
+      await route.fulfill({ json: { device: structuredClone(device) } })
+    }
+    const brightness = page.getByRole('slider', { name: /^Brightness/ })
+    await brightness.fill('25')
+    await started.promise
+    await brightness.fill('80')
+    await expect(brightness).toHaveValue('80')
+    gate.resolve()
+    await expect.poll(() => state.devices[0].brightness).toBe(80)
+    await expect(brightness).toHaveValue('80')
+    await page.clock.runFor(1500)
+    await expect(brightness).toHaveValue('80')
+    assert.ok(commands.filter(command => command.path.endsWith('/brightness')).length <= 2,
+      'rapid slider changes keep only in-flight and latest pending values')
+    assert.deepEqual(app.errors, [])
+  } finally { await app.context.close() }
+}
+
+async function reviewScheduleDeletion(browser, origin) {
+  const app = await mockApp(browser, origin, { prepareState: state => {
+    state.rooms = [{ id: 'room', name: 'Test room', lightIDs: ['lifx:test'], schedules: [
+      { id: 'morning', hour: 7, minute: 30, action: 'turnOn', weekdays: [2, 3, 4, 5, 6], isEnabled: true, sceneID: null },
+    ] }]
+  } })
+  try {
+    const { page, commands } = app
+    await page.getByRole('button', { name: 'Schedules', exact: true }).click()
+    const remove = page.getByRole('button', { name: /^Delete Turn on at 07:30 in Test room$/ })
+    page.once('dialog', dialog => dialog.dismiss())
+    await remove.click()
+    assert.equal(commands.filter(command => command.path.includes('/schedules/')).length, 0)
+    await expect(remove).toBeVisible()
+    page.once('dialog', async dialog => {
+      assert.match(dialog.message(), /07:30/)
+      await dialog.accept()
+    })
+    await remove.click()
+    await expect(remove).toHaveCount(0)
+    assert.equal(commands.filter(command => command.path.includes('/schedules/')).length, 1)
     assert.deepEqual(app.errors, [])
   } finally { await app.context.close() }
 }
@@ -346,11 +487,14 @@ async function reviewPendingScope(browser, origin) {
 }
 
 export async function reviewLifecycles(browser, origin) {
+  await reviewConnectionRecovery(browser, origin)
+  await reviewRapidCommands(browser, origin)
+  await reviewScheduleDeletion(browser, origin)
   await reviewPainting(browser, origin)
   await reviewMusic(browser, origin)
   await reviewPendingScope(browser, origin)
   await reviewPolling(browser, origin)
-  console.log('LIFECYCLE_ASSERTIONS_PASS: rejected painting/retry, pending edits, explicit source Start/Restart, failed-source restore, restart/cancellation, pending room lock and cancellation, fresh baseline and revisions, stale polling and reconnect generation')
+  console.log('LIFECYCLE_ASSERTIONS_PASS: ordered slider commands, schedule deletion confirmation, painting drafts across navigation and selection, rejected painting/retry, pending edits, explicit source Start/Restart, failed-source restore, restart/cancellation, pending room lock and cancellation, fresh baseline and revisions, stale polling and reconnect generation')
 }
 
 // Also runnable on its own with the optional Playwright packages used by CI.

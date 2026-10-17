@@ -10,5 +10,5 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "rootDir": "src"
   },
-  "include": ["src/discovery.ts"]
+  "include": ["src/discovery.ts", "src/commandQueue.ts"]
 }

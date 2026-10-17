@@ -91,7 +91,11 @@ function ScheduleRow({ room, schedule, scenes, onUpdate, onDelete }: {
       <button type="button" className="ghost" disabled={Boolean(working) || editing} aria-label={`Edit ${description}`}
         onClick={() => { setProblem(null); setEditing(true) }}>Edit</button>
       <button type="button" className="ghost" disabled={Boolean(working) || editing} aria-label={`Delete ${description}`}
-        onClick={() => { void change('delete', () => onDelete(room.id, schedule.id)) }}>
+        onClick={() => {
+          if (window.confirm(`Delete ${description}? This cannot be undone in the browser.`)) {
+            void change('delete', () => onDelete(room.id, schedule.id))
+          }
+        }}>
         {working === 'delete' ? 'Deleting…' : 'Delete'}
       </button>
     </div>

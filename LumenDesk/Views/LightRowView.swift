@@ -3,6 +3,7 @@ import SwiftUI
 struct LightRowView: View {
     @EnvironmentObject var manager: LightManager
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @AppStorage(AppPreferenceKey.quietInterface) private var quietInterface = false
     @ObservedObject var device: LightDevice
 
     var selectionMode: Bool = false
@@ -89,7 +90,7 @@ struct LightRowView: View {
                     .transition(.opacity)
             }
         }
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: manager.newlyDiscoveredIDs.contains(device.id))
+        .animation(reduceMotion || quietInterface ? nil : .easeOut(duration: 0.18), value: manager.newlyDiscoveredIDs.contains(device.id))
         .opacity(1)
         .help(device.isStale
               ? "Not responding \u{2014} last seen \(device.lastSeen.formatted(.relative(presentation: .named))). Check the bulb\u{2019}s power and network."
@@ -617,7 +618,7 @@ struct LightRowView: View {
                             .allowsHitTesting(false)
                     }
                 }
-                .shadow(color: active ? swatch.color.opacity(0.55) : .clear, radius: 6)
+                .shadow(color: active && !quietInterface ? swatch.color.opacity(0.55) : .clear, radius: 6)
                 .frame(minWidth: 44, minHeight: 44)
                 .contentShape(Rectangle())
                 .accessibilityHidden(true)

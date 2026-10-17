@@ -173,13 +173,20 @@ try {
   await expect(scope).toContainText('1 saved fixture outside Living room will also be recalled.')
   assert.equal(count('/scenes/everywhere/apply'), 0, 'reading scene scope must not recall lighting')
   await scope.locator('summary').click()
-  await expect(scope.locator('.scene-fixture-list')).toContainText('Desk lamp · Office · Outside Living room')
+  const savedFixture = name => scope.locator('.scene-fixture-list li').filter({ hasText: name })
+  await expect(savedFixture('Desk lamp')).toContainText('Desk lamp · Office')
+  await expect(savedFixture('Desk lamp')).toContainText('Outside Living room')
+  await expect(savedFixture('Desk lamp')).toContainText('On · 75% brightness')
+  await expect(savedFixture('Beta lamp')).toContainText('3500 K white')
 
   // Unavailable and missing fixtures are identified separately from another
   // room. Selecting All lights never describes a missing ID as outside it.
   await expect(scope).toContainText('2 unavailable fixtures may be skipped.')
-  await expect(scope.locator('.scene-fixture-list')).toContainText('Corner lamp · Living room · Unavailable')
-  await expect(scope.locator('.scene-fixture-list')).toContainText('Unavailable fixture (lifx:gone) · Unknown room · Unavailable')
+  await expect(savedFixture('Corner lamp')).toContainText('Corner lamp · Living room')
+  await expect(savedFixture('Corner lamp')).toContainText('Off · 40% brightness')
+  await expect(savedFixture('Corner lamp')).toContainText('Unavailable')
+  await expect(savedFixture('Unavailable fixture (lifx:gone)')).toContainText('Unknown room')
+  await expect(savedFixture('Unavailable fixture (lifx:gone)')).toContainText('Unavailable')
   await everywhere.getByRole('button', { name: 'Apply', exact: true }).click()
   await expect(page.locator('.toast')).toContainText('sent to 3 lights · 2 skipped')
   assert.equal(count('/scenes/everywhere/apply'), 1)

@@ -47,8 +47,10 @@ import { MusicModeView, flushPendingMusicCleanup } from './MusicModeView'
 import { RoomSetup } from './RoomSetup'
 import { DiscoveryStatus } from './DiscoveryStatus'
 import { countDiscoveryReplies } from './discovery'
+import { DeviceCommandQueue } from './commandQueue'
 
 type Destination = 'home' | 'library' | 'music' | 'automation' | 'devices' | 'settings'
+type CommandKind = 'power' | 'brightness' | 'color' | 'kelvin'
 
 const NAV: { id: Destination; label: string; icon: string }[] = [
   { id: 'home', label: 'Room', icon: '⌂' },
@@ -83,6 +85,7 @@ export default function App() {
   const [scenes, setScenes] = useState<Scene[]>([])
   const [error, setError] = useState<string | null>(null)
   const [connectionError, setConnectionError] = useState<string | null>(null)
+  const [failedEndpoint, setFailedEndpoint] = useState<'health' | 'state'>('health')
   const [hasConnected, setHasConnected] = useState(false)
   const [supportsRooms, setSupportsRooms] = useState(true)
   const [toast, setToast] = useState<string | null>(null)
@@ -96,15 +99,28 @@ export default function App() {
   const [discovery, setDiscovery] = useState<DiscoveryResponse | null>(null)
   const [scanAnswered, setScanAnswered] = useState<number | null>(null)
   const [discoveryError, setDiscoveryError] = useState<string | null>(null)
-  // Ids with a command in flight, so a poll cannot overwrite an optimistic
-  // value with a reading taken before the command landed.
-  const inFlight = useRef(new Map<string, number>())
+  const [openPairing, setOpenPairing] = useState(0)
+  // Commands to one light run in order; continuous controls keep their latest
+  // unsent value. Polls must also ignore readings older than an optimistic edit.
+  const commandQueue = useRef(new DeviceCommandQueue<CommandKind, Device>())
+  const commandSequence = useRef(new Map<string, number>())
+  const latestKindSequence = useRef(new Map<string, Map<CommandKind, number>>())
+  const contentRef = useRef<HTMLElement>(null)
+  const didMountNavigation = useRef(false)
   // Each connection attempt owns its requests. An older response may settle
   // after a newer one, or after the user has selected another bridge.
   const connectionRef = useRef<{ port: number; requests: number; settled: number } | null>(null)
 
   useEffect(() => window.localStorage.setItem(PORT_KEY, String(port)), [port])
   useEffect(() => window.localStorage.setItem(NAV_KEY, destination), [destination])
+
+  useEffect(() => {
+    if (!didMountNavigation.current) {
+      didMountNavigation.current = true
+      return
+    }
+    if (!setupOpen) contentRef.current?.focus()
+  }, [destination])
 
   useEffect(() => {
     if (!toast) return undefined
@@ -116,6 +132,8 @@ export default function App() {
     const connection = connectionRef.current
     if (!connection || connection.port !== port) return
     const request = ++connection.requests
+    const commandVersions = new Map(commandSequence.current)
+    const commandsAtRequest = new Set([...commandVersions.keys()].filter(id => commandQueue.current.has(id)))
     const isCurrent = () => connectionRef.current === connection && request >= connection.settled
     try {
       const next = await fetchState(port)
@@ -123,7 +141,8 @@ export default function App() {
       connection.settled = request
       setDevices(previous =>
         next.devices.map(device =>
-          inFlight.current.has(device.id)
+          commandQueue.current.has(device.id) || commandsAtRequest.has(device.id) ||
+          (commandSequence.current.get(device.id) ?? 0) !== (commandVersions.get(device.id) ?? 0)
             ? (previous.find(p => p.id === device.id) ?? device)
             : device,
         ),
@@ -135,18 +154,23 @@ export default function App() {
       setState('connected')
       setHasConnected(true)
       setConnectionError(null)
+      setFailedEndpoint('health')
       void flushPendingMusicCleanup(port, postMusicFrame)
       return next
     } catch (err) {
       if (!isCurrent()) return
       connection.settled = request
       setState('unavailable')
-      setConnectionError(describeFailure(err))
+      setConnectionError(err instanceof DOMException && err.name === 'TimeoutError'
+        ? 'The bridge did not return lighting data in time.'
+        : 'Could not load lighting data from the bridge.')
+      setFailedEndpoint('state')
       return null
     }
   }, [port])
 
   useEffect(() => {
+    commandQueue.current.cancelAll()
     const connection = { port, requests: 0, settled: 0 }
     connectionRef.current = connection
     const isCurrent = () => connectionRef.current === connection
@@ -159,12 +183,17 @@ export default function App() {
         setServedByBridge(same)
         await checkHealth(port)
         if (isCurrent()) await poll()
-      } catch {
-        if (isCurrent()) setState('unavailable')
+      } catch (err) {
+        if (isCurrent()) {
+          setState('unavailable')
+          setConnectionError(describeFailure(err))
+          setFailedEndpoint('health')
+        }
       }
     })()
     return () => {
       connectionRef.current = null
+      commandQueue.current.cancelAll()
     }
   }, [port, poll])
 
@@ -185,6 +214,7 @@ export default function App() {
   }, [supportsRooms, destination])
 
   const connect = useCallback(async () => {
+    commandQueue.current.cancelAll()
     const connection = { port, requests: 0, settled: 0 }
     connectionRef.current = connection
     const isCurrent = () => connectionRef.current === connection
@@ -197,30 +227,34 @@ export default function App() {
       if (!isCurrent()) return
       setState('unavailable')
       setConnectionError(describeFailure(err))
+      setFailedEndpoint('health')
       setAttempts(n => n + 1)
     }
   }, [port, poll])
 
-  /** Optimistic device command: patch locally, send, reconcile, release. */
+  /** Optimistic device command: preserve intent while requests are serialized. */
   const run = useCallback(
-    async (device: Device, patch: Partial<Device>, action: () => Promise<Device>) => {
-      inFlight.current.set(device.id, (inFlight.current.get(device.id) ?? 0) + 1)
+    async (device: Device, patch: Partial<Device>, kind: CommandKind, action: () => Promise<Device>) => {
+      const sequence = (commandSequence.current.get(device.id) ?? 0) + 1
+      commandSequence.current.set(device.id, sequence)
+      let kindSequence = latestKindSequence.current.get(device.id)
+      if (!kindSequence) {
+        kindSequence = new Map()
+        latestKindSequence.current.set(device.id, kindSequence)
+      }
+      kindSequence.set(kind, sequence)
+      const connection = connectionRef.current
       setError(null)
       setDevices(list => list.map(d => (d.id === device.id ? { ...d, ...patch } : d)))
-      let succeeded = false
-      try {
-        const updated = await action()
-        setDevices(list => list.map(d => (d.id === device.id ? { ...d, ...updated } : d)))
-        succeeded = true
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err))
-      } finally {
-        const remaining = (inFlight.current.get(device.id) ?? 1) - 1
-        if (remaining) inFlight.current.set(device.id, remaining)
-        else inFlight.current.delete(device.id)
-        if (!succeeded) void poll()
+      const result = await commandQueue.current.enqueue(device.id, kind, action, kind !== 'power')
+      if (connectionRef.current !== connection) return false
+      if (result.ok && commandSequence.current.get(device.id) === sequence) {
+        setDevices(list => list.map(d => (d.id === device.id ? { ...d, ...result.value } : d)))
+      } else if (!result.ok && !result.cancelled && latestKindSequence.current.get(device.id)?.get(kind) === sequence) {
+        setError(result.error instanceof Error ? result.error.message : String(result.error))
+        void poll()
       }
-      return succeeded
+      return result.ok
     },
     [poll],
   )
@@ -267,10 +301,10 @@ export default function App() {
   }, [port, poll])
 
   const controls: Controls = {
-    power: (d, on) => run(d, { power: on }, () => setPower(port, d.id, on)),
-    brightness: (d, value) => run(d, { brightness: value }, () => setBrightness(port, d.id, value)),
-    color: (d, rgb) => run(d, { color: rgb }, () => setColor(port, d.id, rgb)),
-    kelvin: (d, k) => run(d, { kelvin: k }, () => setKelvin(port, d.id, k)),
+    power: (d, on) => run(d, { power: on }, 'power', () => setPower(port, d.id, on)),
+    brightness: (d, value) => run(d, { brightness: value }, 'brightness', () => setBrightness(port, d.id, value)),
+    color: (d, rgb) => run(d, { color: rgb }, 'color', () => setColor(port, d.id, rgb)),
+    kelvin: (d, k) => run(d, { kelvin: k }, 'kelvin', () => setKelvin(port, d.id, k)),
     favorite: d => mutate(() => toggleFavorite(port, d.id)),
     rename: (d, name) => mutate(() => renameDevice(port, d.id, name), `Renamed to ${name}`),
     assign: (d, roomID) => mutate(() => assignRoom(port, d.id, roomID)),
@@ -286,7 +320,7 @@ export default function App() {
     async (ids: string[], action: 'on' | 'off') => {
       const targets = devices.filter(d => ids.includes(d.id) && d.reachable)
       const results = await Promise.all(
-        targets.map(d => run(d, { power: action === 'on' }, () => setPower(port, d.id, action === 'on'))),
+        targets.map(d => run(d, { power: action === 'on' }, 'power', () => setPower(port, d.id, action === 'on'))),
       )
       const sent = results.filter(Boolean).length
       const failed = results.length - sent
@@ -301,6 +335,7 @@ export default function App() {
         state={state}
         port={port}
         error={connectionError}
+        failedEndpoint={failedEndpoint}
         attempts={attempts}
         servedByBridge={servedByBridge}
         onPort={setPort}
@@ -344,7 +379,8 @@ export default function App() {
         </p>
       </nav>
 
-      <main className="content">
+      <main className="content" ref={contentRef} tabIndex={-1}
+        aria-label={`${NAV.find(item => item.id === destination)?.label ?? 'Room'} section`}>
         {state !== 'connected' && <div className="diagnostic" role="status">
           <p>{state === 'checking' ? 'Reconnecting to the bridge…' : `${connectionError ?? 'Bridge disconnected.'} Reconnecting automatically.`}</p>
           <p>Your edits are kept here. Light readings may be out of date; controls will return when the bridge reconnects.</p>
@@ -382,10 +418,15 @@ export default function App() {
 
         <fieldset className="workspace-controls" disabled={state !== 'connected'} aria-label="Lighting workspace">
         {!supportsRooms && <p className="note" role="status">This older bridge supports basic lighting controls.
-          Update it to use rooms, scenes, favorites, schedules and Music. <a href="https://github.com/SeanPVera/LumenDesk/releases">Get the current bridge</a>.</p>}
-        {!setupVisible && <DiscoveryStatus scanning={scanning} result={discovery} answeredCount={scanAnswered}
-          problem={discoveryError} onPair={supportsRooms ? () => setSetupOpen(true) : undefined} onRetry={scan} />}
+          Update it to use rooms, scenes, favorites, schedules and Music. <a href="https://github.com/SeanPVera/LumenDesk/blob/main/docs/BRIDGE_DISTRIBUTION.md">Install the current bridge</a>.</p>}
+        {!setupVisible && (destination === 'home' || destination === 'devices' || scanning || Boolean(discoveryError)) &&
+          <DiscoveryStatus scanning={scanning} result={discovery} answeredCount={scanAnswered}
+            problem={discoveryError} onPair={supportsRooms ? () => {
+              setOpenPairing(request => request + 1)
+              setSetupOpen(true)
+            } : undefined} onRetry={scan} />}
         <RoomSetup open={setupVisible} devices={devices} rooms={rooms} scanning={scanning}
+          openPairing={openPairing}
           discovery={discovery} answeredCount={scanAnswered} discoveryError={discoveryError}
           onScan={scan}
           onCreateRoom={async name => {
@@ -398,8 +439,8 @@ export default function App() {
             return saved ? created : null
           }}
           onAssign={(device, targetRoomID) => mutate(() => assignRoom(port, device.id, targetRoomID))}
-          onPower={(device, on) => run(device, { power: on }, () => setPower(port, device.id, on))}
-          onBrightness={(device, value) => run(device, { brightness: value }, () => setBrightness(port, device.id, value))}
+          onPower={(device, on) => run(device, { power: on }, 'power', () => setPower(port, device.id, on))}
+          onBrightness={(device, value) => run(device, { brightness: value }, 'brightness', () => setBrightness(port, device.id, value))}
           onPairShapes={async (host, controllerPort) => {
             let paired: Device | null = null
             const saved = await mutate(async () => { paired = await pairShapes(port, host, controllerPort) })
@@ -477,17 +518,17 @@ export default function App() {
             scanning={scanning}
           />
         )}
-        {destination === 'settings' && (
-          <SettingsView
-            port={port}
-            servedByBridge={servedByBridge}
-            deviceCount={devices.length}
-            onScan={scan}
-            scanning={scanning}
-          />
-        )}
         </div>
         </fieldset>
+        {destination === 'settings' && <SettingsView
+          port={port}
+          onPortChange={setPort}
+          connected={state === 'connected'}
+          servedByBridge={servedByBridge}
+          deviceCount={devices.length}
+          onScan={scan}
+          scanning={scanning}
+        />}
       </main>
 
       {toast && (

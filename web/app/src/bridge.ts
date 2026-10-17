@@ -43,6 +43,7 @@ export interface Device {
   power: boolean
   brightness: number
   controlRevision?: number
+  musicOwner?: string | null
   color: RGB | null
   kelvin: number | null
   favorite?: boolean
@@ -93,6 +94,8 @@ export interface BridgeState {
   favorites: string[]
   /** False only for the compatibility response from a pre-/state bridge. */
   supportsRooms?: boolean
+  /** Bridge keeps starting Music output and recovers it after this idle lease. */
+  musicRecoveryLeaseMS?: number
 }
 
 export interface DiscoveryProbeReport {
@@ -349,7 +352,7 @@ export const deleteSchedule = (port: number, roomID: string, scheduleID: string)
 /** One colour per fixture. The bridge never opens a razer stream from this path. */
 export const postMusicFrame = (
   port: number,
-  states: { fixtureID: string; rgb: RGB; brightness?: number; transitionDuration?: number; restoring?: boolean; owner?: string; controlRevision?: number; release?: boolean }[],
+  states: { fixtureID: string; rgb: RGB; brightness?: number; transitionDuration?: number; restoring?: boolean; owner?: string; controlRevision?: number; release?: boolean; heartbeat?: boolean; restoreOnDisconnect?: boolean }[],
 ) =>
   request<{ ok: boolean; applied: number }>(port, '/music/frame', {
     method: 'POST',

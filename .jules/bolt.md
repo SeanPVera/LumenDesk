@@ -9,3 +9,7 @@
 ## 2026-10-12 - Backward Day-Stepping for Schedule Evaluation
 **Learning:** Replacing minute-by-minute scanning in schedule evaluation with backward day-stepping reduces complexity from $O(\text{minutes})$ to $O(\text{days})$. Re-constructing `Date` instances per calendar day instead of mutating a single `Date` object avoids hour drift caused by JS Date hour-adjustments across DST spring-forward transitions.
 **Action:** In date/time interval matching, iterate over candidate days and re-instantiate local-time components per candidate date to safely handle DST boundaries without minute-walking.
+
+## 2026-10-13 - Array Indexing and Inlined HSB Lookups in Choreography Render Loop
+**Learning:** In frame-by-frame lighting choreography engines with hundreds of spatial targets, replacing string-keyed `Map` lookups with direct `Float64Array` index access and inlining palette HSB calculations (avoiding temporary `{hue, saturation, brightness}` object allocations and discarding unused brightness math) cuts frame rendering time by 15% to 33%.
+**Action:** In high-frequency render loops (e.g., 20-60 FPS), maintain indexed typed arrays reallocated only when topology changes, and avoid allocating short-lived helper objects inside target loops.

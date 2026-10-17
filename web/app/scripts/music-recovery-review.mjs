@@ -45,10 +45,9 @@ context.on('request', request => {
     if (network.length > 20) network.shift()
   }
 })
-const newPage = async ({ emulateClock = false, pageContext = context } = {}) => {
+const newPage = async ({ pageContext = context } = {}) => {
   const page = await pageContext.newPage()
   page.on('pageerror', error => errors.push(error.message))
-  if (emulateClock) await page.clock.install()
   await page.goto(appURL)
   await page.getByRole('button', { name: 'Music', exact: true }).click()
   await expect(page.getByRole('button', { name: 'Start', exact: true })).toBeEnabled()
@@ -106,10 +105,11 @@ try {
   // Playwright's clock is shared across pages in one context.
   const pausedContext = await browser.newContext()
   await pausedContext.addInitScript(() => window.localStorage.setItem('LumenDesk.roomSetupDismissed.v1', 'true'))
-  const pausedPage = await newPage({ emulateClock: true, pageContext: pausedContext })
+  const pausedPage = await newPage({ pageContext: pausedContext })
   await start(pausedPage)
-  // Use the emulated browser's clock, allowing a full second for the protocol
-  // round trip under concurrent CI load before the clock is paused.
+  // Use the emulated browser's clock, installing it after show start so initial
+  // page load and connection checks complete with the real clock first.
+  await pausedPage.clock.install()
   await pausedPage.clock.pauseAt(await pausedPage.evaluate(() => Date.now() + 1000))
   await expect.poll(() => registry.get(id).musicOwner, { timeout: 8000 }).toBeNull()
   await pausedPage.clock.resume()

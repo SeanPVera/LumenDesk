@@ -2343,6 +2343,3 @@ struct RoomCanvasSettingsView: View {
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Lumen.rule, lineWidth: 1))
     }
 }
-
-
-

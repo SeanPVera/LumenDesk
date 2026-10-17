@@ -309,4 +309,3 @@ final class SQLiteStateDatabase {
 
     private static let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 }
-

@@ -342,7 +342,7 @@ final class BeatMapCoordinator {
     private func endTrack() {
         guard let learner else { return }
         self.learner = nil
-        if needsBuild(learner) {
+        if needsBuild(learner), !buildsInFlight.contains(learner.key) {
             finishLearning(learner)
         } else if (builtCoverage[learner.key] ?? 0) < 0.99 {
             checkpoint(learner)

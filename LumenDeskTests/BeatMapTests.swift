@@ -648,6 +648,38 @@ final class BeatMapTests: XCTestCase {
         coordinator.stop()
     }
 
+    func testStoppingDuringAnEarlierBuildCheckpointsNewlyHeardSections() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = BeatMapStore(directory: directory)
+        let queue = DispatchQueue(label: "test.in-flight-learning")
+        queue.suspend()
+        var suspended = true
+        defer { if suspended { queue.resume() }; queue.sync {} }
+        var time = 100.0
+        let coordinator = BeatMapCoordinator(store: store, learningQueue: queue, now: { time })
+        coordinator.beginFollowing(startMonitor: false)
+        coordinator.receive(NowPlayingSample(app: .music, trackID: "in-flight", title: "Song", artist: "Artist",
+                                              duration: 40, position: 0, isPlaying: true, sampledAt: time))
+        let hops = Self.syntheticHops(seconds: 40)
+        func feed(_ section: [HopFeature]) {
+            coordinator.consume(hops: section.map {
+                HopFeature(time: 100 + $0.time, onset: $0.onset, kick: $0.kick, energy: $0.energy)
+            })
+        }
+        time = 135
+        feed(hops.filter { $0.time < 35 }) // 87.5% starts the queued build.
+        time = 138
+        feed(hops.filter { $0.time >= 35 && $0.time < 38 }) // Another 7.5% is heard.
+        coordinator.stop()
+        queue.resume()
+        suspended = false
+        queue.sync {}
+        let restored = try XCTUnwrap(store.loadLearning(key: PlaybackApp.music.trackKey("in-flight"), duration: 40))
+        XCTAssertGreaterThan(restored.coverage, 0.94, "Stop must persist the newer learner, not just the old build's snapshot")
+        XCTAssertGreaterThan(try XCTUnwrap(restored.hops.last).time, 37.9)
+    }
+
     func testLearningFinishesBeforeTheOutroAndAnImmediateRepeatReusesTheMap() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }

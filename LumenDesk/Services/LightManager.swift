@@ -2139,13 +2139,22 @@ extension LightManager: LIFXClientDelegate {
                 device.sku = LIFXProductCatalog.sku(for: productID) ?? device.sku
             }
             guard device.isLIFXLuna else { return }
-            self.lifxMatrixStates[device.id] = LIFXMatrixState(
+            let previous = self.lifxMatrixStates[device.id]
+            let matrix = LIFXMatrixState(
                 productID: device.productID ?? productID,
                 width: width,
                 height: height,
                 colors: colors.map(LIFXMatrixColor.init),
                 isActive: true
             )
+            self.lifxMatrixStates[device.id] = matrix
+            if previous?.productID != matrix.productID || previous?.width != matrix.width || previous?.height != matrix.height {
+                self.musicFixtureCache.removeAll()
+                for scope in self.musicModeController.activeScopeIDs
+                    where self.effectRuns[scope]?.ownedDeviceIDs.contains(device.id) == true {
+                    self.musicModeController.updateFixtures(scope: scope, fixtures: self.musicFixtureDescriptors(in: scope))
+                }
+            }
             self.markSeen(device)
         }
     }

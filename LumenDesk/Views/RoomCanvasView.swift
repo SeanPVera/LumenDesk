@@ -586,9 +586,10 @@ private struct DirectionARoomField: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let compact = geometry.size.width < 520
-            let horizontalInset: CGFloat = compact ? 34 : 54
-            let verticalInset: CGFloat = compact ? 42 : 46
+            let compactWidth = geometry.size.width < 520
+            let condensed = compactWidth || geometry.size.height < 420
+            let horizontalInset: CGFloat = compactWidth ? 34 : 54
+            let verticalInset: CGFloat = condensed ? 42 : 46
             ZStack {
                 RoundedRectangle(cornerRadius: 24, style: .continuous)
                     .fill(Lumen.floor)
@@ -606,11 +607,12 @@ private struct DirectionARoomField: View {
                         light: light,
                         selected: selection.contains(light.id),
                         status: RoomCanvasStatus.resolve([light], manager: manager),
-                        compact: compact,
+                        compact: compactWidth,
+                        condensed: condensed,
                         select: { toggle(light.id) }
                     )
-                    .frame(width: nodeWidth(for: light, compact: compact),
-                           height: compact ? 64 : 82)
+                    .frame(width: nodeWidth(for: light, compact: compactWidth),
+                           height: condensed ? 64 : 82)
                     .position(
                         x: horizontalInset
                             + (geometry.size.width - horizontalInset * 2) * anchor.x
@@ -725,6 +727,7 @@ private struct FixtureCanvasNode: View {
     let selected: Bool
     let status: RoomCanvasStatus
     let compact: Bool
+    let condensed: Bool
     let select: () -> Void
 
     var body: some View {
@@ -741,20 +744,20 @@ private struct FixtureCanvasNode: View {
                                     endRadius: 34
                                 )
                             )
-                            .frame(width: compact ? 54 : 74, height: compact ? 46 : 64)
+                            .frame(width: compact ? 54 : 74, height: condensed ? 44 : 64)
                     }
                     RoundedRectangle(cornerRadius: 7, style: .continuous)
                         .fill(Lumen.graphite)
-                        .frame(width: compact ? 32 : 38, height: compact ? 26 : 30)
+                        .frame(width: compact ? 32 : 38, height: condensed ? 26 : 30)
                     Image(systemName: fixtureSymbol)
-                        .font(.system(size: compact ? 12 : 14, weight: .semibold))
+                        .font(.system(size: compact ? 12 : (condensed ? 13 : 14), weight: .semibold))
                         .foregroundStyle(light.isOn ? light.color : Lumen.canvas.opacity(0.66))
                     Image(systemName: status.symbol)
-                        .font(.system(size: compact ? 8 : 10, weight: .bold))
+                        .font(.system(size: condensed ? 8 : 10, weight: .bold))
                         .foregroundStyle(status.color)
-                        .padding(compact ? 2 : 3)
+                        .padding(condensed ? 2 : 3)
                         .background(Lumen.floor, in: Circle())
-                        .offset(x: compact ? 17 : 20, y: compact ? -15 : -17)
+                        .offset(x: compact ? 17 : 20, y: condensed ? -14 : -17)
                 }
                 Text(light.label)
                     .font(LumenType.body(size: compact ? 9 : 11, weight: .semibold))
@@ -764,7 +767,7 @@ private struct FixtureCanvasNode: View {
                     .minimumScaleFactor(0.82)
             }
             .padding(.horizontal, compact ? 4 : 7)
-            .padding(.vertical, compact ? 3 : 5)
+            .padding(.vertical, condensed ? 2 : 5)
             .background(Lumen.floor.opacity(selected ? 0.98 : 0.78), in: RoundedRectangle(cornerRadius: 10))
             .overlay(
                 RoundedRectangle(cornerRadius: 10)

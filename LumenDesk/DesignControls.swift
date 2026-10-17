@@ -275,6 +275,7 @@ private struct LumenPowerKeyFace: View {
 
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @AppStorage(AppPreferenceKey.quietInterface) private var quietInterface = false
 
     private var shape: RoundedRectangle {
         RoundedRectangle(cornerRadius: Lumen.controlRadius, style: .continuous)
@@ -296,7 +297,7 @@ private struct LumenPowerKeyFace: View {
         }
         .buttonStyle(.plain)
         .opacity(isEnabled ? 1 : 0.35)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: configuration.isOn)
+        .animation(reduceMotion || quietInterface ? nil : .easeOut(duration: 0.16), value: configuration.isOn)
         .accessibilityLabel(spokenLabel ?? "Power")
         .accessibilityValue(configuration.isOn ? "On" : "Off")
         .accessibilityAddTraits(configuration.isOn ? [.isButton, .isSelected] : .isButton)
@@ -325,6 +326,7 @@ private struct LumenRockerFace: View {
 
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @AppStorage(AppPreferenceKey.quietInterface) private var quietInterface = false
 
     var body: some View {
         Button {
@@ -359,7 +361,7 @@ private struct LumenRockerFace: View {
                 .padding(3)
         }
         .frame(width: 40, height: 21)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: configuration.isOn)
+        .animation(reduceMotion || quietInterface ? nil : .easeOut(duration: 0.16), value: configuration.isOn)
     }
 }
 
@@ -517,12 +519,13 @@ struct LumenStatusDot: View {
     let color: Color
     var size: CGFloat = 6
     var lit: Bool = true
+    @AppStorage(AppPreferenceKey.quietInterface) private var quietInterface = false
 
     var body: some View {
         Circle()
             .fill(color.opacity(lit ? 1 : 0.3))
             .frame(width: size, height: size)
-            .shadow(color: color.opacity(lit ? 0.6 : 0), radius: 5)
+            .shadow(color: color.opacity(lit && !quietInterface ? 0.6 : 0), radius: 5)
             .accessibilityHidden(true)
     }
 }
@@ -649,6 +652,7 @@ struct LumenLens: View {
     var isStale: Bool = false
     /// 0…1. A lamp at 18% should not present as a full-strength swatch.
     var level: Double = 1
+    @AppStorage(AppPreferenceKey.quietInterface) private var quietInterface = false
 
     private var shape: RoundedRectangle {
         RoundedRectangle(cornerRadius: max(size * 0.2, Lumen.minimumRadius), style: .continuous)
@@ -660,10 +664,12 @@ struct LumenLens: View {
             .opacity(isOn ? 0.35 + min(max(level, 0), 1) * 0.65 : 1)
             .overlay(alignment: .topLeading) {
                 // The highlight that makes the field read as glass.
-                shape.fill(
-                    LinearGradient(colors: [Color.white.opacity(isOn ? 0.16 : 0.03), .clear],
-                                   startPoint: .topLeading, endPoint: .bottomTrailing)
-                )
+                if !quietInterface {
+                    shape.fill(
+                        LinearGradient(colors: [Color.white.opacity(isOn ? 0.16 : 0.03), .clear],
+                                       startPoint: .topLeading, endPoint: .bottomTrailing)
+                    )
+                }
             }
             .overlay {
                 if isStale {

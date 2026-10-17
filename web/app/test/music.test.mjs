@@ -6,6 +6,36 @@ import { emptySnapshot } from '../.test-build/types.js'
 import { MusicFeatureAnalyzer } from '../.test-build/analyzer.js'
 import { BeatTracker } from '../.test-build/beat-tracker.js'
 import { WebMusicSession, frameToCommands } from '../.test-build/session.js'
+import { readMusicRecovery, writeMusicRecovery } from '../.test-build/recovery.js'
+
+test('Music cleanup preserves original owner, revision, output and release choice across reload', () => {
+  let saved = null
+  const storage = { getItem: () => saved, setItem: (_key, value) => { saved = value }, removeItem: () => { saved = null } }
+  const command = { fixtureID: 'lifx:a', owner: 'show-a', controlRevision: 9, rgb: { r: 4, g: 80, b: 255 }, brightness: 0.63, restoring: true }
+  const entries = new Map([
+    ['show-a', { port: 8765, states: [command] }],
+    ['show-b', { port: 8766, states: [{ ...command, owner: 'show-b', restoring: false, release: true }] }],
+  ])
+  writeMusicRecovery(storage, entries)
+  assert.deepEqual(readMusicRecovery(storage), entries)
+  const reloaded = readMusicRecovery(storage)
+  reloaded.delete('show-a')
+  writeMusicRecovery(storage, reloaded)
+  assert.deepEqual([...readMusicRecovery(storage).keys()], ['show-b'])
+  reloaded.clear()
+  writeMusicRecovery(storage, reloaded)
+  assert.equal(saved, null, 'completed cleanup removes the saved starting output')
+})
+
+test('Music recovery tolerates blocked storage and drops corrupted or mismatched records', () => {
+  const blocked = { getItem() { throw new Error('disabled') }, setItem() { throw new Error('quota') }, removeItem() { throw new Error('disabled') } }
+  assert.equal(readMusicRecovery(blocked).size, 0)
+  assert.doesNotThrow(() => writeMusicRecovery(blocked, new Map([['show', { port: 8765, states: [] }]])))
+  assert.equal(readMusicRecovery({ getItem: () => '{bad json' }).size, 0)
+  const command = { fixtureID: 'lifx:a', owner: 'wrong-owner', controlRevision: 9, rgb: { r: 4, g: 80, b: 255 }, restoring: true }
+  assert.equal(readMusicRecovery({ getItem: () => JSON.stringify([['show', { port: 8765, states: [command] }]]) }).size, 0)
+})
+
 const fixtures = [{id:'a',label:'A',transport:'lifxLAN',segmentCount:0,role:'accent'}]
 const topology = {layout:'leftToRight',fixtureOrder:['a'],excludedFixtureIDs:[]}
 function snapshot(t) { return {...emptySnapshot(), level:.7,energy:.6,confidence:1,

@@ -11,6 +11,7 @@ struct OnboardingView: View {
     @State private var showingNanoleafPairing = false
     @EnvironmentObject var manager: LightManager
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @AppStorage(AppPreferenceKey.quietInterface) private var quietInterface = false
 
     /// Called when the user finishes or skips. The caller flips the persisted
     /// "has onboarded" flag.
@@ -23,7 +24,6 @@ struct OnboardingView: View {
     @State private var step: Step = .welcome
     @State private var activeRoomID: UUID? = nil
     @State private var newRoomName: String = ""
-    @AppStorage(AppPreferenceKey.quietInterface) private var quietInterface = false
     @FocusState private var roomFieldFocused: Bool
 
     var body: some View {
@@ -70,17 +70,20 @@ struct OnboardingView: View {
                               ? AnyShapeStyle(Lumen.beamBright)
                               : AnyShapeStyle(Lumen.hairlineStrong))
                         .frame(width: s == step ? 30 : 16, height: 3)
-                        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: step)
+                        .animation(reduceMotion || quietInterface ? nil : .easeOut(duration: 0.18), value: step)
                 }
             }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Step \(step.rawValue + 1) of \(Step.allCases.count)")
             Spacer()
             if step != .done {
-                Button("Skip setup") { onFinish() }
+                Button(step.rawValue <= Step.prepare.rawValue ? "Skip & find lights" : "Skip setup") { onFinish() }
                     .buttonStyle(.plain)
                     .font(.callout)
                     .foregroundStyle(Lumen.textTertiary)
+                    .accessibilityHint(step.rawValue <= Step.prepare.rawValue
+                                       ? "Starts a local network scan. Your device may ask for Local Network permission."
+                                       : "Opens the main workspace.")
             }
         }
     }
@@ -96,6 +99,9 @@ struct OnboardingView: View {
             valueRow("1.circle", Lumen.chalk, "Prepare", "Power the lights and enable local control where required.")
             valueRow("2.circle", Lumen.chalk, "Discover", "Review what responds. Missing fixtures can be added later.")
             valueRow("3.circle", Lumen.chalk, "Assign", "Choose the room each fixture belongs to.")
+            Text("Skip & find lights starts a local network scan immediately. Your device may ask for Local Network permission.")
+                .font(.caption).foregroundStyle(Lumen.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
             Button("Explore Demo Mode") { manager.enterDemoMode(); onFinish() }
                 .buttonStyle(LumenSecondaryButtonStyle())
             Text("Demo Mode uses simulated fixtures and sends no lighting commands.")
@@ -200,7 +206,7 @@ struct OnboardingView: View {
                         DiscoverChip(device: device)
                     }
                 }
-                .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: manager.devices.count)
+                .animation(reduceMotion || quietInterface ? nil : .easeOut(duration: 0.18), value: manager.devices.count)
             } else if !manager.isScanning {
                 VStack(spacing: 14) {
                     Image(systemName: "lightbulb.slash")
@@ -452,7 +458,8 @@ struct OnboardingView: View {
     }
 
     private func go(_ next: Step) {
-        withAnimation(.spring(duration: 0.4)) { step = next }
+        if reduceMotion || quietInterface { step = next }
+        else { withAnimation(.spring(duration: 0.4)) { step = next } }
     }
 }
 
@@ -489,30 +496,42 @@ private struct OnboardingRoomTrial: View {
 /// Concentric rings radiating from a radio glyph — the "we're listening on the
 /// network" moment during discovery.
 private struct ScanPulse: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @AppStorage(AppPreferenceKey.quietInterface) private var quietInterface = false
     @State private var animate = false
 
     var body: some View {
         ZStack {
-            ForEach(0..<3, id: \.self) { i in
-                Circle()
-                    .stroke(Lumen.cyan.opacity(0.45), lineWidth: 2)
-                    .frame(width: 120, height: 120)
-                    .scaleEffect(animate ? 1.7 : 0.45)
-                    .opacity(animate ? 0 : 0.85)
-                    .animation(
-                        .easeOut(duration: 2.2)
-                            .repeatForever(autoreverses: false)
-                            .delay(Double(i) * 0.7),
-                        value: animate
-                    )
+            if !reduceMotion && !quietInterface {
+                ForEach(0..<3, id: \.self) { i in
+                    Circle()
+                        .stroke(Lumen.cyan.opacity(0.45), lineWidth: 2)
+                        .frame(width: 120, height: 120)
+                        .scaleEffect(animate ? 1.7 : 0.45)
+                        .opacity(animate ? 0 : 0.85)
+                        .animation(
+                            .easeOut(duration: 2.2)
+                                .repeatForever(autoreverses: false)
+                                .delay(Double(i) * 0.7),
+                            value: animate
+                        )
+                }
             }
             Image(systemName: "antenna.radiowaves.left.and.right")
                 .font(.system(size: 30))
                 .foregroundStyle(Lumen.signal)
         }
         .frame(width: 130, height: 130)
-        .onAppear { animate = true }
+        .onAppear(perform: updateAnimation)
+        .onChange(of: reduceMotion) { _ in updateAnimation() }
+        .onChange(of: quietInterface) { _ in updateAnimation() }
         .accessibilityHidden(true)
+    }
+
+    private func updateAnimation() {
+        animate = false
+        guard !reduceMotion && !quietInterface else { return }
+        DispatchQueue.main.async { animate = !reduceMotion && !quietInterface }
     }
 }
 

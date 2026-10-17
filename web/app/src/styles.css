@@ -72,7 +72,7 @@ small, .note, .meta, .count { font-size: .86rem; color: var(--secondary); }
 .selection-mark { position: absolute; right: 5px; top: 2px; font-size: .9rem; color: var(--text); }
 .room-editing { display: grid; grid-template-columns: minmax(0, 1fr) minmax(290px, 360px); gap: 40px; align-items: start; }
 .section-line { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
-.fixture-directory > input { width: 100%; margin-bottom: 12px; }
+.fixture-search { display: block; width: 100%; margin: 12px 0; }
 .fixture-rows, .composition-list, .inspector-list, .rows, .fixture-list { list-style: none; padding: 0; margin: 0; }
 .fixture-rows li { display: flex; gap: 16px; align-items: center; justify-content: space-between; padding: 14px 0; border-bottom: 1px solid var(--soft-rule); }
 .fixture-rows label { display: flex; gap: 14px; align-items: center; min-width: 0; cursor: pointer; }
@@ -105,6 +105,9 @@ small, .note, .meta, .count { font-size: .86rem; color: var(--secondary); }
 .chip.active, .chip.on, .music-toolbar .nav.active { background: var(--text); color: var(--canvas); }
 .group { margin-top: 28px; }
 .group-title { display: flex; gap: 12px; align-items: baseline; margin-bottom: 12px; }
+.pills { display: flex; flex-wrap: wrap; gap: 10px; list-style: none; padding: 0; margin: 0; }
+.pill { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; padding: 4px 4px 4px 12px; border: 1px solid var(--rule); border-radius: 4px; background: var(--surface); overflow-wrap: anywhere; }
+.pill-x { min-width: 44px; padding: 8px; background: transparent; border-left: 1px solid var(--rule); }
 .row { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; padding: 16px 0; border-bottom: 1px solid var(--soft-rule); }
 .row-time { font-variant-numeric: tabular-nums; }
 .row-action { flex: 1; min-width: 140px; }
@@ -217,6 +220,7 @@ meter { width: 100%; height: 12px; accent-color: var(--text); }
 .shapes-panel.off polygon { stroke: var(--muted); stroke-dasharray: 5 4; stroke-width: 1.5; }
 .shapes-panel.selected polygon { stroke: var(--focus); stroke-width: 4; stroke-dasharray: none; }
 .shapes-panel:focus-visible polygon { stroke: var(--warning); stroke-width: 4; stroke-dasharray: none; }
+.shapes-panel-buttons, .shapes-panel-buttons-intro { display: none; }
 .shapes-panel text { font-size: 14px; font-weight: 600; pointer-events: none; font-variant-numeric: tabular-nums; }
 .shapes-panel text.light { fill: #ffffff; paint-order: stroke; stroke: #000000; stroke-width: 3px; }
 .shapes-panel text.dark { fill: #000000; paint-order: stroke; stroke: #ffffff; stroke-width: 3px; }
@@ -229,6 +233,12 @@ label.inline input[type=number] { width: 84px; }
 .panel-info { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
 @media (max-width: 900px) {
   .shapes-layout { grid-template-columns: 1fr; gap: 20px; }
+}
+@media (max-width: 540px) {
+  .shapes-panel-buttons-intro { display: block; }
+  .shapes-panel-buttons { display: grid; grid-template-columns: repeat(auto-fit, minmax(44px, 1fr)); gap: 8px; }
+  .shapes-panel-buttons button { min-width: 44px; min-height: 44px; }
+  .shapes-panel-buttons button[aria-pressed=true] { background: var(--text); color: var(--canvas); }
 }
 @media (forced-colors: active) {
   .shapes-panel.selected polygon { stroke: Highlight; }
@@ -255,7 +265,9 @@ label.inline input[type=number] { width: 84px; }
 .bridge-install { display: flex; flex-direction: column; gap: 12px; }
 .download-link { display: inline-flex; align-self: start; align-items: center; min-height: 44px; padding: 8px 14px; background: var(--text); color: var(--canvas); border-radius: 4px; }
 .music-desk .music-transport { padding: 16px; background: var(--surface); border: 1px solid var(--rule); }
-.music-desk.is-running .music-transport { position: sticky; top: 12px; z-index: 2; }
+.music-desk .music-transport-controls { padding: 12px 16px; background: var(--surface); border: 1px solid var(--rule); }
+.music-transport-status { display: block; max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.music-desk.is-running .music-transport-controls { position: sticky; top: 12px; z-index: 2; }
 @media (max-width: 540px) {
   .setup-progress { gap: 8px 24px; }
   .scene-capture-form > input { width: 100%; }

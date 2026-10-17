@@ -25,7 +25,7 @@ and skipped or failed lights, rather than promising physical confirmation.
 
 ## Connecting and organizing a room
 
-Release **LumenDesk Bridge** packages include Node and the built browser app. Open the platform launcher to start both; use its Open and Quit or Start and Stop actions to manage it. [Bridge packaging](../docs/BRIDGE_DISTRIBUTION.md) covers installation and building. Until the next release publishes these assets, use `npm run app` in `web/bridge` with Node 20 or newer.
+**LumenDesk Bridge** preview packages include Node and the built browser app. Sign in to GitHub, open the latest successful **main** run of [Package browser bridge](https://github.com/SeanPVera/LumenDesk/actions/workflows/bridge-packages.yml?query=branch%3Amain), and choose your platform under Artifacts. Unpack the outer Actions zip, then open the platform launcher to start both; use its Open and Quit or Start and Stop actions to manage it. Release downloads are available only when Assets lists `LumenDesk-Bridge` files. [Bridge packaging](../docs/BRIDGE_DISTRIBUTION.md) covers installation and building. To run from source instead, use `npm run app` in `web/bridge` with Node 20 or newer.
 
 The first connection offers **Set up room**: Find lights → Create room → Assign lights → Try controls. You can pause and reopen it, choose an existing room, or pair Nanoleaf manually. Discovery distinguishes sent and failed probes and explains Govee LAN Control and network permissions. **Save current lighting** beside room controls captures every fixture in the selected room, including hidden or unselected fixtures. **Scenes** shows saved targets and their current rooms before applying. **Favorites** filters starred lights; hidden selections are excluded from grouped commands. **Schedules → Edit** preserves the existing rule, and device names use **Save / Cancel** with failed drafts kept for retry.
 
@@ -73,13 +73,18 @@ colours to the bridge; nothing is uploaded anywhere. To run a show:
 **Stop** cancels capture, discards pending frames, drains the one in-flight frame
 request, and restores the starting color and brightness while the show still owns
 the fixture. A newer manual edit takes priority. Restart/source changes are
-serialized with this restoration. Leaving the Music tab requests the same stop;
-closing the whole browser cannot guarantee asynchronous network delivery. Use
-explicit Stop before closing. Music does not change power, so turn lights on first.
+serialized with this restoration. Leaving the Music tab requests the same stop.
+The current bridge keeps its own starting-output snapshot: if frames and
+heartbeats stop for five seconds because the page closes, reloads or is suspended,
+the running bridge restores the output (or releases it if restoration is off).
+It retries failed restoration and gives newer manual edits priority. Music does
+not change power, so turn lights on first.
 If a restore or release request fails, it stays pending in this page and retries
 after the bridge reconnects, including while another section is open. Another
-show waits for that cleanup; a newer manual edit still takes priority. Reloading
-or closing the page discards pending work, so wait for restoration before leaving.
+show waits for that cleanup; a newer manual edit still takes priority. Pending
+cleanup also survives a reload in the same tab. Keep the bridge running until
+restoration finishes. Older bridges without recovery support still require
+explicit Stop before closing; Music identifies that limit after connecting.
 Newly discovered lights wait until the next show rather than joining without a
 restoration snapshot. Music Mode settings are session-only and reset on reload.
 

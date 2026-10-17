@@ -112,25 +112,25 @@ struct PlanWorkspaceView: View {
                     scopeHeader
                     FavoritesStripView()
                     runningOutput
-                    if lights.isEmpty {
-                        emptyState
-                    } else {
-                        RoomLightField(lights: lights, room: room, selectedIDs: selectionBinding,
-                                       showsSpatialPlacement: geometry.size.width >= max(720, CGFloat(lights.count) * 155))
-                        saveRoomSceneButton
-                        sectionPicker
-                        switch section {
-                        case .control:
+                    sectionPicker
+                    switch section {
+                    case .control:
+                        if lights.isEmpty {
+                            emptyState
+                        } else {
+                            RoomLightField(lights: lights, room: room, selectedIDs: selectionBinding,
+                                           showsSpatialPlacement: geometry.size.width >= max(720, CGFloat(lights.count) * 155))
+                            saveRoomSceneButton
                             if let wall = selectedShapesWall {
                                 NanoleafShapesStudio(device: wall, shapes: manager.shapes,
                                                      wide: geometry.size.width >= 1000)
                             }
                             controls(wide: geometry.size.width >= 900)
-                        case .compositions:
-                            LibraryWorkspaceView(scope: $scope, embedded: true)
-                        case .music:
-                            MusicModeView(scope: $scope, showsScopePicker: false)
                         }
+                    case .compositions:
+                        LibraryWorkspaceView(scope: $scope, embedded: true)
+                    case .music:
+                        MusicModeView(scope: $scope, showsScopePicker: false)
                     }
                 }
                 .padding(geometry.size.width < 600 ? 16 : 24)

@@ -13,6 +13,8 @@ export interface RoomSetupProps {
   discovery: DiscoveryResponse | null
   answeredCount: number | null
   discoveryError?: string | null
+  /** Increment to open the Nanoleaf form from outside the setup wizard. */
+  openPairing?: number
   onScan: () => Promise<void>
   onCreateRoom: (name: string) => Promise<Room | null>
   onAssign: (device: Device, roomID: string) => Promise<boolean>
@@ -23,14 +25,13 @@ export interface RoomSetupProps {
   onCancel: () => void
 }
 
-export function RoomSetup({ open, devices, rooms, scanning, discovery, answeredCount, discoveryError,
+export function RoomSetup({ open, devices, rooms, scanning, discovery, answeredCount, discoveryError, openPairing,
   onScan, onCreateRoom, onAssign, onPower, onBrightness, onPairShapes, onDone, onCancel }: RoomSetupProps) {
   const [stage, setStage] = useState(0)
   const [name, setName] = useState('')
   const [savedRoom, setSavedRoom] = useState<Room | null>(null)
   const [existingID, setExistingID] = useState('')
   const [selectedIDs, setSelectedIDs] = useState<string[]>([])
-  const [assignedIDs, setAssignedIDs] = useState<string[]>([])
   const [targetID, setTargetID] = useState('')
   const [level, setLevel] = useState(50)
   const [busy, setBusy] = useState(false)
@@ -50,12 +51,20 @@ export function RoomSetup({ open, devices, rooms, scanning, discovery, answeredC
   // confirmed, only its current record is valid.
   const room = canonicalRoom ?? (savedRoom && confirmedRoom.current?.id !== savedRoom.id ? savedRoom : null)
   const duplicate = rooms.find(candidate => candidate.name.trim().toLocaleLowerCase() === name.trim().toLocaleLowerCase())
-  const roomDevices = room ? devices.filter(device => device.roomID === room.id || assignedIDs.includes(device.id) || room.lightIDs.includes(device.id)) : []
+  const roomDevices = room ? devices.filter(device => device.roomID === room.id || room.lightIDs.includes(device.id)) : []
   const target = roomDevices.find(device => device.id === targetID) ?? roomDevices.find(device => device.reachable && !device.needsPairing) ?? roomDevices[0]
 
   useEffect(() => {
     if (open) heading.current?.focus()
   }, [open, stage])
+
+  useEffect(() => {
+    if (!openPairing) return
+    setStage(0)
+    setPairing(true)
+    setProblem(null)
+    setMessage(null)
+  }, [openPairing])
 
   useEffect(() => {
     if (target) setLevel(target.brightness)
@@ -75,13 +84,12 @@ export function RoomSetup({ open, devices, rooms, scanning, discovery, answeredC
     setName(deleted.name)
     setSavedRoom(null)
     setExistingID('')
-    setSelectedIDs(previous => [...new Set([...previous, ...assignedIDs, ...deleted.lightIDs])])
-    setAssignedIDs([])
+    setSelectedIDs(previous => [...new Set([...previous, ...deleted.lightIDs])])
     setTargetID('')
     setMessage(null)
     setProblem('This room was deleted. Create a new room or choose an existing room to continue. Your light choices are kept.')
     setStage(1)
-  }, [savedRoom, canonicalRoom, busy, assignedIDs])
+  }, [savedRoom, canonicalRoom, busy])
 
   const changeStage = (next: number) => {
     setProblem(null)
@@ -116,6 +124,7 @@ export function RoomSetup({ open, devices, rooms, scanning, discovery, answeredC
     // That refresh may already report a deletion made by another client.
     confirmedRoom.current = created
     setSavedRoom(created)
+    setTargetID('')
     changeStage(2)
   })
 
@@ -124,11 +133,11 @@ export function RoomSetup({ open, devices, rooms, scanning, discovery, answeredC
     const selected = devices.filter(device => selectedIDs.includes(device.id))
     if (!selected.length) return
     const results = await Promise.all(selected.map(async device => {
-      if (assignedIDs.includes(device.id) || device.roomID === room.id || room.lightIDs.includes(device.id)) return true
+      if (device.roomID === room.id || room.lightIDs.includes(device.id)) return true
       try { return await onAssign(device, room.id) } catch { return false }
     }))
-    const succeeded = selected.filter((_, index) => results[index]).map(device => device.id)
-    setAssignedIDs(previous => [...new Set([...previous, ...succeeded])])
+    const saved = new Set(selected.filter((_, index) => results[index]).map(device => device.id))
+    setSelectedIDs(previous => previous.filter(id => !saved.has(id)))
     const failed = results.filter(result => !result).length
     if (failed) {
       setProblem(`${failed} light${failed === 1 ? '' : 's'} could not be assigned. Saved assignments are kept; try again to add the remaining lights.`)
@@ -156,7 +165,6 @@ export function RoomSetup({ open, devices, rooms, scanning, discovery, answeredC
     confirmedRoom.current = null
     setExistingID('')
     setSelectedIDs([])
-    setAssignedIDs([])
     setTargetID('')
     setProblem(null)
     setMessage(null)
@@ -185,7 +193,7 @@ export function RoomSetup({ open, devices, rooms, scanning, discovery, answeredC
         onPair={() => setPairing(true)} />
       <div className="setup-actions">
         <button type="button" className="primary" disabled={scanning || busy} onClick={onScan}>{scanning ? 'Searching…' : 'Find lights'}</button>
-        <button type="button" disabled={scanning || busy || devices.length === 0} onClick={() => changeStage(1)}>Continue to room</button>
+        <button type="button" disabled={scanning || busy} onClick={() => changeStage(1)}>Continue to room</button>
       </div>
       <p className="note">{devices.length} known light{devices.length === 1 ? '' : 's'} · {devices.filter(device => device.reachable && !device.needsPairing).length} available for control.</p>
       {devices.length > 0 && <ul className="rows" aria-label="Found lights">{devices.map(device => <li className="row" key={device.id}>
@@ -207,7 +215,7 @@ export function RoomSetup({ open, devices, rooms, scanning, discovery, answeredC
           <label>Controller address<input type="text" placeholder="192.168.1.40" autoComplete="off" spellCheck={false}
             value={host} onChange={event => setHost(event.target.value)} disabled={busy} required /></label>
           <label>Port<input type="number" min="1" max="65535" value={port} onChange={event => setPort(event.target.value)} disabled={busy} required /></label>
-          <button type="submit" disabled={busy || scanning || !host.trim() || !Number.isInteger(Number(port)) || Number(port) < 1 || Number(port) > 65535}>{busy ? 'Pairing…' : 'Pair wall'}</button>
+          <button type="submit" disabled={busy || !host.trim() || !Number.isInteger(Number(port)) || Number(port) < 1 || Number(port) > 65535}>{busy ? 'Pairing…' : 'Pair wall'}</button>
         </form>
       </details>
     </>}
@@ -215,8 +223,17 @@ export function RoomSetup({ open, devices, rooms, scanning, discovery, answeredC
     {stage === 1 && <>
       <p>Give this group of lights a name. You’ll use the room for lighting controls, scenes and schedules.</p>
       {savedRoom ? <>
-        <p><strong>{room?.name}</strong> is saved. Continue to choose its lights.</p>
-        <button type="button" className="primary" onClick={() => changeStage(2)}>Continue to lights</button>
+        <p><strong>{room?.name}</strong> is selected. You can continue or choose a different room. Any room you created stays saved.</p>
+        <div className="setup-actions">
+          <button type="button" className="primary" onClick={() => changeStage(2)}>Continue to lights</button>
+          <button type="button" onClick={() => {
+            setSavedRoom(null)
+            confirmedRoom.current = null
+            setExistingID('')
+            setSelectedIDs([])
+            setTargetID('')
+          }}>Choose a different room</button>
+        </div>
       </> : <>
         <form className="inline-form" onSubmit={event => { event.preventDefault(); void create() }}>
           <label htmlFor={nameID}>Room name</label>
@@ -239,8 +256,9 @@ export function RoomSetup({ open, devices, rooms, scanning, discovery, answeredC
 
     {stage === 2 && room && <>
       <p>Choose the lights for <strong>{room.name}</strong>. Lights in another room will move here when you save.</p>
+      {devices.length === 0 && <p className="note">No lights are known yet. You can finish setting up the room and find lights later.</p>}
       <ul className="rows">{devices.map(device => {
-        const alreadyAssigned = assignedIDs.includes(device.id) || device.roomID === room.id || room.lightIDs.includes(device.id)
+        const alreadyAssigned = device.roomID === room.id || room.lightIDs.includes(device.id)
         return <li className="row" key={device.id}>
           <label className="row-toggle"><input type="checkbox" checked={alreadyAssigned || selectedIDs.includes(device.id)} disabled={busy || alreadyAssigned}
             onChange={event => setSelectedIDs(previous => event.target.checked ? [...previous, device.id] : previous.filter(id => id !== device.id))} />
@@ -253,12 +271,14 @@ export function RoomSetup({ open, devices, rooms, scanning, discovery, answeredC
         <button type="button" className="ghost" disabled={busy} onClick={() => changeStage(1)}>Back to room</button>
         {selectedIDs.some(id => devices.some(device => device.id === id))
           ? <button type="button" className="primary" disabled={busy} onClick={() => void assign()}>{busy ? 'Saving assignments…' : 'Save lights and continue'}</button>
-          : <button type="button" className="primary" disabled={busy || roomDevices.length === 0} onClick={() => changeStage(3)}>Continue with room’s lights</button>}
+          : <button type="button" className="primary" disabled={busy} onClick={() => changeStage(3)}>{roomDevices.length ? 'Continue with room’s lights' : 'Continue without lights'}</button>}
       </div>
     </>}
 
     {stage === 3 && room && <>
-      <p><strong>{room.name}</strong> is ready with {roomDevices.length} light{roomDevices.length === 1 ? '' : 's'}. Try a control below and check the light itself, or open the room now.</p>
+      <p>{roomDevices.length
+        ? <><strong>{room.name}</strong> is ready with {roomDevices.length} light{roomDevices.length === 1 ? '' : 's'}. Try a control below and check the light itself, or open the room now.</>
+        : <><strong>{room.name}</strong> is saved without lights. You can open it now and find or assign lights later.</>}</p>
       {roomDevices.length > 0 ? <>
         <label>Light to try<select value={target?.id ?? ''} onChange={event => { setTargetID(event.target.value); setMessage(null) }} disabled={busy}>
           {roomDevices.map(device => <option key={device.id} value={device.id}>{device.name}{!device.reachable ? ' (offline)' : device.needsPairing ? ' (pair again)' : ''}</option>)}
@@ -273,7 +293,7 @@ export function RoomSetup({ open, devices, rooms, scanning, discovery, answeredC
           <button type="button" onClick={() => void testCommand('brightness')}>Apply brightness</button>
         </fieldset>
         {(!target?.reachable || target.needsPairing) && <p className="note">This light needs to reconnect or pair before it can be controlled. You can still open the room.</p>}
-      </> : <p className="note">The assigned lights are no longer listed. Go back to choose lights or open the room and search again.</p>}
+      </> : room.lightIDs.length > 0 && <p className="note">The assigned lights are no longer listed. Go back to choose lights or open the room and search again.</p>}
       <div className="setup-actions">
         <button type="button" className="ghost" disabled={busy} onClick={() => changeStage(2)}>Back to assignments</button>
         <button type="button" className="primary" disabled={busy} onClick={finish}>Done, open room</button>

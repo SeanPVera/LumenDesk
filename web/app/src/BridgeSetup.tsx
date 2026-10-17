@@ -16,6 +16,7 @@ export function BridgeSetup({
   state,
   port,
   error,
+  failedEndpoint = 'health',
   attempts,
   servedByBridge,
   onPort,
@@ -24,6 +25,7 @@ export function BridgeSetup({
   state: BridgeState
   port: number
   error: string | null
+  failedEndpoint?: 'health' | 'state'
   attempts: number
   servedByBridge: boolean
   onPort: (value: number) => void
@@ -34,23 +36,29 @@ export function BridgeSetup({
   useEffect(() => setPortText(String(port)), [port])
   const requestedPort = Number(portText)
   const validPort = Number.isInteger(requestedPort) && requestedPort >= 1 && requestedPort <= 65535
+  const diagnosticURL = failedEndpoint === 'state'
+    ? healthURL(port).replace(/\/health$/, '/state') : healthURL(port)
   return (
     <main className="shell centered">
       <div className="panel wide">
         <span className="eyebrow">Local control only</span>
         <h1>{checking ? 'Connecting to your lights' : 'Connect your local lights'}</h1>
         <p>LumenDesk needs a local bridge to reach your LIFX, Govee and Nanoleaf lights.
-          Start it on this computer, then open its local address. No account is required.</p>
+          Start it on this computer, then open its local address. No LumenDesk account is required.</p>
         <p className="note">Connecting checks the bridge without changing your lights. You can safely retry.</p>
 
 
         <div className="bridge-install">
           <h2>Launch the browser bridge</h2>
-          <p>Choose the LumenDesk Bridge package for Mac, Windows or Linux, unpack it,
-            and open its launcher. It includes everything it needs and opens this app
-            automatically. Keep the launcher running while you use your lights.</p>
-          <a className="download-link" href="https://github.com/SeanPVera/LumenDesk/releases">Get bridge packages</a>
-          <p className="note">If your release does not list a bridge package yet, use the source setup below.</p>
+          <p>Packaged previews for Mac, Windows and Linux include the runtime and this app.
+            Sign in to GitHub, open the latest successful <strong>main</strong> build,
+            and choose your computer under <strong>Artifacts</strong>. Unpack the downloaded
+            zip, then open the launcher inside. Keep it running while you use your lights.</p>
+          <a className="download-link" href="https://github.com/SeanPVera/LumenDesk/actions/workflows/bridge-packages.yml?query=branch%3Amain">Get a packaged preview</a>
+          <p className="note">Preview downloads need a GitHub account and expire after 14 days.
+            Use a newer successful build if needed, or set up from source below.
+            {' '}<a href="https://github.com/SeanPVera/LumenDesk/releases">Release downloads</a>
+            {' '}include the bridge only when Assets lists LumenDesk-Bridge files.</p>
         </div>
 
         <details className="alt">
@@ -117,22 +125,26 @@ npm run app`}</code>
           </button>
         </form>
 
-        {attempts > 0 && !checking && (
+        {(attempts > 0 || error) && !checking && (
           <div className="diagnostic" role="alert">
             <p className="diagnostic-head">
               {error ?? 'Could not reach the bridge.'} Tried{' '}
-              <code>{healthURL(port)}</code>
+              <code>{diagnosticURL}</code>
               {attempts > 1 && ` · ${attempts} attempts`}
             </p>
 
             <p>
-              <strong>1. Check whether the bridge is running.</strong> Open{' '}
-              <a href={healthURL(port)} target="_blank" rel="noreferrer">
-                {healthURL(port)}
+              <strong>1. Check the bridge response.</strong> Open{' '}
+              <a href={diagnosticURL} target="_blank" rel="noreferrer">
+                {diagnosticURL}
               </a>{' '}
               in a new tab.
             </p>
-            <ul>
+            {failedEndpoint === 'state' ? <p>
+              The bridge answered its health check, but the app could not load its lighting data.
+              If this address also fails, restart the bridge and check its terminal for an error.
+              If it shows device data, press Connect again.
+            </p> : <ul>
               <li>
                 If that tab shows <code>{'{"ok":true,…}'}</code>, the bridge is fine and your
                 browser is blocking this page from reaching it — see step 2.
@@ -141,7 +153,7 @@ npm run app`}</code>
                 If the tab fails to load, the bridge is not running. Start it with the commands
                 above, and check the port here matches the one it printed.
               </li>
-            </ul>
+            </ul>}
 
             {!servedByBridge && (
               <>

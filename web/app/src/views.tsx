@@ -1,11 +1,13 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   type Device,
   type Room,
   type Scene,
+  type RGB,
   hexToRGB,
   rgbToHex,
 } from './bridge'
+import { toTone } from './shapes/tone'
 import { ShapesEditor, ShapesMiniWall, wallProductName, type ShapesActions } from './ShapesEditor'
 import { SceneCapture } from './SceneCapture'
 import { DeviceName } from './DeviceName'
@@ -184,6 +186,11 @@ export function HomeView({ devices, controls, onBulk, onScan, scanning, scopeNam
   const filtered = showingFavorites || Boolean(query.trim())
   const targets = (inScopeSelection.length ? visible.filter(d => active.includes(d.id)) : visible).filter(d => d.reachable && !d.needsPairing)
   const level = targets.length ? Math.round(targets.reduce((sum, d) => sum + d.brightness, 0) / targets.length) : 0
+  const mixedLevel = new Set(targets.map(d => d.brightness)).size > 1
+  const white = targets[0]?.kelvin ?? 3500
+  const knownWhite = targets.length > 0 && targets.every(d => d.kelvin != null)
+  const mixedWhite = new Set(targets.map(d => d.kelvin)).size > 1
+  const whiteLabel = !targets.length ? '—' : !knownWhite ? (mixedWhite ? 'Mixed / unknown' : 'Unknown') : mixedWhite ? 'Mixed' : `${white} K`
   const toggle = (id: string) => setSelected(ids => ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id])
   const color = rgbToHex(targets[0]?.color ?? {r: 255, g: 255, b: 255})
   const mixed = new Set(targets.map(d => rgbToHex(d.color ?? {r: 255, g: 255, b: 255}))).size > 1
@@ -195,6 +202,7 @@ export function HomeView({ devices, controls, onBulk, onScan, scanning, scopeNam
         <button className={`chip${favoritesOnly ? ' active' : ''}`} aria-pressed={favoritesOnly}
           onClick={() => setFavoritesOnly(true)}>★ Favorites ({devices.filter(d => d.favorite).length})</button>
       </div>}
+      <input className="fixture-search" type="search" aria-label="Find a fixture" placeholder="Find a fixture" value={query} onChange={e => setQuery(e.target.value)} />
       <div className="light-field" aria-label="Fixtures in this room">
         <p className="field-caption">Fixture order · select to control{visible.length > 12 && ' · scroll for more fixtures'}</p>
         <div className="emitters">
@@ -215,7 +223,6 @@ export function HomeView({ devices, controls, onBulk, onScan, scanning, scopeNam
       <div className="room-editing">
         <div className="fixture-directory">
           <div className="section-line"><h2>Fixtures</h2><button disabled={!visible.length} onClick={() => setSelected(visible.map(d => d.id))}>Select visible</button></div>
-          <input type="search" aria-label="Find a fixture" placeholder="Find a fixture" value={query} onChange={e => setQuery(e.target.value)} />
           {hiddenSelectionCount > 0 && <p className="note">{hiddenSelectionCount} selected fixture{hiddenSelectionCount === 1 ? ' is' : 's are'} hidden by your filters and excluded from changes.</p>}
           <ul className="fixture-rows">{visible.map(d => <li key={d.id}>
             <label><input type="checkbox" checked={active.includes(d.id)} onChange={() => toggle(d.id)} />
@@ -239,8 +246,9 @@ export function HomeView({ devices, controls, onBulk, onScan, scanning, scopeNam
             <button className="primary" disabled={!targets.length} onClick={() => onBulk(targets.map(d => d.id), 'on')}>On</button>
             <button disabled={!targets.length} onClick={() => onBulk(targets.map(d => d.id), 'off')}>Off</button>
           </div>
-          <label className="field" htmlFor="room-brightness">Brightness <output>{level}%</output>
+          <label className="field" htmlFor="room-brightness">Brightness <output>{mixedLevel ? `Mixed · ${level}% average` : `${level}%`}</output>
             <input id="room-brightness" type="range" min="0" max="100" value={level} disabled={!targets.length}
+              aria-valuetext={mixedLevel ? `Mixed levels, averaging ${level} percent. Changing this sets all available fixtures.` : undefined}
               onChange={e => targets.forEach(d => controls.brightness(d, Number(e.target.value)))} />
           </label>
           <label className="color-control">Color
@@ -248,8 +256,9 @@ export function HomeView({ devices, controls, onBulk, onScan, scanning, scopeNam
               onChange={e => targets.forEach(d => controls.color(d, hexToRGB(e.target.value)))} />
             <span>{mixed ? 'Mixed' : color.toUpperCase()}</span>
           </label>
-          <label className="field" htmlFor="room-white">White temperature <output>{targets[0]?.kelvin ?? 3500} K</output>
-            <input id="room-white" type="range" min="2500" max="9000" step="100" value={targets[0]?.kelvin ?? 3500} disabled={!targets.length}
+          <label className="field" htmlFor="room-white">White temperature <output>{whiteLabel}</output>
+            <input id="room-white" type="range" min="2500" max="9000" step="100" value={white} disabled={!targets.length}
+              aria-valuetext={mixedWhite || !knownWhite ? `${whiteLabel}; slider starts at ${white} kelvin. Changing this sets all available fixtures.` : undefined}
               onChange={e => targets.forEach(d => controls.kelvin(d, Number(e.target.value)))} />
           </label>
           <p className="note">Color and white replace the current whole-fixture output, a Nanoleaf design or scene included. Hardware limits still apply.</p>
@@ -373,6 +382,7 @@ function SceneScope({ scene, devices, rooms, currentDevices, scopeName }: {
       id,
       name: device?.name ?? `Unavailable fixture (${id})`,
       room: room?.name ?? (device ? 'No room' : 'Unknown room'),
+      lighting: describeSavedLighting(scene.snapshots[id], device?.brand),
       missing: !device,
       unavailable: !device || !device.reachable || Boolean(device.needsPairing),
       outside: Boolean(device) && !currentIDs.has(id),
@@ -397,7 +407,7 @@ function SceneScope({ scene, devices, rooms, currentDevices, scopeName }: {
       </p>
       <details><summary>View all {saved.length} saved fixture{saved.length === 1 ? '' : 's'}</summary>
         <ul className="scene-fixture-list">{saved.map(fixture => <li key={fixture.id}>
-          <strong>{fixture.name}</strong> · {fixture.room}
+          <strong>{fixture.name}</strong> · {fixture.room} · {fixture.lighting}
           {fixture.outside && <span> · Outside {scopeName}</span>}
           {fixture.unavailable && <span className="warn"> · Unavailable</span>}
         </li>)}</ul>
@@ -406,8 +416,48 @@ function SceneScope({ scene, devices, rooms, currentDevices, scopeName }: {
   </div>
 }
 
+type SavedLighting = {
+  isOn?: boolean; power?: boolean; brightness?: number; color?: RGB | null; kelvin?: number | null
+  hsbk?: { saturation?: number; kelvin?: number } | null
+  design?: Record<string, unknown> | null; effect?: string | null
+}
+
+function colorName(rgb: RGB): string {
+  const { h, s, v } = toTone(rgb)
+  if (v < .08) return 'black'
+  if (s < .12) return v < .35 ? 'dark gray' : v < .75 ? 'gray' : 'white'
+  if (h < 15 || h >= 335) return 'red'
+  if (h < 45) return 'orange'
+  if (h < 70) return 'yellow'
+  if (h < 160) return 'green'
+  if (h < 200) return 'cyan'
+  if (h < 255) return 'blue'
+  if (h < 290) return 'purple'
+  return 'pink'
+}
+
+function describeSavedLighting(value: unknown, brand?: Device['brand']): string {
+  if (!value || typeof value !== 'object') return 'Saved output unavailable'
+  const saved = value as SavedLighting
+  const power = saved.isOn ?? saved.power
+  const parts = [power == null ? 'Power unknown' : power ? 'On' : 'Off']
+  if (typeof saved.brightness === 'number') parts.push(`${saved.brightness}% brightness`)
+  const kelvin = saved.hsbk?.kelvin ?? saved.kelvin
+  const hasKelvin = typeof kelvin === 'number' && kelvin > 0
+  if (saved.effect) parts.push(`controller scene “${saved.effect}”`)
+  else if (saved.design) parts.push(`panel design for ${Object.keys(saved.design).length} panels`)
+  else if (hasKelvin && (saved.hsbk?.saturation === 0 || (brand !== 'lifx' && brand != null) || !saved.color)) {
+    parts.push(`${kelvin} K white`)
+  } else {
+    if (saved.color) parts.push(`${colorName(saved.color)} ${rgbToHex(saved.color).toUpperCase()}`)
+    if (hasKelvin) parts.push(`saved temperature ${kelvin} K`)
+  }
+  return parts.join(' · ')
+}
+
 function SceneScore({ scene }: { scene: Scene }) {
-  return <div className="scene-score" role="img" aria-label="Saved fixture color and level">
+  return <div className="scene-score" role="img"
+    aria-label={`${scene.name}: saved colors and levels for ${Object.keys(scene.snapshots ?? {}).length} fixtures. Expand the saved fixture list for each value.`}>
     {Object.keys(scene.snapshots ?? {}).sort().map(id => {
       const s = scene.snapshots[id] as { isOn?: boolean; power?: boolean; brightness?: number; color?: {r:number;g:number;b:number} }
       const isOn = s.isOn ?? s.power
@@ -596,15 +646,23 @@ export function SettingsView({
   port,
   servedByBridge,
   deviceCount,
+  connected,
+  onPortChange,
   onScan,
   scanning,
 }: {
   port: number
   servedByBridge: boolean
   deviceCount: number
+  connected: boolean
+  onPortChange: (port: number) => void
   onScan: () => void
   scanning: boolean
 }) {
+  const [portText, setPortText] = useState(String(port))
+  useEffect(() => setPortText(String(port)), [port])
+  const nextPort = Number(portText)
+  const validPort = Number.isInteger(nextPort) && nextPort >= 1 && nextPort <= 65535
   return (
     <section>
       <div className="panel">
@@ -625,7 +683,17 @@ export function SettingsView({
             <span>{deviceCount}</span>
           </li>
         </ul>
-        <button className="ghost" onClick={onScan} disabled={scanning}>
+        {!servedByBridge && <form className="inline-form" onSubmit={event => {
+          event.preventDefault()
+          if (validPort && nextPort !== port) onPortChange(nextPort)
+        }}>
+          <label className="port">Bridge port
+            <input type="number" min={1} max={65535} required value={portText}
+              onChange={event => setPortText(event.target.value)} />
+          </label>
+          <button type="submit" disabled={!validPort || nextPort === port}>Connect to port</button>
+        </form>}
+        <button className="ghost" onClick={onScan} disabled={!connected || scanning}>
           {scanning ? 'Scanning…' : 'Rescan the network'}
         </button>
       </div>

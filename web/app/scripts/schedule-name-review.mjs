@@ -157,6 +157,7 @@ try {
   await expect(page.locator('.schedule-entry').getByRole('alert')).toContainText('Schedule was not changed')
   await expect(toggle).toBeChecked()
   failingPath = '/rooms/lounge/schedules/reading?delete=1'
+  page.once('dialog', dialog => dialog.accept())
   await page.getByRole('button', { name: 'Delete Dim to 25% at 18:45 in Living room', exact: true }).click()
   await expect(page.locator('.schedule-entry').getByRole('alert')).toContainText('Schedule was not deleted')
   assert.equal(state.rooms[0].schedules.length, 1)

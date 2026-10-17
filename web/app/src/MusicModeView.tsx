@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { fetchState, type Device, type RGB } from './bridge'
+import { fetchState, type Device } from './bridge'
 import { LATENCY_OFFSET_LIMIT, MUSIC_HELP, PRESET_COPY, ROLE_COPY, SOURCE_COPY, configurationFor, preservingRoomCalibration } from './music/config'
 import { GROOVES } from './music/grooves'
 import { hsvToRgb } from './music/fixtures'
 import { WebMusicSession, LatestMusicFrameSender, setFixtureRole, type MusicFrameCommand } from './music/session'
+import { readMusicRecovery, writeMusicRecovery, type MusicRecovery } from './music/recovery'
 import { TAP_MINIMUM } from './music/beat-map'
 import { AURORA_PALETTE, SUNSET_PALETTE, OCEAN_PALETTE, CLUB_PALETTE, type AudioSourceKind, type FixtureRole, type MusicModePreset, type MusicModeConfiguration, type MusicFixtureDescriptor } from './music/types'
 
@@ -30,9 +31,17 @@ type MusicCleanup = {
   error: string | null
 }
 
-// Keep failed restoration/release work across Music tab navigation. These
-// original owner/revision values let the bridge protect newer manual edits.
-const pendingCleanups = new Map<string, MusicCleanup>()
+// Persist only explicit Stop/release work, after capture has stopped. Active
+// shows belong to the bridge watchdog: a duplicate tab may inherit session
+// storage and must never mistake the original tab's live show for cleanup.
+const recoveryEntries = (() => {
+  try { return readMusicRecovery(window.sessionStorage) } catch { return new Map<string, MusicRecovery>() }
+})()
+const saveRecovery = () => {
+  try { writeMusicRecovery(window.sessionStorage, recoveryEntries) } catch { /* Storage can be unavailable. */ }
+}
+const pendingCleanups = new Map<string, MusicCleanup>([...recoveryEntries].map(([owner, cleanup]) =>
+  [owner, { ...cleanup, ready: Promise.resolve(), sending: false, error: null }]))
 const cleanupListeners = new Set<() => void>()
 let cleanupVersion = 0
 let cleanupFlight: { port: number; promise: Promise<boolean> } | null = null
@@ -53,7 +62,11 @@ export function flushPendingMusicCleanup(port: number, postFrame: MusicFramePost
         cleanup.sending = true
         cleanupChanged()
         await postFrame(cleanup.port, cleanup.states)
-        if (pendingCleanups.get(owner) === cleanup) pendingCleanups.delete(owner)
+        if (pendingCleanups.get(owner) === cleanup) {
+          pendingCleanups.delete(owner)
+          recoveryEntries.delete(owner)
+          saveRecovery()
+        }
       } catch (err) {
         cleanup.error = err instanceof Error ? err.message : String(err)
         return false
@@ -120,6 +133,8 @@ export function MusicModeView({
   const [selectedGroove, setSelectedGroove] = useState(state.grooveId)
   const [starting, setStarting] = useState(false)
   const [stopSummary, setStopSummary] = useState<string | null>(null)
+  const [recoveryLeaseMS, setRecoveryLeaseMS] = useState<number | null>(null)
+  const recoveryLeaseRef = useRef(recoveryLeaseMS); recoveryLeaseRef.current = recoveryLeaseMS
   const busy = state.running || starting
   useEffect(() => { onRunningChange?.(busy); return () => onRunningChange?.(false) }, [busy, onRunningChange])
   const activeFile = useRef<File | null>(null)
@@ -140,14 +155,28 @@ export function MusicModeView({
   // owns the fixture. The bridge rejects restoration after a newer manual edit.
   const baseline = useRef<MusicFrameCommand[] | null>(null)
   const baselineRevisions = useRef(new Map<string, number | undefined>())
+  const ownershipLostRef = useRef<() => void>(() => undefined)
   const senderRef = useRef<LatestMusicFrameSender | null>(null)
   const postRef = useRef(postFrame); postRef.current=postFrame
   const portRef = useRef(port); portRef.current=port
   const connectedRef = useRef(connected); connectedRef.current=connected
   const owner = useRef(crypto.randomUUID())
-  if (!senderRef.current) senderRef.current = new LatestMusicFrameSender(states=>postRef.current(portRef.current,states.map(state=>({
-    ...state,owner:owner.current,controlRevision:baselineRevisions.current.get(state.fixtureID)
-  }))))
+  const checkOwnership = (result: unknown, submitted: MusicFrameCommand[]) => {
+    if (!result || typeof result !== 'object' || !('rejectedOwnership' in result)) return
+    const rejected = result.rejectedOwnership
+    if (Array.isArray(rejected) && submitted.some(command => rejected.includes(command.fixtureID)
+      && baselineRevisions.current.has(command.fixtureID)
+      && baselineRevisions.current.get(command.fixtureID) === command.controlRevision)) ownershipLostRef.current()
+  }
+  if (!senderRef.current) senderRef.current = new LatestMusicFrameSender(async states => {
+    const commands = states.map(state => ({
+      ...state, owner: owner.current, controlRevision: baselineRevisions.current.get(state.fixtureID),
+      restoreOnDisconnect: session.state.configuration.restorePreviousState,
+    }))
+    const result = await postRef.current(portRef.current, commands)
+    checkOwnership(result, commands)
+    return result
+  })
   const sender=senderRef.current
   const transition = useRef(Promise.resolve())
   const transitionEpoch = useRef(0)
@@ -167,6 +196,8 @@ export function MusicModeView({
         states: restore ? previous : previous.map(command => ({ ...command, restoring: false, release: true })),
         ready, sending: false, error: null,
       })
+      recoveryEntries.set(owner.current, { port: portRef.current, states: pendingCleanups.get(owner.current)!.states })
+      saveRecovery()
       cleanupChanged()
     }
     const epoch = transitionEpoch.current
@@ -198,8 +229,12 @@ export function MusicModeView({
       // read the bridge: the page may still show the previous show's colors.
       if (!baseline.current) {
         let current: Device[]
+        let bridgeLeaseMS = 0
         try {
-          current = (await fetchState(portRef.current)).devices
+          const latest = await fetchState(portRef.current)
+          current = latest.devices
+          bridgeLeaseMS = latest.musicRecoveryLeaseMS ?? 0
+          setRecoveryLeaseMS(bridgeLeaseMS)
         } catch (err) {
           if (epoch === transitionEpoch.current) session.patch({ error: err instanceof Error ? err.message : String(err) })
           return
@@ -210,9 +245,13 @@ export function MusicModeView({
         const scoped = reachableRef.current
         session.setDevices(scoped.map(d => ({ id: d.id, name: d.name, brand: d.brand, reachable: d.reachable })))
         const includedIDs = new Set(session.state.fixtures.filter(fixture => fixture.role !== 'off').map(fixture => fixture.id))
+        if (bridgeLeaseMS > 0 && current.some(device => includedIDs.has(device.id) && device.musicOwner && device.musicOwner !== owner.current)) {
+          session.patch({ error: 'Another Music show still owns these lights. Stop that show, or wait a few seconds after its page closes before starting again.' })
+          return
+        }
         baseline.current = current
-          .filter((d): d is Device & { color: RGB } => d.reachable && Boolean(d.color) && includedIDs.has(d.id))
-          .map(d => ({ fixtureID: d.id, rgb: d.color, brightness:d.brightness/100,restoring:true,owner:owner.current,controlRevision:d.controlRevision ?? 0 }))
+          .filter(d => d.reachable && includedIDs.has(d.id))
+          .map(d => ({ fixtureID: d.id, rgb: d.color ?? { r: 255, g: 255, b: 255 }, brightness:d.brightness/100,restoring:true,owner:owner.current,controlRevision:d.controlRevision ?? 0 }))
         baselineRevisions.current = new Map(baseline.current.map(frame => [frame.fixtureID, frame.controlRevision]))
       }
       session.patch({ grooveId: selectedGroove })
@@ -253,11 +292,31 @@ export function MusicModeView({
   // abandoned mid-show.
   const stopRef = useRef(stop)
   stopRef.current = stop
+  ownershipLostRef.current = () => {
+    if (!baseline.current) return
+    // An expired lease fences the old owner. End capture and restore only
+    // fixtures this show still owns; the bridge protects every newer edit.
+    void stopRef.current()
+    session.patch({ error: 'Music stopped because the bridge released these lights or another control took over. Press Start to use their current output as a fresh starting point.' })
+  }
   useEffect(() => () => { void stopRef.current() }, [])
   useEffect(() => {
     if (!connected) void stopRef.current()
     else void flushPendingMusicCleanup(portRef.current, postRef.current)
   }, [connected])
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (!connectedRef.current || !recoveryLeaseRef.current || !baseline.current?.length) return
+      // A quiet source or a pending Restart permission prompt still owns its
+      // lights. Closing/reloading the tab removes this lease renewal.
+      const commands = baseline.current.map(command => ({ ...command,
+        restoring: false, heartbeat: true, restoreOnDisconnect: session.state.configuration.restorePreviousState,
+      }))
+      void postRef.current(portRef.current, commands).then(result => checkOwnership(result, commands)).catch(() => undefined)
+    }, 1000)
+    return () => window.clearInterval(timer)
+  }, [session])
 
   useEffect(() => {
     const memberIDs = new Set(session.state.fixtures.map(fixture => fixture.id))
@@ -377,15 +436,12 @@ export function MusicModeView({
       <div className="panel music-transport">
         <h3>4. Start the show</h3>
         <p className="note">{reduceMotion ? "Reduced Motion: flashes blocked; movement limited." : state.configuration.photosensitivitySafeMode ? "No-flash mode: explicit flashes blocked." : "Controlled flashes enabled."} Brightness changes can still be uncomfortable. {state.configuration.restorePreviousState ? 'Stop sends the starting output back; a newer manual edit takes priority.' : 'Stop leaves the lights at their last music output.'}</p>
-        <div className="music-toolbar">
-          <button className="primary" disabled={startDisabled} onClick={() => void start()}>
-            {starting ? 'Starting…' : state.running ? 'Restart' : 'Start'}
-          </button>
-          <button onClick={() => void stop()} disabled={!state.running && !starting && !baseline.current?.length}>Stop</button>
-        </div>
-        <p className="meta" role="status">
-          {starting ? 'Starting' : state.running ? 'Running' : 'Idle'} · {state.running ? sourceLabel(state.source, state.fileName) : sourceLabel(selectedSource, file?.name ?? null)} · {includedFixtures.length} included lights
-          {state.midiClock ? ' · MIDI' : ''}
+        <p className="note">
+          {recoveryLeaseMS === null
+            ? 'Keep the local bridge running. A supported bridge recovers the lights if this page closes or reloads.'
+            : recoveryLeaseMS > 0
+              ? `If this page closes or loses contact, the running local bridge ${state.configuration.restorePreviousState ? 'restores the starting output' : 'releases the lights at their last output'} after ${Math.ceil(recoveryLeaseMS / 1000)} seconds. Newer manual edits take priority.`
+              : 'This bridge cannot recover lights after page closure. Stop and wait for restoration before closing, or update the bridge.'}
         </p>
         {!connected && <p className="note">Reconnect the bridge before starting Music.</p>}
         {!includedFixtures.length && selectedSource !== 'demo' && <p className="note">Find lights in Room or change a light’s role from Off before starting. Demo groove can run without lights.</p>}
@@ -403,6 +459,19 @@ export function MusicModeView({
             {cleanupBusy ? 'Sending…' : 'Retry now'}
           </button>
         </div>}
+      </div>
+
+      <div className="panel music-transport-controls">
+        <div className="music-toolbar">
+          <button className="primary" disabled={startDisabled} onClick={() => void start()}>
+            {starting ? 'Starting…' : state.running ? 'Restart' : 'Start'}
+          </button>
+          <button onClick={() => void stop()} disabled={!state.running && !starting && !baseline.current?.length}>Stop</button>
+        </div>
+        <p className="meta music-transport-status" role="status">
+          {starting ? 'Starting' : state.running ? 'Running' : 'Idle'} · {state.running ? sourceLabel(state.source, state.fileName) : sourceLabel(selectedSource, file?.name ?? null)} · {includedFixtures.length} included lights
+          {state.midiClock ? ' · MIDI' : ''}
+        </p>
       </div>
 
       <div className="music-performance">

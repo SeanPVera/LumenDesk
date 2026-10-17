@@ -674,7 +674,7 @@ export function setFixtureRole(session: WebMusicSession, id: string, role: Fixtu
   })
 }
 
-export interface MusicFrameCommand { fixtureID: string; rgb: { r: number; g: number; b: number }; brightness?: number; transitionDuration?: number; restoring?: boolean; owner?: string; controlRevision?: number; release?: boolean }
+export interface MusicFrameCommand { fixtureID: string; rgb: { r: number; g: number; b: number }; brightness?: number; transitionDuration?: number; restoring?: boolean; owner?: string; controlRevision?: number; release?: boolean; heartbeat?: boolean; restoreOnDisconnect?: boolean }
 
 export function frameToCommands(frame: MusicLightingFrame): MusicFrameCommand[] {
   const byFixture = new Map<string, MusicFrameCommand>()

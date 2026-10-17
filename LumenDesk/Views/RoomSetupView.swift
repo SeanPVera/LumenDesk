@@ -474,9 +474,11 @@ private struct IdentifyLamp: View {
     @ObservedObject var device: LightDevice
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @AppStorage(AppPreferenceKey.quietInterface) private var quietInterface = false
     @State private var breathing = false
 
     private var live: Bool { !device.isStale }
+    private var showsBreathing: Bool { breathing && live && !reduceMotion && !quietInterface }
 
     private var identityLine: String {
         var line = device.brand.displayName
@@ -493,19 +495,19 @@ private struct IdentifyLamp: View {
                                        center: .center, startRadius: 2, endRadius: 52)
                     )
                     .frame(width: 104, height: 104)
-                    .scaleEffect(breathing ? 1.12 : 0.9)
-                    .opacity(live ? (breathing ? 0.65 : 0.2) : 0.08)
+                    .scaleEffect(showsBreathing ? 1.12 : 0.9)
+                    .opacity(quietInterface ? 0 : live ? (showsBreathing ? 0.65 : 0.2) : 0.08)
 
                 Circle()
                     .fill(live ? device.color : Lumen.faint)
                     .frame(width: 34, height: 34)
-                    .shadow(color: live ? device.color.opacity(0.9) : .clear, radius: 18)
+                    .shadow(color: live && !quietInterface ? device.color.opacity(0.9) : .clear, radius: 18)
             }
             .frame(height: 110)
-            .animation(reduceMotion || !live ? nil
+            .animation(reduceMotion || quietInterface || !live ? nil
                        : .easeInOut(duration: 0.7).repeatForever(autoreverses: true),
                        value: breathing)
-            .onAppear { breathing = true }
+            .onAppear { breathing = !reduceMotion && !quietInterface && live }
 
             Text(device.label)
                 .font(.system(size: 15, weight: .semibold))

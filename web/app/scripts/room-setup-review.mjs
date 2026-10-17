@@ -279,6 +279,47 @@ try {
   await expect(page.getByLabel('Control room', { exact: true })).toHaveValue(recoveredID)
   assert.deepEqual(errors, [])
 
+  // A room can be organized before hardware is discovered, and choosing the
+  // wrong room is reversible inside the wizard.
+  devices.length = 0
+  state.rooms = []
+  await page.reload()
+  await page.getByRole('button', { name: 'Set up room', exact: true }).click()
+  await wizard.getByRole('button', { name: 'Continue to room', exact: true }).click()
+  await wizard.getByLabel('Room name', { exact: true }).fill('Empty room')
+  await wizard.getByRole('button', { name: 'Create room', exact: true }).click()
+  await wizard.getByRole('button', { name: 'Continue without lights', exact: true }).click()
+  await expect(wizard.getByRole('heading', { name: 'Try controls', exact: true })).toBeVisible()
+  await wizard.getByRole('button', { name: 'Done, open room', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'No lights found yet' })).toBeVisible()
+  const emptyRoomID = state.rooms[0].id
+  state.rooms.push({ id: 'alternative', name: 'Alternative room', lightIDs: [], schedules: [] })
+  await page.getByRole('button', { name: 'Set up room', exact: true }).click()
+  await wizard.getByRole('button', { name: 'Continue to room', exact: true }).click()
+  await wizard.getByLabel(/^Or use an existing room/).selectOption(emptyRoomID)
+  await wizard.getByRole('button', { name: 'Use room', exact: true }).click()
+  await wizard.getByRole('button', { name: 'Back to room', exact: true }).click()
+  await wizard.getByRole('button', { name: 'Choose a different room', exact: true }).click()
+  await wizard.getByLabel(/^Or use an existing room/).selectOption('alternative')
+  await wizard.getByRole('button', { name: 'Use room', exact: true }).click()
+  await expect(wizard.getByText('Alternative room', { exact: true })).toBeVisible()
+
+  // The global pairing shortcut overrides a paused later wizard step.
+  await wizard.getByRole('button', { name: 'Pause setup', exact: true }).click()
+  await page.getByText('Prepare your lights and network', { exact: true }).click()
+  await page.getByRole('button', { name: 'Pair a Nanoleaf wall', exact: true }).click()
+  await expect(wizard.getByRole('heading', { name: 'Find lights', exact: true })).toBeVisible()
+  await expect(wizard.getByLabel('Controller address', { exact: true })).toBeVisible()
+  await wizard.getByLabel('Controller address', { exact: true }).fill('192.0.2.30')
+  delayedPath = '/discover'
+  await wizard.getByRole('button', { name: 'Find lights', exact: true }).click()
+  await expect(wizard.getByRole('button', { name: 'Pair wall', exact: true })).toBeEnabled()
+  await wizard.getByRole('button', { name: 'Pair wall', exact: true }).click()
+  await expect(wizard.getByRole('alert')).toContainText('Pairing failed')
+  await expect(wizard.getByRole('button', { name: 'Searching…', exact: true })).toBeDisabled()
+  delayedPath = null
+  assert.deepEqual(errors, [])
+
   // Editing a bridge port must leave the current connection alone until Connect.
   const portContext = await browser.newContext({ viewport: { width: 390, height: 844 } })
   const portPage = await portContext.newPage()
@@ -307,7 +348,7 @@ try {
   assert.equal(connectedPort, true)
   assert.ok(healthRequests.includes('http://127.0.0.1:9387/health'))
   await portContext.close()
-  console.log('ROOM_SETUP_ASSERTIONS_PASS: fresh discovery diagnostics, vendor and network preparation, pairing draft retention, room failure and duplicate guards, pause/reopen, partial assignment retry, explicit control commands, completed room scope, deleted-room recovery from Assign, Try and Pause, deletion during create refresh, same-name recreation and retained fixture choices, Connect-only bridge port changes, 390px overflow and accessibility')
+  console.log('ROOM_SETUP_ASSERTIONS_PASS: empty-room setup, changing rooms, global pairing shortcut and pairing during discovery, fresh discovery diagnostics, vendor and network preparation, pairing draft retention, room failure and duplicate guards, pause/reopen, partial assignment retry, explicit control commands, completed room scope, deleted-room recovery from Assign, Try and Pause, deletion during create refresh, same-name recreation and retained fixture choices, Connect-only bridge port changes, 390px overflow and accessibility')
 } finally {
   await browser.close()
   server.kill()

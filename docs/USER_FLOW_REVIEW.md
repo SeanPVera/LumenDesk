@@ -1,7 +1,7 @@
 # LumenDesk user flow review
 
-This change implements the five flow improvements from the everyday-user review,
-alongside the correctness and recovery fixes below. Browser journeys run against
+This record covers the everyday-user review and the subsequent complete UX audit.
+Browser journeys run against
 the production app with simulated bridge responses; bridge tests use simulated
 controllers. Native and installer platform checks run in pull-request CI.
 
@@ -40,6 +40,16 @@ device behavior or native UI behavior.
 | A native scene retry is requested | Only failed lights receive the original scene version; off protection and successful lights are preserved. |
 | A native scene rehearsal is saved or dismissed | Starting lighting is restored. Previous saved scene versions are reached through History. |
 | Setup is read with accessibility tools | Skip setup remains a separate accessible control; browser scene and schedule controls have valid names and roles. |
+| A slider changes faster than the bridge responds | Per-fixture commands stay ordered, continuous controls keep the latest pending value, and older responses cannot replace newer intent. Changing bridges cancels unsent work. |
+| The bridge moves to another port | The published web client's Settings keeps port editing available during an outage. Initial health and lighting-data failures show their own diagnostics immediately. |
+| Setup starts without any lights | A room can be created and completed before discovery. Back allows choosing another room, and Nanoleaf pairing works while discovery is running. |
+| A Nanoleaf draft is left during navigation | Draft, selection and undo history stay with the wall. A delayed Apply clears only the submitted draft and preserves later edits. |
+| Music's page closes, reloads or stops responding | The running bridge restores its exact starting output after a five-second lease. A duplicated tab cannot stop a live show; resumed timers detect expired ownership and show a stopped state. |
+| A schedule is deleted | Confirmation names the action, time and room before deletion. |
+| Mixed lights or saved scenes are inspected | Group controls label mixed brightness and white values; scene details expose saved power, brightness, color, temperature and panel-design information in text. |
+| A phone controls fixtures or panels | Search sits above fixture selection, Music's sticky transport contains only controls/status, and small Nanoleaf panels have numbered touch buttons. |
+| An empty native room is selected | Light, Scenes and Music remain available on iPhone and iPad. |
+| Native appearance settings are changed | Quiet interface reduces decorative motion/glow, onboarding honors Reduce Motion, iOS text tokens scale with Dynamic Type, and platform-inapplicable or inert controls are hidden. Solar actions explicitly state on/off. |
 
 ## Implemented flow improvements
 
@@ -54,8 +64,8 @@ device behavior or native UI behavior.
 
 ## Verification and release checks
 
-The production browser build, all 101 component tests and all 167 bridge tests pass locally. The theme catalog audit and whitespace checks also pass; CI repeats these checks. The main Chromium walkthrough covers
-27 rendered states, including phone widths, reduced motion, failures and recovery.
+The production browser build, all 130 component tests and all 179 bridge tests pass locally. The theme catalog audit and whitespace checks also pass; CI repeats these checks. The main Chromium walkthrough covers
+29 rendered states, including 320 px phone widths, reduced motion, failures and recovery.
 Focused production-app regressions cover guided setup/discovery, scenes/favorites,
 schedule editing, explicit names, legacy bridges and Music capture recovery. Each script checks browser errors, narrow
 screen overflow and axe accessibility. Music checks verify source selection sends
@@ -69,9 +79,10 @@ The scripts are:
 - [`schedule-name-review.mjs`](../web/app/scripts/schedule-name-review.mjs)
 - [`legacy-bridge-review.mjs`](../web/app/scripts/legacy-bridge-review.mjs)
 - [`music-setup-review.mjs`](../web/app/scripts/music-setup-review.mjs)
+- [`music-recovery-review.mjs`](../web/app/scripts/music-recovery-review.mjs)
 
 Screenshots and audit reports are written to `/tmp/LumenDesk-Web-QA` by default.
-Eight added native regressions cover scene retry, rehearsal cleanup, schedule capacity,
+Existing native regressions cover scene retry, rehearsal cleanup, schedule capacity,
 daylight saving, saved scene scope and favorites ordering. They supplement the
 existing macOS test suite and iOS build; this Linux workspace cannot run Xcode.
 Pull-request CI runs the complete native test suite, macOS analysis and the iOS build.
@@ -83,5 +94,8 @@ Physical discovery, downloaded-app permission prompts, VoiceOver and actual
 light output still require hardware verification before release. Sent or accepted
 means local dispatch, rather than confirmed physical output. Native scene result
 tracking still classifies availability before asynchronous transport completion;
-it does not claim that a light visibly changed. Closing or reloading the browser
-can discard pending Music cleanup, so use Stop and wait for restoration first.
+it does not claim that a light visibly changed. The current bridge owns Music's
+starting output and restores it after five seconds without frames or heartbeats;
+this covers page closure, reload and browser suspension while the bridge remains
+running. Explicit pending cleanup survives reload in the same tab. Older bridges
+without this capability require Stop and completed restoration before closing.

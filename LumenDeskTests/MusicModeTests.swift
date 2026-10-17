@@ -751,6 +751,29 @@ final class MusicModeTests: XCTestCase {
     }
 
     @MainActor
+    func testLunaMusicUsesEveryPhysicalZoneWithASpatialGradient() throws {
+        let manager = LightManager(persistenceStore: MusicModePersistenceSpy())
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+        let luna = try XCTUnwrap(manager.devices.first { $0.isLIFXLuna })
+        let matrix = try XCTUnwrap(manager.lifxMatrixState(for: luna))
+        let fixtures = manager.musicFixtureDescriptors(in: .all)
+        let descriptor = try XCTUnwrap(fixtures.first { $0.id == luna.id })
+        XCTAssertEqual(descriptor.transport, .lifxLAN)
+        XCTAssertEqual(descriptor.segmentCount, 26)
+        XCTAssertEqual(descriptor.segmentPositions?.count, matrix.zoneCount)
+        var config = MusicModeConfiguration.configuration(for: .balanced)
+        config.colorChangeIntensity = 0
+        config.palette = [MusicPaletteColor(0xFF0000), MusicPaletteColor(0x0000FF)]
+        let frame = MusicChoreographyEngine().makeFrame(
+            snapshot: AudioReactiveSnapshot(level: 0.5, energy: 0.5, confidence: 1), configuration: config,
+            topology: manager.fixtureTopology(for: .all), fixtures: fixtures, timestamp: 100, sequenceNumber: 1)
+        let zones = frame.states.filter { $0.fixtureID == luna.id }
+        XCTAssertEqual(zones.map(\.segmentID), (0..<26).map { Optional($0) })
+        XCTAssertGreaterThan(Set(zones.map(\.hue)).count, 1)
+    }
+
+    @MainActor
     func testReduceMotionReachesShowsStartedOutsideTheMusicScreen() throws {
         let manager = LightManager(persistenceStore: MusicModePersistenceSpy())
         manager.enterDemoMode()

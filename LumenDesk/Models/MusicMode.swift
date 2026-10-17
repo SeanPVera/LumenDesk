@@ -615,7 +615,11 @@ struct FixtureTopology: Codable, Equatable {
                     fixtureID: fixture.id,
                     segmentID: fixture.segmentCount > 0 ? segment : nil,
                     position: position,
-                    role: role
+                    role: role,
+                    segmentPosition: segmentCount > 1
+                        ? (fixture.segmentPositions?[segment] ?? Double(segment) / Double(segmentCount - 1))
+                            * (layout == .circular ? Double(segmentCount - 1) / Double(segmentCount) : 1)
+                        : nil
                 ))
                 flatIndex += 1
             }
@@ -709,6 +713,8 @@ struct MusicSpatialTarget: Codable, Equatable {
     let segmentID: Int?
     let position: Double
     let role: FixtureRole
+    /// Position inside this fixture, independent of other fixtures' zone counts.
+    var segmentPosition: Double? = nil
 }
 
 struct MusicLightingState: Equatable {

@@ -199,6 +199,8 @@ export interface MusicSpatialTarget {
   segmentID: number | null;
   position: number;
   role: FixtureRole;
+  /** Position inside this fixture, independent of the room's zone count. */
+  segmentPosition?: number;
 }
 
 export interface MusicLightingState {

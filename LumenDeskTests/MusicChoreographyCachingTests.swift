@@ -23,6 +23,40 @@ final class MusicChoreographyCachingTests: XCTestCase {
         return value
     }
 
+    func testEachBarAndPanelFixtureKeepsItsFullGradientBesideALongerStrip() throws {
+        let fixtures = [
+            MusicFixtureDescriptor(id: "a-wall", label: "Wall", transport: .nanoleafStream, segmentCount: 4),
+            MusicFixtureDescriptor(id: "b-strip", label: "Strip", transport: .goveeRealtimeSegments, segmentCount: 200),
+            MusicFixtureDescriptor(id: "c-bar", label: "Bar", transport: .goveeRealtimeSegments, segmentCount: 4)
+        ]
+        for intensity in [0.0, 0.1, 1.0] {
+            var config = configuration
+            config.colorChangeIntensity = intensity
+            let frame = MusicChoreographyEngine().makeFrame(snapshot: snapshot, configuration: config,
+                topology: FixtureTopology(), fixtures: fixtures, timestamp: 100, sequenceNumber: 1)
+            for id in ["a-wall", "c-bar"] {
+                let states = frame.states.filter { $0.fixtureID == id }
+                XCTAssertEqual(Set(states.map(\.hue)).count, 4)
+                XCTAssertEqual(try XCTUnwrap(states.first).hue, 0, accuracy: 0.000_001)
+                XCTAssertEqual(try XCTUnwrap(states.last).hue, 2.0 / 3, accuracy: 0.000_001)
+            }
+        }
+    }
+
+    func testLockedBeatTransitionsFinishWithinOneRenderTick() throws {
+        let fixture = MusicFixtureDescriptor(id: "a", label: "A", transport: .lifxLAN)
+        for interval in [0.3, 0.4, 0.5, 1.0] {
+            var input = snapshot
+            input.beatInterval = interval
+            input.feltInterval = interval
+            let frame = MusicChoreographyEngine().makeFrame(snapshot: input, configuration: configuration,
+                topology: FixtureTopology(), fixtures: [fixture], timestamp: 100, sequenceNumber: 1)
+            let duration = try XCTUnwrap(frame.states.first).transitionDuration
+            XCTAssertLessThanOrEqual(duration, 0.05)
+            XCTAssertLessThanOrEqual(duration, interval * 0.12)
+        }
+    }
+
     func testLiveTopologyChangesReorderAndExcludeTargets() {
         let engine = MusicChoreographyEngine()
         let fixtures = [

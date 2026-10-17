@@ -3474,6 +3474,17 @@ extension LightManager {
         let topology = fixtureTopology(for: scope)
         return devices(in: scope).map { device in
             let role = topology.role(for: device.id)
+            if device.isLIFXLuna, let matrix = lifxMatrixState(for: device) {
+                return MusicFixtureDescriptor(
+                    id: device.id, label: device.label, transport: .lifxLAN,
+                    segmentCount: matrix.zoneCount, role: role,
+                    segmentPositions: matrix.activeZoneIndices.map { zone in
+                        topology.layout == .frontToBack
+                            ? Double(zone / matrix.width) / Double(max(1, matrix.height - 1))
+                            : Double(zone % matrix.width) / Double(max(1, matrix.width - 1))
+                    }
+                )
+            }
             if device.brand == .govee, segmentProfile(for: device) != nil {
                 return MusicFixtureDescriptor(
                     id: device.id,
@@ -3487,10 +3498,19 @@ extension LightManager {
                 // Segment i is the i-th light panel by ID, a numbering that
                 // never moves; where it sits on the wall, as oriented, comes
                 // from the layout along the room's own sweep direction.
+                let orientation = Double(shapes.displayOrientation(device.id))
+                var positions = layout.spatialPositions(rotationDegrees: orientation,
+                                                       axis: shapesAxis(for: topology.layout))
+                if positions.count > 1,
+                   let first = positions.first, let last = positions.last,
+                   last.position - first.position < 0.001 {
+                    // A vertical wall has no horizontal span (and vice versa).
+                    // Use its other physical axis rather than a uniform color.
+                    positions = layout.spatialPositions(rotationDegrees: orientation,
+                        axis: topology.layout == .frontToBack ? .leftToRight : .topToBottom)
+                }
                 let placed = Dictionary(
-                    layout.spatialPositions(rotationDegrees: Double(shapes.displayOrientation(device.id)),
-                                            axis: shapesAxis(for: topology.layout))
-                        .map { ($0.panelID, $0.position) },
+                    positions.map { ($0.panelID, $0.position) },
                     uniquingKeysWith: { first, _ in first })
                 let panels = layout.paintablePanels
                 return MusicFixtureDescriptor(
@@ -3552,7 +3572,25 @@ extension LightManager {
                 govee?.sendMusicColor(deviceID: device.backendID,
                     r: Int(rgb.r * 255 * first.brightness), g: Int(rgb.g * 255 * first.brightness),
                     b: Int(rgb.b * 255 * first.brightness))
-            case .lifxLAN, .nanoleafLAN:
+            case .lifxLAN:
+                if first.segmentID != nil, var matrix = lifxMatrixState(for: device) {
+                    let zones = matrix.activeZoneIndices
+                    for state in command.states {
+                        guard let segment = state.segmentID, zones.indices.contains(segment) else { continue }
+                        matrix.colors[zones[segment]] = LIFXMatrixColor(
+                            hue: UInt16((state.hue * 65_535).rounded()),
+                            saturation: UInt16((state.saturation * 65_535).rounded()),
+                            brightness: UInt16((state.brightness * 65_535).rounded()), kelvin: 3_500)
+                    }
+                    guard demoWorkspaceController.allowsLiveNetworking else { continue }
+                    lifx?.setMatrixColors(macHex: device.backendID, colors: matrix.colors.map(\.hsbk),
+                        width: matrix.width, durationMS: UInt32((first.transitionDuration * 1000).rounded()),
+                        musicTimestamp: frame.timestamp)
+                } else {
+                    sendEffectFrame(device, color: color, brightness: first.brightness,
+                                    duration: first.transitionDuration, musicTimestamp: frame.timestamp)
+                }
+            case .nanoleafLAN:
                 sendEffectFrame(
                     device,
                     color: color,

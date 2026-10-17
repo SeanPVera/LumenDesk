@@ -238,20 +238,18 @@ final class MusicChoreographyEngine {
         let dt = max(1 / 120, min(0.25, timestamp - (lastTimestamp ?? timestamp - 1 / 30)))
         lastTimestamp = timestamp
         // The tier needs this frame's bar position, and the clock needs the
-        // tier (it sets the attack the prediction compensates for, and
-        // half-time). Measure on the plain clock, then build the one the show renders.
+        // tier (it sets the attack the prediction compensates for). Measure
+        // on the plain clock, then build the one the show renders.
         let plainClock = musicalClock(snapshot: snapshot, timestamp: timestamp, configuration: config,
                                       attackTime: Self.attackTime, halfTime: false)
         let tier = tiers.update(energy: snapshot.energy, dt: dt, barPosition: plainClock.barPosition,
                                 gridStrength: plainClock.strength, mappedBarEnergy: snapshot.barEnergy)
         let attackTime = EnergyTierTracker.attack[tier]
-        // Calm music on a fast grid nods on every other beat, the way a
-        // listener would. Only when time feel is left on Auto and the grid
-        // itself reads straight; an explicit feel always wins.
-        let autoHalfTime = config.timeFeel == .auto && snapshot.timeFeel == .straight
-            && tier <= 2 && plainClock.interval > 0 && plainClock.interval < 0.5
+        // Energy shapes the accent, never the clock. Switching to half-time
+        // at an energy boundary skips beats and changes phase mid-song.
+        // Detected feel and the user's explicit feel still set feltInterval.
         let clock = musicalClock(snapshot: snapshot, timestamp: timestamp, configuration: config,
-                                 attackTime: attackTime, halfTime: autoHalfTime)
+                                 attackTime: attackTime, halfTime: false)
         let enteredDownbeat = clock.strength >= 0.5 && clock.beatInBar == 0
             && lastClockBeatInBar != nil && lastClockBeatInBar != 0
         lastClockBeatInBar = clock.strength >= 0.5 ? clock.beatInBar : nil
@@ -363,7 +361,10 @@ final class MusicChoreographyEngine {
         let spread = config.colorChangeIntensity * (0.35 + spatialFidelity * 0.65)
         let paletteSpan = Double(max(1, palette.count - 1))
         let paletteCount = Double(max(1, palette.count))
-        let transitionDuration = silence ? 0.55 : (flashIntensity > 0 ? 0.04 : 0.09)
+        // A 90 ms fade interrupted by each 50 ms frame adds another low-pass
+        // delay after the brightness envelope. Keep grid accents within a tick.
+        let transitionDuration = silence ? 0.55 : (flashIntensity > 0 ? 0.04
+            : (clock.strength >= 0.5 ? min(0.05, clock.interval * 0.12) : 0.09))
 
         var states: [MusicLightingState] = []
         states.reserveCapacity(targets.count)
@@ -425,7 +426,12 @@ final class MusicChoreographyEngine {
             // so the room reads as one gradient. `paletteColor` takes a 0…1
             // position across the whole palette, so entries are converted at
             // the last moment.
-            let paletteMotion = target.position * spread * paletteSpan
+            // Each addressable fixture spans the palette on its own. A short
+            // bar beside a long strip must not receive a near-solid sliver of
+            // the room gradient. Color-change intensity controls progression;
+            // zero holds the internal gradient rather than flattening it.
+            let colorPosition = target.segmentPosition ?? target.position * spread
+            let paletteMotion = colorPosition * paletteSpan
                 + paletteProgress + (isAccent && palette.count > 1 ? 1 : 0)
             var color = Self.paletteColor(palette, position: paletteMotion / paletteCount)
 

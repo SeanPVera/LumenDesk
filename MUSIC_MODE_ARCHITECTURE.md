@@ -141,10 +141,18 @@ Clocks (`BeatMapCoordinator`, main thread, owned by
   through the request. `PlaybackClock` dead-reckons between reports, drifts a
   tenth of the way toward reports within 250 ms and re-anchors on anything
   larger (seek, skip, stall). A track without a map is learned by
-  `BeatMapLearner` from host-timed hops drained each render tick; only one
-  unbroken pass counts, and it must start in the first ten seconds and cover
-  85 % of the track. The map is built just before the track ends or when it
-  changes, stored under `app bundle ID:track ID`, and used from the next listen.
+  `BeatMapLearner` from host-timed hops drained each render tick. Heard sections
+  are indexed at the map's 100 Hz rate by track position. Pauses, seeks and
+  capture gaps break interpolation without discarding earlier sections; replayed
+  sections do not inflate coverage. Partial progress is checkpointed every
+  15 seconds and on track/session changes under `BeatMaps/Learning`. Once 85 %
+  is heard, including audio in the first ten seconds, a background serial queue
+  builds a map immediately. Recording continues through the outro, refining
+  the map after another 5 % and at 99 %. Pending builds and recent progress
+  survive immediate repeats; later sessions load the persisted map or progress
+  under `app bundle ID:track ID`. An optional `learnedRanges` field confines
+  streamed-map playback to heard sections; gaps retain live timing. Existing
+  maps without that field remain compatible.
 - **Alignment:** every two seconds the last six seconds of live onsets are
   cross-correlated with the map within ±400 ms of the clock's position,
   penalising distance from zero so a neighbouring beat cannot win on a tie. A
@@ -199,8 +207,8 @@ remains app-wide. Zero offset is labeled Default timing, without claiming sync.
   hysteresis scale accent depth (0.62…1.15 of the original) and rise time (140 ms
   calm, 26 ms loud). A beat map supplies the playing bar's energy; live input
   sets a gear when a bar finishes (one bar late), and without a grid a
-  two-second average stands in. Gears 0–2 on beats under 0.5 s pulse every other
-  beat while time feel is Auto and the grid reads straight. Gears 4–5 step the
+  two-second average stands in. Gears preserve the detected or user-selected
+  beat interval, including in quiet passages. Gears 4–5 step the
   palette each beat (each other beat above 180 BPM, at most three changes a
   second) unless Reduced Motion is on. Gear 5 may request a downbeat flash
   through `FlashSafetyLimiter` like any other request.
@@ -209,6 +217,14 @@ remains app-wide. Zero offset is labeled Default timing, without claiming sync.
   This is not reliable phrase, chorus or drop recognition.
 
 ## Capability and transport boundaries
+
+Addressable fixtures each span the palette internally, independently of the
+number of zones in other fixtures and of temporal color-change intensity.
+Nanoleaf uses oriented panel placement, falling back to the other wall axis
+when the requested axis has no span. LIFX Luna expands its 26 physical zones
+and sends them through Set64 with music-frame expiry. Locked-grid transitions
+last at most 50 ms (12 % of the felt beat at fast tempos), avoiding overlapping
+90 ms fades on a 50 ms render clock.
 
 | Path | Renderer handoff ceiling (average) | Actual command path / limits |
 |---|---:|---|

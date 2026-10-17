@@ -213,17 +213,13 @@ export class MusicChoreographyEngine {
     const dt = Math.max(1 / 120, Math.min(0.25, timestamp - (this.lastTimestamp ?? timestamp - 1 / 30)));
     this.lastTimestamp = timestamp;
     // The tier needs this frame's bar position, and the clock needs the tier
-    // (it sets the attack the prediction compensates for, and half-time).
+    // (it sets the attack the prediction compensates for).
     // Measure on the plain clock, then build the one the show renders.
     const plainClock = this.musicalClock(snapshot, timestamp, config, MusicChoreographyEngine.attackTime, false);
     const tier = this.tiers.update(snapshot.energy, dt, plainClock.barPosition, plainClock.strength, snapshot.barEnergy);
     const attackTime = TIER_ATTACK[tier];
-    // Calm music on a fast grid nods on every other beat, the way a listener
-    // would. Only when the user left time feel on Auto and the grid itself
-    // reads straight; an explicit feel always wins.
-    const autoHalfTime = config.timeFeel === "auto" && snapshot.timeFeel === "straight" &&
-      tier <= 2 && plainClock.interval > 0 && plainClock.interval < 0.5;
-    const clock = this.musicalClock(snapshot, timestamp, config, attackTime, autoHalfTime);
+    // Energy shapes accents without changing the detected/user-selected clock.
+    const clock = this.musicalClock(snapshot, timestamp, config, attackTime, false);
     const enteredDownbeat = clock.strength >= 0.5 && clock.beatInBar === 0 &&
       this.lastClockBeatInBar != null && this.lastClockBeatInBar !== 0;
     this.lastClockBeatInBar = clock.strength >= 0.5 ? clock.beatInBar : null;
@@ -320,7 +316,9 @@ export class MusicChoreographyEngine {
     const spread = config.colorChangeIntensity * (0.35 + spatialFidelity * 0.65);
     const paletteSpan = Math.max(1, palette.length - 1);
     const paletteCount = Math.max(1, palette.length);
-    const transitionDuration = silence ? 0.55 : flashIntensity > 0 ? 0.04 : 0.09;
+    // Avoid overlapping 90 ms fades on the 50 ms render clock.
+    const transitionDuration = silence ? 0.55 : flashIntensity > 0 ? 0.04
+      : clock.strength >= 0.5 ? Math.min(0.05, clock.interval * 0.12) : 0.09;
 
     const states: MusicLightingState[] = [];
     for (let index = 0; index < targets.length; index += 1) {
@@ -374,7 +372,7 @@ export class MusicChoreographyEngine {
       // one beat at the bar line, plus a spatial offset so the room reads as
       // one gradient.
       const paletteMotion =
-        target.position * spread * paletteSpan + this.paletteProgress + (isAccent && palette.length > 1 ? 1 : 0);
+        (target.segmentPosition ?? target.position * spread) * paletteSpan + this.paletteProgress + (isAccent && palette.length > 1 ? 1 : 0);
       const color = paletteColor(palette, paletteMotion / paletteCount);
       if (flashIntensity > 0) color.saturation *= 1 - flashIntensity * 0.8;
 
@@ -622,6 +620,9 @@ export function expandedTargets(
         segmentID: segmented ? segment : null,
         position,
         role,
+        segmentPosition: segmentCount > 1
+          ? segment / (topology.layout === "circular" ? segmentCount : segmentCount - 1)
+          : undefined,
       });
       flat += 1;
     }

@@ -109,16 +109,20 @@ final class LIFXClient {
     }
 
     func setMatrixColors(macHex: String, colors: [LIFXHSBK], width: Int,
-                         durationMS: UInt32 = 250) {
+                         durationMS: UInt32 = 250, musicTimestamp: TimeInterval? = nil) {
         queue.async { [weak self] in
             guard let self,
                   let host = self.addressesByMac[macHex],
                   let target = self.targetsByMac[macHex] else { return }
+            if let timestamp = musicTimestamp, ProcessInfo.processInfo.systemUptime - timestamp > MusicLightingRenderer.maximumFrameAge {
+                self.musicMetrics.record(age: ProcessInfo.processInfo.systemUptime - timestamp, expired: true)
+                return
+            }
             let payload = LIFXProtocol.set64Payload(colors: colors, width: width,
                                                     durationMS: durationMS)
             let packet = LIFXProtocol.packet(type: .set64, source: self.source,
                                              target: target, payload: payload)
-            self.sendCommand(packet, to: host)
+            self.sendCommand(packet, to: host, musicTimestamp: musicTimestamp)
         }
     }
 

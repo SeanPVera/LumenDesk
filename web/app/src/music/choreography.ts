@@ -138,7 +138,7 @@ export class MusicChoreographyEngine {
   private highEnergyBeganAt: number | null = null;
   private sustainedEnergyEvent = false;
   private lastTimestamp: number | null = null;
-  private brightnessEnvelopes = new Map<string, number>();
+  private brightnessEnvelopesArray = new Float64Array(0);
   private flashLimiter = new FlashSafetyLimiter();
   private dynamics = 0;
   private fastEnergy = 0;
@@ -172,7 +172,7 @@ export class MusicChoreographyEngine {
     this.highEnergyBeganAt = null;
     this.sustainedEnergyEvent = false;
     this.lastTimestamp = null;
-    this.brightnessEnvelopes.clear();
+    this.brightnessEnvelopesArray = new Float64Array(0);
     this.flashLimiter.reset();
     this.dynamics = 0;
     this.fastEnergy = 0;
@@ -284,6 +284,7 @@ export class MusicChoreographyEngine {
 
     const lowerBrightness = config.minimumBrightness * config.masterBrightness;
     const upperBrightness = config.maximumBrightness * config.masterBrightness;
+    const brightnessSpan = upperBrightness - lowerBrightness;
     const palette = this.convertedPalette(config.palette);
     const phraseLift = config.phraseAware ? Math.min(0.18, energyRise * 0.9) : 0;
 
@@ -314,73 +315,102 @@ export class MusicChoreographyEngine {
     const release = 1 - Math.exp(-dt / releaseTime);
     const brightnessFloor = silence && config.silenceBehavior === "fadeOut" ? 0 : lowerBrightness;
     const spread = config.colorChangeIntensity * (0.35 + spatialFidelity * 0.65);
-    const paletteSpan = Math.max(1, palette.length - 1);
-    const paletteCount = Math.max(1, palette.length);
+    const paletteLen = palette.length;
+    const paletteSpan = Math.max(1, paletteLen - 1);
+    const paletteCount = Math.max(1, paletteLen);
+    const invPaletteCount = 1 / paletteCount;
+    const hasMultiplePalette = paletteLen > 1;
+
     // Avoid overlapping 90 ms fades on the 50 ms render clock.
     const transitionDuration = silence ? 0.55 : flashIntensity > 0 ? 0.04
       : clock.strength >= 0.5 ? Math.min(0.05, clock.interval * 0.12) : 0.09;
 
+    // Precalculate target-invariant constants for the target loop
+    const layoutFactor = topology.layout === "circular" ? 1 : 0.75;
+    const stereoFactor = (snapshot.stereo - 0.5) * 4 * config.stereoImage;
+    const commonBedScaled = commonBed * effectScale;
+    const hitBedScaled = commonBed * 0.76 * effectScale;
+    const accentBedScaled = commonBed * 0.85 * effectScale;
+
+    let silenceRawBrightness = 0;
+    if (silence) {
+      if (config.silenceBehavior === "settle") silenceRawBrightness = lowerBrightness;
+      else if (config.silenceBehavior === "holdPalette") {
+        silenceRawBrightness = lowerBrightness + brightnessSpan * (0.08 + config.effectIntensity * 0.08);
+      } else silenceRawBrightness = 0;
+    }
+
     const states: MusicLightingState[] = [];
     for (let index = 0; index < targets.length; index += 1) {
       const target = targets[index];
-      const phase = spatialPhase(topology.layout === "circular" ? target.position : target.position * 0.75, config.movementDirection, this.movementPhase);
+      const targetPos = target.position;
+      const phase = spatialPhase(targetPos * layoutFactor, config.movementDirection, this.movementPhase);
       const wave = 0.5 + 0.5 * Math.sin(phase * 2 * Math.PI);
-      const stereoBias = 1 + (snapshot.stereo - 0.5) * 2 * config.stereoImage * (target.position - 0.5) * 2;
+      const stereoBias = 1 + stereoFactor * (targetPos - 0.5);
       // Centred on 1 so movement tilts the room rather than dimming it.
       const spatialWeight = (1 - motionDepth * 0.5 + motionDepth * wave) * Math.max(0.6, Math.min(1.4, stereoBias));
 
-      const isHit = target.role === "hit";
-      const isAccent = target.role === "accent";
-      const isMotion = target.role === "motion";
-      const isWash = target.role === "wash" || target.role === "auto";
+      const role = target.role;
+      const isHit = role === "hit";
+      const isAccent = role === "accent";
+      const isMotion = role === "motion";
+      const isWash = role === "wash" || role === "auto";
 
-      // The bed: where this fixture rests between accents.
-      let bedLevel = commonBed;
-      // A hit fixture rests darker so it has headroom to punch.
-      if (isHit) bedLevel *= 0.76;
-      else if (isAccent) bedLevel *= 0.85;
-      bedLevel = clamp01(bedLevel * effectScale * spatialWeight);
-
-      // The swell: an accent inside the headroom above the bed.
-      const depth = isHit ? hitDepth : isWash ? washDepth : isMotion ? motionSwellDepth : accentDepth;
-      const bed = lowerBrightness + (upperBrightness - lowerBrightness) * bedLevel;
-      const rolePulse = isHit ? hitPulse : p;
-      let rawBrightness = bed + (upperBrightness - bed) * depth * rolePulse;
-
+      let rawBrightness: number;
       if (silence) {
-        if (config.silenceBehavior === "settle") rawBrightness = lowerBrightness;
-        else if (config.silenceBehavior === "holdPalette") {
-          rawBrightness =
-            lowerBrightness +
-            (upperBrightness - lowerBrightness) * (0.08 + config.effectIntensity * 0.08);
-        } else rawBrightness = 0;
+        rawBrightness = silenceRawBrightness;
+      } else {
+        // The bed: where this fixture rests between accents.
+        const bedLevel = isHit ? hitBedScaled : isAccent ? accentBedScaled : commonBedScaled;
+        const bed = lowerBrightness + brightnessSpan * clamp01(bedLevel * spatialWeight);
+
+        // The swell: an accent inside the headroom above the bed.
+        const depth = isHit ? hitDepth : isWash ? washDepth : isMotion ? motionSwellDepth : accentDepth;
+        const rolePulse = isHit ? hitPulse : p;
+        rawBrightness = bed + (upperBrightness - bed) * depth * rolePulse;
       }
       rawBrightness = Math.max(
         brightnessFloor,
         Math.min(upperBrightness, rawBrightness),
       );
 
-      const envelopeKey = this.cachedEnvelopeKeys[index];
-      const previous = this.brightnessEnvelopes.get(envelopeKey) ?? rawBrightness;
+      const prev = this.brightnessEnvelopesArray[index];
+      const previous = prev < 0 ? rawBrightness : prev;
       const coefficient = rawBrightness > previous ? attack : release;
       let brightness = previous + (rawBrightness - previous) * coefficient;
       brightness += flashIntensity * Math.max(0, upperBrightness - brightness);
       brightness = Math.max(brightnessFloor, Math.min(upperBrightness, brightness));
-      this.brightnessEnvelopes.set(envelopeKey, brightness);
+      this.brightnessEnvelopesArray[index] = brightness;
 
-      // A palette entry held for a whole number of bars and cross-faded over
-      // one beat at the bar line, plus a spatial offset so the room reads as
-      // one gradient.
-      const paletteMotion =
-        (target.segmentPosition ?? target.position * spread) * paletteSpan + this.paletteProgress + (isAccent && palette.length > 1 ? 1 : 0);
-      const color = paletteColor(palette, paletteMotion / paletteCount);
-      if (flashIntensity > 0) color.saturation *= 1 - flashIntensity * 0.8;
+      // Fast inlined palette HSB calculation avoiding object creation and unused brightness computation
+      let hue = 0;
+      let sat = 0;
+      if (paletteLen === 1) {
+        hue = palette[0].hue;
+        sat = palette[0].saturation;
+      } else if (hasMultiplePalette) {
+        const paletteMotion =
+          (target.segmentPosition ?? targetPos * spread) * paletteSpan + this.paletteProgress + (isAccent ? 1 : 0);
+        const wrapped = wrapUnit(paletteMotion * invPaletteCount) * paletteLen;
+        const palIdx = Math.floor(wrapped) % paletteLen;
+        const t = wrapped - Math.floor(wrapped);
+        const a = palette[palIdx];
+        const b = palette[(palIdx + 1) % paletteLen];
+        if (a.saturation <= 0.08) hue = b.hue;
+        else if (b.saturation <= 0.08) hue = a.hue;
+        else {
+          const delta = wrapUnit(b.hue - a.hue + 0.5) - 0.5;
+          hue = wrapUnit(a.hue + delta * t);
+        }
+        sat = a.saturation + (b.saturation - a.saturation) * t;
+      }
+      if (flashIntensity > 0) sat *= 1 - flashIntensity * 0.8;
 
       states.push({
         fixtureID: target.fixtureID,
         segmentID: target.segmentID,
-        hue: color.hue,
-        saturation: clamp01(color.saturation),
+        hue,
+        saturation: clamp01(sat),
         brightness: clamp01(brightness),
         // The transition covers the gap to the next frame, so a fixture
         // interpolates between commands instead of stepping.
@@ -414,6 +444,8 @@ export class MusicChoreographyEngine {
       this.cachedTargets = expandedTargets(topology, fixtures);
       this.cachedEnvelopeKeys = this.cachedTargets.map(target => `${target.fixtureID}#${target.segmentID ?? -1}`);
       this.cachedRoles = new Set(this.cachedTargets.map(target => target.role));
+      this.brightnessEnvelopesArray = new Float64Array(this.cachedTargets.length);
+      this.brightnessEnvelopesArray.fill(-1);
     }
     return this.cachedTargets;
   }

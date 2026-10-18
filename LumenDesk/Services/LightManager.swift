@@ -3167,7 +3167,8 @@ extension LightManager {
                 title: "Delete “\(scene.name)” everywhere?",
                 message: "The Look will be removed from every room shelf where it appears. You can undo the deletion afterward.",
                 confirmTitle: "Delete Everywhere",
-                role: .destructive
+                role: .destructive,
+                requirement: .always
             ),
             action: { [weak self] in self?.performDeleteScene(sceneID) }
         )

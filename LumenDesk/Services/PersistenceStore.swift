@@ -343,7 +343,8 @@ final class PersistenceStore: ApplicationPersistence {
 
     func load() -> PersistedApplicationState {
         if SQLiteStateDatabase.isSQLiteFile(at: fileURL) {
-            if var state = (try? database.load()) ?? recoverDatabaseBackup() {
+            do {
+                var state = try database.load()
                 guard state.schemaVersion <= PersistedApplicationState.currentSchemaVersion else {
                     return PersistedApplicationState()
                 }
@@ -351,6 +352,21 @@ final class PersistenceStore: ApplicationPersistence {
                 state = migratedAndNormalized(state)
                 if previousVersion != state.schemaVersion { try? save(state) }
                 return state
+            } catch {
+                if isUnsupportedDatabaseVersion(error) { return PersistedApplicationState() }
+            }
+
+            do {
+                var state = try recoverDatabaseBackup()
+                guard state.schemaVersion <= PersistedApplicationState.currentSchemaVersion else {
+                    return PersistedApplicationState()
+                }
+                let previousVersion = state.schemaVersion
+                state = migratedAndNormalized(state)
+                if previousVersion != state.schemaVersion { try? save(state) }
+                return state
+            } catch {
+                if isUnsupportedDatabaseVersion(error) { return PersistedApplicationState() }
             }
 
             // A valid SQLite signature does not guarantee a readable database.
@@ -372,8 +388,11 @@ final class PersistenceStore: ApplicationPersistence {
             // A torn or otherwise damaged SQLite header cannot be identified
             // as SQLite. Try the last transaction backup before treating the
             // file as an unknown legacy payload.
-            if let recovered = recoverDatabaseBackup() {
+            do {
+                let recovered = try recoverDatabaseBackup()
                 return migratedAndNormalized(recovered)
+            } catch {
+                if isUnsupportedDatabaseVersion(error) { return PersistedApplicationState() }
             }
         }
 
@@ -563,8 +582,8 @@ final class PersistenceStore: ApplicationPersistence {
         try fileManager.copyItem(at: sourceURL, to: archiveURL)
     }
 
-    private func recoverDatabaseBackup() -> PersistedApplicationState? {
-        guard let recovered = try? database.loadBackup() else { return nil }
+    private func recoverDatabaseBackup() throws -> PersistedApplicationState {
+        let recovered = try database.loadBackup()
         // Keep the corrupt primary for diagnosis and make the last complete
         // transaction the active store again. No Room or Look is discarded.
         let corruptURL = fileURL.appendingPathExtension("corrupt-\(Int(Date().timeIntervalSince1970))")
@@ -573,6 +592,12 @@ final class PersistenceStore: ApplicationPersistence {
         }
         try? fileManager.copyItem(at: database.backupURL, to: fileURL)
         return recovered
+    }
+
+    private func isUnsupportedDatabaseVersion(_ error: Error) -> Bool {
+        guard let databaseError = error as? SQLiteStateDatabase.DatabaseError else { return false }
+        if case .unsupportedVersion = databaseError { return true }
+        return false
     }
 
     private func quarantineUnreadableDatabase() {

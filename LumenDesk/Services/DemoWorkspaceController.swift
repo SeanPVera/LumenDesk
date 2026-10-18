@@ -300,6 +300,7 @@ final class DemoWorkspaceController {
                 brightness: device.brightness,
                 colorHex: hex,
                 kelvin: device.kelvin,
+                nanoleafAppearance: device.nanoleafAppearance,
                 confirmedAt: timestamp
             )
             workspace.commandState.commandStates[device.id] = DeviceCommandState(

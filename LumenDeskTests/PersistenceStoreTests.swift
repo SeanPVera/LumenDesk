@@ -1,4 +1,5 @@
 import Foundation
+import SQLite3
 import XCTest
 @testable import LumenDesk
 
@@ -169,6 +170,37 @@ final class PersistenceStoreTests: XCTestCase {
         XCTAssertTrue(siblings.contains {
             $0.lastPathComponent.hasPrefix("RoomCanvas.sqlite3.unreadable-")
         })
+    }
+
+    func testNewerSQLiteStoreVersionIsLeftUntouched() throws {
+        let root = temporaryPersistenceFileURL().deletingLastPathComponent()
+        let databaseURL = root.appendingPathComponent("RoomCanvas.sqlite3", isDirectory: false)
+        let backupURL = databaseURL.appendingPathExtension("backup")
+        let legacyURL = root.appendingPathComponent("ApplicationState.json", isDirectory: false)
+        let store = PersistenceStore(fileURL: databaseURL, legacyStateFileURL: legacyURL)
+
+        var currentState = PersistedApplicationState()
+        currentState.rooms = [Room(name: "Newer Room")]
+        try store.save(currentState)
+        var staleLegacyState = PersistedApplicationState()
+        staleLegacyState.rooms = [Room(name: "Stale Legacy Room")]
+        try JSONEncoder().encode(staleLegacyState).write(to: legacyURL)
+
+        let newerVersion = SQLiteStateDatabase.storeVersion + 1
+        setSQLiteStoreVersion(newerVersion, at: databaseURL)
+        setSQLiteStoreVersion(newerVersion, at: backupURL)
+        let primaryBeforeLoad = try Data(contentsOf: databaseURL)
+        let backupBeforeLoad = try Data(contentsOf: backupURL)
+
+        XCTAssertEqual(store.load(), PersistedApplicationState())
+        XCTAssertEqual(try Data(contentsOf: databaseURL), primaryBeforeLoad)
+        XCTAssertEqual(try Data(contentsOf: backupURL), backupBeforeLoad)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: legacyURL.path))
+        let siblings = try FileManager.default.contentsOfDirectory(
+            at: root,
+            includingPropertiesForKeys: nil
+        )
+        XCTAssertFalse(siblings.contains { $0.lastPathComponent.contains(".unreadable-") })
     }
 
     func testLegacyDefaultsMigrationPreservesRoomsLooksFavoritesAndSegments() throws {
@@ -435,6 +467,18 @@ final class PersistenceStoreTests: XCTestCase {
         defaults: UserDefaults
     ) throws {
         defaults.set(try JSONEncoder().encode(value), forKey: key)
+    }
+
+    private func setSQLiteStoreVersion(_ version: Int32, at url: URL) {
+        var connection: OpaquePointer?
+        let openResult = sqlite3_open(url.path, &connection)
+        XCTAssertEqual(openResult, SQLITE_OK)
+        guard let connection else { return }
+        defer { sqlite3_close(connection) }
+        XCTAssertEqual(
+            sqlite3_exec(connection, "PRAGMA user_version = \(version)", nil, nil, nil),
+            SQLITE_OK
+        )
     }
 }
 

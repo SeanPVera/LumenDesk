@@ -59,6 +59,7 @@ struct LumenDeskApp: App {
             NavigationStack { RoomCanvasSettingsView() }
                 .environmentObject(manager)
                 .preferredColorScheme(.light)
+                .managedActionConfirmations(manager)
         }
 
         MenuBarExtra {

@@ -546,6 +546,7 @@ final class LightManager: ObservableObject {
             brightness: device.brightness,
             colorHex: hex,
             kelvin: device.kelvin,
+            nanoleafAppearance: device.nanoleafAppearance,
             confirmedAt: Date()
         )
         if !confirmsPendingCommand,
@@ -576,6 +577,7 @@ final class LightManager: ObservableObject {
             || abs(lhs.brightness - rhs.brightness) > 0.03
             || lhs.colorHex != rhs.colorHex
             || abs(lhs.kelvin - rhs.kelvin) > 100
+            || lhs.nanoleafAppearance != rhs.nanoleafAppearance
     }
 
     func acknowledgeExternalChange(deviceIDs: Set<String>) {

@@ -260,6 +260,29 @@ final class NanoleafTests: XCTestCase {
     }
 
     @MainActor
+    func testExternalNativeEffectChangeIsVisibleUntilAcknowledged() async throws {
+        let fixture = NanoleafFixture()
+        let client = makeClient(fixture)
+        defer { client.pause() }
+        let manager = makeManager(client)
+        try await manager.pairNanoleaf(host: fixture.endpoint.host)
+        let device = try XCTUnwrap(manager.devices.first)
+        XCTAssertEqual(manager.confirmedStates[device.id]?.nanoleafAppearance,
+                       .init(colorMode: "hs"))
+        XCTAssertFalse(manager.externallyChangedDeviceIDs.contains(device.id))
+
+        fixture.setAppearance("effect", effect: "Northern Lights")
+        client.refresh("SHAPES123")
+        try await waitUntil {
+            manager.confirmedStates[device.id]?.nanoleafAppearance?.effect == "Northern Lights"
+        }
+
+        XCTAssertTrue(manager.externallyChangedDeviceIDs.contains(device.id))
+        manager.acknowledgeExternalChange(deviceIDs: [device.id])
+        XCTAssertFalse(manager.externallyChangedDeviceIDs.contains(device.id))
+    }
+
+    @MainActor
     func testNativeEffectSurvivesScene() async throws {
         let fixture = NanoleafFixture()
         let client = makeClient(fixture)

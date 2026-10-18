@@ -71,6 +71,7 @@ struct ConfirmedDeviceState: Equatable {
     var brightness: Double
     var colorHex: String
     var kelvin: Int
+    var nanoleafAppearance: NanoleafAppearance? = nil
     var confirmedAt: Date
 }
 

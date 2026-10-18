@@ -29,13 +29,19 @@ is active.
 A Look is a saved room composition. The room workspace includes immediate Evening,
 Reading, Movie, and Bright templates, saved Looks, and **Save current**.
 The built-in collection includes 48 curated static themes, all rendered through
-the same capability-aware planner.
+the same capability-aware planner. **Color themes** in the room or selection
+controls and the Look shelf exposes the complete collection, grouped by mood.
 
-The Look Composer offers Spatial wash, Gradient, and Exact fixture brushes.
+The Look Composer includes every theme alongside Ember & Moss. **Original**
+keeps a theme's authored spread and brightness; Spatial wash, Gradient, and
+Exact fixture brushes let you change its distribution.
 The pure capability renderer distributes one palette across normal bulbs,
 Govee RGBIC segments, LIFX Luna zones, and Nanoleaf panels. It states every
 adaptation instead of implying all fixtures can render the same detail.
 
+The onscreen preview shows the planned segment, matrix, or panel colours.
+**Preview on lights** starts a live preview; subsequent palette, brush, fixture
+assignment, scope, and transition edits update it automatically.
 Preview changes real output but remains recoverable: **Restore before preview**
 returns the opening snapshot. **Save Look** keeps the preview and stores the
 result. Apply and shared controls use the existing per-device command

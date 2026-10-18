@@ -551,6 +551,85 @@ final class RoomWorkspaceTests: XCTestCase {
         XCTAssertEqual(candidate.brightness, expected.brightness, accuracy: 0.001)
     }
 
+    @MainActor
+    func testLiveBrushUpdatesPreserveTheOpeningSpatialStateAndPreviewIdentity() throws {
+        let manager = LightManager(defaults: UserDefaults(suiteName: UUID().uuidString)!,
+                                   persistenceStore: temporaryPersistenceStore())
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+        let room = try XCTUnwrap(manager.rooms.first)
+        let targets = manager.devices(in: room)
+        let ids = Set(targets.map(\.id))
+        let strip = try XCTUnwrap(targets.first { manager.segmentProfile(for: $0)?.layout == .cobStrip })
+        let luna = try XCTUnwrap(targets.first { $0.isLIFXLuna })
+        manager.applySegments(strip, state: manager.segmentState(for: strip))
+        let originalSegments = manager.activeSegmentState(for: strip.id)
+        let originalMatrix = manager.activeLIFXMatrixState(for: luna.id)
+        let originalPower = Dictionary(uniqueKeysWithValues: targets.map { ($0.id, $0.isOn) })
+        let originalBrightness = Dictionary(uniqueKeysWithValues: targets.map { ($0.id, $0.brightness) })
+        let theme = try XCTUnwrap(LightingCatalog.theme(withID: "aurora"))
+
+        let previewID = try XCTUnwrap(manager.startLookPreview(
+            LookBrush.spatialWash.applying(to: theme), deviceIDs: ids, in: .room(room.id),
+            transitionDuration: 0
+        ))
+        let washSegments = manager.activeSegmentState(for: strip.id)
+        let washMatrix = manager.activeLIFXMatrixState(for: luna.id)
+        XCTAssertEqual(manager.startLookPreview(
+            LookBrush.gradient.applying(to: theme), deviceIDs: ids, in: .room(room.id),
+            transitionDuration: 0, updating: previewID
+        ), previewID)
+        XCTAssertNotEqual(manager.activeSegmentState(for: strip.id)?.colors, washSegments?.colors)
+        XCTAssertNotEqual(manager.activeLIFXMatrixState(for: luna.id)?.colors, washMatrix?.colors)
+
+        manager.stopSceneRehearsal(restore: true)
+        XCTAssertEqual(manager.activeSegmentState(for: strip.id), originalSegments)
+        XCTAssertEqual(manager.activeLIFXMatrixState(for: luna.id), originalMatrix)
+        for light in targets {
+            XCTAssertEqual(light.isOn, originalPower[light.id])
+            XCTAssertEqual(light.brightness, try XCTUnwrap(originalBrightness[light.id]), accuracy: 0.001)
+        }
+        // A coalesced edit that wakes after Restore cannot relight the room.
+        XCTAssertNil(manager.startLookPreview(theme, deviceIDs: ids, in: .room(room.id), updating: previewID))
+        XCTAssertNil(manager.rehearsalSceneID)
+        XCTAssertEqual(manager.activeSegmentState(for: strip.id), originalSegments)
+    }
+
+    @MainActor
+    func testLivePreviewScopeChangesRestoreExcludedLightsAndCaptureNewTargets() throws {
+        let manager = LightManager(defaults: UserDefaults(suiteName: UUID().uuidString)!,
+                                   persistenceStore: temporaryPersistenceStore())
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+        let room = try XCTUnwrap(manager.rooms.first)
+        let bulbs = manager.devices(in: room).filter {
+            if case .solid = manager.themeCapability(for: $0) { return true }
+            return false
+        }
+        XCTAssertGreaterThanOrEqual(bulbs.count, 2)
+        let a = try XCTUnwrap(bulbs.first)
+        let b = try XCTUnwrap(bulbs.last)
+        a.isOn = false
+        a.color = .red
+        a.brightness = 0.27
+        b.color = .blue
+        b.brightness = 0.43
+        let theme = try XCTUnwrap(LightingCatalog.theme(withID: "afterglow"))
+        let id = try XCTUnwrap(manager.startLookPreview(theme, deviceIDs: [a.id], in: .room(room.id)))
+
+        manager.startLookPreview(theme, deviceIDs: [a.id, b.id], in: .room(room.id), updating: id)
+        manager.startLookPreview(theme, deviceIDs: [b.id], in: .room(room.id), updating: id)
+        XCTAssertFalse(a.isOn)
+        XCTAssertEqual(a.brightness, 0.27, accuracy: 0.001)
+        XCTAssertLessThan(a.color.rgbDistance(to: .red), 0.001)
+        XCTAssertEqual(manager.rehearsalSceneID, id)
+
+        manager.startLookPreview(theme, deviceIDs: [], in: .room(room.id), updating: id)
+        XCTAssertNil(manager.rehearsalSceneID)
+        XCTAssertEqual(b.brightness, 0.43, accuracy: 0.001)
+        XCTAssertLessThan(b.color.rgbDistance(to: .blue), 0.001)
+    }
+
     func testSelectionNeverExpandsAStaleSelectionToTheWholeRoom() {
         XCTAssertEqual(RoomWorkspaceSelection.targets(
             selected: ["gone"], available: ["a", "b"], controlsWholeRoom: false
@@ -885,6 +964,20 @@ final class RoomCanvasRenderTests: XCTestCase {
         try await capture("room-canvas-1440", RoomCanvasShellView(), manager, width: 1440, height: 1000)
         try await capture("room-canvas-settings", NavigationStack { RoomCanvasSettingsView() },
                           manager, width: 760, height: 760)
+        let room = try XCTUnwrap(manager.rooms.first)
+        try await capture("look-composer-680", LookComposerView(
+            room: room, initialSelection: [], initiallyControlsWholeRoom: true
+        ), manager, width: 680, height: 900)
+        try await capture("look-composer-1040", LookComposerView(
+            room: room, initialSelection: [], initiallyControlsWholeRoom: true
+        ), manager, width: 1040, height: 1000)
+        let theme = try XCTUnwrap(LightingCatalog.theme(withID: "aurora"))
+        for brush in [LookBrush.spatialWash, .gradient] {
+            try await capture("look-preview-\(brush.id)", ComposerRoomPreview(
+                room: room, lights: manager.devices(in: room), targetIDs: Set(room.lightIDs),
+                theme: brush.applying(to: theme), paletteAssignments: nil
+            ), manager, width: 680, height: 360)
+        }
     }
 
     @MainActor

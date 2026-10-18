@@ -151,7 +151,9 @@ final class MusicChoreographyEngine {
     private var highEnergyBeganAt: TimeInterval?
     private var sustainedEnergyEvent = false
     private var lastTimestamp: TimeInterval?
-    private var brightnessEnvelopes: [String: Double] = [:]
+    /// Index-aligned brightness envelopes for `cachedTargets`. $O(1)$ array access
+    /// replaces dictionary lookups and string key allocations in the 120Hz render loop.
+    private var brightnessEnvelopes: [Double?] = []
     private var flashLimiter = FlashSafetyLimiter()
 
     // Musical state carried between frames.
@@ -176,7 +178,6 @@ final class MusicChoreographyEngine {
     private var cachedTopology: FixtureTopology?
     private var cachedFixtures: [MusicFixtureDescriptor] = []
     private var cachedTargets: [MusicSpatialTarget] = []
-    private var cachedEnvelopeKeys: [String] = []
     private var hasHitTargets = false
     private var hasAccentTargets = false
     private var hasMotionTargets = false
@@ -207,7 +208,6 @@ final class MusicChoreographyEngine {
         cachedTopology = nil
         cachedFixtures.removeAll(keepingCapacity: true)
         cachedTargets.removeAll(keepingCapacity: true)
-        cachedEnvelopeKeys.removeAll(keepingCapacity: true)
         hasHitTargets = false
         hasAccentTargets = false
         hasMotionTargets = false
@@ -366,6 +366,8 @@ final class MusicChoreographyEngine {
         let transitionDuration = silence ? 0.55 : (flashIntensity > 0 ? 0.04
             : (clock.strength >= 0.5 ? min(0.05, clock.interval * 0.12) : 0.09))
 
+        let spatialPositionScale = topology.layout == .circular ? 1.0 : 0.75
+
         var states: [MusicLightingState] = []
         states.reserveCapacity(targets.count)
         for (index, target) in targets.enumerated() {
@@ -375,7 +377,7 @@ final class MusicChoreographyEngine {
             let isWash = target.role == .wash || target.role == .auto
 
             // A full turn at the two endpoints made two bulbs move identically.
-            let spatialPosition = topology.layout == .circular ? target.position : target.position * 0.75
+            let spatialPosition = target.position * spatialPositionScale
             let phase = spatialPhase(position: spatialPosition, direction: config.movementDirection)
             let wave = 0.5 + 0.5 * sin(phase * 2 * .pi)
             let stereoBias = 1 + (snapshot.stereo - 0.5) * 2 * config.stereoImage * (target.position - 0.5) * 2
@@ -412,14 +414,16 @@ final class MusicChoreographyEngine {
                 min(upperBrightness, rawBrightness)
             )
 
-            let envelopeKey = cachedEnvelopeKeys[index]
-            let previous = brightnessEnvelopes[envelopeKey] ?? rawBrightness
+            // Direct array indexing eliminates dictionary lookups and string allocations per frame.
+            let previous = (index < brightnessEnvelopes.count ? brightnessEnvelopes[index] : nil) ?? rawBrightness
             let coefficient = rawBrightness > previous ? attack : release
             var brightness = previous + (rawBrightness - previous) * coefficient
             brightness += flashIntensity * max(0, upperBrightness - brightness)
             brightness = max(brightnessFloor,
                              min(upperBrightness, brightness))
-            brightnessEnvelopes[envelopeKey] = brightness
+            if index < brightnessEnvelopes.count {
+                brightnessEnvelopes[index] = brightness
+            }
 
             // Colour: a palette entry held for a whole number of bars and
             // cross-faded over one beat at the bar line, plus a spatial offset
@@ -462,19 +466,42 @@ final class MusicChoreographyEngine {
         )
     }
 
+    private struct TargetKey: Hashable {
+        let fixtureID: String
+        let segmentID: Int
+    }
+
     private func expandedTargets(
         for topology: FixtureTopology,
         fixtures: [MusicFixtureDescriptor]
     ) -> [MusicSpatialTarget] {
         if cachedTopology != topology || cachedFixtures != fixtures {
+            // Preserve existing envelope states across topology / fixture updates
+            var oldEnvelopes: [TargetKey: Double] = [:]
+            if !cachedTargets.isEmpty && cachedTargets.count == brightnessEnvelopes.count {
+                for (idx, target) in cachedTargets.enumerated() {
+                    if let val = brightnessEnvelopes[idx] {
+                        let key = TargetKey(fixtureID: target.fixtureID, segmentID: target.segmentID ?? -1)
+                        oldEnvelopes[key] = val
+                    }
+                }
+            }
+
             cachedTopology = topology
             cachedFixtures = fixtures
             cachedTargets = topology.expandedTargets(for: fixtures)
-            cachedEnvelopeKeys = cachedTargets.map { "\($0.fixtureID)#\($0.segmentID ?? -1)" }
             hasHitTargets = cachedTargets.contains { $0.role == .hit }
             hasAccentTargets = cachedTargets.contains { $0.role == .accent }
             hasMotionTargets = cachedTargets.contains { $0.role == .motion }
             hasWashTargets = cachedTargets.contains { $0.role == .wash || $0.role == .auto }
+
+            var newEnvelopes: [Double?] = []
+            newEnvelopes.reserveCapacity(cachedTargets.count)
+            for target in cachedTargets {
+                let key = TargetKey(fixtureID: target.fixtureID, segmentID: target.segmentID ?? -1)
+                newEnvelopes.append(oldEnvelopes[key])
+            }
+            brightnessEnvelopes = newEnvelopes
         }
         return cachedTargets
     }

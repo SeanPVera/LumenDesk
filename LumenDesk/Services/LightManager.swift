@@ -3164,9 +3164,9 @@ extension LightManager {
         let scene = scenes[idx]
         confirmationCoordinator.request(
             .init(
-                title: "Delete “\(scene.name)”?",
-                message: "The Look will be removed from this room’s shelf. You can undo the deletion afterward.",
-                confirmTitle: "Delete Look",
+                title: "Delete “\(scene.name)” everywhere?",
+                message: "The Look will be removed from every room shelf where it appears. You can undo the deletion afterward.",
+                confirmTitle: "Delete Everywhere",
                 role: .destructive
             ),
             action: { [weak self] in self?.performDeleteScene(sceneID) }

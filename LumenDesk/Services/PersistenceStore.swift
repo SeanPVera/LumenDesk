@@ -343,14 +343,20 @@ final class PersistenceStore: ApplicationPersistence {
 
     func load() -> PersistedApplicationState {
         if SQLiteStateDatabase.isSQLiteFile(at: fileURL) {
-            guard var state = (try? database.load()) ?? recoverDatabaseBackup(),
-                  state.schemaVersion <= PersistedApplicationState.currentSchemaVersion else {
-                return PersistedApplicationState()
+            if var state = (try? database.load()) ?? recoverDatabaseBackup() {
+                guard state.schemaVersion <= PersistedApplicationState.currentSchemaVersion else {
+                    return PersistedApplicationState()
+                }
+                let previousVersion = state.schemaVersion
+                state = migratedAndNormalized(state)
+                if previousVersion != state.schemaVersion { try? save(state) }
+                return state
             }
-            let previousVersion = state.schemaVersion
-            state = migratedAndNormalized(state)
-            if previousVersion != state.schemaVersion { try? save(state) }
-            return state
+
+            // A valid SQLite signature does not guarantee a readable database.
+            // Preserve the failed primary, then keep walking the migration path
+            // so a still-valid ApplicationState.json can restore Rooms & Looks.
+            quarantineUnreadableDatabase()
         }
 
         // Tests, development builds, and 1.x installs can place the previous
@@ -567,6 +573,21 @@ final class PersistenceStore: ApplicationPersistence {
         }
         try? fileManager.copyItem(at: database.backupURL, to: fileURL)
         return recovered
+    }
+
+    private func quarantineUnreadableDatabase() {
+        guard fileManager.fileExists(atPath: fileURL.path) else { return }
+        let quarantineURL = fileURL.appendingPathExtension("unreadable-\(UUID().uuidString)")
+        try? fileManager.moveItem(at: fileURL, to: quarantineURL)
+
+        // SQLite can leave these beside a failed primary. Moving them prevents
+        // stale journal pages from being attached to the newly migrated store.
+        for suffix in ["-wal", "-shm"] {
+            let sidecar = URL(fileURLWithPath: fileURL.path + suffix)
+            guard fileManager.fileExists(atPath: sidecar.path) else { continue }
+            let quarantinedSidecar = URL(fileURLWithPath: quarantineURL.path + suffix)
+            try? fileManager.moveItem(at: sidecar, to: quarantinedSidecar)
+        }
     }
 
     private func reconciledFavoriteOrder(

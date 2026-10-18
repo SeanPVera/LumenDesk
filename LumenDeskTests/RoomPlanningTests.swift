@@ -249,6 +249,25 @@ final class PlanLayoutTests: XCTestCase {
     }
 }
 
+final class RoomCommissioningProgressTests: XCTestCase {
+    func testFindCanContinueWhenDiscoveryReturnsNoFixtures() {
+        XCTAssertTrue(RoomCommissioningProgress.canContinueFromFind(
+            selectedCount: 0,
+            discoveredCount: 0
+        ))
+    }
+
+    func testFindStillRequiresASelectionWhenFixturesWereDiscovered() {
+        XCTAssertFalse(RoomCommissioningProgress.canContinueFromFind(
+            selectedCount: 0,
+            discoveredCount: 3
+        ))
+        XCTAssertTrue(RoomCommissioningProgress.canContinueFromFind(
+            selectedCount: 1,
+            discoveredCount: 3
+        ))
+    }
+}
 
 final class RoomWorkspaceTests: XCTestCase {
     @MainActor

@@ -136,6 +136,41 @@ final class PersistenceStoreTests: XCTestCase {
         XCTAssertTrue(siblings.contains { $0.lastPathComponent.hasPrefix("ApplicationState.json.corrupt-") })
     }
 
+    func testUnreadableSQLiteFallsBackToPreservedLegacyState() throws {
+        let root = temporaryPersistenceFileURL().deletingLastPathComponent()
+        let databaseURL = root.appendingPathComponent("RoomCanvas.sqlite3", isDirectory: false)
+        let legacyURL = root.appendingPathComponent("ApplicationState.json", isDirectory: false)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        var corruptSQLite = Data("SQLite format 3\0".utf8)
+        corruptSQLite.append(Data(repeating: 0xA5, count: 128))
+        try corruptSQLite.write(to: databaseURL)
+        try corruptSQLite.write(to: databaseURL.appendingPathExtension("backup"))
+
+        var legacyState = PersistedApplicationState()
+        legacyState.rooms = [Room(name: "Legacy Room")]
+        legacyState.scenes = [LightingScene(name: "Legacy Look", snapshots: [:])]
+        try JSONEncoder().encode(legacyState).write(to: legacyURL)
+
+        let store = PersistenceStore(
+            fileURL: databaseURL,
+            legacyStateFileURL: legacyURL
+        )
+        let recovered = store.load()
+
+        XCTAssertEqual(recovered.rooms.map(\.name), ["Legacy Room"])
+        XCTAssertEqual(recovered.scenes.map(\.name), ["Legacy Look"])
+        XCTAssertTrue(SQLiteStateDatabase.isSQLiteFile(at: databaseURL))
+        XCTAssertEqual(PersistenceStore(fileURL: databaseURL).load(), recovered)
+        let siblings = try FileManager.default.contentsOfDirectory(
+            at: root,
+            includingPropertiesForKeys: nil
+        )
+        XCTAssertTrue(siblings.contains {
+            $0.lastPathComponent.hasPrefix("RoomCanvas.sqlite3.unreadable-")
+        })
+    }
+
     func testLegacyDefaultsMigrationPreservesRoomsLooksFavoritesAndSegments() throws {
         let defaults = isolatedPersistenceDefaults()
         let roomID = UUID()

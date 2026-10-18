@@ -1,5 +1,6 @@
 import SwiftUI
 import Combine
+import Foundation
 import UniformTypeIdentifiers
 
 // MARK: - Direction A session state
@@ -1117,6 +1118,8 @@ private struct LookShelf: View {
     let compose: () -> Void
     @State private var namingCurrent = false
     @State private var currentName = ""
+    @State private var renamingLookID: UUID?
+    @State private var renamedLookName = ""
 
     private var ids: Set<String> { Set(room.lightIDs) }
     private var roomLooks: [LightingScene] {
@@ -1161,6 +1164,10 @@ private struct LookShelf: View {
                         }
                         .buttonStyle(RoomLookButtonStyle())
                         .contextMenu {
+                            Button("Rename Look") {
+                                renamedLookName = look.name
+                                renamingLookID = look.id
+                            }
                             Button("Delete Look", role: .destructive) {
                                 manager.deleteScene(look.id)
                             }
@@ -1190,6 +1197,21 @@ private struct LookShelf: View {
             .disabled(currentName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         } message: {
             Text("Captures the power, colour, brightness, and supported spatial output in \(room.name).")
+        }
+        .alert("Rename Look", isPresented: Binding(
+            get: { renamingLookID != nil },
+            set: { if !$0 { renamingLookID = nil } }
+        )) {
+            TextField("Look name", text: $renamedLookName)
+            Button("Cancel", role: .cancel) { renamingLookID = nil }
+            Button("Rename") {
+                guard let renamingLookID else { return }
+                manager.renameScene(renamingLookID, to: renamedLookName)
+                self.renamingLookID = nil
+            }
+            .disabled(renamedLookName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        } message: {
+            Text("The new name appears on every room shelf where this Look is available.")
         }
     }
 
@@ -1731,6 +1753,12 @@ private enum AddRepairStep: Int, CaseIterable, Identifiable {
     }
 }
 
+enum RoomCommissioningProgress {
+    static func canContinueFromFind(selectedCount: Int, discoveredCount: Int) -> Bool {
+        discoveredCount == 0 || selectedCount > 0
+    }
+}
+
 private struct AddOrRepairRoomView: View {
     @EnvironmentObject private var manager: LightManager
     @Environment(\.dismiss) private var dismiss
@@ -1878,10 +1906,18 @@ private struct AddOrRepairRoomView: View {
                         .font(.system(size: 30, weight: .light))
                     Text("No fixtures have answered yet")
                         .font(LumenType.display(size: 20, weight: .bold))
-                    Text("Keep the scan open for five seconds. If the network blocks discovery, repair the fixture in its vendor app and rescan here.")
+                    Text("Keep the scan open for five seconds. If discovery stays unavailable, continue with an empty room or explore the isolated Sample Room; you can add fixtures later.")
                         .font(LumenType.body(size: 12))
                         .foregroundStyle(Lumen.meter)
                         .multilineTextAlignment(.center)
+                    HStack(spacing: 10) {
+                        Button("Scan again") { manager.scan() }
+                            .buttonStyle(.bordered)
+                            .disabled(manager.isScanning)
+                        Button("Open Sample Room") { openSampleRoom() }
+                            .buttonStyle(.borderedProminent)
+                            .tint(Lumen.ember)
+                    }
                 }
                 .frame(maxWidth: .infinity)
                 .padding(32)
@@ -2033,7 +2069,7 @@ private struct AddOrRepairRoomView: View {
             Text(footerNote)
                 .font(LumenType.body(size: 11))
                 .foregroundStyle(Lumen.meter)
-            Button(step == .verify ? "Open room" : "Continue") { advance() }
+            Button(primaryButtonTitle) { advance() }
                 .buttonStyle(.borderedProminent)
                 .tint(Lumen.ember)
                 .disabled(!canAdvance)
@@ -2045,16 +2081,29 @@ private struct AddOrRepairRoomView: View {
     private var canAdvance: Bool {
         switch step {
         case .prepare: return true
-        case .find: return !selectedIDs.isEmpty
+        case .find:
+            return RoomCommissioningProgress.canContinueFromFind(
+                selectedCount: selectedIDs.count,
+                discoveredCount: manager.devices.count
+            )
         case .place: return targetRoomID != nil
         case .verify: return true
         }
     }
 
+    private var primaryButtonTitle: String {
+        if step == .verify { return "Open room" }
+        if step == .find, manager.devices.isEmpty { return "Continue without fixtures" }
+        return "Continue"
+    }
+
     private var footerNote: String {
         switch step {
         case .prepare: return "Discovery begins in the foreground"
-        case .find: return "\(selectedIDs.count) fixture\(selectedIDs.count == 1 ? "" : "s") to place"
+        case .find:
+            return manager.devices.isEmpty
+                ? "Fixtures can be added later"
+                : "\(selectedIDs.count) fixture\(selectedIDs.count == 1 ? "" : "s") to place"
         case .place: return targetRoom?.name ?? "Choose a room"
         case .verify: return "Best-effort confirmation from physical fixtures"
         }
@@ -2093,6 +2142,14 @@ private struct AddOrRepairRoomView: View {
         guard let id = manager.addRoom(named: newRoomName) else { return }
         targetRoomID = id
         newRoomName = ""
+    }
+
+    private func openSampleRoom() {
+        manager.endSustainedIdentify()
+        manager.enterDemoMode()
+        selectedRoomID = manager.rooms.first?.id
+        onFinish()
+        dismiss()
     }
 
     private func fixtureNameBinding(_ device: LightDevice) -> Binding<String> {
@@ -2362,7 +2419,6 @@ private struct RoomLiveView: View {
         configuration.maximumFlashFrequency = 0
         configuration.followsPlaybackApps = false
         configuration.usesSyntheticDemoPattern = manager.isDemoMode
-        manager.setMusicModeConfiguration(configuration)
         let capture: MusicCapturePreference
         if input == .file, let audioFile { capture = .file(audioFile) }
         else { capture = .platformDefault }
@@ -2573,11 +2629,36 @@ private struct RoomCanvasCommandToast: View {
     }
 }
 
+struct RoomLookBackupDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.json] }
+
+    var data: Data
+
+    init(data: Data = Data()) {
+        self.data = data
+    }
+
+    init(configuration: ReadConfiguration) throws {
+        guard let data = configuration.file.regularFileContents else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        self.data = data
+    }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: data)
+    }
+}
+
 struct RoomCanvasSettingsView: View {
     @EnvironmentObject private var manager: LightManager
     @AppStorage(AppPreferenceKey.quietInterface) private var quietInterface = false
     @AppStorage(AppPreferenceKey.confirmationPolicy) private var confirmationPolicy = ConfirmationPolicy.balanced.rawValue
     @AppStorage(AppPreferenceKey.audioPrivacyAcknowledged) private var audioAcknowledged = false
+    @State private var backupDocument = RoomLookBackupDocument()
+    @State private var exportingBackup = false
+    @State private var importingBackup = false
+    @State private var backupStatus: String?
 
     var body: some View {
         ScrollView {
@@ -2616,6 +2697,24 @@ struct RoomCanvasSettingsView: View {
                     }
                 }
 
+                settingsSection("Rooms & Looks backup", symbol: "externaldrive") {
+                    HStack(spacing: 10) {
+                        Button("Back Up…") { prepareBackup() }
+                            .buttonStyle(.borderedProminent)
+                            .tint(Lumen.ember)
+                        Button("Restore…") { importingBackup = true }
+                            .buttonStyle(.bordered)
+                    }
+                    Text("Exports a portable JSON backup of rooms, Looks, fixture names, favorites, and supported spatial layouts. Restoring asks before replacing the current configuration.")
+                        .font(LumenType.body(size: 11))
+                        .foregroundStyle(Lumen.meter)
+                    if let backupStatus {
+                        Label(backupStatus, systemImage: "checkmark.circle")
+                            .font(LumenType.body(size: 11, weight: .semibold))
+                            .foregroundStyle(Lumen.verdigris)
+                    }
+                }
+
                 settingsSection("Sample Room", symbol: "testtube.2") {
                     if manager.isDemoMode {
                         Label("No physical fixtures are being controlled", systemImage: "checkmark.shield")
@@ -2645,6 +2744,27 @@ struct RoomCanvasSettingsView: View {
         .foregroundStyle(Lumen.graphite)
         .font(LumenType.body())
         .navigationTitle("Settings")
+        .fileExporter(
+            isPresented: $exportingBackup,
+            document: backupDocument,
+            contentType: .json,
+            defaultFilename: "LumenDesk-Rooms-and-Looks"
+        ) { result in
+            switch result {
+            case .success(let url):
+                backupStatus = "Saved \(url.lastPathComponent)"
+            case .failure(let error):
+                reportDocumentError(error, action: "Backup")
+            }
+        }
+        .fileImporter(isPresented: $importingBackup, allowedContentTypes: [.json]) { result in
+            switch result {
+            case .success(let url):
+                restoreBackup(from: url)
+            case .failure(let error):
+                reportDocumentError(error, action: "Restore")
+            }
+        }
     }
 
     private func settingsSection<Content: View>(_ title: String, symbol: String,
@@ -2660,5 +2780,33 @@ struct RoomCanvasSettingsView: View {
         .padding(17)
         .background(Lumen.floor, in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Lumen.rule, lineWidth: 1))
+    }
+
+    private func prepareBackup() {
+        guard let data = manager.exportConfigurationData() else {
+            manager.publishError("Backup failed — LumenDesk could not encode the current Rooms & Looks configuration.")
+            return
+        }
+        backupDocument = RoomLookBackupDocument(data: data)
+        backupStatus = nil
+        exportingBackup = true
+    }
+
+    private func restoreBackup(from url: URL) {
+        let hasAccess = url.startAccessingSecurityScopedResource()
+        defer { if hasAccess { url.stopAccessingSecurityScopedResource() } }
+        do {
+            let data = try Data(contentsOf: url)
+            backupStatus = nil
+            manager.requestConfigurationImport(data, fileName: url.lastPathComponent)
+        } catch {
+            manager.publishError("Restore failed — could not read “\(url.lastPathComponent)”: \(error.localizedDescription)")
+        }
+    }
+
+    private func reportDocumentError(_ error: Error, action: String) {
+        let cocoaError = error as NSError
+        guard cocoaError.domain != NSCocoaErrorDomain || cocoaError.code != NSUserCancelledError else { return }
+        manager.publishError("\(action) failed — \(error.localizedDescription)")
     }
 }

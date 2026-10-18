@@ -1863,8 +1863,11 @@ final class MusicModeTests: XCTestCase {
     func testManagerRestoresMusicStateAndAllowsNonOverlappingRoomSessions() throws {
         let manager = LightManager(persistenceStore: MusicModePersistenceSpy())
         manager.enterDemoMode()
-        var config = MusicModeConfiguration.configuration(for: .balanced)
-        config.usesSyntheticDemoPattern = true
+        var firstConfig = MusicModeConfiguration.configuration(for: .ambient)
+        firstConfig.usesSyntheticDemoPattern = true
+        var secondConfig = MusicModeConfiguration.configuration(for: .cinematic)
+        secondConfig.usesSyntheticDemoPattern = true
+        let savedConfiguration = manager.musicModeConfiguration
         let secondRoomID = try XCTUnwrap(manager.addRoom(named: "Second Room"))
         let secondRoomDevice = try XCTUnwrap(manager.devices.last)
         manager.assign(lightID: secondRoomDevice.id, toRoom: secondRoomID)
@@ -1875,8 +1878,14 @@ final class MusicModeTests: XCTestCase {
         let originalPower = device.isOn
         let originalBrightness = device.brightness
         let originalColor = device.color
-        manager.startMusicMode(configuration: config, scope: roomScopes[0])
-        manager.startMusicMode(configuration: config, scope: roomScopes[1])
+        manager.startMusicMode(configuration: firstConfig, scope: roomScopes[0])
+        manager.startMusicMode(configuration: secondConfig, scope: roomScopes[1])
+        XCTAssertEqual(manager.musicModeController.effectiveConfiguration(for: roomScopes[0])?.preset,
+                       .ambient)
+        XCTAssertEqual(manager.musicModeController.effectiveConfiguration(for: roomScopes[1])?.preset,
+                       .cinematic)
+        XCTAssertEqual(manager.musicModeConfiguration, savedConfiguration,
+                       "Starting a room-scoped Live session must not replace the saved global configuration")
         manager.musicModeController.renderNowForTesting()
         XCTAssertEqual(manager.activeEffects.count, 2)
         manager.stopEffect(scope: roomScopes[0])

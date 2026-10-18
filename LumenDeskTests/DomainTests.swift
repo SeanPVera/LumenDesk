@@ -963,6 +963,26 @@ final class DomainTests: XCTestCase {
     }
 
     @MainActor
+    func testDeleteLookConfirmationStatesGlobalShelfImpact() throws {
+        let defaults = isolatedDefaults()
+        defaults.set(ConfirmationPolicy.cautious.rawValue,
+                     forKey: AppPreferenceKey.confirmationPolicy)
+        let manager = LightManager(defaults: defaults, persistenceStore: temporaryPersistenceStore())
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+        manager.captureScene(name: "Shared Look")
+        let scene = try XCTUnwrap(manager.scenes.last)
+
+        manager.deleteScene(scene.id)
+
+        let request = try XCTUnwrap(manager.confirmationCoordinator.pendingRequest)
+        XCTAssertEqual(request.title, "Delete “Shared Look” everywhere?")
+        XCTAssertTrue(request.message.contains("every room shelf"))
+        XCTAssertEqual(request.confirmTitle, "Delete Everywhere")
+        XCTAssertTrue(manager.scenes.contains { $0.id == scene.id })
+    }
+
+    @MainActor
     func testSceneRetryPreservesTheOriginalSkipOffPolicy() throws {
         let manager = LightManager(defaults: isolatedDefaults(), persistenceStore: temporaryPersistenceStore())
         manager.enterDemoMode()

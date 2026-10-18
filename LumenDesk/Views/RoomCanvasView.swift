@@ -214,7 +214,8 @@ struct RoomCanvasShellView: View {
             if let selectedRoom {
                 LookComposerView(
                     room: selectedRoom,
-                    initialSelection: session.selectedFixtureIDs
+                    initialSelection: session.selectedFixtureIDs,
+                    initiallyControlsWholeRoom: session.controlsWholeRoom
                 )
                 .environmentObject(manager)
             }
@@ -657,9 +658,11 @@ private struct RoomCanvasWorkspace: View {
 
     private var selectionInspector: some View {
         let available = lights.map(\.id)
-        let targetIDs = session.controlsWholeRoom
-            ? Set(available)
-            : session.selectedFixtureIDs.intersection(available)
+        let targetIDs = RoomWorkspaceSelection.targets(
+            selected: session.selectedFixtureIDs,
+            available: available,
+            controlsWholeRoom: session.controlsWholeRoom
+        )
         let targets = lights.filter { targetIDs.contains($0.id) }
         return RoomSelectionInspector(
             room: currentRoom,
@@ -1349,22 +1352,20 @@ private struct LookComposerView: View {
     @State private var transitionSeconds = 1.8
     @State private var exactAssignments: [String: Int] = [:]
 
-    init(room: Room, initialSelection: Set<String>) {
+    init(room: Room, initialSelection: Set<String>, initiallyControlsWholeRoom: Bool) {
         self.room = room
         self.initialSelection = initialSelection
-        _scope = State(initialValue: initialSelection.isEmpty ? .room : .selection)
+        _scope = State(initialValue: initiallyControlsWholeRoom ? .room : .selection)
     }
 
     private var currentRoom: Room { manager.rooms.first(where: { $0.id == room.id }) ?? room }
     private var roomIDs: Set<String> { Set(currentRoom.lightIDs) }
     private var targetIDs: Set<String> {
-        if scope == .selection {
-            return RoomWorkspaceSelection.targets(
-                selected: initialSelection,
-                available: currentRoom.lightIDs
-            )
-        }
-        return roomIDs
+        RoomWorkspaceSelection.targets(
+            selected: initialSelection,
+            available: currentRoom.lightIDs,
+            controlsWholeRoom: scope == .room
+        )
     }
     private var selectedPalette: ComposerPalette {
         ComposerPalette.choices.first(where: { $0.id == paletteID }) ?? ComposerPalette.choices[0]
@@ -1578,6 +1579,12 @@ private struct LookComposerView: View {
                 Text("\(targetIDs.count) of \(roomIDs.count) fixtures")
                     .font(LumenType.readout(size: 11))
                     .foregroundStyle(Lumen.meter)
+                if scope == .selection && targetIDs.isEmpty {
+                    Text("No fixtures selected. Choose Whole room to compose for every light.")
+                        .font(LumenType.body(size: 11))
+                        .foregroundStyle(Lumen.meter)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
 
             VStack(alignment: .leading, spacing: 7) {
@@ -1637,6 +1644,7 @@ private struct LookComposerView: View {
                     )
                 }
                 .buttonStyle(.bordered)
+                .disabled(targetIDs.isEmpty)
             }
 
             Button(action: save) {
@@ -1655,6 +1663,7 @@ private struct LookComposerView: View {
     }
 
     private func save() {
+        guard !targetIDs.isEmpty else { return }
         // Re-plan even when a preview is already active: the palette, brush,
         // scope, or an Exact assignment may have changed since that preview.
         manager.startLookPreview(

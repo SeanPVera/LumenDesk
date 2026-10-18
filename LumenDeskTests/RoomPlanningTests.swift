@@ -552,9 +552,18 @@ final class RoomWorkspaceTests: XCTestCase {
     }
 
     func testSelectionNeverExpandsAStaleSelectionToTheWholeRoom() {
-        XCTAssertEqual(RoomWorkspaceSelection.targets(selected: ["gone"], available: ["a", "b"]), [])
-        XCTAssertEqual(RoomWorkspaceSelection.targets(selected: [], available: ["a", "b"]), ["a", "b"])
-        XCTAssertEqual(RoomWorkspaceSelection.targets(selected: ["a", "gone"], available: ["a", "b"]), ["a"])
+        XCTAssertEqual(RoomWorkspaceSelection.targets(
+            selected: ["gone"], available: ["a", "b"], controlsWholeRoom: false
+        ), [])
+        XCTAssertEqual(RoomWorkspaceSelection.targets(
+            selected: [], available: ["a", "b"], controlsWholeRoom: false
+        ), [])
+        XCTAssertEqual(RoomWorkspaceSelection.targets(
+            selected: [], available: ["a", "b"], controlsWholeRoom: true
+        ), ["a", "b"])
+        XCTAssertEqual(RoomWorkspaceSelection.targets(
+            selected: ["a", "gone"], available: ["a", "b"], controlsWholeRoom: false
+        ), ["a"])
     }
 
     func testSelectionDropsRemovedFixturesWithoutInventingMembers() {
@@ -563,7 +572,9 @@ final class RoomWorkspaceTests: XCTestCase {
         // stays until cleared, so the next edit cannot widen to the whole room.
         let removed = RoomWorkspaceSelection.reconciled(selected: ["gone"], available: ["b", "c"])
         XCTAssertEqual(removed, ["gone"])
-        XCTAssertEqual(RoomWorkspaceSelection.targets(selected: removed, available: ["b", "c"]), [])
+        XCTAssertEqual(RoomWorkspaceSelection.targets(
+            selected: removed, available: ["b", "c"], controlsWholeRoom: false
+        ), [])
     }
 
     @MainActor

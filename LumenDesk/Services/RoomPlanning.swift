@@ -323,8 +323,7 @@ enum RoomWorkspaceSelection {
         let remaining = selected.intersection(available)
         // Retain an empty-target selection until explicitly cleared. Otherwise
         // removing its last fixture would silently turn the next edit into All.
-        // Swapping the whole workspace (Demo Mode) clears selections outright
-        // through `SpectrumDraftStore.clearAll()` instead.
+        // Swapping the whole workspace clears the Room Canvas session instead.
         return remaining.isEmpty && !selected.isEmpty ? selected : remaining
     }
 

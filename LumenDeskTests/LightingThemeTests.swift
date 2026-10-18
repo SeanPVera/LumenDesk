@@ -280,6 +280,28 @@ final class LightingThemeTests: XCTestCase {
         XCTAssertGreaterThan(saturations[0], saturations[3])
     }
 
+    func testExactFixturePlanHonorsExplicitPaletteAssignments() throws {
+        let look = try theme("creative-spark")
+        let fixtures = [bulb("desk"), strip("shelf", count: 6), bulb("floor")]
+        let assignments = ["desk": 1, "shelf": 3, "floor": 0]
+
+        let plan = ThemePlanner.planExact(
+            look,
+            fixtures: fixtures,
+            paletteIndices: assignments
+        )
+        let byID = Dictionary(uniqueKeysWithValues: plan.fixtures.map { ($0.fixtureID, $0) })
+
+        XCTAssertEqual(byID["desk"]?.tone, look.normalizedTones[1],
+                       "a solid fixture must preserve the assigned swatch's relative level")
+        XCTAssertEqual(byID["floor"]?.tone, look.normalizedTones[0])
+        let shelf = try XCTUnwrap(byID["shelf"])
+        XCTAssertEqual(shelf.tone, look.normalizedTones[3])
+        let segments = try XCTUnwrap(shelf.segments)
+        XCTAssertEqual(Set(segments.colors.map(\.packetKey)).count, 1,
+                       "Exact repeats the assigned colour instead of inventing a pattern")
+    }
+
     /// A dark palette entry has to arrive as full chroma plus a low brightness.
     /// Sending the authored hex instead lands differently on each brand: LIFX
     /// ignores how dark it was, Govee dims by it twice.

@@ -3,7 +3,7 @@ import Foundation
 /// The complete structured configuration that survives app launches.
 /// Lightweight view preferences remain in `UserDefaults` at their call sites.
 struct PersistedApplicationState: Codable, Equatable {
-    static let currentSchemaVersion = 2
+    static let currentSchemaVersion = 3
 
     var schemaVersion: Int = currentSchemaVersion
     var rooms: [Room] = []
@@ -126,8 +126,9 @@ protocol ApplicationPersistence: AnyObject {
     ) throws -> PersistedApplicationState
 }
 
-/// File-backed structured application storage with one-time migration from
-/// the individual `UserDefaults` values used by earlier LumenDesk releases.
+/// SQLite-backed structured application storage with one-time migration from
+/// the JSON file and individual `UserDefaults` values used by earlier
+/// LumenDesk releases. JSON remains the portable Room/Look backup format.
 final class PersistenceStore: ApplicationPersistence {
     struct ConfigurationArchive: Codable, Equatable {
         var schemaVersion: Int
@@ -300,19 +301,24 @@ final class PersistenceStore: ApplicationPersistence {
     }
 
     private let fileURL: URL
+    private let legacyStateFileURL: URL?
     private let legacyDefaults: UserDefaults?
     private let fileManager: FileManager
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
+    private let database: SQLiteStateDatabase
 
     init(
         fileURL: URL,
+        legacyStateFileURL: URL? = nil,
         legacyDefaults: UserDefaults? = nil,
         fileManager: FileManager = .default
     ) {
         self.fileURL = fileURL
+        self.legacyStateFileURL = legacyStateFileURL
         self.legacyDefaults = legacyDefaults
         self.fileManager = fileManager
+        database = SQLiteStateDatabase(fileURL: fileURL, fileManager: fileManager)
         encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         decoder = JSONDecoder()
@@ -324,27 +330,78 @@ final class PersistenceStore: ApplicationPersistence {
     ) -> PersistenceStore {
         let root = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? fileManager.temporaryDirectory
-        let fileURL = root
-            .appendingPathComponent("LumenDesk", isDirectory: true)
-            .appendingPathComponent("ApplicationState.json", isDirectory: false)
+        let directory = root.appendingPathComponent("LumenDesk", isDirectory: true)
+        let fileURL = directory.appendingPathComponent("RoomCanvas.sqlite3", isDirectory: false)
+        let legacyFileURL = directory.appendingPathComponent("ApplicationState.json", isDirectory: false)
         return PersistenceStore(
             fileURL: fileURL,
+            legacyStateFileURL: legacyFileURL,
             legacyDefaults: legacyDefaults,
             fileManager: fileManager
         )
     }
 
     func load() -> PersistedApplicationState {
-        if fileManager.fileExists(atPath: fileURL.path) {
-            guard let data = try? Data(contentsOf: fileURL),
-                  var state = try? decoder.decode(PersistedApplicationState.self, from: data),
-                  state.schemaVersion <= PersistedApplicationState.currentSchemaVersion else {
-                return PersistedApplicationState()
+        if SQLiteStateDatabase.isSQLiteFile(at: fileURL) {
+            do {
+                var state = try database.load()
+                guard state.schemaVersion <= PersistedApplicationState.currentSchemaVersion else {
+                    return PersistedApplicationState()
+                }
+                let previousVersion = state.schemaVersion
+                state = migratedAndNormalized(state)
+                if previousVersion != state.schemaVersion { try? save(state) }
+                return state
+            } catch {
+                if isUnsupportedDatabaseVersion(error) { return PersistedApplicationState() }
             }
-            let previousVersion = state.schemaVersion
-            state = migratedAndNormalized(state)
-            if previousVersion != state.schemaVersion { try? save(state) }
-            return state
+
+            do {
+                var state = try recoverDatabaseBackup()
+                guard state.schemaVersion <= PersistedApplicationState.currentSchemaVersion else {
+                    return PersistedApplicationState()
+                }
+                let previousVersion = state.schemaVersion
+                state = migratedAndNormalized(state)
+                if previousVersion != state.schemaVersion { try? save(state) }
+                return state
+            } catch {
+                if isUnsupportedDatabaseVersion(error) { return PersistedApplicationState() }
+            }
+
+            // A valid SQLite signature does not guarantee a readable database.
+            // Preserve the failed primary, then keep walking the migration path
+            // so a still-valid ApplicationState.json can restore Rooms & Looks.
+            quarantineUnreadableDatabase()
+        }
+
+        // Tests, development builds, and 1.x installs can place the previous
+        // JSON payload at the new store URL. Decode it before SQLite attempts
+        // to open the bytes as a database, preserve a sidecar copy, then
+        // migrate it atomically.
+        if fileManager.fileExists(atPath: fileURL.path) {
+            if let state = loadJSONState(at: fileURL) {
+                let migrated = migratedAndNormalized(state)
+                try? migrateJSON(migrated, from: fileURL, occupiesDatabaseURL: true)
+                return migrated
+            }
+            // A torn or otherwise damaged SQLite header cannot be identified
+            // as SQLite. Try the last transaction backup before treating the
+            // file as an unknown legacy payload.
+            do {
+                let recovered = try recoverDatabaseBackup()
+                return migratedAndNormalized(recovered)
+            } catch {
+                if isUnsupportedDatabaseVersion(error) { return PersistedApplicationState() }
+            }
+        }
+
+        if let legacyStateFileURL,
+           fileManager.fileExists(atPath: legacyStateFileURL.path),
+           let state = loadJSONState(at: legacyStateFileURL) {
+            let migrated = migratedAndNormalized(state)
+            try? migrateJSON(migrated, from: legacyStateFileURL, occupiesDatabaseURL: false)
+            return migrated
         }
 
         guard let legacyState = loadLegacyState() else {
@@ -357,11 +414,12 @@ final class PersistenceStore: ApplicationPersistence {
 
     func save(_ state: PersistedApplicationState) throws {
         let normalized = migratedAndNormalized(state)
-        try fileManager.createDirectory(
-            at: fileURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        try encoder.encode(normalized).write(to: fileURL, options: .atomic)
+        if fileManager.fileExists(atPath: fileURL.path),
+           !SQLiteStateDatabase.isSQLiteFile(at: fileURL) {
+            try preserveLegacyJSON(at: fileURL)
+            try fileManager.removeItem(at: fileURL)
+        }
+        try database.save(normalized)
     }
 
     func exportConfiguration(from state: PersistedApplicationState) throws -> Data {
@@ -478,16 +536,83 @@ final class PersistenceStore: ApplicationPersistence {
         migrated.musicModeConfiguration = migrated.musicModeConfiguration.normalized()
         migrated.rooms = migrated.rooms.map { room in
             var value = room
-            value.schedules = room.schedules.map { $0.normalized() }
+            // Direction A makes no unattended guarantee. Old schedules stay
+            // recoverable in the preserved JSON sidecar, but never enter the
+            // foreground Room Canvas store or execute after migration.
+            value.schedules = []
             return value
         }
-        migrated.solarPreferences.sunriseHour = max(0, min(23, migrated.solarPreferences.sunriseHour))
-        migrated.solarPreferences.sunriseMinute = max(0, min(59, migrated.solarPreferences.sunriseMinute))
-        migrated.solarPreferences.sunsetHour = max(0, min(23, migrated.solarPreferences.sunsetHour))
-        migrated.solarPreferences.sunsetMinute = max(0, min(59, migrated.solarPreferences.sunsetMinute))
+        migrated.solarPreferences = .init()
+        migrated.automationOverrides = [:]
+        migrated.activityEvents = []
+        migrated.parliamentMembers = []
+        migrated.parliamentSessions = []
+        migrated.sceneCertifications = []
         migrated.scenes = migrated.scenes.map { $0.normalized() }
         migrated.sceneDrafts = migrated.sceneDrafts.mapValues { $0.normalized() }
         return migrated
+    }
+
+    private func loadJSONState(at url: URL) -> PersistedApplicationState? {
+        guard let data = try? Data(contentsOf: url),
+              let state = try? decoder.decode(PersistedApplicationState.self, from: data),
+              state.schemaVersion <= PersistedApplicationState.currentSchemaVersion else {
+            return nil
+        }
+        return state
+    }
+
+    private func migrateJSON(
+        _ state: PersistedApplicationState,
+        from sourceURL: URL,
+        occupiesDatabaseURL: Bool
+    ) throws {
+        try preserveLegacyJSON(at: sourceURL)
+        if occupiesDatabaseURL { try fileManager.removeItem(at: sourceURL) }
+        try database.save(state)
+    }
+
+    private func preserveLegacyJSON(at sourceURL: URL) throws {
+        let archiveURL = fileURL.appendingPathExtension("legacy.json")
+        guard !fileManager.fileExists(atPath: archiveURL.path) else { return }
+        try fileManager.createDirectory(
+            at: archiveURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try fileManager.copyItem(at: sourceURL, to: archiveURL)
+    }
+
+    private func recoverDatabaseBackup() throws -> PersistedApplicationState {
+        let recovered = try database.loadBackup()
+        // Keep the corrupt primary for diagnosis and make the last complete
+        // transaction the active store again. No Room or Look is discarded.
+        let corruptURL = fileURL.appendingPathExtension("corrupt-\(Int(Date().timeIntervalSince1970))")
+        if fileManager.fileExists(atPath: fileURL.path) {
+            try? fileManager.moveItem(at: fileURL, to: corruptURL)
+        }
+        try? fileManager.copyItem(at: database.backupURL, to: fileURL)
+        return recovered
+    }
+
+    private func isUnsupportedDatabaseVersion(_ error: Error) -> Bool {
+        guard let databaseError = error as? SQLiteStateDatabase.DatabaseError else { return false }
+        if case .unsupportedVersion = databaseError { return true }
+        return false
+    }
+
+    private func quarantineUnreadableDatabase() {
+        guard fileManager.fileExists(atPath: fileURL.path) else { return }
+        let quarantineURL = fileURL.appendingPathExtension("unreadable-\(UUID().uuidString)")
+        try? fileManager.moveItem(at: fileURL, to: quarantineURL)
+
+        // SQLite can leave these beside a failed primary. Moving them prevents
+        // stale journal pages from being attached to the newly migrated store.
+        for suffix in ["-wal", "-shm"] {
+            let sidecar = URL(fileURLWithPath: fileURL.path + suffix)
+            guard fileManager.fileExists(atPath: sidecar.path) else { continue }
+            let quarantinedSidecar = URL(fileURLWithPath: quarantineURL.path + suffix)
+            try? fileManager.moveItem(at: sidecar, to: quarantinedSidecar)
+        }
     }
 
     private func reconciledFavoriteOrder(

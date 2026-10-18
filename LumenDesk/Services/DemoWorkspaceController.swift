@@ -205,20 +205,13 @@ final class DemoWorkspaceController {
         )
         shapes.lastSeen = timestamp
         shapes.nanoleafEffects = ["Northern Lights", "Forest", "Beatdrop"]
-        let lampsAndStrips = workspace.devices
         workspace.devices.append(shapes)
 
-        let office = Room(
-            name: "Demo Office",
-            lightIDs: Array(lampsAndStrips.prefix(3).map(\.id)),
-            schedules: [ScheduleEntry(hour: 9, minute: 0, action: .turnOn)]
+        let sampleRoom = Room(
+            name: "Sample Room",
+            lightIDs: workspace.devices.map(\.id)
         )
-        let lounge = Room(
-            name: "Demo Lounge",
-            lightIDs: Array(lampsAndStrips.suffix(3).map(\.id)) + [shapes.id],
-            schedules: [ScheduleEntry(hour: 22, minute: 30, action: .turnOff)]
-        )
-        workspace.rooms = [office, lounge]
+        workspace.rooms = [sampleRoom]
 
         let snapshots = Dictionary(uniqueKeysWithValues: workspace.devices.map { device in
             let hsb = device.color.hsbComponents
@@ -232,21 +225,16 @@ final class DemoWorkspaceController {
                 nanoleafDesign: device.brand == .nanoleaf ? NanoleafShapesDemo.design : nil
             ))
         })
-        workspace.scenes = [LightingScene(name: "Demo Focus", snapshots: snapshots)]
-        workspace.favoriteIDs = [workspace.devices[0].id, workspace.devices[3].id]
-        workspace.favoriteRoomIDs = [office.id]
-        workspace.favoriteSceneIDs = Set(workspace.scenes.map(\.id))
-        let favoriteSet = Set(
-            workspace.favoriteIDs.map { FavoriteReference(kind: .light, rawID: $0) }
-                + workspace.favoriteRoomIDs.map { FavoriteReference(kind: .room, rawID: $0.uuidString) }
-                + workspace.favoriteSceneIDs.map { FavoriteReference(kind: .scene, rawID: $0.uuidString) }
-        )
-        workspace.favoriteOrder = favoriteSet.sorted { $0.id < $1.id }
+        workspace.scenes = [LightingScene(name: "Sample Evening", snapshots: snapshots)]
+        workspace.favoriteIDs = []
+        workspace.favoriteRoomIDs = []
+        workspace.favoriteSceneIDs = []
+        workspace.favoriteOrder = []
 
         workspace.customNames = [:]
         workspace.collapsedRooms = []
         workspace.whiteModeDeviceIDs = []
-        workspace.customBrightnessPresets = [0.1, 0.35, 0.7]
+        workspace.customBrightnessPresets = []
         workspace.goveeSegmentStates = [:]
         workspace.goveeSegmentPresets = []
         workspace.segmentPreviewIDs = []
@@ -263,12 +251,7 @@ final class DemoWorkspaceController {
         workspace.musicModeConfiguration = .configuration(for: .balanced)
         workspace.musicModeConfiguration.usesSyntheticDemoPattern = true
         workspace.fixtureTopologies = [:]
-        workspace.activityEvents = [ActivityEvent(
-            kind: .system,
-            title: "Demo mode entered",
-            detail: "Using isolated simulated lights and rooms.",
-            date: timestamp
-        )]
+        workspace.activityEvents = []
         workspace.parliamentMembers = []
         workspace.parliamentSessions = []
         workspace.sceneCertifications = []
@@ -317,6 +300,7 @@ final class DemoWorkspaceController {
                 brightness: device.brightness,
                 colorHex: hex,
                 kelvin: device.kelvin,
+                nanoleafAppearance: device.nanoleafAppearance,
                 confirmedAt: timestamp
             )
             workspace.commandState.commandStates[device.id] = DeviceCommandState(

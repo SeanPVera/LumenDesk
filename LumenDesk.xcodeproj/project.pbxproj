@@ -8,7 +8,6 @@
 
 /* Begin PBXBuildFile section */
 		B100000000000000000001 /* LumenDeskApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000001 /* LumenDeskApp.swift */; };
-		B100000000000000000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000002 /* ContentView.swift */; };
 		B100000000000000000003 /* LightDevice.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000003 /* LightDevice.swift */; };
 		B100000000000000000004 /* LightManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000004 /* LightManager.swift */; };
 		B100000000000000000005 /* UDPSocket.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000005 /* UDPSocket.swift */; };
@@ -16,30 +15,21 @@
 		B100000000000000000007 /* LIFXClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000007 /* LIFXClient.swift */; };
 		B100000000000000000008 /* GoveeProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000008 /* GoveeProtocol.swift */; };
 		B100000000000000000009 /* GoveeClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000009 /* GoveeClient.swift */; };
-		B10000000000000000000A /* LightRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000A /* LightRowView.swift */; };
 		B10000000000000000000B /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000B /* Assets.xcassets */; };
 		B10000000000000000000C /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000C /* Preview Assets.xcassets */; };
+		B100000000000000000038 /* Fonts in Resources */ = {isa = PBXBuildFile; fileRef = A100000000000000000038 /* Fonts */; };
 		B100000000000000000010 /* Room.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000010 /* Room.swift */; };
-		B100000000000000000011 /* RoomSectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000011 /* RoomSectionView.swift */; };
 		B100000000000000000012 /* LightingScene.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000012 /* LightingScene.swift */; };
-		B100000000000000000013 /* ScenesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000013 /* ScenesView.swift */; };
-		B100000000000000000014 /* FavoritesStripView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000014 /* FavoritesStripView.swift */; };
 		B100000000000000000015 /* ScheduleEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000015 /* ScheduleEntry.swift */; };
 		B100000000000000000016 /* MenuBarPopoverView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000016 /* MenuBarPopoverView.swift */; };
-		B100000000000000000017 /* ScheduleEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000017 /* ScheduleEditorView.swift */; };
 		B100000000000000000018 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000018 /* Theme.swift */; };
 		B10000000000000000002E /* DesignControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000002E /* DesignControls.swift */; };
-		B100000000000000000019 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000019 /* OnboardingView.swift */; };
 		B10000000000000000001A /* LightingCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000001A /* LightingCatalog.swift */; };
 		B10000000000000000001B /* AudioLevelMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000001B /* AudioLevelMonitor.swift */; };
 		B10000000000000000001C /* UXEnhancements.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000001C /* UXEnhancements.swift */; };
-		B10000000000000000001D /* UXCenterViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000001D /* UXCenterViews.swift */; };
 		B10000000000000000001E /* GoveeSegments.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000001E /* GoveeSegments.swift */; };
 		B10000000000000000001F /* GoveeSegmentEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000001F /* GoveeSegmentEditorView.swift */; };
-		B100000000000000000020 /* ProductShellView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000020 /* ProductShellView.swift */; };
 		B100000000000000000030 /* RoomPlanning.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000030 /* RoomPlanning.swift */; };
-		B100000000000000000031 /* PlanWorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000031 /* PlanWorkspaceView.swift */; };
-		B100000000000000000032 /* RoomSetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000032 /* RoomSetupView.swift */; };
 		B100000000000000000021 /* DemoWorkspaceController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000021 /* DemoWorkspaceController.swift */; };
 		B100000000000000000022 /* ConfirmationCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000022 /* ConfirmationCoordinator.swift */; };
 		B100000000000000000023 /* ScheduleEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000023 /* ScheduleEngine.swift */; };
@@ -50,8 +40,6 @@
 		B100000000000000000028 /* MusicLightingRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000028 /* MusicLightingRenderer.swift */; };
 		B100000000000000000029 /* AudioReactiveSessionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000029 /* AudioReactiveSessionController.swift */; };
 		B10000000000000000002F /* BeatTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000002F /* BeatTracker.swift */; };
-		B10000000000000000002A /* MusicModeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000002A /* MusicModeView.swift */; };
-		B10000000000000000002B /* MusicModeVisualizerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000002B /* MusicModeVisualizerView.swift */; };
 		B10000000000000000002C /* LIFXMatrix.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000002C /* LIFXMatrix.swift */; };
 		B10000000000000000002D /* LIFXLunaEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000002D /* LIFXLunaEditorView.swift */; };
 		B100000000000000000033 /* ThemePalette.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000033 /* ThemePalette.swift */; };
@@ -59,6 +47,8 @@
 		B100000000000000000035 /* BeatMap.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000035 /* BeatMap.swift */; };
 		B100000000000000000036 /* BeatMapCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000036 /* BeatMapCoordinator.swift */; };
 		B100000000000000000037 /* NowPlayingMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000037 /* NowPlayingMonitor.swift */; };
+		B100000000000000000039 /* RoomCanvasView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000039 /* RoomCanvasView.swift */; };
+		B10000000000000000003A /* SQLiteStateDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000003A /* SQLiteStateDatabase.swift */; };
 		B200000000000000000001 /* ProtocolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000001 /* ProtocolTests.swift */; };
 		B200000000000000000002 /* DomainTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000002 /* DomainTests.swift */; };
 		B200000000000000000003 /* NetworkUtilityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000003 /* NetworkUtilityTests.swift */; };
@@ -107,7 +97,6 @@
 
 /* Begin PBXFileReference section */
 		A100000000000000000001 /* LumenDeskApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LumenDeskApp.swift; sourceTree = "<group>"; };
-		A100000000000000000002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		A100000000000000000003 /* LightDevice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LightDevice.swift; sourceTree = "<group>"; };
 		A100000000000000000004 /* LightManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LightManager.swift; sourceTree = "<group>"; };
 		A100000000000000000005 /* UDPSocket.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UDPSocket.swift; sourceTree = "<group>"; };
@@ -115,32 +104,22 @@
 		A100000000000000000007 /* LIFXClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LIFXClient.swift; sourceTree = "<group>"; };
 		A100000000000000000008 /* GoveeProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoveeProtocol.swift; sourceTree = "<group>"; };
 		A100000000000000000009 /* GoveeClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoveeClient.swift; sourceTree = "<group>"; };
-		A10000000000000000000A /* LightRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LightRowView.swift; sourceTree = "<group>"; };
 		A10000000000000000000B /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A10000000000000000000C /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
 		A10000000000000000000D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A10000000000000000000E /* LumenDesk.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LumenDesk.entitlements; sourceTree = "<group>"; };
 		A100000000000000000010 /* Room.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Room.swift; sourceTree = "<group>"; };
-		A100000000000000000011 /* RoomSectionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomSectionView.swift; sourceTree = "<group>"; };
 		A100000000000000000012 /* LightingScene.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LightingScene.swift; sourceTree = "<group>"; };
-		A100000000000000000013 /* ScenesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScenesView.swift; sourceTree = "<group>"; };
-		A100000000000000000014 /* FavoritesStripView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FavoritesStripView.swift; sourceTree = "<group>"; };
 		A100000000000000000015 /* ScheduleEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleEntry.swift; sourceTree = "<group>"; };
 		A100000000000000000016 /* MenuBarPopoverView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarPopoverView.swift; sourceTree = "<group>"; };
-		A100000000000000000017 /* ScheduleEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleEditorView.swift; sourceTree = "<group>"; };
 		A100000000000000000018 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		A10000000000000000002E /* DesignControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignControls.swift; sourceTree = "<group>"; };
-		A100000000000000000019 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		A10000000000000000001A /* LightingCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LightingCatalog.swift; sourceTree = "<group>"; };
 		A10000000000000000001B /* AudioLevelMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioLevelMonitor.swift; sourceTree = "<group>"; };
 		A10000000000000000001C /* UXEnhancements.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UXEnhancements.swift; sourceTree = "<group>"; };
-		A10000000000000000001D /* UXCenterViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UXCenterViews.swift; sourceTree = "<group>"; };
 		A10000000000000000001E /* GoveeSegments.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoveeSegments.swift; sourceTree = "<group>"; };
 		A10000000000000000001F /* GoveeSegmentEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoveeSegmentEditorView.swift; sourceTree = "<group>"; };
-		A100000000000000000020 /* ProductShellView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductShellView.swift; sourceTree = "<group>"; };
 		A100000000000000000030 /* RoomPlanning.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomPlanning.swift; sourceTree = "<group>"; };
-		A100000000000000000031 /* PlanWorkspaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanWorkspaceView.swift; sourceTree = "<group>"; };
-		A100000000000000000032 /* RoomSetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomSetupView.swift; sourceTree = "<group>"; };
 		A100000000000000000021 /* DemoWorkspaceController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoWorkspaceController.swift; sourceTree = "<group>"; };
 		A100000000000000000022 /* ConfirmationCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfirmationCoordinator.swift; sourceTree = "<group>"; };
 		A100000000000000000023 /* ScheduleEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleEngine.swift; sourceTree = "<group>"; };
@@ -151,8 +130,6 @@
 		A100000000000000000028 /* MusicLightingRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicLightingRenderer.swift; sourceTree = "<group>"; };
 		A100000000000000000029 /* AudioReactiveSessionController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioReactiveSessionController.swift; sourceTree = "<group>"; };
 		A10000000000000000002F /* BeatTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BeatTracker.swift; sourceTree = "<group>"; };
-		A10000000000000000002A /* MusicModeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicModeView.swift; sourceTree = "<group>"; };
-		A10000000000000000002B /* MusicModeVisualizerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicModeVisualizerView.swift; sourceTree = "<group>"; };
 		A10000000000000000002C /* LIFXMatrix.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LIFXMatrix.swift; sourceTree = "<group>"; };
 		A10000000000000000002D /* LIFXLunaEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LIFXLunaEditorView.swift; sourceTree = "<group>"; };
 		A100000000000000000033 /* ThemePalette.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemePalette.swift; sourceTree = "<group>"; };
@@ -160,6 +137,9 @@
 		A100000000000000000035 /* BeatMap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BeatMap.swift; sourceTree = "<group>"; };
 		A100000000000000000036 /* BeatMapCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BeatMapCoordinator.swift; sourceTree = "<group>"; };
 		A100000000000000000037 /* NowPlayingMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NowPlayingMonitor.swift; sourceTree = "<group>"; };
+		A100000000000000000038 /* Fonts */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Fonts; path = Resources/Fonts; sourceTree = "<group>"; };
+		A100000000000000000039 /* RoomCanvasView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCanvasView.swift; sourceTree = "<group>"; };
+		A10000000000000000003A /* SQLiteStateDatabase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SQLiteStateDatabase.swift; sourceTree = "<group>"; };
 		A100000000000000000099 /* LumenDesk.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LumenDesk.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A200000000000000000001 /* ProtocolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolTests.swift; sourceTree = "<group>"; };
 		A200000000000000000002 /* DomainTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DomainTests.swift; sourceTree = "<group>"; };
@@ -245,7 +225,6 @@
 				A30000000000000000000C /* NanoleafShapesController.swift */,
 				A30000000000000000000D /* NanoleafShapesCanvas.swift */,
 				A100000000000000000001 /* LumenDeskApp.swift */,
-				A100000000000000000002 /* ContentView.swift */,
 				A100000000000000000018 /* Theme.swift */,
 				A10000000000000000002E /* DesignControls.swift */,
 				C100000000000000000003 /* Models */,
@@ -254,6 +233,7 @@
 				A10000000000000000000B /* Assets.xcassets */,
 				A10000000000000000000D /* Info.plist */,
 				A10000000000000000000E /* LumenDesk.entitlements */,
+				A100000000000000000038 /* Fonts */,
 			);
 			path = LumenDesk;
 			sourceTree = "<group>";
@@ -293,6 +273,7 @@
 				A100000000000000000035 /* BeatMap.swift */,
 				A100000000000000000036 /* BeatMapCoordinator.swift */,
 				A100000000000000000037 /* NowPlayingMonitor.swift */,
+				A10000000000000000003A /* SQLiteStateDatabase.swift */,
 				A100000000000000000005 /* UDPSocket.swift */,
 				A10000000000000000001B /* AudioLevelMonitor.swift */,
 				C100000000000000000005 /* LIFX */,
@@ -322,21 +303,10 @@
 		C100000000000000000007 /* Views */ = {
 			isa = PBXGroup;
 			children = (
-				A10000000000000000000A /* LightRowView.swift */,
-				A100000000000000000011 /* RoomSectionView.swift */,
-				A100000000000000000013 /* ScenesView.swift */,
-				A100000000000000000014 /* FavoritesStripView.swift */,
 				A100000000000000000016 /* MenuBarPopoverView.swift */,
-				A100000000000000000017 /* ScheduleEditorView.swift */,
-				A100000000000000000019 /* OnboardingView.swift */,
-				A10000000000000000001D /* UXCenterViews.swift */,
 				A10000000000000000001F /* GoveeSegmentEditorView.swift */,
 				A10000000000000000002D /* LIFXLunaEditorView.swift */,
-				A100000000000000000020 /* ProductShellView.swift */,
-				A100000000000000000031 /* PlanWorkspaceView.swift */,
-				A100000000000000000032 /* RoomSetupView.swift */,
-				A10000000000000000002A /* MusicModeView.swift */,
-				A10000000000000000002B /* MusicModeVisualizerView.swift */,
+				A100000000000000000039 /* RoomCanvasView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -466,6 +436,7 @@
 			files = (
 				B10000000000000000000B /* Assets.xcassets in Resources */,
 				B10000000000000000000C /* Preview Assets.xcassets in Resources */,
+				B100000000000000000038 /* Fonts in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -492,7 +463,6 @@
 				B30000000000000000000C /* NanoleafShapesController.swift in Sources */,
 				B30000000000000000000D /* NanoleafShapesCanvas.swift in Sources */,
 				B100000000000000000001 /* LumenDeskApp.swift in Sources */,
-				B100000000000000000002 /* ContentView.swift in Sources */,
 				B100000000000000000003 /* LightDevice.swift in Sources */,
 				B100000000000000000004 /* LightManager.swift in Sources */,
 				B100000000000000000005 /* UDPSocket.swift in Sources */,
@@ -500,28 +470,18 @@
 				B100000000000000000007 /* LIFXClient.swift in Sources */,
 				B100000000000000000008 /* GoveeProtocol.swift in Sources */,
 				B100000000000000000009 /* GoveeClient.swift in Sources */,
-				B10000000000000000000A /* LightRowView.swift in Sources */,
 				B100000000000000000010 /* Room.swift in Sources */,
-				B100000000000000000011 /* RoomSectionView.swift in Sources */,
 				B100000000000000000012 /* LightingScene.swift in Sources */,
-				B100000000000000000013 /* ScenesView.swift in Sources */,
-				B100000000000000000014 /* FavoritesStripView.swift in Sources */,
 				B100000000000000000015 /* ScheduleEntry.swift in Sources */,
 				B100000000000000000016 /* MenuBarPopoverView.swift in Sources */,
-				B100000000000000000017 /* ScheduleEditorView.swift in Sources */,
 				B100000000000000000018 /* Theme.swift in Sources */,
 				B10000000000000000002E /* DesignControls.swift in Sources */,
-				B100000000000000000019 /* OnboardingView.swift in Sources */,
 				B10000000000000000001A /* LightingCatalog.swift in Sources */,
 				B10000000000000000001B /* AudioLevelMonitor.swift in Sources */,
 				B10000000000000000001C /* UXEnhancements.swift in Sources */,
-				B10000000000000000001D /* UXCenterViews.swift in Sources */,
 				B10000000000000000001E /* GoveeSegments.swift in Sources */,
 				B10000000000000000001F /* GoveeSegmentEditorView.swift in Sources */,
-				B100000000000000000020 /* ProductShellView.swift in Sources */,
 				B100000000000000000030 /* RoomPlanning.swift in Sources */,
-				B100000000000000000031 /* PlanWorkspaceView.swift in Sources */,
-				B100000000000000000032 /* RoomSetupView.swift in Sources */,
 				B100000000000000000021 /* DemoWorkspaceController.swift in Sources */,
 				B100000000000000000022 /* ConfirmationCoordinator.swift in Sources */,
 				B100000000000000000023 /* ScheduleEngine.swift in Sources */,
@@ -535,12 +495,12 @@
 				B100000000000000000035 /* BeatMap.swift in Sources */,
 				B100000000000000000036 /* BeatMapCoordinator.swift in Sources */,
 				B100000000000000000037 /* NowPlayingMonitor.swift in Sources */,
-				B10000000000000000002A /* MusicModeView.swift in Sources */,
-				B10000000000000000002B /* MusicModeVisualizerView.swift in Sources */,
 				B10000000000000000002C /* LIFXMatrix.swift in Sources */,
 				B10000000000000000002D /* LIFXLunaEditorView.swift in Sources */,
 				B100000000000000000033 /* ThemePalette.swift in Sources */,
 				B100000000000000000034 /* ThemePlanner.swift in Sources */,
+				B100000000000000000039 /* RoomCanvasView.swift in Sources */,
+				B10000000000000000003A /* SQLiteStateDatabase.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -724,6 +684,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 1.1.0;
+				OTHER_LDFLAGS = "$(inherited) -lsqlite3";
 				PRODUCT_BUNDLE_IDENTIFIER = com.lumendesk.LumenDesk;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				"REGISTER_WITH_LAUNCH_SERVICES[sdk=macosx*]" = NO;
@@ -761,6 +722,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 1.1.0;
+				OTHER_LDFLAGS = "$(inherited) -lsqlite3";
 				PRODUCT_BUNDLE_IDENTIFIER = com.lumendesk.LumenDesk;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;

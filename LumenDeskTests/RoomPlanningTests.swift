@@ -249,8 +249,70 @@ final class PlanLayoutTests: XCTestCase {
     }
 }
 
+final class RoomCommissioningProgressTests: XCTestCase {
+    func testFindCanContinueWhenDiscoveryReturnsNoFixtures() {
+        XCTAssertTrue(RoomCommissioningProgress.canContinueFromFind(
+            selectedCount: 0,
+            discoveredCount: 0
+        ))
+    }
+
+    func testFindStillRequiresASelectionWhenFixturesWereDiscovered() {
+        XCTAssertFalse(RoomCommissioningProgress.canContinueFromFind(
+            selectedCount: 0,
+            discoveredCount: 3
+        ))
+        XCTAssertTrue(RoomCommissioningProgress.canContinueFromFind(
+            selectedCount: 1,
+            discoveredCount: 3
+        ))
+    }
+}
 
 final class RoomWorkspaceTests: XCTestCase {
+    @MainActor
+    func testRoomCanvasSessionKeepsSelectionInsideTheOpenRoom() {
+        let roomA = Room(name: "A", lightIDs: ["a", "b"])
+        let roomB = Room(name: "B", lightIDs: ["c"])
+        let devices = [
+            LightDevice(id: "a", brand: .lifx, backendID: "a", name: "A", address: "test"),
+            LightDevice(id: "b", brand: .govee, backendID: "b", name: "B", address: "test"),
+            LightDevice(id: "c", brand: .lifx, backendID: "c", name: "C", address: "test")
+        ]
+        let session = RoomCanvasSessionStore()
+
+        session.reconcile(rooms: [roomA, roomB], devices: devices)
+        XCTAssertEqual(session.selectedRoomID, roomA.id)
+        XCTAssertEqual(session.selectedFixtureIDs, ["a", "b"])
+
+        session.select(roomB, devices: [devices[2]])
+        XCTAssertEqual(session.selectedFixtureIDs, ["c"])
+        session.reconcile(rooms: [roomA], devices: Array(devices.prefix(2)))
+        XCTAssertEqual(session.selectedRoomID, roomA.id)
+        XCTAssertEqual(session.selectedFixtureIDs, ["a", "b"])
+
+        XCTAssertTrue(session.select(roomID: roomB.id, rooms: [roomA, roomB], devices: devices))
+        XCTAssertEqual(session.selectedRoomID, roomB.id)
+        XCTAssertEqual(session.selectedFixtureIDs, ["c"])
+    }
+
+    @MainActor
+    func testRoomCanvasSessionDoesNotExpandAStaleSelection() {
+        let room = Room(name: "Room", lightIDs: ["a", "b"])
+        let a = LightDevice(id: "a", brand: .lifx, backendID: "a", name: "A", address: "test")
+        let b = LightDevice(id: "b", brand: .govee, backendID: "b", name: "B", address: "test")
+        let session = RoomCanvasSessionStore()
+
+        session.select(room, devices: [a, b])
+        session.selectedFixtureIDs = ["a"]
+        let afterMove = Room(id: room.id, name: room.name, lightIDs: ["b"])
+        session.reconcile(rooms: [afterMove], devices: [b])
+
+        XCTAssertEqual(session.selectedFixtureIDs, ["a"],
+                       "a removed fixture remains as an empty-target sentinel")
+        XCTAssertTrue(session.selectedFixtureIDs.intersection(afterMove.lightIDs).isEmpty)
+    }
+
     @MainActor
     func testRoomAggregateObservesIndividualDevicesAndIncludesStaleTargets() throws {
         let manager = LightManager(defaults: UserDefaults(suiteName: UUID().uuidString)!,
@@ -261,8 +323,19 @@ final class RoomWorkspaceTests: XCTestCase {
         let b = try XCTUnwrap(manager.devices.last)
         a.brightness = 0.2
         b.brightness = 0.6
+        a.kelvin = 2_700
+        b.kelvin = 5_000
         b.isStale = true
         XCTAssertEqual(RoomOutputState.level(of: [a, b]), 0.4, accuracy: 0.001)
+        XCTAssertEqual(RoomOutputState.kelvin(of: [a, b]), 3_850, accuracy: 0.001)
+        XCTAssertTrue(RoomOutputState.hasMixedBrightness([a, b]))
+        XCTAssertTrue(RoomOutputState.hasMixedKelvin([a, b]))
+        b.brightness = a.brightness
+        b.kelvin = a.kelvin
+        XCTAssertFalse(RoomOutputState.hasMixedBrightness([a, b]))
+        XCTAssertFalse(RoomOutputState.hasMixedKelvin([a, b]))
+        b.brightness = 0.6
+        b.kelvin = 5_000
         let aggregate = RoomOutputState(lights: [a, b])
         var updates = 0
         let token = aggregate.objectWillChange.sink { updates += 1 }
@@ -282,6 +355,64 @@ final class RoomWorkspaceTests: XCTestCase {
         XCTAssertGreaterThan(narrowedUpdates, 0)
         manager.setPower(deviceIDs: [a.id, b.id], on: true)
         XCTAssertTrue(b.isOn, "Stale lights remain eligible for a recovery command")
+    }
+
+    @MainActor
+    func testObservedFixtureChangeIsVisibleUntilAcknowledged() async throws {
+        let manager = LightManager(defaults: UserDefaults(suiteName: UUID().uuidString)!,
+                                   persistenceStore: temporaryPersistenceStore())
+        manager.lifxDiscovered(macHex: "001122334455", address: "192.0.2.10")
+        try await Task.sleep(nanoseconds: 20_000_000)
+        let device = try XCTUnwrap(manager.devices.first)
+
+        manager.lifxDidUpdate(
+            macHex: "001122334455",
+            label: "Desk",
+            color: LIFXHSBK(hue: 0, saturation: 0, brightness: 20_000, kelvin: 3_500),
+            isOn: true
+        )
+        try await Task.sleep(nanoseconds: 20_000_000)
+        XCTAssertFalse(manager.externallyChangedDeviceIDs.contains(device.id))
+
+        manager.lifxDidUpdate(
+            macHex: "001122334455",
+            label: "Desk",
+            color: LIFXHSBK(hue: 30_000, saturation: 50_000, brightness: 45_000, kelvin: 4_200),
+            isOn: true
+        )
+        try await Task.sleep(nanoseconds: 20_000_000)
+        XCTAssertTrue(manager.externallyChangedDeviceIDs.contains(device.id))
+        XCTAssertEqual(RoomCanvasStatus.resolve([device], manager: manager), .changedElsewhere)
+
+        manager.acknowledgeExternalChange(deviceIDs: [device.id])
+        XCTAssertFalse(manager.externallyChangedDeviceIDs.contains(device.id))
+    }
+
+    @MainActor
+    func testLookCaptureAndScopedRecallRestoreTheSavedFixtureState() throws {
+        let manager = LightManager(defaults: UserDefaults(suiteName: UUID().uuidString)!,
+                                   persistenceStore: temporaryPersistenceStore())
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+        let room = try XCTUnwrap(manager.rooms.first)
+        let target = try XCTUnwrap(manager.devices(in: room).first {
+            !$0.isStale && $0.brand == .lifx && !$0.isLIFXLuna
+        })
+        target.isOn = true
+        target.brightness = 0.37
+        target.color = Color(red: 0.92, green: 0.24, blue: 0.12)
+        let savedColor = target.color.lifxReportedEquivalent
+        let look = try XCTUnwrap(manager.captureLook(name: "Ember", deviceIDs: [target.id]))
+
+        target.isOn = false
+        target.brightness = 0.91
+        target.color = .blue
+        manager.applyLook(look, deviceIDs: [target.id])
+
+        XCTAssertTrue(target.isOn)
+        XCTAssertEqual(target.brightness, 0.37, accuracy: 0.001)
+        XCTAssertEqual(target.color.rgbDistance(to: savedColor), 0, accuracy: 0.001)
+        XCTAssertEqual(manager.scenes.last?.name, "Ember")
     }
 
     @MainActor
@@ -338,7 +469,10 @@ final class RoomWorkspaceTests: XCTestCase {
         let room = try XCTUnwrap(manager.rooms.first { manager.devices(in: $0).count >= 2 })
         let a = try XCTUnwrap(manager.devices(in: room).first)
         let b = try XCTUnwrap(manager.devices(in: room).last)
-        let outside = try XCTUnwrap(manager.devices.first { !room.lightIDs.contains($0.id) })
+        let outside = try XCTUnwrap(manager.devices.dropFirst().first)
+        manager.createRoom(name: "Outside")
+        let outsideRoom = try XCTUnwrap(manager.rooms.first { $0.name == "Outside" })
+        manager.assign(lightID: outside.id, toRoom: outsideRoom.id)
         b.isOn = false
         outside.isOn = false
         let before = b.color
@@ -353,19 +487,44 @@ final class RoomWorkspaceTests: XCTestCase {
     }
 
     @MainActor
-    func testRoomSelectionSurvivesEditorAndDestinationRecreation() {
-        let room = LightScope.room(UUID())
-        let otherRoom = LightScope.room(UUID())
-        let drafts = SpectrumDraftStore()
-        drafts.selections[room] = ["a", "b"]
-        drafts.selections[otherRoom] = ["c"]
-        _ = PlanWorkspaceView(scope: .constant(room), requestedDeviceID: .constant("a"), studioDrafts: drafts)
-        _ = PlanWorkspaceView(scope: .constant(otherRoom), studioDrafts: drafts)
-        _ = PlanWorkspaceView(scope: .constant(room), requestedDeviceID: .constant(nil), studioDrafts: drafts)
-        XCTAssertEqual(drafts.selections[room], ["a", "b"])
-        XCTAssertEqual(drafts.selections[otherRoom], ["c"])
-        drafts.retainDevices(["b", "c"])
-        XCTAssertEqual(drafts.selections[room], ["b"])
+    func testLookPreviewUsesPersistedRoomOrderInsteadOfDiscoveryOrder() throws {
+        let manager = LightManager(defaults: UserDefaults(suiteName: UUID().uuidString)!,
+                                   persistenceStore: temporaryPersistenceStore())
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+        let initialRoom = try XCTUnwrap(manager.rooms.first)
+        let initialTargets = manager.devices(in: initialRoom)
+        let candidate = try XCTUnwrap(initialTargets.dropFirst().first { device in
+            guard !device.isStale else { return false }
+            if case .solid = manager.themeCapability(for: device) { return true }
+            return false
+        })
+        let initialIndex = try XCTUnwrap(initialRoom.lightIDs.firstIndex(of: candidate.id))
+        for _ in 0..<initialIndex {
+            manager.moveLight(candidate.id, in: initialRoom.id, by: -1)
+        }
+
+        let reorderedRoom = try XCTUnwrap(manager.rooms.first { $0.id == initialRoom.id })
+        let orderedTargets = manager.devices(in: reorderedRoom)
+        XCTAssertEqual(orderedTargets.first?.id, candidate.id)
+        let theme = try XCTUnwrap(LightingCatalog.theme(withID: "sapphire-hour"))
+        let fixtures = orderedTargets.map {
+            ThemeFixture(id: $0.id, capability: manager.themeCapability(for: $0), kelvin: $0.kelvin)
+        }
+        let expected = try XCTUnwrap(
+            ThemePlanner.plan(theme, fixtures: fixtures).fixtures.first { $0.fixtureID == candidate.id }
+        )
+
+        manager.startLookPreview(
+            theme,
+            deviceIDs: Set(reorderedRoom.lightIDs),
+            in: .room(reorderedRoom.id),
+            transitionDuration: 0
+        )
+        defer { manager.stopSceneRehearsal(restore: true) }
+
+        XCTAssertLessThan(candidate.color.rgbDistance(to: expected.tone.displayColor), 0.001)
+        XCTAssertEqual(candidate.brightness, expected.brightness, accuracy: 0.001)
     }
 
     func testSelectionNeverExpandsAStaleSelectionToTheWholeRoom() {
@@ -381,39 +540,6 @@ final class RoomWorkspaceTests: XCTestCase {
         let removed = RoomWorkspaceSelection.reconciled(selected: ["gone"], available: ["b", "c"])
         XCTAssertEqual(removed, ["gone"])
         XCTAssertEqual(RoomWorkspaceSelection.targets(selected: removed, available: ["b", "c"]), [])
-    }
-
-    @MainActor
-    func testRetainDevicesReconcilesEveryScopeInOnePublication() {
-        let drafts = SpectrumDraftStore()
-        let room = LightScope.room(UUID())
-        drafts.selections = [.all: ["a", "b"], room: ["b", "c"]]
-        var changes = 0
-        let token = drafts.objectWillChange.sink { changes += 1 }
-        defer { token.cancel() }
-        drafts.retainDevices(["b"])
-        XCTAssertEqual(drafts.selections[.all], ["b"])
-        XCTAssertEqual(drafts.selections[room], ["b"])
-        // luna, govee and one selections write: never one publication per scope.
-        XCTAssertLessThanOrEqual(changes, 3)
-        drafts.retainDevices(["x"])
-        XCTAssertEqual(drafts.selections[.all], ["b"], "A dead selection waits to be cleared")
-    }
-
-    @MainActor
-    func testWorkspaceSwapClearsSelectionsAndDrafts() {
-        let drafts = SpectrumDraftStore()
-        drafts.selections = [.all: ["live-a"], .room(UUID()): ["live-b"]]
-        drafts.govee["live-a"] = GoveeSegmentState(colors: [.init(hex: 0xFF6600)])
-        drafts.clearAll()
-        XCTAssertTrue(drafts.selections.isEmpty)
-        XCTAssertTrue(drafts.govee.isEmpty)
-        XCTAssertTrue(drafts.luna.isEmpty)
-        // Demo lights share no IDs with live ones, so after the swap the room
-        // controls target the whole demo room instead of "0 of N selected".
-        XCTAssertEqual(RoomWorkspaceSelection.targets(selected: drafts.selections[.all] ?? [],
-                                                      available: ["demo-a", "demo-b"]),
-                       ["demo-a", "demo-b"])
     }
 
     @MainActor
@@ -490,11 +616,16 @@ final class RoomWorkspaceTests: XCTestCase {
         manager.enterDemoMode()
         defer { manager.exitDemoMode() }
         let room = try XCTUnwrap(manager.rooms.first)
-        manager.captureScene(name: "Only this room", scope: .room(room.id))
+        let outside = try XCTUnwrap(manager.devices.last)
+        manager.createRoom(name: "Outside")
+        let outsideRoom = try XCTUnwrap(manager.rooms.first { $0.name == "Outside" })
+        manager.assign(lightID: outside.id, toRoom: outsideRoom.id)
+        let scopedRoom = try XCTUnwrap(manager.rooms.first { $0.id == room.id })
+        manager.captureScene(name: "Only this room", scope: .room(scopedRoom.id))
         let scene = try XCTUnwrap(manager.scenes.last)
-        XCTAssertEqual(Set(scene.snapshots.keys), Set(manager.devices(in: room).map(\.id)))
+        XCTAssertEqual(Set(scene.snapshots.keys), Set(manager.devices(in: scopedRoom).map(\.id)))
         XCTAssertLessThan(scene.snapshots.count, manager.devices.count)
-        for light in manager.devices(in: room) {
+        for light in manager.devices(in: scopedRoom) {
             XCTAssertEqual(scene.snapshots[light.id]?.segments, manager.activeSegmentState(for: light.id))
             XCTAssertEqual(scene.snapshots[light.id]?.matrix, manager.activeLIFXMatrixState(for: light.id))
         }
@@ -577,8 +708,10 @@ final class EffectOwnershipRegressionTests: XCTestCase {
         manager.enterDemoMode()
         defer { manager.exitDemoMode() }
         let firstRoom = try XCTUnwrap(manager.rooms.first)
-        let otherRoom = try XCTUnwrap(manager.rooms.last)
-        let outside = try XCTUnwrap(manager.devices(in: otherRoom).first { !$0.isStale && $0.brand == .govee })
+        let outside = try XCTUnwrap(manager.devices.first { !$0.isStale && $0.brand == .govee })
+        manager.createRoom(name: "Outside")
+        let otherRoom = try XCTUnwrap(manager.rooms.first { $0.name == "Outside" })
+        manager.assign(lightID: outside.id, toRoom: otherRoom.id)
         outside.color = .orange
         outside.brightness = 0.31
         let effect = try XCTUnwrap(LightingCatalog.effects.first { $0.id != "music-pulse" })
@@ -600,8 +733,9 @@ final class EffectOwnershipRegressionTests: XCTestCase {
         manager.enterDemoMode()
         defer { manager.exitDemoMode() }
         let firstRoom = try XCTUnwrap(manager.rooms.first)
-        let otherRoom = try XCTUnwrap(manager.rooms.last)
         let light = try XCTUnwrap(manager.devices(in: firstRoom).first { !$0.isLIFXLuna })
+        manager.createRoom(name: "Outside")
+        let otherRoom = try XCTUnwrap(manager.rooms.first { $0.name == "Outside" })
         let effect = try XCTUnwrap(LightingCatalog.effects.first { $0.id != "music-pulse" })
         let scope = LightScope.room(firstRoom.id)
         manager.startEffect(effect, scope: scope)
@@ -700,7 +834,7 @@ final class SpectrumEditorLifecycleTests: XCTestCase {
     }
 }
 
-final class RoomWorkspaceRenderTests: XCTestCase {
+final class RoomCanvasRenderTests: XCTestCase {
     @MainActor
     func testRenderReviewStates() async throws {
         guard ProcessInfo.processInfo.environment["LUMENDESK_RENDER_QA"] == "1" else {
@@ -708,97 +842,21 @@ final class RoomWorkspaceRenderTests: XCTestCase {
         }
         let manager = LightManager(defaults: UserDefaults(suiteName: UUID().uuidString)!,
                                    persistenceStore: temporaryPersistenceStore())
-        try await capture("empty-620", PlanWorkspaceView(scope: .constant(.all)), manager, width: 620, height: 700)
         manager.enterDemoMode()
         defer { manager.exitDemoMode() }
-        let room = try XCTUnwrap(manager.rooms.first)
-        let scope = LightScope.room(room.id)
-        try await capture("shell-demo", LumenDeskShellView(), manager, width: 1100, height: 1000)
-        try await capture("shell-620", LumenDeskShellView(), manager, width: 620, height: 1000)
-        try await capture("room-all-offline", PlanWorkspaceView(scope: .constant(.all)), manager, width: 1440, height: 1100)
-        try await capture("room-620", PlanWorkspaceView(scope: .constant(scope)), manager, width: 620, height: 850)
-        try await capture("room-1100", PlanWorkspaceView(scope: .constant(scope)), manager, width: 1100, height: 900)
-        try await capture("room-1440", PlanWorkspaceView(scope: .constant(scope)), manager, width: 1440, height: 1000)
-        let selected = Set(manager.devices(in: room).prefix(2).map(\.id))
-        try await capture("selection", PlanWorkspaceView(scope: .constant(scope), initialSelection: selected),
-                          manager, width: 1100, height: 1000)
-        let light = try XCTUnwrap(manager.devices(in: room).first)
-        try await capture("fixture-inspector", PlanWorkspaceView(scope: .constant(scope), initialSelection: [light.id]),
-                          manager, width: 1100, height: 1100)
-        try await capture("luna-studio", LIFXLunaEditorView(device: light, initialSelection: [6, 7, 8]), manager, width: 1100, height: 950)
-        try await capture("room-configuration", RoomConfigurationView(room: room), manager, width: 660, height: 850)
-        try await capture("scenes", LibraryWorkspaceView(scope: .constant(scope)), manager, width: 900, height: 800)
-        try await capture("music-stopped", ScrollView { MusicModeView(scope: .constant(scope)).padding(24) },
-                          manager, width: 1000, height: 1100)
-        try await capture("music-compact", ScrollView { MusicModeView(scope: .constant(scope)).padding(16) },
-                          manager, width: 620, height: 2100)
-        var config = MusicModeConfiguration.configuration(for: .ambient)
-        config.usesSyntheticDemoPattern = true
-        manager.startMusicMode(configuration: config, scope: scope, reducedMotion: true)
-        try await capture("music-running-demo", ScrollView { MusicModeView(scope: .constant(scope)).padding(24) },
-                          manager, width: 1000, height: 1100)
-        try await capture("effect-owner", PlanWorkspaceView(scope: .constant(scope)), manager, width: 1100, height: 950)
-        manager.stopAllEffects()
-        let effect = try XCTUnwrap(LightingCatalog.effects.first { $0.id != "music-pulse" })
-        manager.startEffect(effect, scope: scope)
-        try await capture("dynamic-effect", PlanWorkspaceView(scope: .constant(scope)), manager, width: 1100, height: 950)
-        manager.stopAllEffects()
-        try await capture("room-arrangement", RoomArrangementSheet(), manager, width: 820, height: 850)
-        let strip = try XCTUnwrap(manager.devices.first { manager.segmentProfile(for: $0)?.layout == .cobStrip })
-        try await capture("segment-studio", GoveeSegmentEditorView(device: strip, initialSelection: [0, 1, 2]), manager, width: 1100, height: 950)
-        try await capture("spectrum-segment-detail", PlanWorkspaceView(scope: .constant(.all), initialSelection: [strip.id]),
-                          manager, width: 1200, height: 1200)
-        try await capture("segment-compact", GoveeSegmentEditorView(device: strip), manager, width: 620, height: 850)
-        let string = try XCTUnwrap(manager.devices.first { manager.segmentProfile(for: $0)?.layout == .stringLights })
-        manager.applySegments(string, state: manager.segmentState(for: string))
-        try await capture("dense-room-lane", SpectrumFixtureLane(light: string, selected: false,
-                                                                  hasDraft: false, select: {}, edit: {}).padding(24),
-                          manager, width: 400, height: 280)
-        try await capture("discovery-partial", DevicesWorkspaceView(), manager, width: 850, height: 900)
-        try await captureShapes(manager)
-        try await capture("onboarding", OnboardingView(onFinish: {}), manager, width: 760, height: 720)
-    }
 
-    /// The Shapes wall in the Demo Lounge: the studio inline in the room at
-    /// three widths, as a sheet, mid-edit with a selection, turned 90°, and
-    /// while Music Mode streams panel by panel.
-    @MainActor
-    private func captureShapes(_ manager: LightManager) async throws {
-        let lounge = try XCTUnwrap(manager.rooms.first { $0.name == "Demo Lounge" })
-        let scope = LightScope.room(lounge.id)
-        let wall = try XCTUnwrap(manager.devices.first { $0.brand == .nanoleaf })
-        let layout = try XCTUnwrap(manager.shapes.layout(wall.id))
-        try await capture("shapes-room-1440", PlanWorkspaceView(scope: .constant(scope), initialSelection: [wall.id]),
-                          manager, width: 1440, height: 1500)
-        try await capture("shapes-room-900", PlanWorkspaceView(scope: .constant(scope), initialSelection: [wall.id]),
-                          manager, width: 900, height: 2100)
-        try await capture("shapes-room-620", PlanWorkspaceView(scope: .constant(scope), initialSelection: [wall.id]),
-                          manager, width: 620, height: 2400)
-        let picked = Set(layout.spatialPositions(rotationDegrees: 0, axis: .leftToRight).prefix(3).map(\.panelID))
-        manager.shapes.beginSession(wall.id, origin: .appliedDesign, design: try XCTUnwrap(manager.shapes.designs[wall.id]))
-        manager.shapes.edit(wall.id) { $0.edit { $0.paint(NanoleafPanelColor(hue: 0.55, saturation: 0.9, intensity: 1), panels: picked) } }
-        try await capture("shapes-editing", NanoleafShapesStudio(device: wall, shapes: manager.shapes, presentation: .sheet,
-                                                                 initialSelection: picked),
-                          manager, width: 1100, height: 1500)
-        manager.shapes.endSession(wall.id)
-        manager.requestShapesOrientation(90, for: wall)
-        try await capture("shapes-rotated", NanoleafShapesStudio(device: wall, shapes: manager.shapes, presentation: .sheet),
-                          manager, width: 1100, height: 1300)
-        manager.requestShapesOrientation(0, for: wall)
-        var config = MusicModeConfiguration.configuration(for: .ambient)
-        config.usesSyntheticDemoPattern = true
-        manager.startMusicMode(configuration: config, scope: scope, reducedMotion: true)
-        try await Task.sleep(nanoseconds: 700_000_000)
-        try await capture("shapes-music", PlanWorkspaceView(scope: .constant(scope), initialSelection: [wall.id]),
-                          manager, width: 1100, height: 1500)
-        manager.stopAllEffects()
+        try await capture("room-canvas-620", RoomCanvasShellView(), manager, width: 620, height: 850)
+        try await capture("room-canvas-1100", RoomCanvasShellView(), manager, width: 1100, height: 900)
+        try await capture("room-canvas-1440", RoomCanvasShellView(), manager, width: 1440, height: 1000)
+        try await capture("room-canvas-settings", NavigationStack { RoomCanvasSettingsView() },
+                          manager, width: 760, height: 760)
     }
 
     @MainActor
     private func capture<Content: View>(_ name: String, _ content: Content, _ manager: LightManager,
                                        width: CGFloat, height: CGFloat) async throws {
-        let root = content.environmentObject(manager).preferredColorScheme(.dark)
-            .frame(width: width, height: height).background(Lumen.stage)
+        let root = content.environmentObject(manager).preferredColorScheme(.light)
+            .frame(width: width, height: height).background(Lumen.canvas)
         let host = NSHostingView(rootView: root)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: height),
                               styleMask: [.borderless], backing: .buffered, defer: false)
@@ -812,12 +870,13 @@ final class RoomWorkspaceRenderTests: XCTestCase {
         host.cacheDisplay(in: host.bounds, to: bitmap)
         let data = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
         let directory = URL(fileURLWithPath: ProcessInfo.processInfo.environment["LUMENDESK_RENDER_DIRECTORY"]
-                            ?? NSTemporaryDirectory()).appendingPathComponent("LumenDesk-Visual-QA")
+                            ?? NSTemporaryDirectory()).appendingPathComponent("LumenDesk-Direction-A-Visual-QA")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         try data.write(to: directory.appendingPathComponent("\(name).png"))
-        // The connector can read job logs even without an execution workspace.
-        // JPEG is a review transport; the lossless originals are CI artifacts.
-        let jpeg = try XCTUnwrap(bitmap.representation(using: .jpeg, properties: [.compressionFactor: 0.75]))
+        let jpeg = try XCTUnwrap(bitmap.representation(
+            using: .jpeg,
+            properties: [.compressionFactor: 0.78]
+        ))
         try jpeg.write(to: directory.appendingPathComponent("\(name).jpg"))
         XCTAssertGreaterThan(data.count, 1000, "Rendering produced no useful image")
     }

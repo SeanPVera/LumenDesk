@@ -104,7 +104,7 @@ jobs:
         run: scripts/check_music_controls_baseline.sh
 
       - name: Inspect rendered review output
-        run: python3 scripts/print_visual_review.py "$RUNNER_TEMP/LumenDesk-Visual-QA"
+        run: python3 scripts/print_visual_review.py "$RUNNER_TEMP/LumenDesk-Direction-A-Visual-QA"
 
       - name: Analyze macOS
         run: |
@@ -129,5 +129,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: native-visual-review
-          path: ${{ runner.temp }}/LumenDesk-Visual-QA
+          path: ${{ runner.temp }}/LumenDesk-Direction-A-Visual-QA
           if-no-files-found: warn

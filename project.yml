@@ -15,6 +15,11 @@ targets:
     supportedDestinations: [macOS, iOS]
     sources:
       - path: LumenDesk
+        excludes:
+          - Resources/Fonts
+      - path: LumenDesk/Resources/Fonts
+        type: folder
+        buildPhase: resources
     info:
       path: LumenDesk/Info.plist
       properties:
@@ -24,9 +29,15 @@ targets:
         LSApplicationCategoryType: public.app-category.utilities
         LSMinimumSystemVersion: "13.0"
         NSHumanReadableCopyright: "Copyright © 2026 SeanPVera"
+        UIAppFonts:
+          - Fonts/DejaVuSansCondensed.ttf
+          - Fonts/DejaVuSansCondensed-Bold.ttf
+          - Fonts/OpenSans-Regular.ttf
+          - Fonts/OpenSans-Semibold.ttf
+        ATSApplicationFontsPath: Fonts
         NSLocalNetworkUsageDescription: LumenDesk discovers and controls LIFX, Govee, and Nanoleaf Shapes lights on your local network.
-        NSMicrophoneUsageDescription: LumenDesk analyzes music and room audio levels locally to animate music-reactive lighting effects.
-        NSScreenCaptureUsageDescription: LumenDesk can capture system audio from music apps locally to drive music-reactive lightshows.
+        NSMicrophoneUsageDescription: LumenDesk analyzes microphone audio locally to drive a Live room response. Audio is not retained.
+        NSScreenCaptureUsageDescription: LumenDesk analyzes system audio locally to drive a Live room response. Audio is not retained.
         NSBonjourServices:
           - _lifx._udp
           - _hap._tcp
@@ -60,6 +71,7 @@ targets:
         SUPPORTS_MACCATALYST: NO
         TARGETED_DEVICE_FAMILY: "1,2"
         ENABLE_PREVIEWS: YES
+        OTHER_LDFLAGS: "$(inherited) -lsqlite3"
         GENERATE_INFOPLIST_FILE: NO
         DEVELOPMENT_ASSET_PATHS: '"Preview Content"'
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

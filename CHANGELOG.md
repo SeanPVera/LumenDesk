@@ -6,26 +6,26 @@ the install steps, so write each entry for someone deciding whether to update.
 
 ## Unreleased
 
-### Music Mode keeps time
+### Direction A — Room Canvas
 
-- **Beat maps for audio files.** Play a file and LumenDesk maps every beat in
-  it while the show is already running. Once the map is ready the lights follow
-  the file's own clock instead of guessing, and each bar's energy is known
-  before it plays. Maps are saved, so a file you have played before starts
-  mapped. Works in the Mac and iPhone apps and in the browser.
-- **Follow Spotify and Music (Mac).** With the new switch on, LumenDesk asks
-  Spotify or Music where the song is. The first listen of a track teaches it
-  the beats; every later listen plays from that map, and the system audio keeps
-  the clock on the song. macOS asks once for Automation permission. Nothing
-  leaves the Mac.
-- **Light timing.** A slider moves every accent up to 300 ms earlier or later,
-  and **Tap with the lights** measures how late your lights land and sets it
-  for you. It is one setting for the whole app, and changing preset keeps it.
-- **Energy gears.** Shows shift through six gears as songs get louder or
-  quieter. Calm passages ease in and nod on every other beat of a fast song;
-  the loudest parts snap and change colour on the beat. The top gear can ask
-  for a downbeat flash, which No-flash mode still blocks and the
-  three-a-second limit still caps.
+- LumenDesk now opens on the physical room: a direct-manipulation fixture
+  canvas, contextual controls, truthful command status, and a room Look shelf.
+- The new Look Composer adapts Spatial wash, Gradient, and Exact fixture
+  compositions across ordinary bulbs, segments, matrices, and Nanoleaf panels.
+  Preview is reversible and saved Looks capture the real supported output.
+- Add or repair is one Prepare → Find/identify → Place → Verify flow. Live is
+  reduced to room, input, Calm/Pulse/Spatial, and Stop + restore.
+- Rooms and Looks now persist as ordered rows in versioned SQLite with an
+  automatic last-transaction backup. Existing JSON rooms/scenes migrate on
+  first launch and remain preserved in a legacy sidecar.
+- The visual system now uses Graphite, Canvas, Ember, and Verdigris with bundled
+  DejaVu Sans Condensed and Open Sans fonts.
+- The browser client, local web bridge, schedule UI/runtime, dashboard shell,
+  advanced Music authoring surface, and novelty destinations were removed.
+  Proven local hardware transports and the real-time analysis/render engine
+  remain native and foreground-only.
+- The menu-bar extra now performs quick actions for one selected room only.
+  Demo Mode is presented as one isolated Sample Room.
 
 ## 1.1.0 - 2026-10-03
 

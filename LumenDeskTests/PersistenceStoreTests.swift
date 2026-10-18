@@ -1,10 +1,12 @@
 import Foundation
+import SQLite3
 import XCTest
 @testable import LumenDesk
 
 final class PersistenceStoreTests: XCTestCase {
     func testStructuredStateRoundTripPreservesCurrentData() throws {
-        let store = temporaryPersistenceStore()
+        let fileURL = temporaryPersistenceFileURL()
+        let store = PersistenceStore(fileURL: fileURL)
         let roomID = UUID()
         let sceneID = UUID()
         let schedule = ScheduleEntry(hour: 7, minute: 45, action: .dim50, weekdays: [2, 4, 6])
@@ -60,7 +62,19 @@ final class PersistenceStoreTests: XCTestCase {
 
         try store.save(state)
 
-        XCTAssertEqual(store.load(), state)
+        let loaded = store.load()
+        XCTAssertEqual(loaded.rooms.first?.name, "Office")
+        XCTAssertEqual(loaded.rooms.first?.lightIDs, ["lifx:desk"])
+        XCTAssertTrue(loaded.rooms.first?.schedules.isEmpty == true)
+        XCTAssertEqual(loaded.scenes, [scene])
+        XCTAssertEqual(loaded.customNames, state.customNames)
+        XCTAssertEqual(loaded.goveeSegmentStates, state.goveeSegmentStates)
+        XCTAssertEqual(loaded.solarPreferences, .init())
+        XCTAssertTrue(loaded.automationOverrides.isEmpty)
+        XCTAssertTrue(SQLiteStateDatabase.isSQLiteFile(at: fileURL))
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: fileURL.appendingPathExtension("backup").path
+        ))
     }
 
     func testMissingAndPartiallyMissingDataFallsBackSafely() throws {
@@ -82,6 +96,10 @@ final class PersistenceStoreTests: XCTestCase {
         XCTAssertEqual(loaded.rooms, [room])
         XCTAssertTrue(loaded.scenes.isEmpty)
         XCTAssertEqual(loaded.schemaVersion, PersistedApplicationState.currentSchemaVersion)
+        XCTAssertTrue(SQLiteStateDatabase.isSQLiteFile(at: fileURL))
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: fileURL.appendingPathExtension("legacy.json").path
+        ))
     }
 
     func testMalformedStateFileDoesNotCrashAndReturnsSafeDefaults() throws {
@@ -98,7 +116,94 @@ final class PersistenceStoreTests: XCTestCase {
         )
     }
 
-    func testLegacyDefaultsMigrationPreservesRoomsScenesFavoritesSchedulesAndSegments() throws {
+    func testCorruptPrimaryRecoversLastCompleteSQLiteTransaction() throws {
+        let fileURL = temporaryPersistenceFileURL()
+        let store = PersistenceStore(fileURL: fileURL)
+        var state = PersistedApplicationState()
+        state.rooms = [Room(name: "Recovered Room")]
+        state.scenes = [LightingScene(name: "Recovered Look", snapshots: [:])]
+        try store.save(state)
+
+        try Data("damaged database header".utf8).write(to: fileURL)
+        let recovered = store.load()
+
+        XCTAssertEqual(recovered.rooms.map(\.name), ["Recovered Room"])
+        XCTAssertEqual(recovered.scenes.map(\.name), ["Recovered Look"])
+        XCTAssertTrue(SQLiteStateDatabase.isSQLiteFile(at: fileURL))
+        let siblings = try FileManager.default.contentsOfDirectory(
+            at: fileURL.deletingLastPathComponent(),
+            includingPropertiesForKeys: nil
+        )
+        XCTAssertTrue(siblings.contains { $0.lastPathComponent.hasPrefix("ApplicationState.json.corrupt-") })
+    }
+
+    func testUnreadableSQLiteFallsBackToPreservedLegacyState() throws {
+        let root = temporaryPersistenceFileURL().deletingLastPathComponent()
+        let databaseURL = root.appendingPathComponent("RoomCanvas.sqlite3", isDirectory: false)
+        let legacyURL = root.appendingPathComponent("ApplicationState.json", isDirectory: false)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        var corruptSQLite = Data("SQLite format 3\0".utf8)
+        corruptSQLite.append(Data(repeating: 0xA5, count: 128))
+        try corruptSQLite.write(to: databaseURL)
+        try corruptSQLite.write(to: databaseURL.appendingPathExtension("backup"))
+
+        var legacyState = PersistedApplicationState()
+        legacyState.rooms = [Room(name: "Legacy Room")]
+        legacyState.scenes = [LightingScene(name: "Legacy Look", snapshots: [:])]
+        try JSONEncoder().encode(legacyState).write(to: legacyURL)
+
+        let store = PersistenceStore(
+            fileURL: databaseURL,
+            legacyStateFileURL: legacyURL
+        )
+        let recovered = store.load()
+
+        XCTAssertEqual(recovered.rooms.map(\.name), ["Legacy Room"])
+        XCTAssertEqual(recovered.scenes.map(\.name), ["Legacy Look"])
+        XCTAssertTrue(SQLiteStateDatabase.isSQLiteFile(at: databaseURL))
+        XCTAssertEqual(PersistenceStore(fileURL: databaseURL).load(), recovered)
+        let siblings = try FileManager.default.contentsOfDirectory(
+            at: root,
+            includingPropertiesForKeys: nil
+        )
+        XCTAssertTrue(siblings.contains {
+            $0.lastPathComponent.hasPrefix("RoomCanvas.sqlite3.unreadable-")
+        })
+    }
+
+    func testNewerSQLiteStoreVersionIsLeftUntouched() throws {
+        let root = temporaryPersistenceFileURL().deletingLastPathComponent()
+        let databaseURL = root.appendingPathComponent("RoomCanvas.sqlite3", isDirectory: false)
+        let backupURL = databaseURL.appendingPathExtension("backup")
+        let legacyURL = root.appendingPathComponent("ApplicationState.json", isDirectory: false)
+        let store = PersistenceStore(fileURL: databaseURL, legacyStateFileURL: legacyURL)
+
+        var currentState = PersistedApplicationState()
+        currentState.rooms = [Room(name: "Newer Room")]
+        try store.save(currentState)
+        var staleLegacyState = PersistedApplicationState()
+        staleLegacyState.rooms = [Room(name: "Stale Legacy Room")]
+        try JSONEncoder().encode(staleLegacyState).write(to: legacyURL)
+
+        let newerVersion = SQLiteStateDatabase.storeVersion + 1
+        setSQLiteStoreVersion(newerVersion, at: databaseURL)
+        setSQLiteStoreVersion(newerVersion, at: backupURL)
+        let primaryBeforeLoad = try Data(contentsOf: databaseURL)
+        let backupBeforeLoad = try Data(contentsOf: backupURL)
+
+        XCTAssertEqual(store.load(), PersistedApplicationState())
+        XCTAssertEqual(try Data(contentsOf: databaseURL), primaryBeforeLoad)
+        XCTAssertEqual(try Data(contentsOf: backupURL), backupBeforeLoad)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: legacyURL.path))
+        let siblings = try FileManager.default.contentsOfDirectory(
+            at: root,
+            includingPropertiesForKeys: nil
+        )
+        XCTAssertFalse(siblings.contains { $0.lastPathComponent.contains(".unreadable-") })
+    }
+
+    func testLegacyDefaultsMigrationPreservesRoomsLooksFavoritesAndSegments() throws {
         let defaults = isolatedPersistenceDefaults()
         let roomID = UUID()
         let sceneID = UUID()
@@ -141,15 +246,16 @@ final class PersistenceStoreTests: XCTestCase {
 
         let migrated = store.load()
 
-        XCTAssertEqual(migrated.rooms, [room])
-        XCTAssertEqual(migrated.rooms.first?.schedules, [schedule])
+        XCTAssertEqual(migrated.rooms.first?.id, room.id)
+        XCTAssertEqual(migrated.rooms.first?.name, room.name)
+        XCTAssertTrue(migrated.rooms.first?.schedules.isEmpty == true)
         XCTAssertEqual(migrated.scenes, [scene])
         XCTAssertEqual(migrated.favoriteIDs, ["govee:strip"])
         XCTAssertEqual(migrated.favoriteRoomIDs, [roomID])
         XCTAssertEqual(migrated.favoriteSceneIDs, [sceneID])
         XCTAssertEqual(migrated.goveeSegmentStates, ["govee:strip": segments])
         XCTAssertEqual(migrated.goveeSegmentPresets.map(\.name), ["Migrated"])
-        XCTAssertEqual(migrated.solarPreferences.sunriseHour, 8)
+        XCTAssertEqual(migrated.solarPreferences, .init())
         XCTAssertEqual(migrated.schemaVersion, PersistedApplicationState.currentSchemaVersion)
 
         // A new store without access to legacy defaults reads the migrated file.
@@ -177,7 +283,8 @@ final class PersistenceStoreTests: XCTestCase {
             into: PersistedApplicationState()
         )
 
-        XCTAssertEqual(imported.rooms, source.rooms)
+        XCTAssertEqual(imported.rooms.first?.id, room.id)
+        XCTAssertTrue(imported.rooms.first?.schedules.isEmpty == true)
         XCTAssertEqual(imported.scenes, source.scenes)
         XCTAssertEqual(imported.favoriteRoomIDs, source.favoriteRoomIDs)
         XCTAssertEqual(imported.favoriteSceneIDs, source.favoriteSceneIDs)
@@ -202,7 +309,8 @@ final class PersistenceStoreTests: XCTestCase {
             into: keepsOwn
         )
         XCTAssertEqual(fromLegacy.whiteModeDeviceIDs, ["lifx:local"])
-        XCTAssertEqual(fromLegacy.rooms, source.rooms)
+        XCTAssertEqual(fromLegacy.rooms.first?.id, room.id)
+        XCTAssertTrue(fromLegacy.rooms.first?.schedules.isEmpty == true)
 
         var existing = source
         existing.scenes = [LightingScene(name: "Keep Me", snapshots: [:])]
@@ -229,7 +337,7 @@ final class PersistenceStoreTests: XCTestCase {
         XCTAssertEqual(current.scenes.map(\.name), ["Current Scene"])
     }
 
-    func testFullAndLegacyImportsNormalizeUnsafeScheduleFieldsBeforeSaving() throws {
+    func testFullAndLegacyImportsRetireUnattendedScheduleFields() throws {
         let store = temporaryPersistenceStore()
         let schedule: [String: Any] = [
             "id": UUID().uuidString, "isEnabled": true, "hour": Int.max,
@@ -252,20 +360,11 @@ final class PersistenceStoreTests: XCTestCase {
         let legacy = try store.importingConfiguration(
             from: JSONSerialization.data(withJSONObject: [room]), into: PersistedApplicationState())
         for imported in [full, legacy] {
-            let entry = try XCTUnwrap(imported.rooms.first?.schedules.first)
-            XCTAssertFalse(entry.isEnabled)
-            XCTAssertEqual(entry.weekdays, [2])
-            XCTAssertEqual(entry.daySummary, Calendar.current.veryShortWeekdaySymbols[1])
-            XCTAssertTrue((0...23).contains(entry.hour))
-            XCTAssertTrue((0...59).contains(entry.minute))
-            XCTAssertEqual(entry.offsetMinutes, 1440)
+            XCTAssertTrue(imported.rooms.first?.schedules.isEmpty == true)
             try store.save(imported)
             XCTAssertEqual(store.load().rooms, imported.rooms)
         }
-        XCTAssertEqual(full.solarPreferences.sunriseHour, 23)
-        XCTAssertEqual(full.solarPreferences.sunriseMinute, 0)
-        XCTAssertEqual(full.solarPreferences.sunsetHour, 0)
-        XCTAssertEqual(full.solarPreferences.sunsetMinute, 59)
+        XCTAssertEqual(full.solarPreferences, .init())
     }
 
     func testImportedSceneChannelsAreSafeForLANConversionsAndLegacyDefaults() throws {
@@ -368,6 +467,18 @@ final class PersistenceStoreTests: XCTestCase {
         defaults: UserDefaults
     ) throws {
         defaults.set(try JSONEncoder().encode(value), forKey: key)
+    }
+
+    private func setSQLiteStoreVersion(_ version: Int32, at url: URL) {
+        var connection: OpaquePointer?
+        let openResult = sqlite3_open(url.path, &connection)
+        XCTAssertEqual(openResult, SQLITE_OK)
+        guard let connection else { return }
+        defer { sqlite3_close(connection) }
+        XCTAssertEqual(
+            sqlite3_exec(connection, "PRAGMA user_version = \(version)", nil, nil, nil),
+            SQLITE_OK
+        )
     }
 }
 

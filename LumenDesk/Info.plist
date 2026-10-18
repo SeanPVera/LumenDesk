@@ -26,12 +26,19 @@
     <string>$(MACOSX_DEPLOYMENT_TARGET)</string>
     <key>NSHumanReadableCopyright</key>
     <string>Copyright © 2026 SeanPVera</string>
+    <key>UIAppFonts</key>
+    <array>
+        <string>Fonts/DejaVuSansCondensed.ttf</string>
+        <string>Fonts/DejaVuSansCondensed-Bold.ttf</string>
+        <string>Fonts/OpenSans-Regular.ttf</string>
+        <string>Fonts/OpenSans-Semibold.ttf</string>
+    </array>
+    <key>ATSApplicationFontsPath</key>
+    <string>Fonts</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>LumenDesk analyzes music and room audio levels locally to animate music-reactive lighting effects.</string>
+    <string>LumenDesk analyzes microphone audio locally to drive a Live room response. Audio is not retained.</string>
     <key>NSScreenCaptureUsageDescription</key>
-    <string>LumenDesk can capture system audio from music apps locally to drive music-reactive lightshows.</string>
-    <key>NSAppleEventsUsageDescription</key>
-    <string>When you turn on Follow Spotify and Music, LumenDesk asks those apps which song is playing and where it is, so the lights stay on the beat. Nothing leaves this Mac.</string>
+    <string>LumenDesk analyzes system audio locally to drive a Live room response. Audio is not retained.</string>
     <key>NSLocalNetworkUsageDescription</key>
     <string>LumenDesk discovers and controls LIFX, Govee, and Nanoleaf Shapes lights on your local network.</string>
     <key>NSAppTransportSecurity</key>

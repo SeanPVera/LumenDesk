@@ -2,252 +2,178 @@
 import SwiftUI
 import AppKit
 
-/// Compact popover shown in the macOS menu bar. Exposes master room toggles so
-/// the user can control their lights without switching to the main window.
+/// Direction A keeps the menu bar intentionally narrow: choose one room,
+/// change its immediate output, or recall one of its Looks. Commissioning,
+/// diagnostics, and composition stay in the full Room Canvas.
 struct MenuBarPopoverView: View {
-    @EnvironmentObject var manager: LightManager
-    @AppStorage(AppPreferenceKey.menuBarScope) private var scopeRaw = MenuBarScope.activeRooms.rawValue
-    @AppStorage(AppPreferenceKey.showMenuBarUrgentOnly) private var urgentOnly = false
-    @State private var previewScene: LightingScene?
+    @EnvironmentObject private var manager: LightManager
+    @AppStorage("LumenDesk.menuBarRoom.v2") private var selectedRoomValue = ""
+    @AppStorage(AppPreferenceKey.roomCanvasOpenRequest) private var openRoomRequest = ""
 
-    private var visibleRooms: [Room] {
-        let scope = MenuBarScope(rawValue: scopeRaw) ?? .activeRooms
-        let scoped: [Room]
-        switch scope {
-        case .favorites: scoped = manager.rooms.filter { manager.isFavoriteRoom($0.id) }
-        case .activeRooms: scoped = manager.rooms.filter { manager.devices(in: $0).contains(where: { $0.isOn || $0.isStale || manager.commandPendingIDs.contains($0.id) }) }
-        case .allRooms: scoped = manager.rooms
+    private var room: Room? {
+        if let id = UUID(uuidString: selectedRoomValue),
+           let match = manager.rooms.first(where: { $0.id == id }) {
+            return match
         }
-        guard urgentOnly else { return scoped }
-        return scoped.filter { manager.devices(in: $0).contains(where: { $0.isStale || manager.commandPendingIDs.contains($0.id) }) }
+        return manager.rooms.first
+    }
+
+    private var lights: [LightDevice] {
+        guard let room else { return [] }
+        return manager.devices(in: room)
+    }
+
+    private var roomLooks: [LightingScene] {
+        let ids = Set(lights.map(\.id))
+        return manager.scenes.filter { !Set($0.snapshots.keys).isDisjoint(with: ids) }
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            menuBarHeader
+        VStack(alignment: .leading, spacing: 0) {
+            header
             Divider()
-            ScrollView {
-                VStack(spacing: 0) {
-                    emergencyRow
-                    if !manager.favoriteScenes.isEmpty {
-                        favoriteScenesRow
-                        Divider().padding(.horizontal, 12)
-                    }
-                    globalRow
-                    if !manager.rooms.isEmpty || !manager.unassignedDevices.isEmpty {
-                        Divider().padding(.horizontal, 12)
-                    }
-                    ForEach(visibleRooms) { room in
-                        roomRow(room)
-                        Divider().padding(.horizontal, 12)
-                    }
-                    if !manager.unassignedDevices.isEmpty {
-                        unassignedRow
-                    }
-                }
+            if let room {
+                roomControl(room)
+            } else {
+                emptyState
             }
-            .frame(maxHeight: 340)
         }
-        .frame(width: 280)
-        .background(LumenBackground(glow: false))
-        .sheet(item: $previewScene) { scene in
-            ScenePreviewView(scene: scene).environmentObject(manager)
-        }
+        .frame(width: 300)
+        .font(LumenType.body())
+        .foregroundStyle(Lumen.graphite)
+        .background(Lumen.canvas)
+        .onAppear { selectFirstRoomIfNeeded() }
         .managedActionConfirmations(manager)
     }
 
-    private var emergencyRow: some View {
-        VStack(spacing: 8) {
-            Button {
-                manager.setAllPower(on: false)
-            } label: {
-                Label("All Off", systemImage: "power")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(LumenPrimaryButtonStyle())
-            .tint(.red)
-            .disabled(manager.devices.isEmpty)
-            HStack(spacing: 8) {
-                ForEach([0.1, 0.3, 0.6, 1.0], id: \.self) { value in
-                    Button { manager.setAllBrightness(value) } label: {
-                        Text("\(Int(value * 100))%")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(LumenSecondaryButtonStyle(compact: true))
-                    .disabled(manager.devices.isEmpty)
-                }
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-    }
-
-    private var favoriteScenesRow: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Favorite Scenes").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    ForEach(manager.favoriteScenes) { scene in
-                        Button { previewScene = scene } label: {
-                            Text(scene.name).lumenInteractiveTarget()
-                        }
-                            .controlSize(.small)
-                            .disabled(manager.availableDeviceIDs(for: scene).isEmpty)
-                            .help(manager.availableDeviceIDs(for: scene).isEmpty
-                                  ? "No lights from this scene are currently available"
-                                  : "Preview and rehearse \(scene.name)")
-                    }
-                }
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-    }
-
-    private var menuBarHeader: some View {
-        HStack(spacing: 4) {
-            LumenMark(size: 18)
-            VStack(alignment: .leading, spacing: 2) {
+    private var header: some View {
+        HStack(spacing: 9) {
+            LumenMark(size: 19)
+            VStack(alignment: .leading, spacing: 1) {
                 Text("LumenDesk")
-                    .font(LumenType.display(size: 13, weight: .bold))
-                if manager.isDemoMode {
-                    Text("Demo rig")
-                        .font(LumenType.instrumentLabel(size: 8))
-                        .foregroundStyle(Lumen.warning)
-                }
-                HStack(spacing: 4) {
-                    if !manager.commandPendingIDs.isEmpty {
-                        Label("\(manager.commandPendingIDs.count)", systemImage: "arrow.up.circle")
-                            .font(.caption2)
-                            .help("Commands in progress")
-                    }
-                    Text("\(manager.devices.count) light\(manager.devices.count == 1 ? "" : "s")")
-                        .font(LumenType.readout(size: 10))
-                        .foregroundStyle(Lumen.textTertiary)
-                        .accessibilityLabel("\(manager.devices.count) light\(manager.devices.count == 1 ? "" : "s") found")
-                }
-                .lineLimit(1)
+                    .font(LumenType.display(size: 16, weight: .bold))
+                Text("Quick room action")
+                    .font(LumenType.body(size: 10))
+                    .foregroundStyle(Lumen.meter)
             }
             Spacer()
-            Button {
-                NSApp.activate(ignoringOtherApps: true)
-                NSApp.windows.first(where: { $0.canBecomeKey })?.makeKeyAndOrderFront(nil)
-            } label: {
+            if manager.isScanning {
+                ProgressView().controlSize(.small)
+            } else {
+                Button { manager.scan() } label: { Image(systemName: "arrow.clockwise") }
+                    .buttonStyle(.borderless)
+                    .help("Find fixtures")
+            }
+            Button(action: openMainWindow) {
                 Image(systemName: "macwindow")
-                    .lumenInteractiveTarget()
             }
             .buttonStyle(.borderless)
-            .help("Resume in LumenDesk")
-            .accessibilityLabel("Resume in LumenDesk")
-            if manager.isScanning {
-                ProgressView()
-                    .controlSize(.mini)
-                    .frame(width: 44, height: 44)
-            } else {
-                Button {
-                    manager.scan()
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.caption)
-                        .lumenInteractiveTarget()
+            .help("Open Room Canvas")
+        }
+        .padding(14)
+        .background(Lumen.floor)
+    }
+
+    private func roomControl(_ room: Room) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Picker("Room", selection: $selectedRoomValue) {
+                ForEach(manager.rooms) { item in
+                    Text(item.name).tag(item.id.uuidString)
                 }
-                .buttonStyle(.borderless)
-                .help("Scan for lights")
-                .accessibilityLabel("Scan for lights")
             }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-    }
+            .pickerStyle(.menu)
 
-    private var globalRow: some View {
-        HStack(spacing: 10) {
-            LumenEyebrow(text: "All lights", tint: Lumen.textSecondary, size: 10)
-            Spacer()
-            Toggle("", isOn: Binding(
-                get: { !manager.devices.isEmpty && manager.devices.allSatisfy { $0.isOn } },
-                set: { manager.setAllPower(on: $0) }
-            ))
-            .labelsHidden()
-            .toggleStyle(LumenPowerKeyStyle(size: 26, spokenLabel: "All lights power"))
-            .disabled(manager.devices.isEmpty)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-    }
-
-    private func roomRow(_ room: Room) -> some View {
-        let lights = manager.devices(in: room)
-        let onCount = lights.filter { $0.isOn }.count
-        let brightnessBinding = Binding<Double>(
-            get: {
-                let on = lights.filter { $0.isOn }
-                guard !on.isEmpty else { return 1.0 }
-                return on.reduce(0) { $0 + $1.brightness } / Double(on.count)
-            },
-            set: { manager.setBrightness(in: room, value: $0) }
-        )
-        return VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                VStack(alignment: .leading, spacing: 1) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
                     Text(room.name)
-                        .font(.callout.weight(.medium))
-                        .lineLimit(1)
-                    Text(lights.isEmpty ? "No lights" : "\(onCount) of \(lights.count) on")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .font(LumenType.display(size: 22, weight: .bold))
+                    Text("\(lights.filter(\.isOn).count) of \(lights.count) on")
+                        .font(LumenType.body(size: 11))
+                        .foregroundStyle(Lumen.meter)
                 }
                 Spacer()
                 Toggle("", isOn: Binding(
-                    get: { !lights.isEmpty && lights.allSatisfy { $0.isOn } },
+                    get: { !lights.isEmpty && lights.allSatisfy(\.isOn) },
                     set: { manager.setPower(in: room, on: $0) }
                 ))
                 .labelsHidden()
-                .toggleStyle(LumenPowerKeyStyle(
-                    size: 26,
-                    spokenLabel: "\(room.name) power, \(onCount) of \(lights.count) on"))
+                .toggleStyle(.switch)
+                .disabled(lights.isEmpty)
+                .accessibilityLabel("Power for \(room.name)")
+            }
+
+            VStack(alignment: .leading, spacing: 5) {
+                HStack {
+                    Text("Brightness")
+                    Spacer()
+                    Text("\(Int(averageBrightness * 100))%")
+                        .font(LumenType.readout(size: 11))
+                }
+                Slider(value: Binding(
+                    get: { averageBrightness },
+                    set: { manager.setBrightness(in: room, value: $0) }
+                ), in: 0.01...1)
                 .disabled(lights.isEmpty)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
 
-            if onCount > 0 {
-                LumenFader(label: "\(room.name) brightness",
-                           value: brightnessBinding,
-                           track: .beam,
-                           showsScale: false)
-                    .padding(.horizontal, 14)
-                    .padding(.bottom, 8)
+            if !roomLooks.isEmpty {
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("Looks")
+                        .font(LumenType.instrumentLabel(size: 10))
+                        .foregroundStyle(Lumen.meter)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 7) {
+                            ForEach(roomLooks) { look in
+                                Button(look.name) {
+                                    manager.applyLook(look, deviceIDs: Set(lights.map(\.id)))
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                            }
+                        }
+                    }
+                }
             }
+
+            Button("Open \(room.name) in Room Canvas", action: openMainWindow)
+                .buttonStyle(.borderedProminent)
+                .tint(Lumen.ember)
+                .frame(maxWidth: .infinity)
         }
+        .padding(14)
     }
 
-    private var unassignedRow: some View {
-        let lights = manager.unassignedDevices
-        let onCount = lights.filter { $0.isOn }.count
-        return HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text("Unassigned")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                Text("\(onCount) of \(lights.count) on")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            Toggle("", isOn: Binding(
-                get: { !lights.isEmpty && lights.allSatisfy { $0.isOn } },
-                set: { on in manager.setPower(deviceIDs: Set(lights.map { $0.id }), on: on) }
-            ))
-            .labelsHidden()
-            .toggleStyle(LumenPowerKeyStyle(size: 26, spokenLabel: "Unassigned lights power"))
-            .disabled(lights.isEmpty)
+    private var emptyState: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "square.dashed")
+                .font(.system(size: 28, weight: .light))
+            Text("No room yet")
+                .font(LumenType.display(size: 19, weight: .bold))
+            Button("Open Room Canvas", action: openMainWindow)
+                .buttonStyle(.borderedProminent)
+                .tint(Lumen.ember)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Unassigned, \(onCount) of \(lights.count) on")
+        .frame(maxWidth: .infinity)
+        .padding(28)
+    }
+
+    private var averageBrightness: Double {
+        guard !lights.isEmpty else { return 0 }
+        return lights.reduce(0) { $0 + $1.brightness } / Double(lights.count)
+    }
+
+    private func selectFirstRoomIfNeeded() {
+        guard let room else { selectedRoomValue = ""; return }
+        if selectedRoomValue != room.id.uuidString { selectedRoomValue = room.id.uuidString }
+    }
+
+    private func openMainWindow() {
+        // The menu-bar scene and the window own independent view state. Hand
+        // the chosen room across explicitly before activating the window; the
+        // Room Canvas consumes and clears this request.
+        openRoomRequest = room?.id.uuidString ?? ""
+        NSApp.activate(ignoringOtherApps: true)
+        NSApp.windows.first(where: { $0.canBecomeKey })?.makeKeyAndOrderFront(nil)
     }
 }
 #endif

@@ -8,6 +8,19 @@ reinvention brief is the requirements source; the visual-concepts publication
 is a visual reference for A01–A06. Conceptual mockups are translated into
 working native interactions rather than treated as implemented software.
 
+## Post-implementation control revision
+
+Hands-on product validation superseded the spatial interaction in DA-005,
+DA-013, and DA-014. A light's position inside a room does not affect how it is
+controlled, so the production workspace now presents an explicit room-level
+control panel, an ordered list of lights, individual inline controls, and
+multi-selection. Commissioning assigns lights to a room without a placement
+step, and the Look Composer previews output by light instead of drawing room
+positions. Persisted room anchors remain readable for backup compatibility but
+have no user-facing interaction. The original matrix below is retained as the
+implementation record for the supplied Direction A brief; this revision is the
+current product behavior where the two differ.
+
 ## Baseline and repository assessment
 
 - Starting revision: `100996d2cac9d222129dcb9e806c1ae375d2e8c2` on the

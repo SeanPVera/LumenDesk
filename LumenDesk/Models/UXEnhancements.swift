@@ -245,7 +245,7 @@ enum AppPreferenceKey {
     static let showMenuBarUrgentOnly = "LumenDesk.menuBarUrgentOnly.v1"
     static let audioPrivacyAcknowledged = "LumenDesk.audioPrivacyAcknowledged.v1"
     /// Ephemeral cross-scene handoff from the menu-bar controller to the
-    /// independent Room Canvas session. The canvas clears it after consuming
+    /// independent room-control session. The workspace clears it after consuming
     /// the requested room so choosing the same room again still produces a
     /// fresh navigation event.
     static let roomCanvasOpenRequest = "LumenDesk.roomCanvasOpenRequest.v1"

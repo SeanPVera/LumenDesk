@@ -4,7 +4,7 @@ import AppKit
 
 /// Direction A keeps the menu bar intentionally narrow: choose one room,
 /// change its immediate output, or recall one of its Looks. Commissioning,
-/// diagnostics, and composition stay in the full Room Canvas.
+/// diagnostics and composition stay in the full room controls.
 struct MenuBarPopoverView: View {
     @EnvironmentObject private var manager: LightManager
     @AppStorage("LumenDesk.menuBarRoom.v2") private var selectedRoomValue = ""
@@ -62,13 +62,13 @@ struct MenuBarPopoverView: View {
             } else {
                 Button { manager.scan() } label: { Image(systemName: "arrow.clockwise") }
                     .buttonStyle(.borderless)
-                    .help("Find fixtures")
+                    .help("Find lights")
             }
             Button(action: openMainWindow) {
                 Image(systemName: "macwindow")
             }
             .buttonStyle(.borderless)
-            .help("Open Room Canvas")
+            .help("Open Room Lights")
         }
         .padding(14)
         .background(Lumen.floor)
@@ -135,7 +135,7 @@ struct MenuBarPopoverView: View {
                 }
             }
 
-            Button("Open \(room.name) in Room Canvas", action: openMainWindow)
+            Button("Open \(room.name) in Room Lights", action: openMainWindow)
                 .buttonStyle(.borderedProminent)
                 .tint(Lumen.ember)
                 .frame(maxWidth: .infinity)
@@ -149,7 +149,7 @@ struct MenuBarPopoverView: View {
                 .font(.system(size: 28, weight: .light))
             Text("No room yet")
                 .font(LumenType.display(size: 19, weight: .bold))
-            Button("Open Room Canvas", action: openMainWindow)
+            Button("Open Room Lights", action: openMainWindow)
                 .buttonStyle(.borderedProminent)
                 .tint(Lumen.ember)
         }
@@ -169,8 +169,8 @@ struct MenuBarPopoverView: View {
 
     private func openMainWindow() {
         // The menu-bar scene and the window own independent view state. Hand
-        // the chosen room across explicitly before activating the window; the
-        // Room Canvas consumes and clears this request.
+        // the chosen room across explicitly before activating the window. The
+        // room workspace consumes and clears this request.
         openRoomRequest = room?.id.uuidString ?? ""
         NSApp.activate(ignoringOtherApps: true)
         NSApp.windows.first(where: { $0.canBecomeKey })?.makeKeyAndOrderFront(nil)

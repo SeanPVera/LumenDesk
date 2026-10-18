@@ -5,11 +5,11 @@ import AppKit
 import UIKit
 #endif
 
-// MARK: - LumenDesk design system — Direction A / Room Canvas
+// MARK: - LumenDesk room-control design system
 //
-// The room is the instrument: a warm drawing surface carries literal fixture
-// colour while a compact four-colour system carries product meaning. Status
-// always pairs colour with wording and geometry. See
+// A warm control surface carries literal light colour while a compact
+// four-colour system carries product meaning. Status always pairs colour with
+// wording and geometry. See
 // `docs/direction-a-implementation.md` for the source-to-code contract.
 
 enum Lumen {

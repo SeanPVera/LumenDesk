@@ -6,14 +6,17 @@ the install steps, so write each entry for someone deciding whether to update.
 
 ## Unreleased
 
-### Direction A — Room Canvas
+### Room-organized controls
 
-- LumenDesk now opens on the physical room: a direct-manipulation fixture
-  canvas, contextual controls, truthful command status, and a room Look shelf.
+- LumenDesk now opens on a room-organized light list. Every room has shared
+  power, brightness, white-point, and colour controls; each light also has
+  immediate individual controls, with multi-select for any subset.
+- Room placement and dragging have been removed. A light's position inside a
+  room is not needed to control it, and Look previews now show output by light.
 - The new Look Composer adapts Spatial wash, Gradient, and Exact fixture
   compositions across ordinary bulbs, segments, matrices, and Nanoleaf panels.
   Preview is reversible and saved Looks capture the real supported output.
-- Add or repair is one Prepare → Find/identify → Place → Verify flow. Live is
+- Add or repair is one Prepare → Find/identify → Room → Verify flow. Live is
   reduced to room, input, Calm/Pulse/Spatial, and Stop + restore.
 - Rooms and Looks now persist as ordered rows in versioned SQLite with an
   automatic last-transaction backup. Existing JSON rooms/scenes migrate on

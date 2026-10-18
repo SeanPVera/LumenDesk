@@ -973,6 +973,16 @@ private struct RoomSelectionInspector: View {
                     ), supportsOpacity: false)
                     .font(LumenType.body(size: 13, weight: .semibold))
 
+                    Menu {
+                        LightingThemeCategoryMenuContent { theme in
+                            manager.applyTheme(theme, deviceIDs: ids, in: .room(room.id))
+                        }
+                    } label: {
+                        Label("Color themes (\(LightingCatalog.themes.count))", systemImage: "swatchpalette")
+                    }
+                    .font(LumenType.body(size: 13, weight: .semibold))
+                    .help("Apply a theme to \(usesWholeRoom ? "the room" : "the selected lights") at its original brightness and spread")
+
                     if manager.externallyChangedDeviceIDs.isDisjoint(with: ids) == false {
                         VStack(alignment: .leading, spacing: 8) {
                             Label("A light changed outside LumenDesk. The list now shows what the room reported.",
@@ -1157,6 +1167,12 @@ private struct LookShelf: View {
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 9) {
+                    Menu("Color themes") {
+                        LightingThemeCategoryMenuContent { theme in
+                            manager.applyTheme(theme, deviceIDs: ids, in: .room(room.id))
+                        }
+                    }
+                    .buttonStyle(RoomLookButtonStyle())
                     ForEach(RoomLookTemplate.everyday) { template in
                         Button {
                             guard let theme = LightingCatalog.theme(withID: template.themeID) else { return }
@@ -1281,22 +1297,29 @@ private struct LookMiniPalette: View {
     }
 }
 
-private enum LookBrush: String, CaseIterable, Identifiable {
+enum LookBrush: String, CaseIterable, Identifiable {
+    case original = "Original"
     case spatialWash = "Spatial wash"
     case gradient = "Gradient"
     case exactFixture = "Exact fixture"
     var id: String { rawValue }
 
-    var distribution: ThemeDistribution {
+    func applying(to source: LightingTheme) -> LightingTheme {
+        let distribution: ThemeDistribution
         switch self {
-        case .spatialWash: return .wash
-        case .gradient: return .gradient
-        case .exactFixture: return .alternating
+        case .original: return source
+        case .spatialWash: distribution = .wash
+        case .gradient: distribution = .gradient
+        case .exactFixture: distribution = .alternating
         }
+        return LightingTheme(id: "\(source.id)-\(id)", name: source.name, summary: source.summary,
+                             category: source.category, icon: source.icon, colors: source.colors,
+                             brightness: source.brightness, distribution: distribution)
     }
 
     var summary: String {
         switch self {
+        case .original: return "Keeps the theme\u{2019}s original spread and brightness."
         case .spatialWash: return "One key colour fills the room; spatial fixtures hold a quiet secondary tone."
         case .gradient: return "The palette travels through fixture order and across supported surfaces."
         case .exactFixture: return "Choose the exact palette colour each selected fixture should hold."
@@ -1310,7 +1333,7 @@ private enum LookComposerScope: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
-private struct ComposerPalette: Identifiable {
+struct ComposerPalette: Identifiable {
     let id: String
     let name: String
     let theme: LightingTheme
@@ -1331,26 +1354,33 @@ private struct ComposerPalette: Identifiable {
                 distribution: .gradient
             )
         ))
-        for id in ["reading-nook", "aurora", "linen-dusk", "tokyo-rain", "kitchen-noon"] {
-            if let theme = LightingCatalog.theme(withID: id) {
-                values.append(ComposerPalette(id: id, name: theme.name, theme: theme))
-            }
+        for theme in LightingCatalog.themes {
+            values.append(ComposerPalette(id: theme.id, name: theme.name, theme: theme))
         }
         return values
     }()
 }
 
-private struct LookComposerView: View {
+private struct ComposerPreviewRequest: Equatable {
+    let theme: LightingTheme
+    let targetIDs: Set<String>
+    let paletteAssignments: [String: Int]?
+    let transitionDuration: Double
+    let previewID: UUID?
+}
+
+struct LookComposerView: View {
     @EnvironmentObject private var manager: LightManager
     @Environment(\.dismiss) private var dismiss
     let room: Room
     let initialSelection: Set<String>
     @State private var paletteID = ComposerPalette.choices.first?.id ?? "ember-moss"
-    @State private var brush: LookBrush = .gradient
+    @State private var brush: LookBrush = .original
     @State private var scope: LookComposerScope
     @State private var lookName = "Ember & Moss"
     @State private var transitionSeconds = 1.8
     @State private var exactAssignments: [String: Int] = [:]
+    @State private var previewID: UUID?
 
     init(room: Room, initialSelection: Set<String>, initiallyControlsWholeRoom: Bool) {
         self.room = room
@@ -1380,17 +1410,12 @@ private struct LookComposerView: View {
         })
     }
     private var authoredTheme: LightingTheme {
-        let source = selectedPalette.theme
-        return LightingTheme(
-            id: "\(source.id)-\(brush.id)",
-            name: source.name,
-            summary: source.summary,
-            category: source.category,
-            icon: source.icon,
-            colors: source.colors,
-            brightness: source.brightness,
-            distribution: brush.distribution
-        )
+        brush.applying(to: selectedPalette.theme)
+    }
+    private var previewRequest: ComposerPreviewRequest {
+        ComposerPreviewRequest(theme: authoredTheme, targetIDs: targetIDs,
+                               paletteAssignments: paletteAssignments,
+                               transitionDuration: transitionSeconds, previewID: previewID)
     }
 
     var body: some View {
@@ -1417,6 +1442,7 @@ private struct LookComposerView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
+                        previewID = nil
                         manager.stopSceneRehearsal(restore: true)
                         dismiss()
                     }
@@ -1433,6 +1459,19 @@ private struct LookComposerView: View {
         }
         .onChange(of: scope) { _ in synchronizeExactAssignments() }
         .onChange(of: brush) { _ in synchronizeExactAssignments() }
+        .task(id: previewRequest) {
+            let request = previewRequest
+            guard let id = request.previewID, manager.rehearsalSceneID == id else { return }
+            // Coalesce rapid brush, scope, swatch, and transition edits.
+            do { try await Task.sleep(nanoseconds: 150_000_000) }
+            catch { return }
+            guard !Task.isCancelled else { return }
+            previewID = manager.startLookPreview(
+                request.theme, deviceIDs: request.targetIDs, in: .room(currentRoom.id),
+                paletteAssignments: request.paletteAssignments,
+                transitionDuration: request.transitionDuration, updating: id
+            )
+        }
     }
 
     private var previewColumn: some View {
@@ -1448,6 +1487,11 @@ private struct LookComposerView: View {
                     .font(LumenType.body(size: 13))
                     .foregroundStyle(Lumen.meter)
             }
+
+            Menu("All color themes (\(LightingCatalog.themes.count))") {
+                LightingThemeCategoryMenuContent { theme in paletteID = theme.id }
+            }
+            .font(LumenType.body(size: 13, weight: .semibold))
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 10) {
@@ -1628,24 +1672,33 @@ private struct LookComposerView: View {
                     .foregroundStyle(Lumen.meter)
             }
 
-            HStack(spacing: 9) {
+            VStack(alignment: .leading, spacing: 9) {
                 Button("Restore before preview") {
+                    previewID = nil
                     manager.stopSceneRehearsal(restore: true)
                 }
                 .buttonStyle(.bordered)
                 .disabled(manager.rehearsalSceneID == nil)
-                Button("Preview") {
-                    manager.startLookPreview(
+                Button("Preview on lights") {
+                    previewID = manager.startLookPreview(
                         authoredTheme,
                         deviceIDs: targetIDs,
                         in: .room(currentRoom.id),
                         paletteAssignments: paletteAssignments,
-                        transitionDuration: transitionSeconds
+                        transitionDuration: transitionSeconds,
+                        updating: previewID == manager.rehearsalSceneID ? previewID : nil
                     )
                 }
                 .buttonStyle(.bordered)
                 .disabled(targetIDs.isEmpty)
             }
+
+            Text(previewID != nil && previewID == manager.rehearsalSceneID
+                 ? "Preview is live. Palette and brush edits update the lights automatically. Restore or Cancel returns the opening state."
+                 : "The light preview shows the plan. Preview on lights tries it in the room; Save Look applies and keeps it.")
+                .font(LumenType.body(size: 11))
+                .foregroundStyle(Lumen.meter)
+                .fixedSize(horizontal: false, vertical: true)
 
             Button(action: save) {
                 Label("Save Look", systemImage: "checkmark.circle.fill")
@@ -1666,13 +1719,16 @@ private struct LookComposerView: View {
         guard !targetIDs.isEmpty else { return }
         // Re-plan even when a preview is already active: the palette, brush,
         // scope, or an Exact assignment may have changed since that preview.
-        manager.startLookPreview(
+        let appliedID = manager.startLookPreview(
             authoredTheme,
             deviceIDs: targetIDs,
             in: .room(currentRoom.id),
             paletteAssignments: paletteAssignments,
-            transitionDuration: transitionSeconds
+            transitionDuration: transitionSeconds,
+            updating: previewID == manager.rehearsalSceneID ? previewID : nil
         )
+        guard appliedID != nil else { return }
+        previewID = nil
         manager.stopSceneRehearsal(restore: false)
         _ = manager.captureLook(name: lookName, deviceIDs: targetIDs)
         dismiss()
@@ -1700,7 +1756,7 @@ private struct LookComposerView: View {
     }
 }
 
-private struct ComposerRoomPreview: View {
+struct ComposerRoomPreview: View {
     @EnvironmentObject private var manager: LightManager
     let room: Room
     let lights: [LightDevice]
@@ -1709,19 +1765,8 @@ private struct ComposerRoomPreview: View {
     let paletteAssignments: [String: Int]?
 
     private var plans: [String: ThemeFixturePlan] {
-        let fixtures = lights.filter { targetIDs.contains($0.id) }.map {
-            ThemeFixture(id: $0.id, capability: manager.themeCapability(for: $0), kelvin: $0.kelvin)
-        }
-        let plan: ThemePlan
-        if let paletteAssignments {
-            plan = ThemePlanner.planExact(
-                theme,
-                fixtures: fixtures,
-                paletteIndices: paletteAssignments
-            )
-        } else {
-            plan = ThemePlanner.plan(theme, fixtures: fixtures)
-        }
+        let plan = manager.plannedLook(theme, targets: lights.filter { targetIDs.contains($0.id) },
+                                       paletteAssignments: paletteAssignments)
         return Dictionary(uniqueKeysWithValues: plan.fixtures.map { ($0.fixtureID, $0) })
     }
 
@@ -1734,18 +1779,17 @@ private struct ComposerRoomPreview: View {
                     .font(LumenType.body(size: 11))
                     .foregroundStyle(Lumen.meter)
             }
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 10)], spacing: 10) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 185), spacing: 10)], spacing: 10) {
                 ForEach(lights) { light in
                     let plan = plans[light.id]
                     HStack(spacing: 10) {
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .fill(plan?.tone.emittedColor(scaledBy: plan?.brightness ?? 0)
-                                  ?? Lumen.graphite.opacity(0.12))
-                            .frame(width: 38, height: 38)
+                        ComposerFixtureSwatch(plan: plan)
+                            .frame(width: 54, height: 38)
+                            .clipShape(RoundedRectangle(cornerRadius: 5))
                         VStack(alignment: .leading, spacing: 2) {
                             Text(light.label)
                                 .font(LumenType.body(size: 12, weight: .semibold))
-                                .lineLimit(1)
+                                .lineLimit(2)
                             Text(plan.map { "\(Int(($0.brightness * 100).rounded()))%" }
                                  ?? "Not included")
                                 .font(LumenType.readout(size: 11))
@@ -1763,6 +1807,58 @@ private struct ComposerRoomPreview: View {
         .background(Lumen.floor, in: RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(Lumen.ruleSoft, lineWidth: 1))
         .accessibilityLabel("Preview of \(theme.name) in \(room.name)")
+    }
+}
+
+/// Show the addressable output, not just its first colour: wash and gradient
+/// deliberately share that first swatch but differ across the fixture.
+private struct ComposerFixtureSwatch: View {
+    let plan: ThemeFixturePlan?
+
+    var body: some View {
+        Group {
+            if let plan {
+                if let matrix = plan.matrix {
+                    VStack(spacing: 1) {
+                        ForEach(0..<matrix.height, id: \.self) { row in
+                            HStack(spacing: 1) {
+                                ForEach(0..<matrix.width, id: \.self) { column in
+                                    let index = row * matrix.width + column
+                                    Rectangle().fill(matrix.containsZone(index) ? matrix.colors[index].color : .clear)
+                                }
+                            }
+                        }
+                    }
+                } else if let segments = plan.segments {
+                    HStack(spacing: 0) {
+                        ForEach(sampledIndices(segments.colors.count), id: \.self) { index in
+                            let segment = segments.colors[index]
+                            let level = segment.isOn ? segment.brightness * plan.brightness : 0
+                            Rectangle().fill(Color(red: segment.red * level, green: segment.green * level,
+                                                   blue: segment.blue * level))
+                        }
+                    }
+                } else if let panels = plan.panels {
+                    HStack(spacing: 1) {
+                        ForEach(sampledIndices(panels.count), id: \.self) { index in
+                            Rectangle().fill(panels[index].emittedColor(scaledBy: plan.brightness))
+                        }
+                    }
+                } else {
+                    let rgb = plan.tone.rgb(atLevel: plan.brightness)
+                    Rectangle().fill(Color(red: rgb.red, green: rgb.green, blue: rgb.blue))
+                }
+            } else {
+                Rectangle().fill(Lumen.graphite.opacity(0.12))
+            }
+        }
+        .accessibilityHidden(true)
+    }
+
+    private func sampledIndices(_ count: Int) -> [Int] {
+        guard count > 1 else { return count == 1 ? [0] : [] }
+        let samples = min(count, 24)
+        return (0..<samples).map { $0 * (count - 1) / (samples - 1) }
     }
 }
 

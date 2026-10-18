@@ -18,8 +18,8 @@ enum Lumen {
 
     static let graphite = Color(hex: 0x20272B)
     static let canvas = Color(hex: 0xF4EADF)
-    static let ember = Color(hex: 0xEF5F4F)
-    static let verdigris = Color(hex: 0x35A982)
+    static let ember = Color(hex: 0xB83A2A)
+    static let verdigris = Color(hex: 0x1E6F56)
 
     // MARK: The sheet — cold neutrals
     //
@@ -67,9 +67,9 @@ enum Lumen {
     // MARK: Text
 
     static let chalk = graphite
-    static let meter = Color(hex: 0x586064)
-    static let muted = Color(hex: 0x737A7D)
-    static let faint = Color(hex: 0x92918B)
+    static let meter = Color(hex: 0x434A4E)
+    static let muted = Color(hex: 0x52595D)
+    static let faint = Color(hex: 0x636663)
 
     /// Illumination. A lit key face, a fader cap, a powered legend.
     static let lit = graphite

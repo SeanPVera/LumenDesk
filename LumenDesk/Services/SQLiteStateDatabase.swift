@@ -10,6 +10,7 @@ final class SQLiteStateDatabase {
 
     enum DatabaseError: Error {
         case open(String)
+        case busy(String)
         case sqlite(String)
         case missingState
         case unsupportedVersion(Int32)
@@ -91,8 +92,14 @@ final class SQLiteStateDatabase {
         }
         let database = try open(url, flags: SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX)
         defer { sqlite3_close(database) }
-        try configure(database)
-        try migrate(database)
+        let version = try integerQuery("PRAGMA user_version", in: database)
+        guard version <= Self.storeVersion else {
+            throw DatabaseError.unsupportedVersion(version)
+        }
+        if version == 0 {
+            try configure(database)
+            try migrate(database)
+        }
         guard let payload = try readMetadata(key: "application_state", in: database),
               var state = try? decoder.decode(PersistedApplicationState.self, from: payload) else {
             throw DatabaseError.malformedPayload
@@ -117,15 +124,19 @@ final class SQLiteStateDatabase {
             let message = database.map { String(cString: sqlite3_errmsg($0)) }
                 ?? "SQLite could not open the database."
             if let database { sqlite3_close(database) }
+            if result == SQLITE_BUSY || result == SQLITE_LOCKED {
+                throw DatabaseError.busy(message)
+            }
             throw DatabaseError.open(message)
         }
+        sqlite3_busy_timeout(database, 5_000)
         return database
     }
 
     private func configure(_ database: OpaquePointer) throws {
         try execute("PRAGMA foreign_keys = ON", in: database)
         try execute("PRAGMA journal_mode = DELETE", in: database)
-        try execute("PRAGMA synchronous = FULL", in: database)
+        try execute("PRAGMA synchronous = NORMAL", in: database)
     }
 
     private func migrate(_ database: OpaquePointer) throws {
@@ -248,6 +259,9 @@ final class SQLiteStateDatabase {
             let detail = message.map { String(cString: $0) }
                 ?? String(cString: sqlite3_errmsg(database))
             sqlite3_free(message)
+            if result == SQLITE_BUSY || result == SQLITE_LOCKED {
+                throw DatabaseError.busy(detail)
+            }
             throw DatabaseError.sqlite(detail)
         }
     }
@@ -293,7 +307,12 @@ final class SQLiteStateDatabase {
     }
 
     private func sqliteError(_ database: OpaquePointer) -> DatabaseError {
-        DatabaseError.sqlite(String(cString: sqlite3_errmsg(database)))
+        let code = sqlite3_errcode(database)
+        let message = String(cString: sqlite3_errmsg(database))
+        if code == SQLITE_BUSY || code == SQLITE_LOCKED {
+            return DatabaseError.busy(message)
+        }
+        return DatabaseError.sqlite(message)
     }
 
     private func refreshBackup() throws {

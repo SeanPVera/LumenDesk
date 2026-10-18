@@ -31,10 +31,23 @@ struct RoomPlanFrame: Codable, Equatable, Hashable {
     var height: Int
 
     init(column: Int, row: Int, width: Int = 1, height: Int = 1) {
-        self.column = column
-        self.row = row
+        self.column = max(0, column)
+        self.row = max(0, row)
         self.width = max(1, width)
         self.height = max(1, height)
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case column, row, width, height
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let column = try container.decode(Int.self, forKey: .column)
+        let row = try container.decode(Int.self, forKey: .row)
+        let width = try container.decode(Int.self, forKey: .width)
+        let height = try container.decode(Int.self, forKey: .height)
+        self.init(column: column, row: row, width: width, height: height)
     }
 
     var maxColumn: Int { column + width }
@@ -54,8 +67,21 @@ struct PlanAnchor: Codable, Equatable, Hashable {
     var y: Double
 
     init(x: Double, y: Double) {
-        self.x = min(0.94, max(0.06, x))
-        self.y = min(0.94, max(0.06, y))
+        let safeX = x.isFinite ? x : 0.5
+        let safeY = y.isFinite ? y : 0.5
+        self.x = min(0.94, max(0.06, safeX))
+        self.y = min(0.94, max(0.06, safeY))
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case x, y
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let x = try container.decode(Double.self, forKey: .x)
+        let y = try container.decode(Double.self, forKey: .y)
+        self.init(x: x, y: y)
     }
 }
 

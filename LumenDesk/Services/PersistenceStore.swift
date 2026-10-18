@@ -354,6 +354,13 @@ final class PersistenceStore: ApplicationPersistence {
                 return state
             } catch {
                 if isUnsupportedDatabaseVersion(error) { return PersistedApplicationState() }
+                if isTransientDatabaseBusy(error) {
+                    if let backupState = try? database.loadBackup(),
+                       backupState.schemaVersion <= PersistedApplicationState.currentSchemaVersion {
+                        return migratedAndNormalized(backupState)
+                    }
+                    return PersistedApplicationState()
+                }
             }
 
             do {
@@ -366,7 +373,9 @@ final class PersistenceStore: ApplicationPersistence {
                 if previousVersion != state.schemaVersion { try? save(state) }
                 return state
             } catch {
-                if isUnsupportedDatabaseVersion(error) { return PersistedApplicationState() }
+                if isUnsupportedDatabaseVersion(error) || isTransientDatabaseBusy(error) {
+                    return PersistedApplicationState()
+                }
             }
 
             // A valid SQLite signature does not guarantee a readable database.
@@ -392,7 +401,9 @@ final class PersistenceStore: ApplicationPersistence {
                 let recovered = try recoverDatabaseBackup()
                 return migratedAndNormalized(recovered)
             } catch {
-                if isUnsupportedDatabaseVersion(error) { return PersistedApplicationState() }
+                if isUnsupportedDatabaseVersion(error) || isTransientDatabaseBusy(error) {
+                    return PersistedApplicationState()
+                }
             }
         }
 
@@ -590,6 +601,12 @@ final class PersistenceStore: ApplicationPersistence {
         if fileManager.fileExists(atPath: fileURL.path) {
             try? fileManager.moveItem(at: fileURL, to: corruptURL)
         }
+        for suffix in ["-journal", "-wal", "-shm"] {
+            let sidecar = URL(fileURLWithPath: fileURL.path + suffix)
+            if fileManager.fileExists(atPath: sidecar.path) {
+                try? fileManager.removeItem(at: sidecar)
+            }
+        }
         try? fileManager.copyItem(at: database.backupURL, to: fileURL)
         return recovered
     }
@@ -600,6 +617,12 @@ final class PersistenceStore: ApplicationPersistence {
         return false
     }
 
+    private func isTransientDatabaseBusy(_ error: Error) -> Bool {
+        guard let databaseError = error as? SQLiteStateDatabase.DatabaseError else { return false }
+        if case .busy = databaseError { return true }
+        return false
+    }
+
     private func quarantineUnreadableDatabase() {
         guard fileManager.fileExists(atPath: fileURL.path) else { return }
         let quarantineURL = fileURL.appendingPathExtension("unreadable-\(UUID().uuidString)")
@@ -607,7 +630,7 @@ final class PersistenceStore: ApplicationPersistence {
 
         // SQLite can leave these beside a failed primary. Moving them prevents
         // stale journal pages from being attached to the newly migrated store.
-        for suffix in ["-wal", "-shm"] {
+        for suffix in ["-journal", "-wal", "-shm"] {
             let sidecar = URL(fileURLWithPath: fileURL.path + suffix)
             guard fileManager.fileExists(atPath: sidecar.path) else { continue }
             let quarantinedSidecar = URL(fileURLWithPath: quarantineURL.path + suffix)

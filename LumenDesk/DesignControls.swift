@@ -42,8 +42,8 @@ struct SpectrumValueRow: View {
             Rectangle().fill(Lumen.ruleSoft).frame(height: 1).allowsHitTesting(false)
         }
         .onAppear { hex = rgb.hexString }
-        .onChange(of: rgb) { value in hex = value.hexString; invalidHex = false }
-        .onChange(of: editingHex) { focused in if !focused { submitHex() } }
+        .onChange(of: rgb) { _, value in hex = value.hexString; invalidHex = false }
+        .onChange(of: editingHex) { _, focused in if !focused { submitHex() } }
     }
 
     private func fields(showsRGB: Bool) -> some View {

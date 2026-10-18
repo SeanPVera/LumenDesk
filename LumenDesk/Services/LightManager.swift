@@ -95,6 +95,7 @@ final class LightManager: ObservableObject {
     private var scheduleTimer: Timer?
     private var napTimer: Timer?
     private var brightnessTasks: [String: Task<Void, Never>] = [:]
+    private var deferredPersistenceTask: Task<Void, Never>?
     private var napSnapshotBrightness: [String: Double] = [:]
     private var scanGeneration: Int = 0     // incremented each scan; clears isScanning safely
     private var hasStarted = false
@@ -970,7 +971,11 @@ final class LightManager: ObservableObject {
         }
     }
 
-    func applyTheme(_ theme: LightingTheme, scope: LightScope = .all) {
+    func applyTheme(
+        _ theme: LightingTheme,
+        scope: LightScope = .all,
+        spatialField: SpatialFieldVector = .themeDefault
+    ) {
         let targets = devices(in: scope)
         guard !targets.isEmpty else {
             publishError(scope == .all
@@ -978,24 +983,42 @@ final class LightManager: ObservableObject {
                          : "No lights in “\(scopeDisplayName(scope))” to theme.")
             return
         }
-        applyTheme(theme, to: targets, suffix: scope == .all ? "" : " in “\(scopeDisplayName(scope))”")
+        applyTheme(
+            theme,
+            to: targets,
+            in: scope,
+            spatialField: spatialField,
+            suffix: scope == .all ? "" : " in “\(scopeDisplayName(scope))”"
+        )
     }
 
     /// Palette distribution follows room order and respects an explicit selection.
-    func applyTheme(_ theme: LightingTheme, deviceIDs: Set<String>, in scope: LightScope) {
+    func applyTheme(
+        _ theme: LightingTheme,
+        deviceIDs: Set<String>,
+        in scope: LightScope,
+        spatialField: SpatialFieldVector = .themeDefault
+    ) {
         let targets = devices(in: scope).filter { deviceIDs.contains($0.id) }
         guard !targets.isEmpty else { return }
-        applyTheme(theme, to: targets, suffix: "")
+        applyTheme(theme, to: targets, in: scope, spatialField: spatialField, suffix: "")
     }
 
-    private func applyTheme(_ theme: LightingTheme, to targets: [LightDevice], suffix: String) {
+    private func applyTheme(
+        _ theme: LightingTheme,
+        to targets: [LightDevice],
+        in scope: LightScope = .all,
+        spatialField: SpatialFieldVector = .themeDefault,
+        suffix: String
+    ) {
         stopEffects(touching: Set(targets.map(\.id)))
         // The plan sets each light's brightness; a slider send still in flight
         // would land after it and override the theme.
         cancelPendingBrightness(deviceIDs: Set(targets.map(\.id)))
         recordChange(targets)
 
-        let plan = ThemePlanner.plan(theme, fixtures: targets.map(themeFixture))
+        let fixtures = targets.map { themeFixture($0, in: scope) }
+        let plan = ThemePlanner.plan(theme, fixtures: fixtures, spatialField: spatialField)
         let plansByID = Dictionary(plan.fixtures.map { ($0.fixtureID, $0) },
                                    uniquingKeysWith: { first, _ in first })
         for device in targets {
@@ -1013,11 +1036,20 @@ final class LightManager: ObservableObject {
     /// What the planner needs to know about a light: what it can address, the
     /// white point to fall back on, and — for a fixture that can only run some
     /// of its zones — which zones the user already has lit.
-    private func themeFixture(_ device: LightDevice) -> ThemeFixture {
-        ThemeFixture(id: device.id,
-                     capability: themeCapability(for: device),
-                     kelvin: device.kelvin,
-                     preferredZones: activeSegmentState(for: device.id)?.poweredSegments ?? [])
+    private func themeFixture(_ device: LightDevice, in scope: LightScope = .all) -> ThemeFixture {
+        let resolvedRoom: Room? = {
+            if case .room(let roomID) = scope {
+                return rooms.first(where: { $0.id == roomID }) ?? room(forLightID: device.id)
+            }
+            return room(forLightID: device.id)
+        }()
+        return ThemeFixture(
+            id: device.id,
+            capability: themeCapability(for: device),
+            kelvin: device.kelvin,
+            preferredZones: activeSegmentState(for: device.id)?.poweredSegments ?? [],
+            anchor: resolvedRoom.map { planAnchor(for: device.id, in: $0) }
+        )
     }
 
     /// Capability comes from what discovery reported, never from a guess. A
@@ -1637,6 +1669,10 @@ final class LightManager: ObservableObject {
                     nanoleafDesign: device.brand == .nanoleaf ? shapes.showingDesign(for: device.id) : nil)
     }
 
+    private func recomputeCanUndo() {
+        canUndo = !undoStack.isEmpty || lastDeletedScene != nil || lastDeletedRoom != nil
+    }
+
     private func recordChange(_ devices: [LightDevice]) {
         guard !devices.isEmpty else { return }
         cancelIdentifications(deviceIDs: Set(devices.map(\.id)), restore: true)
@@ -1652,21 +1688,41 @@ final class LightManager: ObservableObject {
         }
         undoStack.append(devices.map { snapshot($0) })
         if undoStack.count > undoLimit { undoStack.removeFirst() }
-        canUndo = true
+        recomputeCanUndo()
         for d in devices { lastChangeTime[d.id] = now }
     }
 
     func undo() {
-        guard let entry = undoStack.popLast() else { return }
-        let current = entry.compactMap { snap -> LightRuntimeSnapshot? in
-            guard let d = device(withID: snap.deviceID) else { return nil }
-            return snapshot(d)
+        if commandErrorUndo != nil {
+            if lastDeletedScene != nil {
+                undoDeleteScene()
+                return
+            }
+            if lastDeletedRoom != nil {
+                undoDeleteRoom()
+                return
+            }
         }
-        redoStack.append(current)
-        apply(entry)
-        lastChangeTime = [:]
-        canUndo = !undoStack.isEmpty
-        canRedo = !redoStack.isEmpty
+        if let entry = undoStack.popLast() {
+            let current = entry.compactMap { snap -> LightRuntimeSnapshot? in
+                guard let d = device(withID: snap.deviceID) else { return nil }
+                return snapshot(d)
+            }
+            redoStack.append(current)
+            apply(entry)
+            lastChangeTime = [:]
+            recomputeCanUndo()
+            canRedo = !redoStack.isEmpty
+            return
+        }
+        if lastDeletedScene != nil {
+            undoDeleteScene()
+            return
+        }
+        if lastDeletedRoom != nil {
+            undoDeleteRoom()
+            return
+        }
     }
 
     func redo() {
@@ -1678,7 +1734,7 @@ final class LightManager: ObservableObject {
         undoStack.append(current)
         apply(entry)
         lastChangeTime = [:]
-        canUndo = !undoStack.isEmpty
+        recomputeCanUndo()
         canRedo = !redoStack.isEmpty
     }
 
@@ -2717,6 +2773,7 @@ extension LightManager {
         lastDeletedRoom = (room: deleted, index: idx)
         rooms.remove(at: idx)
         reconcileFavoriteOrder()
+        recomputeCanUndo()
         publishError("\u{201C}\(deleted.name)\u{201D} deleted.") {
             self.undoDeleteRoom()
         }
@@ -2728,6 +2785,8 @@ extension LightManager {
         rooms.insert(room, at: insertAt)
         lastDeletedRoom = nil
         reconcileFavoriteOrder()
+        recomputeCanUndo()
+        persistApplicationState()
         commandError = nil
         commandErrorUndo = nil
     }
@@ -2836,10 +2895,19 @@ extension LightManager {
         return defaults.indices.contains(index) ? defaults[index] : PlanAnchor(x: 0.5, y: 0.5)
     }
 
-    func setPlanAnchor(_ anchor: PlanAnchor, for lightID: String, in roomID: UUID) {
+    func setPlanAnchor(
+        _ anchor: PlanAnchor,
+        for lightID: String,
+        in roomID: UUID,
+        persistImmediately: Bool = true
+    ) {
         guard let index = rooms.firstIndex(where: { $0.id == roomID }) else { return }
         rooms[index].fixtureAnchors[lightID] = anchor
-        persistApplicationState()
+        if persistImmediately {
+            persistApplicationState()
+        } else {
+            scheduleDeferredPersistence()
+        }
     }
 
     /// Create a room and hand back its identifier, so a setup flow can assign
@@ -3082,6 +3150,7 @@ extension LightManager {
         deviceIDs: Set<String>,
         in scope: LightScope = .all,
         paletteAssignments: [String: Int]? = nil,
+        spatialField: SpatialFieldVector = .themeDefault,
         transitionDuration: TimeInterval = 1.8
     ) {
         stopSceneRehearsal(restore: true)
@@ -3099,7 +3168,13 @@ extension LightManager {
         rehearsalSnapshot = targets.map(snapshot)
         rehearsalSceneID = UUID()
 
-        let plan = plannedLook(theme, targets: targets, paletteAssignments: paletteAssignments)
+        let plan = plannedLook(
+            theme,
+            targets: targets,
+            in: scope,
+            paletteAssignments: paletteAssignments,
+            spatialField: spatialField
+        )
         let plans = Dictionary(plan.fixtures.map { ($0.fixtureID, $0) },
                                uniquingKeysWith: { first, _ in first })
         for device in targets {
@@ -3111,11 +3186,94 @@ extension LightManager {
             theme,
             deviceIDs: deviceIDs,
             in: scope,
-            paletteAssignments: paletteAssignments
+            paletteAssignments: paletteAssignments,
+            spatialField: spatialField
         ) {
             summary += " — \(adaptation)"
         }
         lastActionSummary = summary
+    }
+
+    /// Saves a composed Look directly from its planned fixture states without
+    /// mutating live fixtures or broadcasting hardware packets when the user
+    /// has not started a live room preview.
+    @discardableResult
+    func saveLookFromPlan(
+        name: String,
+        theme: LightingTheme,
+        deviceIDs: Set<String>,
+        in scope: LightScope = .all,
+        paletteAssignments: [String: Int]? = nil,
+        spatialField: SpatialFieldVector = .themeDefault
+    ) -> LightingScene? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let targets = devices(in: scope).filter { deviceIDs.contains($0.id) }
+        guard !targets.isEmpty else {
+            publishError("Select at least one fixture to save this Look.")
+            return nil
+        }
+
+        let plan = plannedLook(
+            theme,
+            targets: targets,
+            in: scope,
+            paletteAssignments: paletteAssignments,
+            spatialField: spatialField
+        )
+        let plans = Dictionary(plan.fixtures.map { ($0.fixtureID, $0) },
+                               uniquingKeysWith: { first, _ in first })
+
+        var snapshots: [String: DeviceSnapshot] = [:]
+        for device in targets {
+            guard let fixturePlan = plans[device.id] else { continue }
+            let hsb = fixturePlan.tone.displayColor.hsbComponents
+            let segmentSnap: GoveeSegmentState?
+            if let segments = fixturePlan.segments, device.brand == .govee {
+                var constrained = zoneConstrained(segments, for: device)
+                constrained.isActive = true
+                segmentSnap = constrained
+            } else {
+                segmentSnap = nil
+            }
+            let matrixSnap: LIFXMatrixState?
+            if var matrix = fixturePlan.matrix, device.isLIFXLuna {
+                matrix.productID = device.productID ?? matrix.productID
+                matrix.isActive = true
+                matrixSnap = matrix
+            } else {
+                matrixSnap = nil
+            }
+            let nanoleafDesignSnap: NanoleafPanelDesign?
+            if let tones = fixturePlan.panels, device.brand == .nanoleaf, let layout = shapes.layout(device.id) {
+                nanoleafDesignSnap = NanoleafDesignBuilder.design(
+                    tones: tones.map { (hue: $0.hue, saturation: $0.saturation, level: $0.level) },
+                    layout: layout,
+                    rotationDegrees: Double(shapes.displayOrientation(device.id))
+                )
+            } else {
+                nanoleafDesignSnap = nil
+            }
+
+            snapshots[device.id] = DeviceSnapshot(
+                isOn: true,
+                brightness: fixturePlan.brightness,
+                hue: hsb.h,
+                saturation: hsb.s,
+                kelvin: fixturePlan.kelvin,
+                segments: segmentSnap,
+                matrix: matrixSnap,
+                nanoleafAppearance: device.nanoleafAppearance,
+                nanoleafDesign: nanoleafDesignSnap
+            )
+        }
+
+        let look = LightingScene(name: trimmed, snapshots: snapshots)
+        scenes.append(look)
+        persistApplicationState()
+        lastActionSummary = "Saved Look “\(trimmed)”"
+        logActivity(.scene, title: "Look saved", detail: "\(trimmed): \(snapshots.count) fixtures")
+        return look
     }
 
     /// Plain-language, capability-aware disclosure for the composer.
@@ -3123,11 +3281,18 @@ extension LightManager {
         _ theme: LightingTheme,
         deviceIDs: Set<String>,
         in scope: LightScope = .all,
-        paletteAssignments: [String: Int]? = nil
+        paletteAssignments: [String: Int]? = nil,
+        spatialField: SpatialFieldVector = .themeDefault
     ) -> String? {
         let targets = devices(in: scope).filter { deviceIDs.contains($0.id) }
         guard !targets.isEmpty else { return nil }
-        let plan = plannedLook(theme, targets: targets, paletteAssignments: paletteAssignments)
+        let plan = plannedLook(
+            theme,
+            targets: targets,
+            in: scope,
+            paletteAssignments: paletteAssignments,
+            spatialField: spatialField
+        )
         var parts: [String] = []
         if plan.solidCount > 0, theme.colors.count > 1 {
             parts.append("\(plan.solidCount) single-colour fixture\(plan.solidCount == 1 ? "" : "s") hold one palette colour each")
@@ -3144,9 +3309,11 @@ extension LightManager {
     private func plannedLook(
         _ theme: LightingTheme,
         targets: [LightDevice],
-        paletteAssignments: [String: Int]?
+        in scope: LightScope = .all,
+        paletteAssignments: [String: Int]?,
+        spatialField: SpatialFieldVector = .themeDefault
     ) -> ThemePlan {
-        let fixtures = targets.map(themeFixture)
+        let fixtures = targets.map { themeFixture($0, in: scope) }
         if let paletteAssignments {
             return ThemePlanner.planExact(
                 theme,
@@ -3154,7 +3321,7 @@ extension LightManager {
                 paletteIndices: paletteAssignments
             )
         }
-        return ThemePlanner.plan(theme, fixtures: fixtures)
+        return ThemePlanner.plan(theme, fixtures: fixtures, spatialField: spatialField)
     }
 
     func applyScene(_ scene: LightingScene) {
@@ -3183,6 +3350,7 @@ extension LightManager {
         scenes.remove(at: idx)
         favoriteSceneIDs.remove(sceneID)
         reconcileFavoriteOrder()
+        recomputeCanUndo()
         publishError("Look “\(deleted.name)” deleted.") { self.undoDeleteScene() }
     }
 
@@ -3190,6 +3358,7 @@ extension LightManager {
         guard let (scene, index) = lastDeletedScene else { return }
         scenes.insert(scene, at: min(index, scenes.count))
         lastDeletedScene = nil
+        recomputeCanUndo()
         persistApplicationState()
         commandError = nil
         commandErrorUndo = nil
@@ -3847,8 +4016,21 @@ extension LightManager {
 
 extension LightManager {
     private func persistApplicationState() {
+        deferredPersistenceTask?.cancel()
+        deferredPersistenceTask = nil
         guard demoWorkspaceController.allowsLivePersistence else { return }
         try? persistenceStore.save(persistedApplicationState())
+    }
+
+    private func scheduleDeferredPersistence(delayNanoseconds: UInt64 = 250_000_000) {
+        guard demoWorkspaceController.allowsLivePersistence else { return }
+        deferredPersistenceTask?.cancel()
+        deferredPersistenceTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: delayNanoseconds)
+            guard !Task.isCancelled, let self else { return }
+            self.deferredPersistenceTask = nil
+            self.persistApplicationState()
+        }
     }
 
     private func persistedApplicationState() -> PersistedApplicationState {
@@ -3922,12 +4104,10 @@ extension LightManager {
     func logActivity(_ kind: ActivityEvent.Kind, title: String, detail: String = "", isFailure: Bool = false) {
         activityEvents.insert(ActivityEvent(kind: kind, title: title, detail: detail, isFailure: isFailure), at: 0)
         if activityEvents.count > 250 { activityEvents.removeLast(activityEvents.count - 250) }
-        persistApplicationState()
     }
 
     func clearActivity() {
         activityEvents.removeAll()
-        persistApplicationState()
     }
 
     func activityExportText() -> String {

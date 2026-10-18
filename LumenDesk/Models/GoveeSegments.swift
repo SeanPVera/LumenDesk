@@ -274,10 +274,10 @@ struct GoveeSegmentColor: Equatable {
     var isOn: Bool
 
     init(red: Double, green: Double, blue: Double, brightness: Double = 1.0, isOn: Bool = true) {
-        self.red = max(0, min(1, red))
-        self.green = max(0, min(1, green))
-        self.blue = max(0, min(1, blue))
-        self.brightness = max(0, min(1, brightness))
+        self.red = red.isFinite ? max(0, min(1, red)) : 0
+        self.green = green.isFinite ? max(0, min(1, green)) : 0
+        self.blue = blue.isFinite ? max(0, min(1, blue)) : 0
+        self.brightness = brightness.isFinite ? max(0, min(1, brightness)) : 1.0
         self.isOn = isOn
     }
 

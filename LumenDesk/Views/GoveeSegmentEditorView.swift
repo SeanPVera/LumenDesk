@@ -224,8 +224,20 @@ struct GoveeSegmentEditorView: View {
                     segmentCell(index: index, width: 44)
                 }
             }
+            .overlay {
+                GeometryReader { proxy in
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .simultaneousGesture(
+                            dragSelectGesture(
+                                width: max(1, proxy.size.width),
+                                count: max(1, draft.segmentCount)
+                            )
+                        )
+                        .allowsHitTesting(false)
+                }
+            }
             .accessibilityLabel("Segment order from controller, \(draft.segmentCount) segments")
-
         }
     }
 

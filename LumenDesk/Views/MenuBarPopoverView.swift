@@ -116,6 +116,36 @@ struct MenuBarPopoverView: View {
                 .disabled(lights.isEmpty)
             }
 
+            if let activeEffectID = manager.activeEffects[.room(room.id)] ?? manager.activeEffects[.all] {
+                let effectName = activeEffectID == "music-pulse"
+                    ? "Live Show (\(manager.musicModeConfiguration.preset.displayName))"
+                    : (LightingCatalog.effects.first(where: { $0.id == activeEffectID })?.name ?? "Ambient effect")
+                HStack(spacing: 8) {
+                    Image(systemName: activeEffectID == "music-pulse" ? "waveform" : "sparkles")
+                        .foregroundStyle(Lumen.verdigris)
+                    Text(effectName)
+                        .font(LumenType.body(size: 11, weight: .semibold))
+                        .lineLimit(1)
+                    Spacer()
+                    Button("Stop") {
+                        if manager.activeEffects[.room(room.id)] != nil {
+                            manager.stopEffect(scope: .room(room.id))
+                        } else {
+                            manager.stopEffect(scope: .all)
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(Lumen.floor, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .stroke(Lumen.ruleSoft, lineWidth: 1)
+                )
+            }
+
             if !roomLooks.isEmpty {
                 VStack(alignment: .leading, spacing: 7) {
                     Text("Looks")

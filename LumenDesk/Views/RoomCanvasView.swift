@@ -162,7 +162,7 @@ struct RoomCanvasShellView: View {
             NavigationSplitView {
                 RoomCanvasSidebar(session: session)
                     #if os(macOS)
-                    .navigationSplitViewColumnWidth(min: 190, ideal: 228, max: 280)
+                    .navigationSplitViewColumnWidth(min: 184, ideal: 218, max: 280)
                     #endif
             } detail: {
                 NavigationStack {
@@ -271,7 +271,8 @@ struct RoomCanvasShellView: View {
     @ViewBuilder
     private var statusOverlays: some View {
         VStack(spacing: 8) {
-            if let summary = manager.lastActionSummary {
+            if let summary = manager.lastActionSummary,
+               !(manager.isDemoMode && summary.localizedCaseInsensitiveContains("Sample Room")) {
                 HStack(spacing: 10) {
                     Label(summary, systemImage: "arrow.uturn.backward.circle")
                     if manager.canUndo {
@@ -299,7 +300,8 @@ struct RoomCanvasShellView: View {
                 )
             }
         }
-        .padding(16)
+        .padding(.horizontal, 16)
+        .padding(.bottom, 76)
     }
 }
 
@@ -410,7 +412,8 @@ private struct RoomCanvasSidebar: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(room.name)
                             .font(LumenType.display(size: 16, weight: .semibold))
-                            .lineLimit(1)
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.88)
                         HStack(spacing: 5) {
                             Text("\(lights.count) fixture\(lights.count == 1 ? "" : "s")")
                             Image(systemName: status.symbol)
@@ -518,18 +521,22 @@ private struct RoomCanvasWorkspace: View {
                         selectionInspector
                             .frame(width: min(330, max(280, geometry.size.width * 0.27)))
                     }
+                    .frame(maxHeight: .infinity)
                 } else {
                     ScrollView {
                         VStack(spacing: 16) {
                             canvasColumn
+                                .frame(minHeight: 240, idealHeight: 280)
                             selectionInspector
                         }
                     }
+                    .frame(maxHeight: .infinity)
                 }
                 LookShelf(
                     room: currentRoom,
                     compose: { session.showingComposer = true }
                 )
+                .layoutPriority(1)
             }
         }
         .background(Lumen.canvas)
@@ -726,7 +733,7 @@ private struct DirectionARoomField: View {
                 }
             }
         }
-        .frame(minHeight: 360)
+        .frame(minHeight: 220)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(room.name) fixture canvas")
     }
@@ -841,6 +848,7 @@ private struct FixtureCanvasNode: View {
                         .background(Lumen.floor, in: Circle())
                         .offset(x: compact ? 17 : 20, y: condensed ? -14 : -17)
                 }
+                .frame(width: compact ? 54 : 74, height: condensed ? 44 : 64)
                 Text(light.label)
                     .font(LumenType.body(size: compact ? 9 : 11, weight: .semibold))
                     .foregroundStyle(Lumen.graphite)
@@ -848,6 +856,7 @@ private struct FixtureCanvasNode: View {
                     .multilineTextAlignment(.center)
                     .minimumScaleFactor(0.82)
             }
+            .frame(maxWidth: .infinity)
             .padding(.horizontal, compact ? 4 : 7)
             .padding(.vertical, condensed ? 2 : 5)
             .background(Lumen.floor.opacity(selected ? 0.98 : 0.78), in: RoundedRectangle(cornerRadius: 10))
@@ -1317,10 +1326,10 @@ private struct ComposerPalette: Identifiable {
                 distribution: .gradient
             )
         ))
-        for id in ["reading-nook", "aurora", "linen-dusk", "tokyo-rain", "kitchen-noon"] {
-            if let theme = LightingCatalog.theme(withID: id) {
-                values.append(ComposerPalette(id: id, name: theme.name, theme: theme))
-            }
+        var seenIDs: Set<String> = ["ember-moss", "direction-a-ember-moss"]
+        for theme in LightingCatalog.themes where !seenIDs.contains(theme.id) {
+            seenIDs.insert(theme.id)
+            values.append(ComposerPalette(id: theme.id, name: theme.name, theme: theme))
         }
         return values
     }()
@@ -1332,7 +1341,10 @@ private struct LookComposerView: View {
     let room: Room
     let initialSelection: Set<String>
     @State private var paletteID = ComposerPalette.choices.first?.id ?? "ember-moss"
+    @State private var selectedCategory: LightingTheme.Category? = nil
     @State private var brush: LookBrush = .gradient
+    @State private var spatialField: SpatialFieldVector = .themeDefault
+    @State private var customBrightness: Double = 0.62
     @State private var scope: LookComposerScope
     @State private var lookName = "Ember & Moss"
     @State private var transitionSeconds = 1.8
@@ -1358,6 +1370,10 @@ private struct LookComposerView: View {
     private var selectedPalette: ComposerPalette {
         ComposerPalette.choices.first(where: { $0.id == paletteID }) ?? ComposerPalette.choices[0]
     }
+    private var filteredPalettes: [ComposerPalette] {
+        guard let selectedCategory else { return ComposerPalette.choices }
+        return ComposerPalette.choices.filter { $0.theme.category == selectedCategory }
+    }
     private var orderedTargetLights: [LightDevice] {
         manager.devices(in: currentRoom).filter { targetIDs.contains($0.id) }
     }
@@ -1376,7 +1392,7 @@ private struct LookComposerView: View {
             category: source.category,
             icon: source.icon,
             colors: source.colors,
-            brightness: source.brightness,
+            brightness: customBrightness,
             distribution: brush.distribution
         )
     }
@@ -1414,9 +1430,13 @@ private struct LookComposerView: View {
         .font(LumenType.body())
         .foregroundStyle(Lumen.graphite)
         .sheetFrame(minWidth: 680, idealWidth: 1040, minHeight: 620, idealHeight: 780)
-        .onAppear { synchronizeExactAssignments() }
+        .onAppear {
+            customBrightness = selectedPalette.theme.brightness
+            synchronizeExactAssignments()
+        }
         .onChange(of: paletteID) { _ in
             lookName = selectedPalette.name
+            customBrightness = selectedPalette.theme.brightness
             synchronizeExactAssignments()
         }
         .onChange(of: scope) { _ in synchronizeExactAssignments() }
@@ -1426,10 +1446,16 @@ private struct LookComposerView: View {
     private var previewColumn: some View {
         VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 5) {
-                Text("PALETTE")
-                    .font(LumenType.instrumentLabel(size: 10))
-                    .tracking(1.2)
-                    .foregroundStyle(Lumen.meter)
+                HStack {
+                    Text("PALETTE · \(ComposerPalette.choices.count) CURATED")
+                        .font(LumenType.instrumentLabel(size: 10))
+                        .tracking(1.2)
+                        .foregroundStyle(Lumen.meter)
+                    Spacer()
+                    Text(selectedPalette.theme.category.rawValue)
+                        .font(LumenType.instrumentLabel(size: 10))
+                        .foregroundStyle(Lumen.verdigris)
+                }
                 Text(selectedPalette.name)
                     .font(LumenType.display(size: 30, weight: .bold))
                 Text(selectedPalette.theme.summary)
@@ -1438,8 +1464,52 @@ private struct LookComposerView: View {
             }
 
             ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    Button {
+                        selectedCategory = nil
+                    } label: {
+                        Text("All (\(ComposerPalette.choices.count))")
+                            .font(LumenType.body(size: 11, weight: .semibold))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(
+                                selectedCategory == nil ? Lumen.graphite : Lumen.floor,
+                                in: Capsule(style: .continuous)
+                            )
+                            .foregroundStyle(selectedCategory == nil ? Lumen.canvas : Lumen.graphite)
+                            .overlay(
+                                Capsule(style: .continuous)
+                                    .stroke(selectedCategory == nil ? Color.clear : Lumen.rule, lineWidth: 1)
+                            )
+                    }
+                    .buttonStyle(.plain)
+
+                    ForEach(LightingTheme.Category.allCases, id: \.self) { category in
+                        Button {
+                            selectedCategory = category
+                        } label: {
+                            Text(category.rawValue)
+                                .font(LumenType.body(size: 11, weight: .semibold))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .background(
+                                    selectedCategory == category ? Lumen.graphite : Lumen.floor,
+                                    in: Capsule(style: .continuous)
+                                )
+                                .foregroundStyle(selectedCategory == category ? Lumen.canvas : Lumen.graphite)
+                                .overlay(
+                                    Capsule(style: .continuous)
+                                        .stroke(selectedCategory == category ? Color.clear : Lumen.rule, lineWidth: 1)
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 10) {
-                    ForEach(ComposerPalette.choices) { palette in
+                    ForEach(filteredPalettes) { palette in
                         Button {
                             paletteID = palette.id
                         } label: {
@@ -1480,6 +1550,28 @@ private struct LookComposerView: View {
                     .foregroundStyle(Lumen.meter)
             }
 
+            if brush != .exactFixture {
+                VStack(alignment: .leading, spacing: 9) {
+                    HStack {
+                        Text("2D Spatial Field")
+                            .font(LumenType.body(size: 13, weight: .semibold))
+                        Spacer()
+                        Label(spatialField.displayName, systemImage: spatialField.icon)
+                            .font(LumenType.instrumentLabel(size: 10))
+                            .foregroundStyle(Lumen.verdigris)
+                    }
+                    Picker("2D Spatial Field", selection: $spatialField) {
+                        ForEach(SpatialFieldVector.allCases) { vector in
+                            Text(vector.shortLabel).tag(vector)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    Text(spatialField.summary)
+                        .font(LumenType.body(size: 12))
+                        .foregroundStyle(Lumen.meter)
+                }
+            }
+
             exactAssignmentEditor
 
             ComposerRoomPreview(
@@ -1487,10 +1579,86 @@ private struct LookComposerView: View {
                 lights: manager.devices(in: currentRoom),
                 targetIDs: targetIDs,
                 theme: authoredTheme,
-                paletteAssignments: paletteAssignments
+                paletteAssignments: paletteAssignments,
+                spatialField: spatialField
             )
             .frame(minHeight: 300)
+
+            ambientEffectsSection
         }
+    }
+
+    private var ambientEffectsSection: some View {
+        let roomScope: LightScope = .room(currentRoom.id)
+        let activeEffectID = manager.activeEffects[roomScope]
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("AMBIENT MOTION EFFECTS")
+                        .font(LumenType.instrumentLabel(size: 10))
+                        .tracking(1.2)
+                        .foregroundStyle(Lumen.meter)
+                    Text("Continuous generative motion across \(currentRoom.name)")
+                        .font(LumenType.body(size: 12))
+                        .foregroundStyle(Lumen.meter)
+                }
+                Spacer()
+                if let activeEffectID, activeEffectID != "music-pulse" {
+                    Button("Stop Motion") {
+                        manager.stopEffect(scope: roomScope, restore: true)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(LightingCatalog.effects) { effect in
+                        let isActive = activeEffectID == effect.id
+                        Button {
+                            if isActive {
+                                manager.stopEffect(scope: roomScope, restore: true)
+                            } else {
+                                manager.startEffect(effect, scope: roomScope)
+                            }
+                        } label: {
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: effect.icon)
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundStyle(isActive ? Lumen.ember : Lumen.graphite)
+                                    Text(effect.name)
+                                        .font(LumenType.body(size: 12, weight: .semibold))
+                                        .lineLimit(1)
+                                }
+                                HStack(spacing: 0) {
+                                    ForEach(effect.colors.indices, id: \.self) { index in
+                                        Rectangle().fill(effect.colors[index].color)
+                                    }
+                                }
+                                .frame(width: 132, height: 14)
+                                .clipShape(RoundedRectangle(cornerRadius: 4))
+                                Text(effect.summary)
+                                    .font(LumenType.body(size: 10))
+                                    .foregroundStyle(Lumen.meter)
+                                    .lineLimit(2)
+                                    .frame(width: 132, alignment: .leading)
+                            }
+                            .padding(10)
+                            .background(Lumen.floor, in: RoundedRectangle(cornerRadius: 10))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .stroke(isActive ? Lumen.ember : Lumen.rule, lineWidth: isActive ? 2 : 1)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .background(Lumen.deck.opacity(0.65), in: RoundedRectangle(cornerRadius: 12))
     }
 
     @ViewBuilder
@@ -1573,11 +1741,13 @@ private struct LookComposerView: View {
                 HStack {
                     Text("Room level").font(LumenType.body(size: 13, weight: .semibold))
                     Spacer()
-                    Text("\(Int(authoredTheme.brightness * 100))%")
+                    Text("\(Int((customBrightness * 100).rounded()))%")
                         .font(LumenType.readout(size: 12))
                 }
-                ProgressView(value: authoredTheme.brightness)
+                Slider(value: $customBrightness, in: 0.05...1.0)
                     .tint(Lumen.ember)
+                    .accessibilityLabel("Room level")
+                    .accessibilityValue("\(Int((customBrightness * 100).rounded())) percent")
             }
 
             VStack(alignment: .leading, spacing: 7) {
@@ -1588,7 +1758,8 @@ private struct LookComposerView: View {
                     authoredTheme,
                     deviceIDs: targetIDs,
                     in: .room(currentRoom.id),
-                    paletteAssignments: paletteAssignments
+                    paletteAssignments: paletteAssignments,
+                    spatialField: spatialField
                 )
                      ?? "Every selected fixture can carry this composition directly.")
                     .font(LumenType.body(size: 12))
@@ -1622,6 +1793,7 @@ private struct LookComposerView: View {
                         deviceIDs: targetIDs,
                         in: .room(currentRoom.id),
                         paletteAssignments: paletteAssignments,
+                        spatialField: spatialField,
                         transitionDuration: transitionSeconds
                     )
                 }
@@ -1644,17 +1816,27 @@ private struct LookComposerView: View {
     }
 
     private func save() {
-        // Re-plan even when a preview is already active: the palette, brush,
-        // scope, or an Exact assignment may have changed since that preview.
-        manager.startLookPreview(
-            authoredTheme,
-            deviceIDs: targetIDs,
-            in: .room(currentRoom.id),
-            paletteAssignments: paletteAssignments,
-            transitionDuration: transitionSeconds
-        )
-        manager.stopSceneRehearsal(restore: false)
-        _ = manager.captureLook(name: lookName, deviceIDs: targetIDs)
+        if manager.rehearsalSceneID != nil {
+            manager.startLookPreview(
+                authoredTheme,
+                deviceIDs: targetIDs,
+                in: .room(currentRoom.id),
+                paletteAssignments: paletteAssignments,
+                spatialField: spatialField,
+                transitionDuration: transitionSeconds
+            )
+            manager.stopSceneRehearsal(restore: false)
+            _ = manager.captureLook(name: lookName, deviceIDs: targetIDs)
+        } else {
+            _ = manager.saveLookFromPlan(
+                name: lookName,
+                theme: authoredTheme,
+                deviceIDs: targetIDs,
+                in: .room(currentRoom.id),
+                paletteAssignments: paletteAssignments,
+                spatialField: spatialField
+            )
+        }
         dismiss()
     }
 
@@ -1687,10 +1869,16 @@ private struct ComposerRoomPreview: View {
     let targetIDs: Set<String>
     let theme: LightingTheme
     let paletteAssignments: [String: Int]?
+    let spatialField: SpatialFieldVector
 
     private var plans: [String: ThemeFixturePlan] {
         let fixtures = lights.filter { targetIDs.contains($0.id) }.map {
-            ThemeFixture(id: $0.id, capability: manager.themeCapability(for: $0), kelvin: $0.kelvin)
+            ThemeFixture(
+                id: $0.id,
+                capability: manager.themeCapability(for: $0),
+                kelvin: $0.kelvin,
+                anchor: manager.planAnchor(for: $0.id, in: room)
+            )
         }
         let plan: ThemePlan
         if let paletteAssignments {
@@ -1700,7 +1888,7 @@ private struct ComposerRoomPreview: View {
                 paletteIndices: paletteAssignments
             )
         } else {
-            plan = ThemePlanner.plan(theme, fixtures: fixtures)
+            plan = ThemePlanner.plan(theme, fixtures: fixtures, spatialField: spatialField)
         }
         return Dictionary(uniqueKeysWithValues: plan.fixtures.map { ($0.fixtureID, $0) })
     }
@@ -2237,6 +2425,7 @@ private enum RoomLiveResponse: String, CaseIterable, Identifiable {
 private enum RoomLiveInput: String, CaseIterable, Identifiable {
     case platform = "Playing audio"
     case file = "Audio file"
+    case midiClock = "MIDI clock"
     var id: String { rawValue }
 }
 
@@ -2246,14 +2435,18 @@ private struct RoomLiveView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let room: Room
     @State private var response: RoomLiveResponse = .calm
+    @State private var studioPreset: MusicModePreset = .ambient
     @State private var input: RoomLiveInput = .platform
     @State private var audioFile: URL?
     @State private var choosingFile = false
     @State private var confirmingLocalAudio = false
+    @State private var showingStudioControls = false
     @AppStorage(AppPreferenceKey.audioPrivacyAcknowledged) private var audioAcknowledged = false
 
     private var scope: LightScope { .room(room.id) }
     private var isRunning: Bool { manager.activeEffects[scope] == "music-pulse" }
+    private var roomLights: [LightDevice] { manager.devices(in: room) }
+    private var topology: FixtureTopology { manager.fixtureTopology(for: scope) }
 
     var body: some View {
         NavigationStack {
@@ -2266,7 +2459,7 @@ private struct RoomLiveView: View {
                             .foregroundStyle(Lumen.ember)
                         Text(room.name)
                             .font(LumenType.display(size: 31, weight: .bold))
-                        Text("Choose one input and one room response. Stop always restores the room to its opening state.")
+                        Text("Choose an audio or clock input and a room response. Stop always restores the room to its opening state.")
                             .font(LumenType.body(size: 13))
                             .foregroundStyle(Lumen.meter)
                     }
@@ -2291,6 +2484,10 @@ private struct RoomLiveView: View {
                                     .buttonStyle(.bordered)
                                     .disabled(isRunning)
                             }
+                        } else if input == .midiClock {
+                            Text("Locks room choreography to incoming CoreMIDI beat clock (24 PPQN) from DAWs or hardware sequencers.")
+                                .font(LumenType.body(size: 12))
+                                .foregroundStyle(Lumen.meter)
                         } else {
                             Text(platformInputDetail)
                                 .font(LumenType.body(size: 12))
@@ -2306,6 +2503,10 @@ private struct RoomLiveView: View {
                             ForEach(RoomLiveResponse.allCases) { item in
                                 Button {
                                     response = item
+                                    studioPreset = item.preset
+                                    if isRunning {
+                                        manager.applyMusicModePreset(item.preset)
+                                    }
                                 } label: {
                                     VStack(alignment: .leading, spacing: 8) {
                                         Image(systemName: item.symbol)
@@ -2322,27 +2523,23 @@ private struct RoomLiveView: View {
                                     .background(Lumen.floor, in: RoundedRectangle(cornerRadius: 11))
                                     .overlay(
                                         RoundedRectangle(cornerRadius: 11)
-                                            .stroke(response == item ? Lumen.ember : Lumen.rule,
-                                                    lineWidth: response == item ? 2 : 1)
+                                            .stroke(studioPreset == item.preset ? Lumen.ember : Lumen.rule,
+                                                    lineWidth: studioPreset == item.preset ? 2 : 1)
                                     )
                                 }
                                 .buttonStyle(.plain)
-                                .disabled(isRunning)
                             }
-                        }
-                        if isRunning {
-                            Text("Stop and restore before changing the input or response.")
-                                .font(LumenType.body(size: 11, weight: .semibold))
-                                .foregroundStyle(Lumen.meter)
                         }
                     }
 
                     LiveInputStatus(controller: manager.musicModeController)
 
+                    studioChoreographyDrawer
+
                     Button {
                         if isRunning {
                             stop()
-                        } else if manager.isDemoMode || audioAcknowledged {
+                        } else if manager.isDemoMode || input == .midiClock || audioAcknowledged {
                             start()
                         } else {
                             confirmingLocalAudio = true
@@ -2357,7 +2554,7 @@ private struct RoomLiveView: View {
                     .controlSize(.large)
                     .disabled(input == .file && audioFile == nil && !isRunning)
 
-                    Text("Live is immediate and foreground-only. It does not create a cue stack, timeline, MIDI map, schedule, or unattended listener.")
+                    Text("Live is immediate and foreground-only. Stop always restores the room's previous lighting state.")
                         .font(LumenType.body(size: 11))
                         .foregroundStyle(Lumen.meter)
                 }
@@ -2370,10 +2567,18 @@ private struct RoomLiveView: View {
                     Button("Done") { dismiss() }
                 }
             }
+            .onAppear {
+                studioPreset = manager.musicModeConfiguration.preset == .custom
+                    ? response.preset
+                    : manager.musicModeConfiguration.preset
+                if let matched = RoomLiveResponse.allCases.first(where: { $0.preset == studioPreset }) {
+                    response = matched
+                }
+            }
         }
         .font(LumenType.body())
         .foregroundStyle(Lumen.graphite)
-        .sheetFrame(minWidth: 600, idealWidth: 760, minHeight: 560, idealHeight: 700)
+        .sheetFrame(minWidth: 620, idealWidth: 780, minHeight: 580, idealHeight: 740)
         .fileImporter(isPresented: $choosingFile, allowedContentTypes: [.audio]) { result in
             if case .success(let url) = result { audioFile = url }
         }
@@ -2388,6 +2593,222 @@ private struct RoomLiveView: View {
         }
     }
 
+    private var studioChoreographyDrawer: some View {
+        DisclosureGroup(isExpanded: $showingStudioControls) {
+            VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("STUDIO CHOREOGRAPHY PRESET")
+                        .font(LumenType.instrumentLabel(size: 10))
+                        .tracking(1.1)
+                        .foregroundStyle(Lumen.meter)
+                    Picker("Preset", selection: Binding(
+                        get: { studioPreset },
+                        set: { newPreset in
+                            studioPreset = newPreset
+                            if let matched = RoomLiveResponse.allCases.first(where: { $0.preset == newPreset }) {
+                                response = matched
+                            }
+                            if isRunning {
+                                manager.applyMusicModePreset(newPreset)
+                            }
+                        }
+                    )) {
+                        ForEach(MusicModePreset.allCases.filter { $0 != .custom }) { preset in
+                            Text(preset.displayName).tag(preset)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    Text(studioPreset.summary)
+                        .font(LumenType.body(size: 11))
+                        .foregroundStyle(Lumen.meter)
+                }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Toggle("Follow Apple Music & Spotify beat maps", isOn: Binding(
+                        get: { manager.musicModeConfiguration.followsPlaybackApps },
+                        set: { enabled in
+                            var updated = manager.musicModeConfiguration
+                            updated.followsPlaybackApps = enabled
+                            manager.setMusicModeConfiguration(updated)
+                        }
+                    ))
+                    .font(LumenType.body(size: 13, weight: .semibold))
+                    Text(manager.musicModeController.beatMapStatus.summary)
+                        .font(LumenType.body(size: 11))
+                        .foregroundStyle(Lumen.meter)
+                }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Light timing offset")
+                            .font(LumenType.body(size: 13, weight: .semibold))
+                        Spacer()
+                        let offsetMS = Int((manager.musicModeConfiguration.outputLatencyOffset * 1000).rounded())
+                        Text("\(offsetMS >= 0 ? "+" : "")\(offsetMS) ms")
+                            .font(LumenType.readout(size: 11, weight: .semibold))
+                            .foregroundStyle(Lumen.meter)
+                    }
+                    Slider(
+                        value: Binding(
+                            get: { manager.musicModeConfiguration.outputLatencyOffset },
+                            set: { newValue in
+                                var updated = manager.musicModeConfiguration
+                                updated.outputLatencyOffset = newValue
+                                manager.previewMusicModeConfiguration(updated)
+                            }
+                        ),
+                        in: -MusicModeConfiguration.latencyOffsetLimit ... MusicModeConfiguration.latencyOffsetLimit,
+                        onEditingChanged: { editing in
+                            if !editing {
+                                manager.setMusicModeConfiguration(manager.musicModeConfiguration)
+                            }
+                        }
+                    )
+                    .tint(Lumen.ember)
+
+                    HStack(spacing: 10) {
+                        Button("Tap Light Pulse") {
+                            manager.musicModeController.recordCalibrationTap(scope: scope)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(!manager.musicModeController.hasCalibrationGrid(for: scope))
+
+                        if let suggested = manager.musicModeController.calibratedLatencyOffset(
+                            from: manager.musicModeConfiguration.outputLatencyOffset,
+                            scope: scope
+                        ) {
+                            let suggestedMS = Int((suggested * 1000).rounded())
+                            Button("Apply \(suggestedMS >= 0 ? "+" : "")\(suggestedMS) ms") {
+                                var updated = manager.musicModeConfiguration
+                                updated.outputLatencyOffset = suggested
+                                manager.setMusicModeConfiguration(updated)
+                                manager.musicModeController.resetCalibrationTaps()
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(Lumen.verdigris)
+                            .controlSize(.small)
+                        } else {
+                            let taps = manager.musicModeController.calibrationTapCount(for: scope)
+                            Text(taps > 0 ? "\(taps) tap\(taps == 1 ? "" : "s") recorded" : "Tap with the visible light pulse while running to calibrate network latency.")
+                                .font(LumenType.body(size: 11))
+                                .foregroundStyle(Lumen.meter)
+                        }
+                    }
+                }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Toggle("Photosensitivity safe mode (clamp rapid flashes)", isOn: Binding(
+                        get: { manager.musicModeConfiguration.photosensitivitySafeMode },
+                        set: { safe in
+                            var updated = manager.musicModeConfiguration
+                            updated.photosensitivitySafeMode = safe
+                            manager.setMusicModeConfiguration(updated)
+                        }
+                    ))
+                    .font(LumenType.body(size: 13, weight: .semibold))
+
+                    Toggle("Allow downbeat flash accents", isOn: Binding(
+                        get: { manager.musicModeConfiguration.allowsFlashes },
+                        set: { flashes in
+                            var updated = manager.musicModeConfiguration
+                            updated.allowsFlashes = flashes
+                            if flashes && updated.flashIntensity == 0 {
+                                updated.flashIntensity = 0.42
+                                updated.maximumFlashFrequency = 1.5
+                            }
+                            manager.setMusicModeConfiguration(updated)
+                        }
+                    ))
+                    .font(LumenType.body(size: 13))
+                    .disabled(manager.musicModeConfiguration.photosensitivitySafeMode)
+                }
+
+                if !roomLights.isEmpty {
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Text("ROOM SWEEP & FIXTURE ROLES")
+                                .font(LumenType.instrumentLabel(size: 10))
+                                .tracking(1.1)
+                                .foregroundStyle(Lumen.meter)
+                            Spacer()
+                            Picker("Sweep", selection: Binding(
+                                get: { topology.layout },
+                                set: { newLayout in
+                                    var updated = topology
+                                    updated.layout = newLayout
+                                    manager.setFixtureTopology(updated, for: scope)
+                                }
+                            )) {
+                                ForEach(FixtureTopologyLayout.allCases) { layout in
+                                    Text(layout.displayName).tag(layout)
+                                }
+                            }
+                            .labelsHidden()
+                            .frame(width: 150)
+                        }
+
+                        ForEach(roomLights) { light in
+                            HStack {
+                                Circle()
+                                    .fill(light.isOn ? light.color : Lumen.rule)
+                                    .frame(width: 10, height: 10)
+                                Text(light.label)
+                                    .font(LumenType.body(size: 12, weight: .semibold))
+                                    .lineLimit(1)
+                                Spacer()
+                                Picker(light.label, selection: Binding(
+                                    get: { topology.role(for: light.id) },
+                                    set: { newRole in
+                                        var updated = topology
+                                        if newRole == .auto {
+                                            updated.roles.removeValue(forKey: light.id)
+                                        } else {
+                                            updated.roles[light.id] = newRole
+                                        }
+                                        manager.setFixtureTopology(updated, for: scope)
+                                    }
+                                )) {
+                                    ForEach(FixtureRole.allCases) { role in
+                                        Text(role.displayName).tag(role)
+                                    }
+                                }
+                                .labelsHidden()
+                                .frame(width: 118)
+                                .disabled(isRunning && (topology.role(for: light.id) == .off))
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(.top, 10)
+        } label: {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Studio Sync & Choreography")
+                        .font(LumenType.display(size: 16, weight: .bold))
+                    Text("Beat-map sync, latency calibration, fixture roles & sweep direction")
+                        .font(LumenType.body(size: 11))
+                        .foregroundStyle(Lumen.meter)
+                }
+                Spacer()
+                Text(studioPreset.displayName)
+                    .font(LumenType.readout(size: 11, weight: .semibold))
+                    .foregroundStyle(Lumen.ember)
+            }
+        }
+        .padding(16)
+        .background(Lumen.floor, in: RoundedRectangle(cornerRadius: 12))
+    }
+
     private func inputTitle(_ input: RoomLiveInput) -> String {
         switch input {
         case .platform:
@@ -2397,6 +2818,7 @@ private struct RoomLiveView: View {
             return "Microphone"
             #endif
         case .file: return "Audio file"
+        case .midiClock: return "MIDI clock"
         }
     }
 
@@ -2410,18 +2832,28 @@ private struct RoomLiveView: View {
     }
 
     private func start() {
-        var configuration = MusicModeConfiguration.configuration(for: response.preset)
-            .preservingRoomCalibration(from: manager.musicModeConfiguration)
+        let current = manager.musicModeConfiguration
+        var configuration = MusicModeConfiguration.configuration(for: studioPreset)
+            .preservingRoomCalibration(from: current)
         configuration.restorePreviousState = true
-        configuration.photosensitivitySafeMode = true
-        configuration.allowsFlashes = false
-        configuration.flashIntensity = 0
-        configuration.maximumFlashFrequency = 0
-        configuration.followsPlaybackApps = false
-        configuration.usesSyntheticDemoPattern = manager.isDemoMode
+        configuration.photosensitivitySafeMode = current.photosensitivitySafeMode
+        if current.photosensitivitySafeMode {
+            configuration.allowsFlashes = false
+            configuration.flashIntensity = 0
+            configuration.maximumFlashFrequency = 0
+        } else {
+            configuration.allowsFlashes = current.allowsFlashes
+        }
+        configuration.usesSyntheticDemoPattern = manager.isDemoMode && input == .platform
         let capture: MusicCapturePreference
-        if input == .file, let audioFile { capture = .file(audioFile) }
-        else { capture = .platformDefault }
+        switch input {
+        case .file:
+            capture = audioFile.map { .file($0) } ?? .platformDefault
+        case .midiClock:
+            capture = .midiClock
+        case .platform:
+            capture = .platformDefault
+        }
         manager.startMusicMode(configuration: configuration, scope: scope,
                                reducedMotion: reduceMotion, capture: capture)
     }
@@ -2441,7 +2873,9 @@ private struct LiveInputStatus: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(controller.sourceStatus.displayName)
                     .font(LumenType.body(size: 13, weight: .semibold))
-                Text(controller.inputHealth.displayName)
+                Text(controller.beatMapStatus.isPlayingMap
+                     ? controller.beatMapStatus.summary
+                     : controller.inputHealth.displayName)
                     .font(LumenType.body(size: 11))
                     .foregroundStyle(Lumen.meter)
             }
@@ -2461,6 +2895,7 @@ private struct LiveInputStatus: View {
         switch controller.sourceStatus {
         case .permissionDenied, .unavailable: return "exclamationmark.triangle.fill"
         case .idle: return "waveform"
+        case .midiClock: return "metronome.fill"
         default: return "waveform.circle.fill"
         }
     }

@@ -1159,12 +1159,6 @@ private struct LookShelf: View {
                     .font(LumenType.body(size: 11))
                     .foregroundStyle(Lumen.meter)
                 Spacer()
-                Menu("Color themes") {
-                    LightingThemeCategoryMenuContent { theme in
-                        manager.applyTheme(theme, deviceIDs: ids, in: .room(room.id))
-                    }
-                }
-                .font(LumenType.body(size: 12, weight: .semibold))
                 Button(action: compose) {
                     Label("Compose", systemImage: "paintpalette")
                 }
@@ -1173,6 +1167,12 @@ private struct LookShelf: View {
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 9) {
+                    Menu("Color themes") {
+                        LightingThemeCategoryMenuContent { theme in
+                            manager.applyTheme(theme, deviceIDs: ids, in: .room(room.id))
+                        }
+                    }
+                    .buttonStyle(RoomLookButtonStyle())
                     ForEach(RoomLookTemplate.everyday) { template in
                         Button {
                             guard let theme = LightingCatalog.theme(withID: template.themeID) else { return }
@@ -1672,7 +1672,7 @@ struct LookComposerView: View {
                     .foregroundStyle(Lumen.meter)
             }
 
-            HStack(spacing: 9) {
+            VStack(alignment: .leading, spacing: 9) {
                 Button("Restore before preview") {
                     previewID = nil
                     manager.stopSceneRehearsal(restore: true)
@@ -1779,7 +1779,7 @@ struct ComposerRoomPreview: View {
                     .font(LumenType.body(size: 11))
                     .foregroundStyle(Lumen.meter)
             }
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 10)], spacing: 10) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 185), spacing: 10)], spacing: 10) {
                 ForEach(lights) { light in
                     let plan = plans[light.id]
                     HStack(spacing: 10) {
@@ -1789,7 +1789,7 @@ struct ComposerRoomPreview: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(light.label)
                                 .font(LumenType.body(size: 12, weight: .semibold))
-                                .lineLimit(1)
+                                .lineLimit(2)
                             Text(plan.map { "\(Int(($0.brightness * 100).rounded()))%" }
                                  ?? "Not included")
                                 .font(LumenType.readout(size: 11))

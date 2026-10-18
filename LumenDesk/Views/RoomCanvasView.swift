@@ -6,12 +6,13 @@ import UniformTypeIdentifiers
 // MARK: - Direction A session state
 
 /// View state for the foreground room session. Desired and observed fixture
-/// state remain in `LightManager`; this store only remembers where the person
-/// is looking and which direct-manipulation tool is open.
+/// state remain in `LightManager`; this store only remembers the room, an
+/// optional explicit fixture selection, and which contextual tool is open.
 @MainActor
 final class RoomCanvasSessionStore: ObservableObject {
     @Published var selectedRoomID: UUID?
     @Published var selectedFixtureIDs: Set<String> = []
+    @Published var controlsWholeRoom = true
     @Published var showingComposer = false
     @Published var showingAddOrRepair = false
     @Published var showingLive = false
@@ -19,17 +20,22 @@ final class RoomCanvasSessionStore: ObservableObject {
     @Published var editorDeviceID: String?
     private var selectionRoomID: UUID?
 
-    func select(_ room: Room, devices: [LightDevice]) {
+    func select(_ room: Room) {
         selectedRoomID = room.id
-        selectedFixtureIDs = Set(devices.map(\.id))
+        // Start with the room as the target. Keeping this as an explicit mode
+        // lets an empty checkbox selection mean "nothing selected" after the
+        // person has narrowed the controls, avoiding an accidental room-wide
+        // edit when they deselect their last light.
+        selectedFixtureIDs = []
+        controlsWholeRoom = true
         selectionRoomID = room.id
         editorDeviceID = nil
     }
 
     @discardableResult
-    func select(roomID: UUID, rooms: [Room], devices: [LightDevice]) -> Bool {
+    func select(roomID: UUID, rooms: [Room]) -> Bool {
         guard let room = rooms.first(where: { $0.id == roomID }) else { return false }
-        select(room, devices: devices.filter { room.lightIDs.contains($0.id) })
+        select(room)
         return true
     }
 
@@ -39,14 +45,18 @@ final class RoomCanvasSessionStore: ObservableObject {
         }
         guard let room = rooms.first(where: { $0.id == selectedRoomID }) else {
             selectedFixtureIDs = []
+            controlsWholeRoom = true
             selectionRoomID = nil
             return
         }
         let knownIDs = Set(devices.map(\.id))
         let available = room.lightIDs.filter(knownIDs.contains)
         if selectionRoomID != room.id {
-            selectedFixtureIDs = Set(available)
+            selectedFixtureIDs = []
+            controlsWholeRoom = true
             selectionRoomID = room.id
+        } else if controlsWholeRoom {
+            selectedFixtureIDs = []
         } else {
             selectedFixtureIDs = RoomWorkspaceSelection.reconciled(
                 selected: selectedFixtureIDs,
@@ -243,7 +253,7 @@ struct RoomCanvasShellView: View {
             openRoomRequest = ""
             return
         }
-        guard session.select(roomID: roomID, rooms: manager.rooms, devices: manager.devices) else {
+        guard session.select(roomID: roomID, rooms: manager.rooms) else {
             // A restore can publish rooms after the scene receives the request.
             // Keep it until the room collection arrives instead of opening the
             // wrong room and silently discarding the user's menu-bar choice.
@@ -316,7 +326,7 @@ private struct RoomCanvasSidebar: View {
                     .font(LumenType.instrumentLabel(size: 11))
                     .tracking(1.6)
                     .foregroundStyle(Lumen.ember)
-                Text("Room Canvas")
+                Text("Room Lights")
                     .font(LumenType.display(size: 25, weight: .bold))
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -397,7 +407,7 @@ private struct RoomCanvasSidebar: View {
         let status = RoomCanvasStatus.resolve(lights, manager: manager)
         return HStack(spacing: 4) {
             Button {
-                session.select(room, devices: lights)
+                session.select(room)
             } label: {
                 HStack(spacing: 10) {
                     ZStack {
@@ -412,7 +422,7 @@ private struct RoomCanvasSidebar: View {
                             .font(LumenType.display(size: 16, weight: .semibold))
                             .lineLimit(1)
                         HStack(spacing: 5) {
-                            Text("\(lights.count) fixture\(lights.count == 1 ? "" : "s")")
+                            Text("\(lights.count) light\(lights.count == 1 ? "" : "s")")
                             Image(systemName: status.symbol)
                                 .accessibilityLabel(status.title)
                         }
@@ -471,9 +481,9 @@ private struct RoomCanvasEmptyState: View {
                 Image(systemName: "square.dashed")
                     .font(.system(size: 40, weight: .light))
             }
-            Text("Make the room the interface")
+            Text("Organize lights by room")
                 .font(LumenType.display(size: 30, weight: .bold))
-            Text("Find a fixture, identify it in the room, then place it where you expect to find it.")
+            Text("Create a room, add its lights, then control the whole group or any light on its own.")
                 .font(LumenType.body(size: 15))
                 .foregroundStyle(Lumen.meter)
                 .multilineTextAlignment(.center)
@@ -487,7 +497,7 @@ private struct RoomCanvasEmptyState: View {
     }
 }
 
-// MARK: - Live Canvas
+// MARK: - Room controls
 
 private struct RoomCanvasWorkspace: View {
     @EnvironmentObject private var manager: LightManager
@@ -507,13 +517,26 @@ private struct RoomCanvasWorkspace: View {
         )
     }
 
+    private var controlsWholeRoom: Binding<Bool> {
+        Binding(
+            get: { session.controlsWholeRoom },
+            set: { session.controlsWholeRoom = $0 }
+        )
+    }
+
     var body: some View {
         GeometryReader { geometry in
             VStack(spacing: 0) {
                 header
-                if geometry.size.width >= 880 {
+                if lights.isEmpty {
+                    emptyRoom
+                } else if geometry.size.width >= 880 {
                     HStack(spacing: 0) {
-                        canvasColumn
+                        ScrollView {
+                            fixtureDirectory
+                                .padding(20)
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                         Divider().overlay(Lumen.rule)
                         selectionInspector
                             .frame(width: min(330, max(280, geometry.size.width * 0.27)))
@@ -521,9 +544,10 @@ private struct RoomCanvasWorkspace: View {
                 } else {
                     ScrollView {
                         VStack(spacing: 16) {
-                            canvasColumn
                             selectionInspector
+                            fixtureDirectory
                         }
+                        .padding(16)
                     }
                 }
                 LookShelf(
@@ -568,7 +592,7 @@ private struct RoomCanvasWorkspace: View {
                 .font(LumenType.display(size: 28, weight: .bold))
                 .lineLimit(1)
             if showsInstruction {
-                Text("Touch a fixture to select it. Drag it to keep the canvas familiar.")
+                Text("Control the whole room together, or adjust each light on its own.")
                     .font(LumenType.body(size: 12))
                     .foregroundStyle(Lumen.meter)
                     .lineLimit(1)
@@ -606,40 +630,41 @@ private struct RoomCanvasWorkspace: View {
         }
     }
 
-    private var canvasColumn: some View {
-        VStack(spacing: 0) {
-            if lights.isEmpty {
-                VStack(spacing: 12) {
-                    Image(systemName: "lightbulb.slash")
-                        .font(.system(size: 34, weight: .light))
-                    Text("No fixtures placed")
-                        .font(LumenType.display(size: 22, weight: .bold))
-                    Text("Use Add or repair room to find and place fixtures.")
-                        .foregroundStyle(Lumen.meter)
-                    Button("Add or repair") { session.showingAddOrRepair = true }
-                        .buttonStyle(.borderedProminent)
-                        .tint(Lumen.ember)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(30)
-            } else {
-                DirectionARoomField(
-                    room: currentRoom,
-                    lights: lights,
-                    selection: selection
-                )
-                .padding(18)
-            }
+    private var emptyRoom: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "lightbulb.slash")
+                .font(.system(size: 34, weight: .light))
+            Text("No lights in this room")
+                .font(LumenType.display(size: 22, weight: .bold))
+            Text("Use Add or repair room to find lights and assign them here.")
+                .foregroundStyle(Lumen.meter)
+            Button("Add or repair") { session.showingAddOrRepair = true }
+                .buttonStyle(.borderedProminent)
+                .tint(Lumen.ember)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Lumen.canvas)
     }
 
+    private var fixtureDirectory: some View {
+        RoomFixtureDirectory(
+            lights: lights,
+            selection: selection,
+            controlsWholeRoom: controlsWholeRoom,
+            edit: { session.editorDeviceID = $0 }
+        )
+    }
+
     private var selectionInspector: some View {
-        let targets = lights.filter { session.selectedFixtureIDs.contains($0.id) }
+        let available = lights.map(\.id)
+        let targetIDs = session.controlsWholeRoom
+            ? Set(available)
+            : session.selectedFixtureIDs.intersection(available)
+        let targets = lights.filter { targetIDs.contains($0.id) }
         return RoomSelectionInspector(
             room: currentRoom,
             targets: targets,
+            usesWholeRoom: session.controlsWholeRoom,
             compose: { session.showingComposer = true },
             edit: { session.editorDeviceID = $0 }
         )
@@ -649,7 +674,10 @@ private struct RoomCanvasWorkspace: View {
     private func reconcileSelection(forceAll: Bool = false) {
         let available = lights.map(\.id)
         if forceAll {
-            session.selectedFixtureIDs = Set(available)
+            session.selectedFixtureIDs = []
+            session.controlsWholeRoom = true
+        } else if session.controlsWholeRoom {
+            session.selectedFixtureIDs = []
         } else {
             session.selectedFixtureIDs = RoomWorkspaceSelection.reconciled(
                 selected: session.selectedFixtureIDs,
@@ -659,217 +687,194 @@ private struct RoomCanvasWorkspace: View {
     }
 }
 
-private struct DirectionARoomField: View {
-    @EnvironmentObject private var manager: LightManager
-    let room: Room
+private struct RoomFixtureDirectory: View {
     let lights: [LightDevice]
     @Binding var selection: Set<String>
-    @State private var dragOffsets: [String: CGSize] = [:]
+    @Binding var controlsWholeRoom: Bool
+    let edit: (String) -> Void
+
+    private var allIDs: Set<String> { Set(lights.map(\.id)) }
 
     var body: some View {
-        GeometryReader { geometry in
-            let compactWidth = geometry.size.width < 520
-            let condensed = compactWidth || geometry.size.height < 420
-            let horizontalInset: CGFloat = compactWidth ? 34 : 54
-            let verticalInset: CGFloat = condensed ? 42 : 46
-            ZStack {
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .fill(Lumen.floor)
-                roomGrid
-                    .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .stroke(Lumen.graphite, lineWidth: 3)
-                roomDetails
+        VStack(alignment: .leading, spacing: 14) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 10) {
+                    directoryTitle
+                    Spacer(minLength: 12)
+                    selectionActions
+                }
+                VStack(alignment: .leading, spacing: 10) {
+                    directoryTitle
+                    selectionActions
+                }
+            }
 
-                ForEach(lights.indices, id: \.self) { index in
-                    let light = lights[index]
-                    let anchor = canvasAnchor(for: light, index: index)
-                    let offset = dragOffsets[light.id] ?? .zero
-                    FixtureCanvasNode(
+            LazyVStack(spacing: 12) {
+                ForEach(lights) { light in
+                    RoomFixtureControlRow(
                         light: light,
                         selected: selection.contains(light.id),
-                        status: RoomCanvasStatus.resolve([light], manager: manager),
-                        compact: compactWidth,
-                        condensed: condensed,
-                        select: { toggle(light.id) }
+                        toggleSelection: { toggle(light.id) },
+                        edit: { edit(light.id) }
                     )
-                    .frame(width: nodeWidth(for: light, compact: compactWidth),
-                           height: condensed ? 64 : 82)
-                    .position(
-                        x: horizontalInset
-                            + (geometry.size.width - horizontalInset * 2) * anchor.x
-                            + offset.width,
-                        y: verticalInset
-                            + (geometry.size.height - verticalInset * 2) * anchor.y
-                            + offset.height
-                    )
-                    .gesture(
-                        DragGesture(minimumDistance: 8)
-                            .onChanged { value in dragOffsets[light.id] = value.translation }
-                            .onEnded { value in
-                                let x = anchor.x + Double(
-                                    value.translation.width
-                                        / max(1, geometry.size.width - horizontalInset * 2)
-                                )
-                                let y = anchor.y + Double(
-                                    value.translation.height
-                                        / max(1, geometry.size.height - verticalInset * 2)
-                                )
-                                manager.setPlanAnchor(PlanAnchor(x: x, y: y), for: light.id, in: room.id)
-                                dragOffsets[light.id] = nil
-                            }
-                    )
-                    .accessibilityAction(named: "Move left") { move(light, index: index, dx: -0.08, dy: 0) }
-                    .accessibilityAction(named: "Move right") { move(light, index: index, dx: 0.08, dy: 0) }
-                    .accessibilityAction(named: "Move up") { move(light, index: index, dx: 0, dy: -0.08) }
-                    .accessibilityAction(named: "Move down") { move(light, index: index, dx: 0, dy: 0.08) }
                 }
             }
         }
-        .frame(minHeight: 360)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("\(room.name) fixture canvas")
     }
 
-    private var roomGrid: some View {
-        GeometryReader { geometry in
-            Path { path in
-                var x: CGFloat = 32
-                while x < geometry.size.width {
-                    path.move(to: CGPoint(x: x, y: 0))
-                    path.addLine(to: CGPoint(x: x, y: geometry.size.height))
-                    x += 32
-                }
-                var y: CGFloat = 32
-                while y < geometry.size.height {
-                    path.move(to: CGPoint(x: 0, y: y))
-                    path.addLine(to: CGPoint(x: geometry.size.width, y: y))
-                    y += 32
-                }
-            }
-            .stroke(Lumen.graphite.opacity(0.055), lineWidth: 1)
+    private var directoryTitle: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text("Lights")
+                .font(LumenType.display(size: 22, weight: .bold))
+            Text(controlsWholeRoom
+                 ? "Room controls target all \(lights.count) lights"
+                 : selection.isEmpty
+                    ? "No lights selected"
+                    : "\(selection.intersection(allIDs).count) of \(lights.count) selected")
+                .font(LumenType.body(size: 12))
+                .foregroundStyle(Lumen.meter)
         }
-        .accessibilityHidden(true)
     }
 
-    private var roomDetails: some View {
-        VStack {
-            HStack {
-                Text(room.name.uppercased())
-                    .font(LumenType.instrumentLabel(size: 10))
-                    .tracking(1.2)
-                    .foregroundStyle(Lumen.graphite.opacity(0.48))
-                Spacer()
+    private var selectionActions: some View {
+        HStack(spacing: 8) {
+            Button("Whole room") {
+                selection.removeAll()
+                controlsWholeRoom = true
             }
-            Spacer()
-            HStack {
-                Capsule().fill(Lumen.graphite.opacity(0.22)).frame(width: 68, height: 8)
-                Spacer()
-                RoundedRectangle(cornerRadius: 2).fill(Lumen.graphite.opacity(0.16)).frame(width: 42, height: 28)
+                .buttonStyle(.bordered)
+                .disabled(controlsWholeRoom)
+            Button("Select all") {
+                selection = allIDs
+                controlsWholeRoom = false
             }
-        }
-        .padding(18)
-        .accessibilityHidden(true)
-    }
-
-    private func nodeWidth(for light: LightDevice, compact: Bool) -> CGFloat {
-        if compact {
-            switch manager.themeCapability(for: light) {
-            case .segments, .matrix, .panels: return 68
-            case .solid: return 64
-            }
-        }
-        switch manager.themeCapability(for: light) {
-        case .segments: return 126
-        case .matrix, .panels: return 104
-        case .solid: return 94
+                .buttonStyle(.bordered)
+                .disabled(!controlsWholeRoom && selection == allIDs)
         }
     }
 
     private func toggle(_ id: String) {
-        if selection.contains(id) { selection.remove(id) }
-        else { selection.insert(id) }
-    }
-
-    private func canvasAnchor(for light: LightDevice, index: Int) -> PlanAnchor {
-        if let stored = room.fixtureAnchors[light.id] { return stored }
-        let defaults = PlanLayout.defaultAnchors(count: lights.count)
-        return defaults.indices.contains(index) ? defaults[index] : PlanAnchor(x: 0.5, y: 0.5)
-    }
-
-    private func move(_ light: LightDevice, index: Int, dx: Double, dy: Double) {
-        let anchor = canvasAnchor(for: light, index: index)
-        manager.setPlanAnchor(PlanAnchor(x: anchor.x + dx, y: anchor.y + dy),
-                              for: light.id, in: room.id)
+        if controlsWholeRoom {
+            selection = [id]
+            controlsWholeRoom = false
+        } else if selection.contains(id) {
+            selection.remove(id)
+        } else {
+            selection.insert(id)
+        }
     }
 }
 
-private struct FixtureCanvasNode: View {
+private struct RoomFixtureControlRow: View {
+    @EnvironmentObject private var manager: LightManager
     @ObservedObject var light: LightDevice
     let selected: Bool
-    let status: RoomCanvasStatus
-    let compact: Bool
-    let condensed: Bool
-    let select: () -> Void
+    let toggleSelection: () -> Void
+    let edit: () -> Void
+
+    private var ids: Set<String> { [light.id] }
+    private var status: RoomCanvasStatus { RoomCanvasStatus.resolve([light], manager: manager) }
 
     var body: some View {
-        Button(action: select) {
-            VStack(spacing: 5) {
-                ZStack {
-                    if light.isOn && !light.isStale {
-                        Circle()
-                            .fill(
-                                RadialGradient(
-                                    colors: [light.color.opacity(0.55 * light.brightness), light.color.opacity(0)],
-                                    center: .center,
-                                    startRadius: 2,
-                                    endRadius: 34
-                                )
-                            )
-                            .frame(width: compact ? 54 : 74, height: condensed ? 44 : 64)
-                    }
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(Lumen.graphite)
-                        .frame(width: compact ? 32 : 38, height: condensed ? 26 : 30)
-                    Image(systemName: fixtureSymbol)
-                        .font(.system(size: compact ? 12 : (condensed ? 13 : 14), weight: .semibold))
-                        .foregroundStyle(light.isOn ? light.color : Lumen.canvas.opacity(0.66))
-                    Image(systemName: status.symbol)
-                        .font(.system(size: condensed ? 8 : 10, weight: .bold))
-                        .foregroundStyle(status.color)
-                        .padding(condensed ? 2 : 3)
-                        .background(Lumen.floor, in: Circle())
-                        .offset(x: compact ? 17 : 20, y: condensed ? -14 : -17)
+        VStack(alignment: .leading, spacing: 14) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) {
+                    identity
+                    Spacer(minLength: 12)
+                    quickActions
                 }
-                Text(light.label)
-                    .font(LumenType.body(size: compact ? 9 : 11, weight: .semibold))
-                    .foregroundStyle(Lumen.graphite)
-                    .lineLimit(compact ? 2 : 1)
-                    .multilineTextAlignment(.center)
-                    .minimumScaleFactor(0.82)
+                VStack(alignment: .leading, spacing: 12) {
+                    identity
+                    quickActions
+                }
             }
-            .padding(.horizontal, compact ? 4 : 7)
-            .padding(.vertical, condensed ? 2 : 5)
-            .background(Lumen.floor.opacity(selected ? 0.98 : 0.78), in: RoundedRectangle(cornerRadius: 10))
-            .overlay(
-                RoundedRectangle(cornerRadius: 10)
-                    .stroke(selected ? Lumen.ember : Lumen.graphite.opacity(0.18), lineWidth: selected ? 2 : 1)
-            )
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 18) {
+                    brightnessControl
+                    ColorPicker("Colour", selection: Binding(
+                        get: { light.color },
+                        set: { manager.setColor(deviceIDs: ids, color: $0) }
+                    ), supportsOpacity: false)
+                    .fixedSize()
+                }
+                VStack(alignment: .leading, spacing: 12) {
+                    brightnessControl
+                    ColorPicker("Colour", selection: Binding(
+                        get: { light.color },
+                        set: { manager.setColor(deviceIDs: ids, color: $0) }
+                    ), supportsOpacity: false)
+                }
+            }
         }
-        .buttonStyle(.plain)
-        .help(light.label)
-        .accessibilityLabel(light.label)
-        .accessibilityValue("\(selected ? "Selected, " : "")\(status.title), \(light.isOn ? "on" : "off"), \(Int(light.brightness * 100)) percent")
-        .accessibilityAddTraits(selected ? .isSelected : [])
+        .padding(15)
+        .background(Lumen.floor, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(selected ? Lumen.ember : Lumen.ruleSoft, lineWidth: selected ? 2 : 1)
+        )
     }
 
-    private var fixtureSymbol: String {
-        if light.isLIFXLuna { return "circle.grid.3x3.fill" }
-        switch light.brand {
-        case .nanoleaf: return "hexagon.fill"
-        case .govee: return "lightswitch.on"
-        case .lifx: return "lightbulb.fill"
+    private var identity: some View {
+        HStack(spacing: 11) {
+            Button(action: toggleSelection) {
+                Image(systemName: selected ? "checkmark.square.fill" : "square")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(selected ? Lumen.ember : Lumen.meter)
+                    .frame(width: 30, height: 30)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(selected ? "Deselect" : "Select") \(light.label)")
+
+            LumenLens(color: light.color, isOn: light.isOn, size: 38,
+                      isStale: light.isStale, level: light.brightness)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(light.label)
+                    .font(LumenType.display(size: 17, weight: .semibold))
+                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(light.brand.displayName)
+                    Label(status.title, systemImage: status.symbol)
+                        .foregroundStyle(status.color)
+                }
+                .font(LumenType.body(size: 11))
+                .foregroundStyle(Lumen.meter)
+            }
         }
+    }
+
+    private var quickActions: some View {
+        HStack(spacing: 10) {
+            Button("Details", action: edit)
+                .buttonStyle(.bordered)
+            Toggle("", isOn: Binding(
+                get: { light.isOn },
+                set: { manager.setPower(deviceIDs: ids, on: $0) }
+            ))
+            .labelsHidden()
+            .toggleStyle(LumenPowerKeyStyle(
+                size: 34,
+                spokenLabel: light.isOn ? "Turn off \(light.label)" : "Turn on \(light.label)"
+            ))
+        }
+    }
+
+    private var brightnessControl: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Brightness")
+                    .font(LumenType.body(size: 12, weight: .semibold))
+                Spacer()
+                Text("\(Int((light.brightness * 100).rounded()))%")
+                    .font(LumenType.readout(size: 12))
+            }
+            Slider(value: Binding(
+                get: { light.brightness },
+                set: { manager.setBrightness(deviceIDs: ids, value: $0) }
+            ), in: 0.01...1)
+        }
+        .frame(minWidth: 180, maxWidth: .infinity)
+        .disabled(!light.isOn)
     }
 }
 
@@ -877,16 +882,19 @@ private struct RoomSelectionInspector: View {
     @EnvironmentObject private var manager: LightManager
     let room: Room
     let targets: [LightDevice]
+    let usesWholeRoom: Bool
     let compose: () -> Void
     let edit: (String) -> Void
     @StateObject private var output: RoomOutputState
     @State private var renamingFixtureID: String?
     @State private var renamedFixtureName = ""
 
-    init(room: Room, targets: [LightDevice], compose: @escaping () -> Void,
+    init(room: Room, targets: [LightDevice], usesWholeRoom: Bool,
+         compose: @escaping () -> Void,
          edit: @escaping (String) -> Void) {
         self.room = room
         self.targets = targets
+        self.usesWholeRoom = usesWholeRoom
         self.compose = compose
         self.edit = edit
         _output = StateObject(wrappedValue: RoomOutputState(lights: targets))
@@ -908,20 +916,22 @@ private struct RoomSelectionInspector: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 VStack(alignment: .leading, spacing: 7) {
-                    Text("Selection")
+                    Text(usesWholeRoom ? "ROOM CONTROLS" : "SELECTION")
                         .font(LumenType.instrumentLabel(size: 10))
                         .tracking(1.2)
                         .foregroundStyle(Lumen.meter)
                     Text(selectionTitle)
                         .font(LumenType.display(size: 23, weight: .bold))
-                    RoomCanvasStatusBadge(
-                        status: RoomCanvasStatus.resolve(targets, manager: manager),
-                        compact: true
-                    )
+                    if !targets.isEmpty {
+                        RoomCanvasStatusBadge(
+                            status: RoomCanvasStatus.resolve(targets, manager: manager),
+                            compact: true
+                        )
+                    }
                 }
 
                 if targets.isEmpty {
-                    Text("Select one or more fixtures on the canvas to control them.")
+                    Text("Nothing is selected. Choose one or more lights from the list, or choose Whole room.")
                         .font(LumenType.body(size: 13))
                         .foregroundStyle(Lumen.meter)
                 } else {
@@ -962,7 +972,7 @@ private struct RoomSelectionInspector: View {
 
                     if manager.externallyChangedDeviceIDs.isDisjoint(with: ids) == false {
                         VStack(alignment: .leading, spacing: 8) {
-                            Label("A fixture changed outside LumenDesk. The canvas now shows what the room reported.",
+                            Label("A light changed outside LumenDesk. The list now shows what the room reported.",
                                   systemImage: RoomCanvasStatus.changedElsewhere.symbol)
                                 .font(LumenType.body(size: 12, weight: .semibold))
                             Button("Use this as current") {
@@ -1005,10 +1015,11 @@ private struct RoomSelectionInspector: View {
     }
 
     private var selectionTitle: String {
+        if usesWholeRoom { return room.name }
         switch targets.count {
         case 0: return "Nothing selected"
         case 1: return targets[0].label
-        default: return "\(targets.count) fixtures"
+        default: return "\(targets.count) lights"
         }
     }
 
@@ -1706,30 +1717,42 @@ private struct ComposerRoomPreview: View {
     }
 
     var body: some View {
-        GeometryReader { geometry in
-            ZStack {
-                RoundedRectangle(cornerRadius: 18).fill(Lumen.floor)
-                RoundedRectangle(cornerRadius: 18).stroke(Lumen.graphite, lineWidth: 3)
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Light preview")
+                    .font(LumenType.display(size: 19, weight: .bold))
+                Text("Planned output by light. Room position is not part of the Look.")
+                    .font(LumenType.body(size: 11))
+                    .foregroundStyle(Lumen.meter)
+            }
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 10)], spacing: 10) {
                 ForEach(lights) { light in
-                    let anchor = manager.planAnchor(for: light.id, in: room)
                     let plan = plans[light.id]
-                    VStack(spacing: 4) {
-                        Circle()
-                            .fill(plan?.tone.emittedColor(scaledBy: plan?.brightness ?? 0) ?? Lumen.graphite.opacity(0.12))
-                            .frame(width: 34, height: 34)
-                            .shadow(color: plan?.tone.displayColor.opacity(0.45) ?? .clear, radius: 14)
-                        Text(light.label)
-                            .font(LumenType.body(size: 10, weight: .semibold))
-                            .lineLimit(1)
+                    HStack(spacing: 10) {
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(plan?.tone.emittedColor(scaledBy: plan?.brightness ?? 0)
+                                  ?? Lumen.graphite.opacity(0.12))
+                            .frame(width: 38, height: 38)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(light.label)
+                                .font(LumenType.body(size: 12, weight: .semibold))
+                                .lineLimit(1)
+                            Text(plan.map { "\(Int(($0.brightness * 100).rounded()))%" }
+                                 ?? "Not included")
+                                .font(LumenType.readout(size: 11))
+                                .foregroundStyle(Lumen.meter)
+                        }
+                        Spacer(minLength: 0)
                     }
-                    .opacity(targetIDs.contains(light.id) ? 1 : 0.32)
-                    .position(
-                        x: 45 + (geometry.size.width - 90) * anchor.x,
-                        y: 35 + (geometry.size.height - 70) * anchor.y
-                    )
+                    .padding(10)
+                    .background(Lumen.canvas, in: RoundedRectangle(cornerRadius: 9))
+                    .opacity(targetIDs.contains(light.id) ? 1 : 0.45)
                 }
             }
         }
+        .padding(14)
+        .background(Lumen.floor, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Lumen.ruleSoft, lineWidth: 1))
         .accessibilityLabel("Preview of \(theme.name) in \(room.name)")
     }
 }
@@ -1739,7 +1762,7 @@ private struct ComposerRoomPreview: View {
 private enum AddRepairStep: Int, CaseIterable, Identifiable {
     case prepare
     case find
-    case place
+    case assign
     case verify
     var id: Int { rawValue }
 
@@ -1747,7 +1770,7 @@ private enum AddRepairStep: Int, CaseIterable, Identifiable {
         switch self {
         case .prepare: return "Prepare"
         case .find: return "Find"
-        case .place: return "Place"
+        case .assign: return "Room"
         case .verify: return "Verify"
         }
     }
@@ -1775,12 +1798,12 @@ private struct AddOrRepairRoomView: View {
         manager.rooms.first { $0.id == targetRoomID }
     }
 
-    private var placementLights: [LightDevice] {
+    private var roomLights: [LightDevice] {
         guard let targetRoom else { return [] }
-        let placed = manager.devices(in: targetRoom)
-        let placedIDs = Set(placed.map(\.id))
-        return placed + manager.devices.filter {
-            selectedIDs.contains($0.id) && !placedIDs.contains($0.id)
+        let assigned = manager.devices(in: targetRoom)
+        let assignedIDs = Set(assigned.map(\.id))
+        return assigned + manager.devices.filter {
+            selectedIDs.contains($0.id) && !assignedIDs.contains($0.id)
         }
     }
 
@@ -1794,7 +1817,7 @@ private struct AddOrRepairRoomView: View {
                         switch step {
                         case .prepare: prepareStep
                         case .find: findStep
-                        case .place: placeStep
+                        case .assign: assignStep
                         case .verify: verifyStep
                         }
                     }
@@ -1856,11 +1879,11 @@ private struct AddOrRepairRoomView: View {
     private var prepareStep: some View {
         VStack(alignment: .leading, spacing: 20) {
             stepHeading(
-                "Make the fixtures visible",
-                "Turn the lights on at the wall and keep this device on the same local network. LumenDesk talks directly to each fixture; there is no bridge service to configure."
+                "Make the lights visible",
+                "Turn the lights on at the wall and keep this device on the same local network. LumenDesk talks directly to each light; there is no bridge service to configure."
             )
             HStack(alignment: .top, spacing: 14) {
-                instructionCard(number: "1", title: "Power", text: "Switch on every fixture you want to place.")
+                instructionCard(number: "1", title: "Power", text: "Switch on every light you want to add.")
                 instructionCard(number: "2", title: "Network", text: "Join the Wi‑Fi network the fixtures use.")
                 instructionCard(number: "3", title: "Permission", text: "Allow Local Network access when iOS asks.")
             }
@@ -1881,7 +1904,7 @@ private struct AddOrRepairRoomView: View {
         VStack(alignment: .leading, spacing: 18) {
             stepHeading(
                 "Find and identify",
-                "Select the fixtures that belong together. Identify flashes one fixture and restores its exact opening state."
+                "Select the lights that belong together. Identify flashes one light and restores its exact opening state."
             )
             HStack {
                 Button {
@@ -1904,9 +1927,9 @@ private struct AddOrRepairRoomView: View {
                 VStack(spacing: 10) {
                     Image(systemName: "antenna.radiowaves.left.and.right.slash")
                         .font(.system(size: 30, weight: .light))
-                    Text("No fixtures have answered yet")
+                    Text("No lights have answered yet")
                         .font(LumenType.display(size: 20, weight: .bold))
-                    Text("Keep the scan open for five seconds. If discovery stays unavailable, continue with an empty room or explore the isolated Sample Room; you can add fixtures later.")
+                    Text("Keep the scan open for five seconds. If discovery stays unavailable, continue with an empty room or explore the isolated Sample Room; you can add lights later.")
                         .font(LumenType.body(size: 12))
                         .foregroundStyle(Lumen.meter)
                         .multilineTextAlignment(.center)
@@ -1962,7 +1985,7 @@ private struct AddOrRepairRoomView: View {
                 .disabled(device.isStale)
 
             HStack(spacing: 8) {
-                TextField("Fixture name", text: fixtureNameBinding(device))
+                TextField("Light name", text: fixtureNameBinding(device))
                     .textFieldStyle(.roundedBorder)
                     .onSubmit { saveFixtureName(device) }
                 Button("Save name") { saveFixtureName(device) }
@@ -1986,11 +2009,11 @@ private struct AddOrRepairRoomView: View {
         )
     }
 
-    private var placeStep: some View {
+    private var assignStep: some View {
         VStack(alignment: .leading, spacing: 18) {
             stepHeading(
-                "Place on the canvas",
-                "Choose a room, then drag the selected fixtures toward where they sit. Placement is a memory aid, not a calibrated floor plan."
+                "Choose a room",
+                "Assign the selected lights to the room where you want to control them together. Their position inside the room is not needed."
             )
 
             HStack(spacing: 10) {
@@ -2009,14 +2032,48 @@ private struct AddOrRepairRoomView: View {
             }
 
             if let targetRoom {
-                DirectionARoomField(
-                    room: targetRoom,
-                    lights: placementLights,
-                    selection: $selectedIDs
-                )
-                .frame(height: 360)
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Text("Lights in \(targetRoom.name)")
+                            .font(LumenType.display(size: 19, weight: .bold))
+                        Spacer()
+                        Text("\(roomLights.count)")
+                            .font(LumenType.readout(size: 12))
+                            .foregroundStyle(Lumen.meter)
+                    }
+                    if roomLights.isEmpty {
+                        Text("This room will start empty. You can add lights later.")
+                            .font(LumenType.body(size: 13))
+                            .foregroundStyle(Lumen.meter)
+                    } else {
+                        ForEach(roomLights) { device in
+                            HStack(spacing: 11) {
+                                LumenLens(color: device.color, isOn: device.isOn, size: 34,
+                                          isStale: device.isStale, level: device.brightness)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(device.label)
+                                        .font(LumenType.body(size: 13, weight: .semibold))
+                                    Text(targetRoom.lightIDs.contains(device.id)
+                                         ? "Already in this room"
+                                         : "Will be added")
+                                        .font(LumenType.body(size: 11))
+                                        .foregroundStyle(Lumen.meter)
+                                }
+                                Spacer()
+                                Image(systemName: targetRoom.lightIDs.contains(device.id)
+                                      ? "checkmark.circle.fill" : "plus.circle.fill")
+                                    .foregroundStyle(targetRoom.lightIDs.contains(device.id)
+                                                     ? Lumen.verdigris : Lumen.ember)
+                            }
+                            .padding(11)
+                            .background(Lumen.canvas, in: RoundedRectangle(cornerRadius: 9))
+                        }
+                    }
+                }
+                .padding(14)
+                .background(Lumen.floor, in: RoundedRectangle(cornerRadius: 12))
             } else {
-                Text("Choose or create the room that contains these fixtures.")
+                Text("Choose or create the room that should contain these lights.")
                     .font(LumenType.body(size: 13))
                     .foregroundStyle(Lumen.meter)
                     .frame(maxWidth: .infinity, minHeight: 260)
@@ -2029,7 +2086,7 @@ private struct AddOrRepairRoomView: View {
         VStack(alignment: .leading, spacing: 18) {
             stepHeading(
                 "Verify the room",
-                "The room is ready when every fixture answers and appears where you expect it. Failures stay beside the fixture so repair remains local."
+                "The room is ready when every light is listed and responding. Failures stay beside the light so repair remains local."
             )
             if let targetRoom {
                 ForEach(manager.devices(in: targetRoom)) { device in
@@ -2086,7 +2143,7 @@ private struct AddOrRepairRoomView: View {
                 selectedCount: selectedIDs.count,
                 discoveredCount: manager.devices.count
             )
-        case .place: return targetRoomID != nil
+        case .assign: return targetRoomID != nil
         case .verify: return true
         }
     }
@@ -2102,9 +2159,9 @@ private struct AddOrRepairRoomView: View {
         case .prepare: return "Discovery begins in the foreground"
         case .find:
             return manager.devices.isEmpty
-                ? "Fixtures can be added later"
-                : "\(selectedIDs.count) fixture\(selectedIDs.count == 1 ? "" : "s") to place"
-        case .place: return targetRoom?.name ?? "Choose a room"
+                ? "Lights can be added later"
+                : "\(selectedIDs.count) light\(selectedIDs.count == 1 ? "" : "s") to assign"
+        case .assign: return targetRoom?.name ?? "Choose a room"
         case .verify: return "Best-effort confirmation from physical fixtures"
         }
     }
@@ -2117,19 +2174,10 @@ private struct AddOrRepairRoomView: View {
         case .find:
             manager.endSustainedIdentify()
             if targetRoomID == nil { targetRoomID = selectedRoomID ?? manager.rooms.first?.id }
-            step = .place
-        case .place:
+            step = .assign
+        case .assign:
             guard let targetRoomID else { return }
-            if let targetRoom {
-                let defaults = PlanLayout.defaultAnchors(count: placementLights.count)
-                for (index, device) in placementLights.enumerated() {
-                    guard targetRoom.fixtureAnchors[device.id] == nil,
-                          defaults.indices.contains(index) else { continue }
-                    manager.setPlanAnchor(defaults[index], for: device.id, in: targetRoomID)
-                }
-            }
             manager.assign(lightIDs: selectedIDs, toRoom: targetRoomID)
-            manager.ensurePlanLayout()
             selectedRoomID = targetRoomID
             step = .verify
         case .verify:
@@ -2565,7 +2613,7 @@ private struct BasicFixtureEditor: View {
     }
 }
 
-// MARK: - Shared Room Canvas support
+// MARK: - Shared room-control support
 
 /// A room aggregate observes its fixtures directly because discovery and
 /// command reconciliation publish through `LightDevice`, not through the
@@ -2668,7 +2716,7 @@ struct RoomCanvasSettingsView: View {
                         .font(LumenType.instrumentLabel(size: 10))
                         .tracking(1.4)
                         .foregroundStyle(Lumen.ember)
-                    Text("Room Canvas")
+                    Text("Room Controls")
                         .font(LumenType.display(size: 30, weight: .bold))
                     Text("A small set of preferences for immediate, local room control.")
                         .font(LumenType.body(size: 13))
@@ -2705,7 +2753,7 @@ struct RoomCanvasSettingsView: View {
                         Button("Restore…") { importingBackup = true }
                             .buttonStyle(.bordered)
                     }
-                    Text("Exports a portable JSON backup of rooms, Looks, fixture names, favorites, and supported spatial layouts. Restoring asks before replacing the current configuration.")
+                    Text("Exports a portable JSON backup of rooms, Looks, light names, favorites, and supported per-light layouts. Restoring asks before replacing the current configuration.")
                         .font(LumenType.body(size: 11))
                         .foregroundStyle(Lumen.meter)
                     if let backupStatus {

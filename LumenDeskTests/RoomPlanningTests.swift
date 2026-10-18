@@ -271,7 +271,7 @@ final class RoomCommissioningProgressTests: XCTestCase {
 
 final class RoomWorkspaceTests: XCTestCase {
     @MainActor
-    func testRoomCanvasSessionKeepsSelectionInsideTheOpenRoom() {
+    func testRoomSessionUsesWholeRoomByDefaultAndClearsSelectionOnRoomChange() {
         let roomA = Room(name: "A", lightIDs: ["a", "b"])
         let roomB = Room(name: "B", lightIDs: ["c"])
         let devices = [
@@ -283,17 +283,24 @@ final class RoomWorkspaceTests: XCTestCase {
 
         session.reconcile(rooms: [roomA, roomB], devices: devices)
         XCTAssertEqual(session.selectedRoomID, roomA.id)
-        XCTAssertEqual(session.selectedFixtureIDs, ["a", "b"])
+        XCTAssertTrue(session.selectedFixtureIDs.isEmpty,
+                      "no explicit selection means control the whole room")
+        XCTAssertTrue(session.controlsWholeRoom)
 
-        session.select(roomB, devices: [devices[2]])
-        XCTAssertEqual(session.selectedFixtureIDs, ["c"])
+        session.selectedFixtureIDs = ["a"]
+        session.controlsWholeRoom = false
+        session.select(roomB)
+        XCTAssertTrue(session.selectedFixtureIDs.isEmpty)
+        XCTAssertTrue(session.controlsWholeRoom)
         session.reconcile(rooms: [roomA], devices: Array(devices.prefix(2)))
         XCTAssertEqual(session.selectedRoomID, roomA.id)
-        XCTAssertEqual(session.selectedFixtureIDs, ["a", "b"])
+        XCTAssertTrue(session.selectedFixtureIDs.isEmpty)
+        XCTAssertTrue(session.controlsWholeRoom)
 
-        XCTAssertTrue(session.select(roomID: roomB.id, rooms: [roomA, roomB], devices: devices))
+        XCTAssertTrue(session.select(roomID: roomB.id, rooms: [roomA, roomB]))
         XCTAssertEqual(session.selectedRoomID, roomB.id)
-        XCTAssertEqual(session.selectedFixtureIDs, ["c"])
+        XCTAssertTrue(session.selectedFixtureIDs.isEmpty)
+        XCTAssertTrue(session.controlsWholeRoom)
     }
 
     @MainActor
@@ -303,14 +310,31 @@ final class RoomWorkspaceTests: XCTestCase {
         let b = LightDevice(id: "b", brand: .govee, backendID: "b", name: "B", address: "test")
         let session = RoomCanvasSessionStore()
 
-        session.select(room, devices: [a, b])
+        session.select(room)
         session.selectedFixtureIDs = ["a"]
+        session.controlsWholeRoom = false
         let afterMove = Room(id: room.id, name: room.name, lightIDs: ["b"])
         session.reconcile(rooms: [afterMove], devices: [b])
 
         XCTAssertEqual(session.selectedFixtureIDs, ["a"],
                        "a removed fixture remains as an empty-target sentinel")
         XCTAssertTrue(session.selectedFixtureIDs.intersection(afterMove.lightIDs).isEmpty)
+    }
+
+    @MainActor
+    func testEmptyExplicitSelectionDoesNotBecomeWholeRoomControl() {
+        let room = Room(name: "Room", lightIDs: ["a"])
+        let light = LightDevice(id: "a", brand: .lifx, backendID: "a",
+                                name: "A", address: "test")
+        let session = RoomCanvasSessionStore()
+
+        session.select(room)
+        session.controlsWholeRoom = false
+        session.selectedFixtureIDs = []
+        session.reconcile(rooms: [room], devices: [light])
+
+        XCTAssertFalse(session.controlsWholeRoom)
+        XCTAssertTrue(session.selectedFixtureIDs.isEmpty)
     }
 
     @MainActor

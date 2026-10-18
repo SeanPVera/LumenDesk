@@ -1,30 +1,32 @@
 # LumenDesk
 
-LumenDesk is a native SwiftUI room-lighting instrument for macOS, iPhone, and
-iPad. Direction A, **Room Canvas**, makes the physical room the primary
-interface: select and place fixtures directly, shape one composition across
-unequal hardware, see what each light confirmed, and restore the room when an
-experiment ends.
+LumenDesk is a native SwiftUI room-lighting controller for macOS, iPhone, and
+iPad. Lights are organized by room, with immediate controls for the whole room,
+any selected group, or one light at a time. It shapes one composition across
+unequal hardware, shows what each light confirmed, and restores the room when
+an experiment ends.
 
 There is no account, cloud authority, browser client, local web server, or
 listening service. LumenDesk talks directly to supported fixtures while the app
 is active.
 
-## Room Canvas
+## Room controls
 
 - A room-only navigator replaces feature-level destinations.
-- The live canvas shows literal fixture colour, output level, reachability, and
-  relative placement.
-- Selection exposes shared power, brightness, white point, and colour controls.
+- Each room presents a clear list of its lights with individual power,
+  brightness, colour, status, and detail controls.
+- The room panel exposes shared power, brightness, white point, and colour
+  controls; multi-select applies those same controls to any subset.
+- Position inside a room is deliberately not modeled or shown.
 - Segment, matrix, and panel tools appear only for a fixture with that
   capability.
 - Status is explicit: **Confirmed**, **Pending**, **Changed elsewhere**, or
   **Needs attention**. Every state uses wording, geometry, and colour.
-- **Add or repair room** is one Prepare → Find/identify → Place → Verify flow.
+- **Add or repair room** is one Prepare → Find/identify → Room → Verify flow.
 
 ## Looks
 
-A Look is a saved room composition. The canvas includes immediate Evening,
+A Look is a saved room composition. The room workspace includes immediate Evening,
 Reading, Movie, and Bright templates, saved Looks, and **Save current**.
 The built-in collection includes 48 curated static themes, all rendered through
 the same capability-aware planner.
@@ -110,7 +112,8 @@ still require device-level verification.
 
 ## Architecture
 
-- `RoomCanvasView.swift` — room session, live canvas, selection inspector,
+- `RoomCanvasView.swift` — room session, group and individual controls,
+  selection inspector,
   Looks, commissioning, and simplified Live UI
 - `ThemePlanner.swift` — pure, deterministic capability-aware Look planning
 - `LightManager.swift` — foreground command transactions, recovery snapshots,

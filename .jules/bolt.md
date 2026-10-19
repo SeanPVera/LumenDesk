@@ -9,3 +9,7 @@
 ## 2026-10-12 - Backward Day-Stepping for Schedule Evaluation
 **Learning:** Replacing minute-by-minute scanning in schedule evaluation with backward day-stepping reduces complexity from $O(\text{minutes})$ to $O(\text{days})$. Re-constructing `Date` instances per calendar day instead of mutating a single `Date` object avoids hour drift caused by JS Date hour-adjustments across DST spring-forward transitions.
 **Action:** In date/time interval matching, iterate over candidate days and re-instantiate local-time components per candidate date to safely handle DST boundaries without minute-walking.
+
+## 2026-10-18 - Index-Aligned State Arrays in Audio Render Loop
+**Learning:** In 60–120 Hz audio lighting render loops (`MusicChoreographyEngine`), tracking per-target envelope state via string-keyed dictionaries (`[String: Double]`) incurs heap allocations from string key formatting and hash-table overhead on every target in every frame. Index-aligning state tracking arrays (`[Double?]`) directly with cached target arrays eliminates all string key generation and hash map lookups per frame, while mapping through a lightweight `TargetKey` struct on target expansion preserves smooth transitions across layout edits.
+**Action:** In high-frequency rendering or audio frame loops, replace dictionary lookup keys with index-aligned arrays aligned with cached target descriptors, handling layout invalidations out-of-band during target re-expansion.

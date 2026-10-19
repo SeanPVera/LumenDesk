@@ -152,9 +152,10 @@ extension LightManager {
     func sendRazerLayout(_ device: LightDevice, state: GoveeSegmentState) {
         guard demoWorkspaceController.allowsLiveNetworking else { return }
         let showable = (segmentStudioProfile(for: device) ?? .generic).enforcingZoneLimit(state)
+        let masterScale = device.brightness > 0.01 ? boundedBrightness(device.brightness) : 1.0
         let colors = showable.colors.map { segment -> (r: Int, g: Int, b: Int) in
             let rgb = segment.renderedRGB255
-            let scale = segment.brightness
+            let scale = segment.brightness * masterScale
             return (r: Int((Double(rgb.r) * scale).rounded()),
                     g: Int((Double(rgb.g) * scale).rounded()),
                     b: Int((Double(rgb.b) * scale).rounded()))

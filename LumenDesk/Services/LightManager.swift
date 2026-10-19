@@ -1592,6 +1592,7 @@ final class LightManager: ObservableObject {
                 self.nanoleaf.setState(device.backendID, ["brightness": ["value": NanoleafProtocol.percent(value)]])
             case .govee:
                 self.govee?.setBrightness(deviceID: device.backendID, percent: Int(value * 100))
+                self.reassertStreamHoldIfNeeded(device)
             }
         }
     }
@@ -1602,6 +1603,30 @@ final class LightManager: ObservableObject {
         debounce: TimeInterval = 0.08,
         transitionDuration: TimeInterval = 0.2
     ) {
+        if device.brand == .govee,
+           let profile = segmentProfile(for: device),
+           profile.limitsSimultaneousZones,
+           var active = activeSegmentState(for: device.id) {
+            let targets = active.poweredSegments.isEmpty ? Array(active.colors.indices) : active.poweredSegments
+            for index in targets where active.colors.indices.contains(index) {
+                let existing = active.colors[index]
+                active.colors[index] = GoveeSegmentColor(
+                    color: color,
+                    brightness: existing.brightness,
+                    isOn: existing.isOn
+                )
+            }
+            active = profile.enforcingZoneLimit(active)
+            active.isActive = true
+            goveeSegmentStates[device.id] = active
+            persistApplicationState()
+            device.color = active.blendedColor
+            noteSegmentCommand(device, summary: "Changing lamp zone color")
+            if demoWorkspaceController.allowsLiveNetworking {
+                assertStreamHold(device, state: active)
+            }
+            return
+        }
         if device.brand == .lifx { markLIFXMatrixInactive(device) }
         expectColor(device, color: color)
         expectNanoleafAppearance(device, appearance: .init(colorMode: "hs"))

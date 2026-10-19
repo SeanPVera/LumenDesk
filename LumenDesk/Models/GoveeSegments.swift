@@ -216,6 +216,13 @@ struct GoveeSegmentProfile {
         add("H7020", .stringLights, 15, false, stream: true, stringStyle: .bulb)
         add("H7021", .stringLights, 30, false, stream: true, stringStyle: .bulb)
         add("H7028", .stringLights, 15, false, stream: true, stringStyle: .bulb)
+        // Indoor RGBIC string downlights (5 pods per meter: 2 m = 10, 3 m = 15,
+        // 5 m = 25, 10 m = 50). Count stays adjustable for cut or extended runs,
+        // and stream hold keeps per-pod colors live over LAN.
+        add("H608A", .stringLights, 25, true, stream: true, stringStyle: .bulb)
+        add("H608B", .stringLights, 15, true, stream: true, stringStyle: .bulb)
+        add("H608C", .stringLights, 10, true, stream: true, stringStyle: .bulb)
+        add("H608D", .stringLights, 50, true, stream: true, stringStyle: .bulb)
         // H70B1 is a 20-column curtain, not a one-dimensional string. The LAN
         // stream addresses columns; the 520-bead pixel canvas remains a Govee
         // Home feature.
@@ -245,6 +252,7 @@ struct GoveeSegmentProfile {
         add("H61A", .neonRope, 20, true)
         add("H61B", .neonRope, 20, true)
         add("H61D", .neonRope, 20, true)
+        add("H608", .stringLights, 15, true, stream: true, stringStyle: .bulb)
         add("H70C", .stringLights, 20, false, stream: true, stringStyle: .bead)
         add("H70B", .curtain, 20, false, stream: true, fixed: true)
         add("H702", .stringLights, 15, false, stream: true, stringStyle: .bulb)

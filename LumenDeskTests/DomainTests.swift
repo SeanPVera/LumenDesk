@@ -198,6 +198,21 @@ final class DomainTests: XCTestCase {
         XCTAssertEqual(h7028.defaultSegmentCount, 15)
         XCTAssertEqual(h7028.stringLightStyle, .bulb)
         XCTAssertFalse(h7028.hasFixedSegmentCount)
+
+        let h608b = try XCTUnwrap(GoveeSegmentProfile.detect(sku: "H608B"))
+        XCTAssertEqual(h608b.layout, .stringLights)
+        XCTAssertEqual(h608b.defaultSegmentCount, 15)
+        XCTAssertTrue(h608b.supportsGradient)
+        XCTAssertTrue(h608b.appliesViaStream)
+        XCTAssertFalse(h608b.hasFixedSegmentCount)
+        XCTAssertEqual(h608b.stringLightStyle, .bulb)
+
+        let h608a = try XCTUnwrap(GoveeSegmentProfile.detect(sku: "H608A"))
+        XCTAssertEqual(h608a.defaultSegmentCount, 25)
+        let h608c = try XCTUnwrap(GoveeSegmentProfile.detect(sku: "H608C"))
+        XCTAssertEqual(h608c.defaultSegmentCount, 10)
+        let h608d = try XCTUnwrap(GoveeSegmentProfile.detect(sku: "H608D"))
+        XCTAssertEqual(h608d.defaultSegmentCount, 50)
     }
 
     func testCurtainProfileIsNotMisclassifiedAsAString() throws {
@@ -307,6 +322,19 @@ final class DomainTests: XCTestCase {
         XCTAssertEqual(stored.poweredCount, 2)
         XCTAssertEqual(stored.poweredSegments, [0, 1])
         XCTAssertEqual(manager.segmentState(for: device).poweredSegments, [0, 1])
+
+        // Picking a whole-fixture color while Uplighter zones [0, 2] are active
+        // paints those active zones without dropping stream-hold zone selection.
+        var upperAndLower = stored
+        upperAndLower.setPoweredSegments([0, 2])
+        manager.applySegments(device, state: upperAndLower)
+        manager.sendColor(device, color: Color(red: 0, green: 1, blue: 0))
+
+        let repainted = try XCTUnwrap(manager.activeSegmentState(for: device.id))
+        XCTAssertEqual(repainted.poweredSegments, [0, 2])
+        XCTAssertEqual(repainted.colors[0].green, 1, accuracy: 0.01)
+        XCTAssertEqual(repainted.colors[2].green, 1, accuracy: 0.01)
+        XCTAssertFalse(repainted.colors[1].isOn)
     }
 
     @MainActor

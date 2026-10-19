@@ -1038,6 +1038,8 @@ private struct RoomSelectionInspector: View {
                         .background(Lumen.graphite.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
                     }
 
+                    uplighterZoneControls
+
                     capabilityDetail
 
                     Button(action: compose) {
@@ -1098,6 +1100,130 @@ private struct RoomSelectionInspector: View {
     }
 
     @ViewBuilder
+    private var uplighterZoneControls: some View {
+        if targets.count == 1,
+           let device = targets.first,
+           let profile = manager.segmentProfile(for: device),
+           profile.layout == .lamp,
+           profile.limitsSimultaneousZones {
+            let state = profile.enforcingZoneLimit(manager.segmentState(for: device))
+            let zoneLimit = profile.simultaneousZoneLimit ?? 2
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("Lamp zones")
+                        .font(LumenType.instrumentLabel(size: 10))
+                        .tracking(1)
+                        .foregroundStyle(Lumen.meter)
+                    Spacer()
+                    Text("\(state.poweredCount) of \(state.segmentCount) lit (max \(zoneLimit))")
+                        .font(LumenType.readout(size: 11))
+                        .foregroundStyle(Lumen.meter)
+                }
+
+                if !profile.zoneCombinations.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(Array(profile.zoneCombinations.enumerated()), id: \.offset) { _, zones in
+                                let isCurrent = state.poweredSegments == zones
+                                let title = zones.map { profile.zoneShortName($0) }.joined(separator: " + ")
+                                Button(title) {
+                                    var next = state
+                                    next.setPoweredSegments(zones)
+                                    manager.applySegments(device, state: next)
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                                .tint(isCurrent ? Lumen.ember : nil)
+                            }
+                            ForEach(0..<min(profile.zoneNames.count, state.segmentCount), id: \.self) { zone in
+                                let isCurrent = state.poweredSegments == [zone]
+                                Button("\(profile.zoneShortName(zone)) only") {
+                                    var next = state
+                                    next.setPoweredSegments([zone])
+                                    manager.applySegments(device, state: next)
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                                .tint(isCurrent ? Lumen.ember : nil)
+                            }
+                        }
+                    }
+                }
+
+                ForEach(0..<min(profile.zoneNames.count, state.segmentCount), id: \.self) { index in
+                    let segment = state.colors[index]
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 8) {
+                            Circle()
+                                .fill(segment.isOn ? segment.litColor : segment.color.opacity(0.25))
+                                .frame(width: 12, height: 12)
+                            Text(profile.zoneName(index))
+                                .font(LumenType.body(size: 12, weight: .semibold))
+                                .foregroundStyle(segment.isOn ? Lumen.graphite : Lumen.meter)
+                            Spacer()
+                            ColorPicker("", selection: Binding(
+                                get: { segment.color },
+                                set: { newColor in
+                                    var next = state
+                                    next.colors[index] = GoveeSegmentColor(
+                                        color: newColor,
+                                        brightness: segment.brightness,
+                                        isOn: segment.isOn
+                                    )
+                                    manager.applySegments(device, state: next)
+                                }
+                            ), supportsOpacity: false)
+                            .labelsHidden()
+                            .accessibilityLabel("\(profile.zoneName(index)) colour")
+
+                            Toggle("", isOn: Binding(
+                                get: { segment.isOn },
+                                set: { isOn in
+                                    var next = state
+                                    let keeping = isOn
+                                        ? ([index] + state.poweredSegments.filter { $0 != index })
+                                        : state.poweredSegments.filter { $0 != index }
+                                    next.setPower(isOn, at: index)
+                                    next = profile.enforcingZoneLimit(next, keeping: keeping)
+                                    manager.applySegments(device, state: next)
+                                }
+                            ))
+                            .toggleStyle(.switch)
+                            .labelsHidden()
+                            .controlSize(.small)
+                            .accessibilityLabel("\(profile.zoneName(index)) power")
+                        }
+
+                        HStack(spacing: 8) {
+                            Slider(
+                                value: Binding(
+                                    get: { segment.brightness },
+                                    set: { newBrightness in
+                                        var next = state
+                                        next.colors[index].brightness = newBrightness
+                                        manager.applySegments(device, state: next)
+                                    }
+                                ),
+                                in: 0.05...1.0
+                            )
+                            .controlSize(.small)
+                            .accessibilityLabel("\(profile.zoneName(index)) brightness")
+                            Text("\(Int((segment.brightness * 100).rounded()))%")
+                                .font(LumenType.readout(size: 11))
+                                .foregroundStyle(Lumen.meter)
+                                .frame(width: 34, alignment: .trailing)
+                        }
+                    }
+                    .padding(8)
+                    .background(Lumen.floor.opacity(0.75), in: RoundedRectangle(cornerRadius: 8))
+                }
+            }
+            .padding(12)
+            .background(Lumen.canvas.opacity(0.8), in: RoundedRectangle(cornerRadius: 10))
+        }
+    }
+
+    @ViewBuilder
     private var capabilityDetail: some View {
         if targets.count == 1, let device = targets.first {
             VStack(alignment: .leading, spacing: 8) {
@@ -1128,6 +1254,12 @@ private struct RoomSelectionInspector: View {
     }
 
     private func capabilityName(_ device: LightDevice) -> String {
+        if let profile = manager.segmentProfile(for: device), profile.layout == .lamp {
+            if let limit = profile.simultaneousZoneLimit {
+                return "\(profile.defaultSegmentCount) lamp zones · up to \(limit) lit"
+            }
+            return "\(profile.defaultSegmentCount) lamp zones"
+        }
         switch manager.themeCapability(for: device) {
         case .solid: return "Single colour · \(device.brand.displayName)"
         case .segments(let count, let gradient, _):
@@ -1156,6 +1288,9 @@ private struct RoomSelectionInspector: View {
     private func capabilityObject(_ device: LightDevice) -> String {
         if device.brand == .nanoleaf { return "panels" }
         if device.isLIFXLuna { return "matrix" }
+        if let profile = manager.segmentProfile(for: device) {
+            return "\(profile.unitSingularName)s"
+        }
         return "segments"
     }
 }

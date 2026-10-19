@@ -4,7 +4,19 @@ What changed in each LumenDesk release. The release workflow copies the
 section whose heading matches the tag into that tag's GitHub release, above
 the install steps, so write each entry for someone deciding whether to update.
 
-## Unreleased
+## 2.0 - 2026-10-18
+
+### Direction B — Spatial and live audio
+
+- Live view adds Subtle/Balanced/Punchy reactivity, spatial spread (Unified,
+  Fixture Wave, Left/Right Split, Radial Pulse), Sub/Mid/High meters, and Tap BPM.
+- Looks project across the room in 2D: matrices, RGBIC segments, and Nanoleaf
+  panels follow west-to-east, north-to-south, diagonal, and radial sweeps.
+- Room schedules return with a manager in room settings and an active-schedule
+  indicator in the menu bar, which is now a compact live room companion.
+- Persistence uses SQLite WAL with a lock-free read path and one-time JSON
+  migration. Govee lights added by IP or restored from cache respond
+  immediately, and command recovery no longer drops retries.
 
 ### Direction A — Room Canvas
 

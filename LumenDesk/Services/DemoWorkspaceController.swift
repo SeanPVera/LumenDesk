@@ -49,9 +49,6 @@ final class DemoWorkspaceController {
         var activityEvents: [ActivityEvent]
         var lastSceneResult: SceneApplicationResult?
         var favoriteOrder: [FavoriteReference]
-        var parliamentMembers: [ParliamentMember]
-        var parliamentSessions: [ParliamentSession]
-        var sceneCertifications: [SceneCertification]
         var recentColors: [RecentColor]
         var discoveryChanges: [DiscoveryChange]
         var scheduleState: ScheduleEngine.State
@@ -252,9 +249,6 @@ final class DemoWorkspaceController {
         workspace.musicModeConfiguration.usesSyntheticDemoPattern = true
         workspace.fixtureTopologies = [:]
         workspace.activityEvents = []
-        workspace.parliamentMembers = []
-        workspace.parliamentSessions = []
-        workspace.sceneCertifications = []
         workspace.recentColors = []
         workspace.scheduleState = ScheduleEngine.State()
         workspace.sceneRevisions = []

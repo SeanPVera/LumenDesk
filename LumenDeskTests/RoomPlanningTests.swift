@@ -655,6 +655,85 @@ final class RoomWorkspaceTests: XCTestCase {
         manager.setColor(deviceIDs: [a.id], color: .blue)
         XCTAssertFalse(manager.isWhiteMode(a.id))
     }
+
+    func testSpatialFieldVector2DInterpolationAndPlannerOrdering() throws {
+        let topLeft = PlanAnchor(x: 0.06, y: 0.06)
+        let bottomRight = PlanAnchor(x: 0.94, y: 0.94)
+        let center = PlanAnchor(x: 0.50, y: 0.50)
+
+        XCTAssertEqual(SpatialFieldVector.westToEast.fieldPosition(for: topLeft, fallbackIndex: 0, total: 2), 0, accuracy: 0.001)
+        XCTAssertEqual(SpatialFieldVector.westToEast.fieldPosition(for: bottomRight, fallbackIndex: 1, total: 2), 1, accuracy: 0.001)
+        XCTAssertEqual(SpatialFieldVector.northToSouth.fieldPosition(for: topLeft, fallbackIndex: 0, total: 2), 0, accuracy: 0.001)
+        XCTAssertEqual(SpatialFieldVector.northToSouth.fieldPosition(for: bottomRight, fallbackIndex: 1, total: 2), 1, accuracy: 0.001)
+        XCTAssertEqual(SpatialFieldVector.radialCenter.fieldPosition(for: center, fallbackIndex: 0, total: 2), 0, accuracy: 0.001)
+        XCTAssertEqual(SpatialFieldVector.radialCenter.fieldPosition(for: bottomRight, fallbackIndex: 1, total: 2), 1, accuracy: 0.001)
+        XCTAssertEqual(SpatialFieldVector.diagonalSweep.fieldPosition(for: topLeft, fallbackIndex: 0, total: 2), 0, accuracy: 0.001)
+        XCTAssertEqual(SpatialFieldVector.diagonalSweep.fieldPosition(for: bottomRight, fallbackIndex: 1, total: 2), 1, accuracy: 0.001)
+
+        let theme = try XCTUnwrap(LightingCatalog.themes.first)
+        let fixtures = [
+            ThemeFixture(id: "front-right", capability: .solid, kelvin: 3500, anchor: bottomRight),
+            ThemeFixture(id: "back-left", capability: .solid, kelvin: 3500, anchor: topLeft)
+        ]
+        for vector in SpatialFieldVector.allCases {
+            let planned = ThemePlanner.plan(theme, fixtures: fixtures, spatialField: vector)
+            XCTAssertEqual(planned.fixtures.count, 2)
+        }
+
+        // Sub-fixture 2D matrix projection: westToEast varies across columns while northToSouth varies across rows
+        let lunaFixture = ThemeFixture(id: "luna-8x8", capability: .matrix(productID: 215, width: 8, height: 8), kelvin: 3500, anchor: center)
+        let matrixWE = try XCTUnwrap(ThemePlanner.plan(theme, fixtures: [lunaFixture], spatialField: .westToEast).fixtures.first?.matrix)
+        let matrixNS = try XCTUnwrap(ThemePlanner.plan(theme, fixtures: [lunaFixture], spatialField: .northToSouth).fixtures.first?.matrix)
+        XCTAssertEqual(matrixWE.colors.count, 64)
+        XCTAssertEqual(matrixNS.colors.count, 64)
+        // In westToEast, row 0 col 0 != row 0 col 7, while row 0 col 0 == row 7 col 0
+        XCTAssertNotEqual(matrixWE.colors[0], matrixWE.colors[7])
+        XCTAssertEqual(matrixWE.colors[0], matrixWE.colors[7 * 8])
+        // In northToSouth, row 0 col 0 != row 7 col 0, while row 0 col 0 == row 0 col 7
+        XCTAssertNotEqual(matrixNS.colors[0], matrixNS.colors[7 * 8])
+        XCTAssertEqual(matrixNS.colors[0], matrixNS.colors[7])
+
+        // Sub-fixture radialCenter segment projection: symmetric outward from the center segment
+        let stripFixture = ThemeFixture(id: "strip-7", capability: .segments(count: 7, gradient: true, simultaneousZoneLimit: nil), kelvin: 3500, anchor: center)
+        let radialSegs = try XCTUnwrap(ThemePlanner.plan(theme, fixtures: [stripFixture], spatialField: .radialCenter).fixtures.first?.segments?.colors)
+        XCTAssertEqual(radialSegs.count, 7)
+        XCTAssertEqual(radialSegs[0], radialSegs[6], "Radial center projects symmetrically to outer strip ends")
+        XCTAssertEqual(radialSegs[1], radialSegs[5], "Radial center projects symmetrically to inner strip rings")
+    }
+
+    @MainActor
+    func testSaveLookFromPlanDoesNotMutateLiveRoomOutputAndUndoRestoresDeletedLook() throws {
+        let manager = LightManager(defaults: UserDefaults(suiteName: UUID().uuidString)!,
+                                   persistenceStore: temporaryPersistenceStore())
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+        let room = try XCTUnwrap(manager.rooms.first)
+        let firstDevice = try XCTUnwrap(manager.devices(in: room).first { !$0.isStale })
+        let originalColor = firstDevice.color
+        let initialSceneCount = manager.scenes.count
+        let theme = try XCTUnwrap(LightingCatalog.themes.last)
+
+        manager.saveLookFromPlan(
+            name: "Silent Plan Look",
+            theme: theme,
+            deviceIDs: Set(room.lightIDs),
+            in: .room(room.id),
+            paletteAssignments: nil,
+            spatialField: .diagonalSweep
+        )
+
+        XCTAssertEqual(manager.scenes.count, initialSceneCount + 1)
+        XCTAssertEqual(firstDevice.color, originalColor, "Saving a Look without live preview must not mutate active fixtures")
+
+        let savedLook = try XCTUnwrap(manager.scenes.last)
+        manager.deleteScene(savedLook.id)
+        manager.confirmationCoordinator.confirmPendingRequest()
+        XCTAssertFalse(manager.scenes.contains { $0.id == savedLook.id })
+        XCTAssertTrue(manager.canUndo)
+
+        manager.undo()
+        XCTAssertTrue(manager.scenes.contains { $0.id == savedLook.id }, "Cmd+Z undo() must restore a deleted Look")
+    }
 }
 
 final class EffectOwnershipRegressionTests: XCTestCase {

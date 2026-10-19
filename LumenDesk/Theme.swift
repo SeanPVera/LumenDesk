@@ -69,6 +69,7 @@ enum Lumen {
     static let chalk = graphite
     static let meter = Color(hex: 0x434A4E)
     static let muted = Color(hex: 0x52595D)
+    static let ash   = muted
     static let faint = Color(hex: 0x636663)
 
     /// Illumination. A lit key face, a fader cap, a powered legend.
@@ -86,8 +87,9 @@ enum Lumen {
 
     /// Status. Both are rare and both always ship with an icon, because hue
     /// alone cannot carry meaning on a screen full of coloured fixtures.
-    static let warn = Color(hex: 0xB16B19)
-    static let fail = Color(hex: 0xB83B31)
+    static let warn  = Color(hex: 0xB16B19)
+    static let ochre = warn
+    static let fail  = Color(hex: 0xB83B31)
 
     // MARK: Row wash
     //

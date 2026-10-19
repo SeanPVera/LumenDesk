@@ -344,6 +344,20 @@ enum ThemePlanner {
         return palette[min(index, palette.count - 1)]
     }
 
+    private static func roomWindow(
+        for fixture: ThemeFixture,
+        fixtureIndex: Int,
+        totalFixtures: Int,
+        spatialField: SpatialFieldVector
+    ) -> (center: Double, start: Double, end: Double) {
+        let center = spatialField.fieldPosition(for: fixture.anchor, fallbackIndex: fixtureIndex, total: totalFixtures)
+        let span = min(1.0, max(0.32, 1.0 / Double(max(1, totalFixtures))))
+        let halfSpan = span * 0.5
+        let startPos = max(0, min(1 - span, center - halfSpan))
+        let endPos = min(1, startPos + span)
+        return (center, startPos, endPos)
+    }
+
     private static func spreadForFixture(
         _ theme: LightingTheme,
         palette: [PaletteTone],
@@ -353,21 +367,24 @@ enum ThemePlanner {
         totalFixtures: Int,
         spatialField: SpatialFieldVector
     ) -> [PaletteTone] {
-        guard spatialField != .themeDefault, fixture.anchor != nil, palette.count > 1 else {
+        guard spatialField != .themeDefault, palette.count > 1 else {
             return spread(theme, palette: palette, over: count, fixtureIndex: fixtureIndex)
         }
         let safeCount = max(1, count)
-        let center = spatialField.fieldPosition(for: fixture.anchor, fallbackIndex: fixtureIndex, total: totalFixtures)
-        let span = min(1.0, max(0.32, 1.0 / Double(max(1, totalFixtures))))
-        let halfSpan = span * 0.5
-        let startPos = max(0, min(1 - span, center - halfSpan))
-        let endPos = min(1, startPos + span)
+        let window = roomWindow(for: fixture, fixtureIndex: fixtureIndex, totalFixtures: totalFixtures, spatialField: spatialField)
         let stops = max(2, min(safeCount, maximumGradientStops))
         return (0..<safeCount).map { index in
-            guard safeCount > 1 else { return PaletteTone.ramp(palette, position: center) }
+            guard safeCount > 1 else { return PaletteTone.ramp(palette, position: window.center) }
             let step = (index * (stops - 1) + (safeCount - 1) / 2) / (safeCount - 1)
             let localFraction = Double(step) / Double(stops - 1)
-            let fieldPos = startPos + (endPos - startPos) * localFraction
+            let shapedFraction: Double
+            if spatialField == .radialCenter {
+                // Radiate from the middle segment outward toward both ends of the strip/wall
+                shapedFraction = min(1, max(0, abs(localFraction - 0.5) * 2.0))
+            } else {
+                shapedFraction = localFraction
+            }
+            let fieldPos = window.start + (window.end - window.start) * shapedFraction
             return PaletteTone.ramp(palette, position: fieldPos)
         }
     }
@@ -417,12 +434,41 @@ enum ThemePlanner {
                                    spatialField: SpatialFieldVector) -> ThemeFixturePlan {
         var state = LIFXMatrixState(productID: productID, width: width, height: height, colors: [])
         let zones = state.activeZoneIndices
-        let tones = spreadForFixture(theme, palette: palette, fixture: fixture,
-                                     over: max(1, zones.count), fixtureIndex: position,
-                                     totalFixtures: total, spatialField: spatialField)
+        let window = roomWindow(for: fixture, fixtureIndex: position, totalFixtures: total, spatialField: spatialField)
+        let fallbackTones = spread(theme, palette: palette, over: max(1, zones.count), fixtureIndex: position)
+        var representativeTone: PaletteTone?
+
         for (offset, zone) in zones.enumerated() {
             guard state.colors.indices.contains(zone) else { continue }
-            let tone = tones[min(offset, tones.count - 1)]
+            let tone: PaletteTone
+            if spatialField != .themeDefault, palette.count > 1 {
+                let row = zone / max(1, state.width)
+                let col = zone % max(1, state.width)
+                let nx = state.width > 1 ? Double(col) / Double(state.width - 1) : 0.5
+                let ny = state.height > 1 ? Double(row) / Double(state.height - 1) : 0.5
+                let localPos: Double
+                switch spatialField {
+                case .themeDefault:
+                    localPos = Double(offset) / Double(max(1, zones.count - 1))
+                case .westToEast:
+                    localPos = nx
+                case .northToSouth:
+                    localPos = ny
+                case .diagonalSweep:
+                    localPos = min(1, max(0, (nx + ny) * 0.5))
+                case .radialCenter:
+                    let dx = nx - 0.5
+                    let dy = ny - 0.5
+                    localPos = min(1, max(0, sqrt(dx * dx + dy * dy) / sqrt(0.5)))
+                }
+                let fieldPos = window.start + (window.end - window.start) * localPos
+                tone = PaletteTone.ramp(palette, position: fieldPos)
+            } else {
+                tone = fallbackTones[min(offset, fallbackTones.count - 1)]
+            }
+            if representativeTone == nil {
+                representativeTone = tone
+            }
             // Matrix zones carry absolute brightness, so the theme's own level
             // folds in here rather than riding a separate device command.
             state.colors[zone] = LIFXMatrixColor(
@@ -434,7 +480,7 @@ enum ThemePlanner {
         }
         state.isActive = true
 
-        let tone = tones.first ?? palette[0]
+        let tone = representativeTone ?? fallbackTones.first ?? palette[0]
         return ThemeFixturePlan(
             fixtureID: fixture.id,
             tone: tone,

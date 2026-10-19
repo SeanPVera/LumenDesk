@@ -969,15 +969,8 @@ struct GoveeSegmentEditorView: View {
             ? nil
             : "\(zoneNameList(trimmed)) switched off — this lamp lights \(zoneLimit) \(unitName)s at a time. Pick the ones you want."
         zoneActivationOrder = draft.poweredSegments.reversed()
-        let initialTargets = initialSelection.isEmpty
-            ? Set(draft.poweredSegments.isEmpty ? Array(draft.colors.indices) : draft.poweredSegments)
-            : initialSelection
-        selection = SpectrumRegionSelection.targets(selected: initialTargets, available: Set(draft.colors.indices))
-        if let first = selection.sorted().first, draft.colors.indices.contains(first) {
-            paintColor = draft.colors[first].color
-        } else {
-            paintColor = device.color
-        }
+        selection = SpectrumRegionSelection.targets(selected: initialSelection, available: Set(draft.colors.indices))
+        paintColor = device.color
     }
 
     /// Switches one zone on or off. On fixtures with a zone limit, switching
@@ -999,12 +992,8 @@ struct GoveeSegmentEditorView: View {
         if on {
             selection.subtract(displaced)
             selection.insert(index)
-            paintColor = limited.colors[index].color
         } else {
             selection.remove(index)
-            if selection.isEmpty, !limited.poweredSegments.isEmpty {
-                selection = Set(limited.poweredSegments)
-            }
         }
     }
 
@@ -1014,9 +1003,6 @@ struct GoveeSegmentEditorView: View {
         zoneLimitNote = nil
         updateDraft { $0.setPoweredSegments(zones) }
         selection = Set(zones.filter { draft.colors.indices.contains($0) })
-        if let first = zones.first, draft.colors.indices.contains(first) {
-            paintColor = draft.colors[first].color
-        }
     }
 
     /// Central mutation point: every edit optionally persists the draft and
@@ -1079,10 +1065,6 @@ struct GoveeSegmentEditorView: View {
         if limitsZones, let presetZones = preset.poweredZones {
             zoneActivationOrder = presetZones.reversed()
             zoneLimitNote = nil
-            selection = Set(presetZones.filter { draft.colors.indices.contains($0) })
-            if let first = presetZones.first, draft.colors.indices.contains(first) {
-                paintColor = draft.colors[first].color
-            }
         }
     }
 
@@ -1097,7 +1079,7 @@ struct GoveeSegmentEditorView: View {
     private func revert() {
         guard let openingState else { return }
         updateDraft { $0 = openingState }
-        selection = Set(openingState.poweredSegments.isEmpty ? Array(openingState.colors.indices) : openingState.poweredSegments)
+        selection = []
         zoneActivationOrder = openingState.poweredSegments.reversed()
         zoneLimitNote = nil
     }

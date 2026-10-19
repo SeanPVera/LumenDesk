@@ -848,7 +848,7 @@ final class NanoleafClient: NSObject {
     }
 }
 
-extension NanoleafClient: NetServiceBrowserDelegate, NetServiceDelegate {
+extension NanoleafClient: @preconcurrency NetServiceBrowserDelegate, @preconcurrency NetServiceDelegate {
     func netServiceBrowser(_ browser: NetServiceBrowser, didFind service: NetService, moreComing: Bool) {
         guard !paused, browsers.contains(where: { $0 === browser }) else { return }
         services.append(service)

@@ -10,6 +10,11 @@
 		B100000000000000000001 /* LumenDeskApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000001 /* LumenDeskApp.swift */; };
 		B100000000000000000003 /* LightDevice.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000003 /* LightDevice.swift */; };
 		B100000000000000000004 /* LightManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000004 /* LightManager.swift */; };
+		B100000000000000000051 /* LightManager+Nanoleaf.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000051 /* LightManager+Nanoleaf.swift */; };
+		B100000000000000000052 /* LightManager+Transports.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000052 /* LightManager+Transports.swift */; };
+		B100000000000000000053 /* LightManager+Studios.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000053 /* LightManager+Studios.swift */; };
+		B100000000000000000054 /* LightManager+RoomsAndScenes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000054 /* LightManager+RoomsAndScenes.swift */; };
+		B100000000000000000055 /* LightManager+MusicAndState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000055 /* LightManager+MusicAndState.swift */; };
 		B100000000000000000005 /* UDPSocket.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000005 /* UDPSocket.swift */; };
 		B100000000000000000006 /* LIFXProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000006 /* LIFXProtocol.swift */; };
 		B100000000000000000007 /* LIFXClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000007 /* LIFXClient.swift */; };
@@ -17,19 +22,16 @@
 		B100000000000000000009 /* GoveeClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000009 /* GoveeClient.swift */; };
 		B10000000000000000000B /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000B /* Assets.xcassets */; };
 		B10000000000000000000C /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000C /* Preview Assets.xcassets */; };
-		B100000000000000000038 /* Fonts in Resources */ = {isa = PBXBuildFile; fileRef = A100000000000000000038 /* Fonts */; };
 		B100000000000000000010 /* Room.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000010 /* Room.swift */; };
 		B100000000000000000012 /* LightingScene.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000012 /* LightingScene.swift */; };
 		B100000000000000000015 /* ScheduleEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000015 /* ScheduleEntry.swift */; };
 		B100000000000000000016 /* MenuBarPopoverView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000016 /* MenuBarPopoverView.swift */; };
 		B100000000000000000018 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000018 /* Theme.swift */; };
-		B10000000000000000002E /* DesignControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000002E /* DesignControls.swift */; };
 		B10000000000000000001A /* LightingCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000001A /* LightingCatalog.swift */; };
 		B10000000000000000001B /* AudioLevelMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000001B /* AudioLevelMonitor.swift */; };
 		B10000000000000000001C /* UXEnhancements.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000001C /* UXEnhancements.swift */; };
 		B10000000000000000001E /* GoveeSegments.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000001E /* GoveeSegments.swift */; };
 		B10000000000000000001F /* GoveeSegmentEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000001F /* GoveeSegmentEditorView.swift */; };
-		B100000000000000000030 /* RoomPlanning.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000030 /* RoomPlanning.swift */; };
 		B100000000000000000021 /* DemoWorkspaceController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000021 /* DemoWorkspaceController.swift */; };
 		B100000000000000000022 /* ConfirmationCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000022 /* ConfirmationCoordinator.swift */; };
 		B100000000000000000023 /* ScheduleEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000023 /* ScheduleEngine.swift */; };
@@ -39,16 +41,22 @@
 		B100000000000000000027 /* MusicChoreographyEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000027 /* MusicChoreographyEngine.swift */; };
 		B100000000000000000028 /* MusicLightingRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000028 /* MusicLightingRenderer.swift */; };
 		B100000000000000000029 /* AudioReactiveSessionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000029 /* AudioReactiveSessionController.swift */; };
-		B10000000000000000002F /* BeatTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000002F /* BeatTracker.swift */; };
 		B10000000000000000002C /* LIFXMatrix.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000002C /* LIFXMatrix.swift */; };
 		B10000000000000000002D /* LIFXLunaEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000002D /* LIFXLunaEditorView.swift */; };
+		B10000000000000000002E /* DesignControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000002E /* DesignControls.swift */; };
+		B10000000000000000002F /* BeatTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000002F /* BeatTracker.swift */; };
+		B100000000000000000030 /* RoomPlanning.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000030 /* RoomPlanning.swift */; };
 		B100000000000000000033 /* ThemePalette.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000033 /* ThemePalette.swift */; };
 		B100000000000000000034 /* ThemePlanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000034 /* ThemePlanner.swift */; };
 		B100000000000000000035 /* BeatMap.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000035 /* BeatMap.swift */; };
 		B100000000000000000036 /* BeatMapCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000036 /* BeatMapCoordinator.swift */; };
 		B100000000000000000037 /* NowPlayingMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000037 /* NowPlayingMonitor.swift */; };
+		B100000000000000000038 /* Fonts in Resources */ = {isa = PBXBuildFile; fileRef = A100000000000000000038 /* Fonts */; };
 		B100000000000000000039 /* RoomCanvasView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000039 /* RoomCanvasView.swift */; };
 		B10000000000000000003A /* SQLiteStateDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000003A /* SQLiteStateDatabase.swift */; };
+		B10000000000000000003B /* LookComposerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000003B /* LookComposerView.swift */; };
+		B10000000000000000003C /* RoomLiveView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000003C /* RoomLiveView.swift */; };
+		B10000000000000000003D /* RoomCanvasSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000003D /* RoomCanvasSettingsView.swift */; };
 		B200000000000000000001 /* ProtocolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000001 /* ProtocolTests.swift */; };
 		B200000000000000000002 /* DomainTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000002 /* DomainTests.swift */; };
 		B200000000000000000003 /* NetworkUtilityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000003 /* NetworkUtilityTests.swift */; };
@@ -59,30 +67,30 @@
 		B200000000000000000008 /* CommandCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000008 /* CommandCoordinatorTests.swift */; };
 		B200000000000000000009 /* MusicModeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000009 /* MusicModeTests.swift */; };
 		B20000000000000000000A /* BeatTrackerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000A /* BeatTrackerTests.swift */; };
-		B20000000000000000000E /* BeatMapTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000E /* BeatMapTests.swift */; };
 		B20000000000000000000B /* RoomPlanningTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000B /* RoomPlanningTests.swift */; };
 		B20000000000000000000C /* LightingThemeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000C /* LightingThemeTests.swift */; };
 		B20000000000000000000D /* MusicChoreographyCachingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000D /* MusicChoreographyCachingTests.swift */; };
-		B300000000000000000000 /* NanoleafProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000000 /* NanoleafProtocol.swift */; };
-		B300000000000000000001 /* NanoleafClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000001 /* NanoleafClient.swift */; };
-		B300000000000000000002 /* NanoleafCredentialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000002 /* NanoleafCredentialStore.swift */; };
-		B300000000000000000003 /* NanoleafPairingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000003 /* NanoleafPairingView.swift */; };
+		B20000000000000000000E /* BeatMapTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000E /* BeatMapTests.swift */; };
+		B300000000000000000000 /* Services/Nanoleaf/NanoleafProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000000 /* Services/Nanoleaf/NanoleafProtocol.swift */; };
+		B300000000000000000001 /* Services/Nanoleaf/NanoleafClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000001 /* Services/Nanoleaf/NanoleafClient.swift */; };
+		B300000000000000000002 /* Services/Nanoleaf/NanoleafCredentialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000002 /* Services/Nanoleaf/NanoleafCredentialStore.swift */; };
+		B300000000000000000003 /* Views/NanoleafPairingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000003 /* Views/NanoleafPairingView.swift */; };
 		B300000000000000000004 /* NanoleafTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000004 /* NanoleafTests.swift */; };
-		B300000000000000000013 /* NanoleafShapesManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000013 /* NanoleafShapesManagerTests.swift */; };
-		B300000000000000000011 /* NanoleafShapesStudioView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000011 /* NanoleafShapesStudioView.swift */; };
-		B300000000000000000012 /* NanoleafSceneLibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000012 /* NanoleafSceneLibraryView.swift */; };
-		B300000000000000000005 /* LossyCodable.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000005 /* LossyCodable.swift */; };
-		B300000000000000000006 /* NanoleafLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000006 /* NanoleafLayout.swift */; };
-		B300000000000000000007 /* NanoleafGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000007 /* NanoleafGeometry.swift */; };
-		B300000000000000000008 /* NanoleafPanelDesign.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000008 /* NanoleafPanelDesign.swift */; };
-		B300000000000000000009 /* NanoleafEffects.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000009 /* NanoleafEffects.swift */; };
-		B30000000000000000000A /* NanoleafEvents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000A /* NanoleafEvents.swift */; };
-		B30000000000000000000B /* NanoleafShapesModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000B /* NanoleafShapesModels.swift */; };
-		B30000000000000000000C /* NanoleafShapesController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000C /* NanoleafShapesController.swift */; };
-		B30000000000000000000D /* NanoleafShapesCanvas.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000D /* NanoleafShapesCanvas.swift */; };
+		B300000000000000000005 /* Services/LossyCodable.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000005 /* Services/LossyCodable.swift */; };
+		B300000000000000000006 /* Services/Nanoleaf/NanoleafLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000006 /* Services/Nanoleaf/NanoleafLayout.swift */; };
+		B300000000000000000007 /* Services/Nanoleaf/NanoleafGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000007 /* Services/Nanoleaf/NanoleafGeometry.swift */; };
+		B300000000000000000008 /* Services/Nanoleaf/NanoleafPanelDesign.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000008 /* Services/Nanoleaf/NanoleafPanelDesign.swift */; };
+		B300000000000000000009 /* Services/Nanoleaf/NanoleafEffects.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000009 /* Services/Nanoleaf/NanoleafEffects.swift */; };
+		B30000000000000000000A /* Services/Nanoleaf/NanoleafEvents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000A /* Services/Nanoleaf/NanoleafEvents.swift */; };
+		B30000000000000000000B /* Services/Nanoleaf/NanoleafShapesModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000B /* Services/Nanoleaf/NanoleafShapesModels.swift */; };
+		B30000000000000000000C /* Services/Nanoleaf/NanoleafShapesController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000C /* Services/Nanoleaf/NanoleafShapesController.swift */; };
+		B30000000000000000000D /* Views/NanoleafShapesCanvas.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000D /* Views/NanoleafShapesCanvas.swift */; };
 		B30000000000000000000E /* NanoleafShapesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000E /* NanoleafShapesTests.swift */; };
 		B30000000000000000000F /* NanoleafShapesClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000F /* NanoleafShapesClientTests.swift */; };
 		B300000000000000000010 /* NanoleafShapesControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000010 /* NanoleafShapesControllerTests.swift */; };
+		B300000000000000000011 /* Views/NanoleafShapesStudioView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000011 /* Views/NanoleafShapesStudioView.swift */; };
+		B300000000000000000012 /* Views/NanoleafSceneLibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000012 /* Views/NanoleafSceneLibraryView.swift */; };
+		B300000000000000000013 /* NanoleafShapesManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000013 /* NanoleafShapesManagerTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -99,6 +107,11 @@
 		A100000000000000000001 /* LumenDeskApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LumenDeskApp.swift; sourceTree = "<group>"; };
 		A100000000000000000003 /* LightDevice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LightDevice.swift; sourceTree = "<group>"; };
 		A100000000000000000004 /* LightManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LightManager.swift; sourceTree = "<group>"; };
+		A100000000000000000051 /* LightManager+Nanoleaf.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LightManager+Nanoleaf.swift"; sourceTree = "<group>"; };
+		A100000000000000000052 /* LightManager+Transports.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LightManager+Transports.swift"; sourceTree = "<group>"; };
+		A100000000000000000053 /* LightManager+Studios.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LightManager+Studios.swift"; sourceTree = "<group>"; };
+		A100000000000000000054 /* LightManager+RoomsAndScenes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LightManager+RoomsAndScenes.swift"; sourceTree = "<group>"; };
+		A100000000000000000055 /* LightManager+MusicAndState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LightManager+MusicAndState.swift"; sourceTree = "<group>"; };
 		A100000000000000000005 /* UDPSocket.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UDPSocket.swift; sourceTree = "<group>"; };
 		A100000000000000000006 /* LIFXProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LIFXProtocol.swift; sourceTree = "<group>"; };
 		A100000000000000000007 /* LIFXClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LIFXClient.swift; sourceTree = "<group>"; };
@@ -113,13 +126,11 @@
 		A100000000000000000015 /* ScheduleEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleEntry.swift; sourceTree = "<group>"; };
 		A100000000000000000016 /* MenuBarPopoverView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarPopoverView.swift; sourceTree = "<group>"; };
 		A100000000000000000018 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
-		A10000000000000000002E /* DesignControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignControls.swift; sourceTree = "<group>"; };
 		A10000000000000000001A /* LightingCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LightingCatalog.swift; sourceTree = "<group>"; };
 		A10000000000000000001B /* AudioLevelMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioLevelMonitor.swift; sourceTree = "<group>"; };
 		A10000000000000000001C /* UXEnhancements.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UXEnhancements.swift; sourceTree = "<group>"; };
 		A10000000000000000001E /* GoveeSegments.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoveeSegments.swift; sourceTree = "<group>"; };
 		A10000000000000000001F /* GoveeSegmentEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoveeSegmentEditorView.swift; sourceTree = "<group>"; };
-		A100000000000000000030 /* RoomPlanning.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomPlanning.swift; sourceTree = "<group>"; };
 		A100000000000000000021 /* DemoWorkspaceController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoWorkspaceController.swift; sourceTree = "<group>"; };
 		A100000000000000000022 /* ConfirmationCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfirmationCoordinator.swift; sourceTree = "<group>"; };
 		A100000000000000000023 /* ScheduleEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleEngine.swift; sourceTree = "<group>"; };
@@ -129,9 +140,11 @@
 		A100000000000000000027 /* MusicChoreographyEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicChoreographyEngine.swift; sourceTree = "<group>"; };
 		A100000000000000000028 /* MusicLightingRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicLightingRenderer.swift; sourceTree = "<group>"; };
 		A100000000000000000029 /* AudioReactiveSessionController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioReactiveSessionController.swift; sourceTree = "<group>"; };
-		A10000000000000000002F /* BeatTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BeatTracker.swift; sourceTree = "<group>"; };
 		A10000000000000000002C /* LIFXMatrix.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LIFXMatrix.swift; sourceTree = "<group>"; };
 		A10000000000000000002D /* LIFXLunaEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LIFXLunaEditorView.swift; sourceTree = "<group>"; };
+		A10000000000000000002E /* DesignControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignControls.swift; sourceTree = "<group>"; };
+		A10000000000000000002F /* BeatTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BeatTracker.swift; sourceTree = "<group>"; };
+		A100000000000000000030 /* RoomPlanning.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomPlanning.swift; sourceTree = "<group>"; };
 		A100000000000000000033 /* ThemePalette.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemePalette.swift; sourceTree = "<group>"; };
 		A100000000000000000034 /* ThemePlanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemePlanner.swift; sourceTree = "<group>"; };
 		A100000000000000000035 /* BeatMap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BeatMap.swift; sourceTree = "<group>"; };
@@ -140,6 +153,9 @@
 		A100000000000000000038 /* Fonts */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Fonts; path = Resources/Fonts; sourceTree = "<group>"; };
 		A100000000000000000039 /* RoomCanvasView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCanvasView.swift; sourceTree = "<group>"; };
 		A10000000000000000003A /* SQLiteStateDatabase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SQLiteStateDatabase.swift; sourceTree = "<group>"; };
+		A10000000000000000003B /* LookComposerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LookComposerView.swift; sourceTree = "<group>"; };
+		A10000000000000000003C /* RoomLiveView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomLiveView.swift; sourceTree = "<group>"; };
+		A10000000000000000003D /* RoomCanvasSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCanvasSettingsView.swift; sourceTree = "<group>"; };
 		A100000000000000000099 /* LumenDesk.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LumenDesk.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A200000000000000000001 /* ProtocolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolTests.swift; sourceTree = "<group>"; };
 		A200000000000000000002 /* DomainTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DomainTests.swift; sourceTree = "<group>"; };
@@ -151,31 +167,31 @@
 		A200000000000000000008 /* CommandCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandCoordinatorTests.swift; sourceTree = "<group>"; };
 		A200000000000000000009 /* MusicModeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicModeTests.swift; sourceTree = "<group>"; };
 		A20000000000000000000A /* BeatTrackerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BeatTrackerTests.swift; sourceTree = "<group>"; };
-		A20000000000000000000E /* BeatMapTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BeatMapTests.swift; sourceTree = "<group>"; };
 		A20000000000000000000B /* RoomPlanningTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomPlanningTests.swift; sourceTree = "<group>"; };
 		A20000000000000000000C /* LightingThemeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LightingThemeTests.swift; sourceTree = "<group>"; };
 		A20000000000000000000D /* MusicChoreographyCachingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicChoreographyCachingTests.swift; sourceTree = "<group>"; };
+		A20000000000000000000E /* BeatMapTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BeatMapTests.swift; sourceTree = "<group>"; };
 		A200000000000000000099 /* LumenDeskTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LumenDeskTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		A300000000000000000000 /* NanoleafProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/Nanoleaf/NanoleafProtocol.swift; sourceTree = "<group>"; };
-		A300000000000000000001 /* NanoleafClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/Nanoleaf/NanoleafClient.swift; sourceTree = "<group>"; };
-		A300000000000000000002 /* NanoleafCredentialStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/Nanoleaf/NanoleafCredentialStore.swift; sourceTree = "<group>"; };
-		A300000000000000000003 /* NanoleafPairingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/NanoleafPairingView.swift; sourceTree = "<group>"; };
+		A300000000000000000000 /* Services/Nanoleaf/NanoleafProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/Nanoleaf/NanoleafProtocol.swift; sourceTree = "<group>"; };
+		A300000000000000000001 /* Services/Nanoleaf/NanoleafClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/Nanoleaf/NanoleafClient.swift; sourceTree = "<group>"; };
+		A300000000000000000002 /* Services/Nanoleaf/NanoleafCredentialStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/Nanoleaf/NanoleafCredentialStore.swift; sourceTree = "<group>"; };
+		A300000000000000000003 /* Views/NanoleafPairingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/NanoleafPairingView.swift; sourceTree = "<group>"; };
 		A300000000000000000004 /* NanoleafTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NanoleafTests.swift; sourceTree = "<group>"; };
-		A300000000000000000013 /* NanoleafShapesManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NanoleafShapesManagerTests.swift; sourceTree = "<group>"; };
-		A300000000000000000011 /* NanoleafShapesStudioView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/NanoleafShapesStudioView.swift; sourceTree = "<group>"; };
-		A300000000000000000012 /* NanoleafSceneLibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/NanoleafSceneLibraryView.swift; sourceTree = "<group>"; };
-		A300000000000000000005 /* LossyCodable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/LossyCodable.swift; sourceTree = "<group>"; };
-		A300000000000000000006 /* NanoleafLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/Nanoleaf/NanoleafLayout.swift; sourceTree = "<group>"; };
-		A300000000000000000007 /* NanoleafGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/Nanoleaf/NanoleafGeometry.swift; sourceTree = "<group>"; };
-		A300000000000000000008 /* NanoleafPanelDesign.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/Nanoleaf/NanoleafPanelDesign.swift; sourceTree = "<group>"; };
-		A300000000000000000009 /* NanoleafEffects.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/Nanoleaf/NanoleafEffects.swift; sourceTree = "<group>"; };
-		A30000000000000000000A /* NanoleafEvents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/Nanoleaf/NanoleafEvents.swift; sourceTree = "<group>"; };
-		A30000000000000000000B /* NanoleafShapesModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/Nanoleaf/NanoleafShapesModels.swift; sourceTree = "<group>"; };
-		A30000000000000000000C /* NanoleafShapesController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/Nanoleaf/NanoleafShapesController.swift; sourceTree = "<group>"; };
-		A30000000000000000000D /* NanoleafShapesCanvas.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/NanoleafShapesCanvas.swift; sourceTree = "<group>"; };
+		A300000000000000000005 /* Services/LossyCodable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/LossyCodable.swift; sourceTree = "<group>"; };
+		A300000000000000000006 /* Services/Nanoleaf/NanoleafLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/Nanoleaf/NanoleafLayout.swift; sourceTree = "<group>"; };
+		A300000000000000000007 /* Services/Nanoleaf/NanoleafGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/Nanoleaf/NanoleafGeometry.swift; sourceTree = "<group>"; };
+		A300000000000000000008 /* Services/Nanoleaf/NanoleafPanelDesign.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/Nanoleaf/NanoleafPanelDesign.swift; sourceTree = "<group>"; };
+		A300000000000000000009 /* Services/Nanoleaf/NanoleafEffects.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/Nanoleaf/NanoleafEffects.swift; sourceTree = "<group>"; };
+		A30000000000000000000A /* Services/Nanoleaf/NanoleafEvents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/Nanoleaf/NanoleafEvents.swift; sourceTree = "<group>"; };
+		A30000000000000000000B /* Services/Nanoleaf/NanoleafShapesModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/Nanoleaf/NanoleafShapesModels.swift; sourceTree = "<group>"; };
+		A30000000000000000000C /* Services/Nanoleaf/NanoleafShapesController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/Nanoleaf/NanoleafShapesController.swift; sourceTree = "<group>"; };
+		A30000000000000000000D /* Views/NanoleafShapesCanvas.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/NanoleafShapesCanvas.swift; sourceTree = "<group>"; };
 		A30000000000000000000E /* NanoleafShapesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NanoleafShapesTests.swift; sourceTree = "<group>"; };
 		A30000000000000000000F /* NanoleafShapesClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NanoleafShapesClientTests.swift; sourceTree = "<group>"; };
 		A300000000000000000010 /* NanoleafShapesControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NanoleafShapesControllerTests.swift; sourceTree = "<group>"; };
+		A300000000000000000011 /* Views/NanoleafShapesStudioView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/NanoleafShapesStudioView.swift; sourceTree = "<group>"; };
+		A300000000000000000012 /* Views/NanoleafSceneLibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/NanoleafSceneLibraryView.swift; sourceTree = "<group>"; };
+		A300000000000000000013 /* NanoleafShapesManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NanoleafShapesManagerTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -209,21 +225,21 @@
 		C100000000000000000002 /* LumenDesk */ = {
 			isa = PBXGroup;
 			children = (
-				A300000000000000000003 /* NanoleafPairingView.swift */,
-				A300000000000000000002 /* NanoleafCredentialStore.swift */,
-				A300000000000000000001 /* NanoleafClient.swift */,
-				A300000000000000000000 /* NanoleafProtocol.swift */,
-				A300000000000000000011 /* NanoleafShapesStudioView.swift */,
-				A300000000000000000012 /* NanoleafSceneLibraryView.swift */,
-				A300000000000000000005 /* LossyCodable.swift */,
-				A300000000000000000006 /* NanoleafLayout.swift */,
-				A300000000000000000007 /* NanoleafGeometry.swift */,
-				A300000000000000000008 /* NanoleafPanelDesign.swift */,
-				A300000000000000000009 /* NanoleafEffects.swift */,
-				A30000000000000000000A /* NanoleafEvents.swift */,
-				A30000000000000000000B /* NanoleafShapesModels.swift */,
-				A30000000000000000000C /* NanoleafShapesController.swift */,
-				A30000000000000000000D /* NanoleafShapesCanvas.swift */,
+				A300000000000000000003 /* Views/NanoleafPairingView.swift */,
+				A300000000000000000002 /* Services/Nanoleaf/NanoleafCredentialStore.swift */,
+				A300000000000000000001 /* Services/Nanoleaf/NanoleafClient.swift */,
+				A300000000000000000000 /* Services/Nanoleaf/NanoleafProtocol.swift */,
+				A300000000000000000011 /* Views/NanoleafShapesStudioView.swift */,
+				A300000000000000000012 /* Views/NanoleafSceneLibraryView.swift */,
+				A300000000000000000005 /* Services/LossyCodable.swift */,
+				A300000000000000000006 /* Services/Nanoleaf/NanoleafLayout.swift */,
+				A300000000000000000007 /* Services/Nanoleaf/NanoleafGeometry.swift */,
+				A300000000000000000008 /* Services/Nanoleaf/NanoleafPanelDesign.swift */,
+				A300000000000000000009 /* Services/Nanoleaf/NanoleafEffects.swift */,
+				A30000000000000000000A /* Services/Nanoleaf/NanoleafEvents.swift */,
+				A30000000000000000000B /* Services/Nanoleaf/NanoleafShapesModels.swift */,
+				A30000000000000000000C /* Services/Nanoleaf/NanoleafShapesController.swift */,
+				A30000000000000000000D /* Views/NanoleafShapesCanvas.swift */,
 				A100000000000000000001 /* LumenDeskApp.swift */,
 				A100000000000000000018 /* Theme.swift */,
 				A10000000000000000002E /* DesignControls.swift */,
@@ -259,6 +275,11 @@
 			isa = PBXGroup;
 			children = (
 				A100000000000000000004 /* LightManager.swift */,
+				A100000000000000000051 /* LightManager+Nanoleaf.swift */,
+				A100000000000000000052 /* LightManager+Transports.swift */,
+				A100000000000000000053 /* LightManager+Studios.swift */,
+				A100000000000000000054 /* LightManager+RoomsAndScenes.swift */,
+				A100000000000000000055 /* LightManager+MusicAndState.swift */,
 				A100000000000000000021 /* DemoWorkspaceController.swift */,
 				A100000000000000000022 /* ConfirmationCoordinator.swift */,
 				A100000000000000000023 /* ScheduleEngine.swift */,
@@ -307,6 +328,9 @@
 				A10000000000000000001F /* GoveeSegmentEditorView.swift */,
 				A10000000000000000002D /* LIFXLunaEditorView.swift */,
 				A100000000000000000039 /* RoomCanvasView.swift */,
+				A10000000000000000003B /* LookComposerView.swift */,
+				A10000000000000000003C /* RoomLiveView.swift */,
+				A10000000000000000003D /* RoomCanvasSettingsView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -399,7 +423,7 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 1500;
-				LastUpgradeCheck = 1500;
+				LastUpgradeCheck = 2700;
 				TargetAttributes = {
 					E100000000000000000001 = {
 						CreatedOnToolsVersion = 15.0;
@@ -447,24 +471,29 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				B300000000000000000003 /* NanoleafPairingView.swift in Sources */,
-				B300000000000000000002 /* NanoleafCredentialStore.swift in Sources */,
-				B300000000000000000001 /* NanoleafClient.swift in Sources */,
-				B300000000000000000000 /* NanoleafProtocol.swift in Sources */,
-				B300000000000000000011 /* NanoleafShapesStudioView.swift in Sources */,
-				B300000000000000000012 /* NanoleafSceneLibraryView.swift in Sources */,
-				B300000000000000000005 /* LossyCodable.swift in Sources */,
-				B300000000000000000006 /* NanoleafLayout.swift in Sources */,
-				B300000000000000000007 /* NanoleafGeometry.swift in Sources */,
-				B300000000000000000008 /* NanoleafPanelDesign.swift in Sources */,
-				B300000000000000000009 /* NanoleafEffects.swift in Sources */,
-				B30000000000000000000A /* NanoleafEvents.swift in Sources */,
-				B30000000000000000000B /* NanoleafShapesModels.swift in Sources */,
-				B30000000000000000000C /* NanoleafShapesController.swift in Sources */,
-				B30000000000000000000D /* NanoleafShapesCanvas.swift in Sources */,
+				B300000000000000000003 /* Views/NanoleafPairingView.swift in Sources */,
+				B300000000000000000002 /* Services/Nanoleaf/NanoleafCredentialStore.swift in Sources */,
+				B300000000000000000001 /* Services/Nanoleaf/NanoleafClient.swift in Sources */,
+				B300000000000000000000 /* Services/Nanoleaf/NanoleafProtocol.swift in Sources */,
+				B300000000000000000011 /* Views/NanoleafShapesStudioView.swift in Sources */,
+				B300000000000000000012 /* Views/NanoleafSceneLibraryView.swift in Sources */,
+				B300000000000000000005 /* Services/LossyCodable.swift in Sources */,
+				B300000000000000000006 /* Services/Nanoleaf/NanoleafLayout.swift in Sources */,
+				B300000000000000000007 /* Services/Nanoleaf/NanoleafGeometry.swift in Sources */,
+				B300000000000000000008 /* Services/Nanoleaf/NanoleafPanelDesign.swift in Sources */,
+				B300000000000000000009 /* Services/Nanoleaf/NanoleafEffects.swift in Sources */,
+				B30000000000000000000A /* Services/Nanoleaf/NanoleafEvents.swift in Sources */,
+				B30000000000000000000B /* Services/Nanoleaf/NanoleafShapesModels.swift in Sources */,
+				B30000000000000000000C /* Services/Nanoleaf/NanoleafShapesController.swift in Sources */,
+				B30000000000000000000D /* Views/NanoleafShapesCanvas.swift in Sources */,
 				B100000000000000000001 /* LumenDeskApp.swift in Sources */,
 				B100000000000000000003 /* LightDevice.swift in Sources */,
 				B100000000000000000004 /* LightManager.swift in Sources */,
+				B100000000000000000051 /* LightManager+Nanoleaf.swift in Sources */,
+				B100000000000000000052 /* LightManager+Transports.swift in Sources */,
+				B100000000000000000053 /* LightManager+Studios.swift in Sources */,
+				B100000000000000000054 /* LightManager+RoomsAndScenes.swift in Sources */,
+				B100000000000000000055 /* LightManager+MusicAndState.swift in Sources */,
 				B100000000000000000005 /* UDPSocket.swift in Sources */,
 				B100000000000000000006 /* LIFXProtocol.swift in Sources */,
 				B100000000000000000007 /* LIFXClient.swift in Sources */,
@@ -501,6 +530,9 @@
 				B100000000000000000034 /* ThemePlanner.swift in Sources */,
 				B100000000000000000039 /* RoomCanvasView.swift in Sources */,
 				B10000000000000000003A /* SQLiteStateDatabase.swift in Sources */,
+				B10000000000000000003B /* LookComposerView.swift in Sources */,
+				B10000000000000000003C /* RoomLiveView.swift in Sources */,
+				B10000000000000000003D /* RoomCanvasSettingsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -575,6 +607,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -599,6 +632,7 @@
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
@@ -638,6 +672,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -655,6 +690,7 @@
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 			};
 			name = Release;
@@ -667,7 +703,8 @@
 				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = LumenDesk/LumenDesk.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 290;
+				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_ASSET_PATHS = "\"Preview Content\"";
 				DEVELOPMENT_TEAM = SW2N54YNK3;
 				"ENABLE_HARDENED_RUNTIME[sdk=macosx*]" = YES;
@@ -683,8 +720,12 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.1.0;
-				OTHER_LDFLAGS = "$(inherited) -lsqlite3";
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MARKETING_VERSION = 2.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-lsqlite3",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.lumendesk.LumenDesk;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				"REGISTER_WITH_LAUNCH_SERVICES[sdk=macosx*]" = NO;
@@ -705,7 +746,8 @@
 				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = LumenDesk/LumenDesk.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 290;
+				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_ASSET_PATHS = "\"Preview Content\"";
 				DEVELOPMENT_TEAM = SW2N54YNK3;
 				"ENABLE_HARDENED_RUNTIME[sdk=macosx*]" = YES;
@@ -721,8 +763,12 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.1.0;
-				OTHER_LDFLAGS = "$(inherited) -lsqlite3";
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MARKETING_VERSION = 2.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-lsqlite3",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.lumendesk.LumenDesk;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
@@ -739,6 +785,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGNING_ALLOWED = NO;
+				DEAD_CODE_STRIPPING = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lumendesk.LumenDeskTests;
@@ -755,6 +802,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGNING_ALLOWED = NO;
+				DEAD_CODE_STRIPPING = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lumendesk.LumenDeskTests;

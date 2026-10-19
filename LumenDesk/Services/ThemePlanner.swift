@@ -23,6 +23,88 @@ enum ThemeFixtureCapability: Equatable {
     case panels(count: Int)
 }
 
+/// Directional vector for 2D spatial color-field interpolation across a room's floorplan.
+enum SpatialFieldVector: String, CaseIterable, Codable, Equatable, Identifiable {
+    case themeDefault
+    case westToEast
+    case northToSouth
+    case radialCenter
+    case diagonalSweep
+
+    var id: String { rawValue }
+
+    var shortLabel: String {
+        switch self {
+        case .themeDefault: return "Role"
+        case .westToEast:   return "L → R"
+        case .northToSouth: return "Back → Front"
+        case .radialCenter: return "Radial"
+        case .diagonalSweep: return "Diagonal"
+        }
+    }
+
+    var displayName: String {
+        switch self {
+        case .themeDefault: return "Theme Role Harmony"
+        case .westToEast:   return "Left to Right Wash"
+        case .northToSouth: return "Back to Front Wash"
+        case .radialCenter: return "Center Radial Bloom"
+        case .diagonalSweep: return "Diagonal Studio Sweep"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .themeDefault: return "sparkles"
+        case .westToEast:   return "arrow.left.and.right"
+        case .northToSouth: return "arrow.up.and.down"
+        case .radialCenter: return "dot.radiowaves.left.and.right"
+        case .diagonalSweep: return "arrow.up.left.and.arrow.down.right"
+        }
+    }
+
+    var summary: String {
+        switch self {
+        case .themeDefault:
+            return "Assigns palette swatches by semantic fixture role and capability across the room."
+        case .westToEast:
+            return "Interpolates the palette continuously from left wall to right wall using 2D floorplan anchors."
+        case .northToSouth:
+            return "Sweeps the palette from back backdrop to front desk edge using 2D floorplan coordinates."
+        case .radialCenter:
+            return "Radiates the hero swatch from the room center outward toward perimeter fixtures."
+        case .diagonalSweep:
+            return "Projects a diagonal studio color gradient from top-left to bottom-right across the canvas."
+        }
+    }
+
+    /// Computes normalized [0, 1] position within the 2D room color field for a given anchor.
+    func fieldPosition(for anchor: PlanAnchor?, fallbackIndex: Int, total: Int) -> Double {
+        guard let anchor else {
+            guard total > 1 else { return 0 }
+            return Double(fallbackIndex) / Double(total - 1)
+        }
+        // Normalize from PlanAnchor's [0.06, 0.94] usable range to [0, 1]
+        let nx = min(1, max(0, (anchor.x - 0.06) / 0.88))
+        let ny = min(1, max(0, (anchor.y - 0.06) / 0.88))
+        switch self {
+        case .themeDefault:
+            guard total > 1 else { return 0 }
+            return Double(fallbackIndex) / Double(total - 1)
+        case .westToEast:
+            return nx
+        case .northToSouth:
+            return ny
+        case .radialCenter:
+            let dx = nx - 0.5
+            let dy = ny - 0.5
+            return min(1, max(0, sqrt(dx * dx + dy * dy) / sqrt(0.5)))
+        case .diagonalSweep:
+            return min(1, max(0, (nx + ny) * 0.5))
+        }
+    }
+}
+
 /// One target for a theme, in the order the room presents it.
 struct ThemeFixture: Equatable {
     let id: String
@@ -34,13 +116,17 @@ struct ThemeFixture: Equatable {
     /// some of them at once. A theme keeps the user's choice of zones instead
     /// of moving the light around the lamp.
     var preferredZones: [Int] = []
+    /// Optional 2D room-plan coordinate used by spatial color-field washes.
+    var anchor: PlanAnchor? = nil
 
     init(id: String, capability: ThemeFixtureCapability,
-         kelvin: Int = 3_500, preferredZones: [Int] = []) {
+         kelvin: Int = 3_500, preferredZones: [Int] = [],
+         anchor: PlanAnchor? = nil) {
         self.id = id
         self.capability = capability
         self.kelvin = kelvin
         self.preferredZones = preferredZones
+        self.anchor = anchor
     }
 }
 
@@ -130,7 +216,11 @@ enum ThemePlanner {
     /// carry a white point or a warm theme comes out cold.
     static let whitePointSaturation = 0.28
 
-    static func plan(_ theme: LightingTheme, fixtures: [ThemeFixture]) -> ThemePlan {
+    static func plan(
+        _ theme: LightingTheme,
+        fixtures: [ThemeFixture],
+        spatialField: SpatialFieldVector = .themeDefault
+    ) -> ThemePlan {
         let palette = theme.normalizedTones
         guard !fixtures.isEmpty, !palette.isEmpty else {
             return ThemePlan(themeID: theme.id, fixtures: [])
@@ -140,7 +230,8 @@ enum ThemePlanner {
         plans.reserveCapacity(fixtures.count)
         for (index, fixture) in fixtures.enumerated() {
             plans.append(plan(theme, palette: palette, fixture: fixture,
-                              position: index, of: fixtures.count))
+                              position: index, of: fixtures.count,
+                              spatialField: spatialField))
         }
         return ThemePlan(themeID: theme.id, fixtures: plans)
     }
@@ -177,13 +268,15 @@ enum ThemePlanner {
         fixture: ThemeFixture,
         position: Int,
         of total: Int,
-        preserveSingleToneLevel: Bool = false
+        preserveSingleToneLevel: Bool = false,
+        spatialField: SpatialFieldVector = .themeDefault
     ) -> ThemeFixturePlan {
         switch fixture.capability {
         case .solid:
             let tone = preserveSingleToneLevel
                 ? palette[0]
-                : soloTone(theme, palette: palette, position: position, of: total)
+                : soloTone(theme, palette: palette, fixture: fixture,
+                           position: position, of: total, spatialField: spatialField)
             return ThemeFixturePlan(
                 fixtureID: fixture.id,
                 tone: tone,
@@ -196,18 +289,22 @@ enum ThemePlanner {
 
         case .segments(let count, let gradient, let zoneLimit):
             return segmentPlan(theme, palette: palette, fixture: fixture,
-                               position: position, count: max(1, count),
-                               canBlend: gradient, zoneLimit: zoneLimit)
+                               position: position, of: total, count: max(1, count),
+                               canBlend: gradient, zoneLimit: zoneLimit,
+                               spatialField: spatialField)
 
         case .matrix(let productID, let width, let height):
             return matrixPlan(theme, palette: palette, fixture: fixture,
-                              position: position, productID: productID,
-                              width: width, height: height)
+                              position: position, of: total, productID: productID,
+                              width: width, height: height,
+                              spatialField: spatialField)
 
         case .panels(let count):
             // Spread like segments: the same distribution rules that place
             // colours across a room place them across the wall.
-            let tones = spread(theme, palette: palette, over: max(1, count), fixtureIndex: position)
+            let tones = spreadForFixture(theme, palette: palette, fixture: fixture,
+                                         over: max(1, count), fixtureIndex: position,
+                                         totalFixtures: total, spatialField: spatialField)
             let tone = tones.first ?? palette[0]
             return ThemeFixturePlan(
                 fixtureID: fixture.id,
@@ -230,7 +327,12 @@ enum ThemePlanner {
     /// what makes a one-bulb room read as the theme instead of as one arbitrary
     /// slice of it.
     private static func soloTone(_ theme: LightingTheme, palette: [PaletteTone],
-                                 position: Int, of total: Int) -> PaletteTone {
+                                 fixture: ThemeFixture, position: Int, of total: Int,
+                                 spatialField: SpatialFieldVector) -> PaletteTone {
+        if spatialField != .themeDefault, fixture.anchor != nil {
+            let fieldPos = spatialField.fieldPosition(for: fixture.anchor, fallbackIndex: position, total: total)
+            return PaletteTone.ramp(palette, position: fieldPos)
+        }
         guard total > 1 else {
             let key = palette[0]
             return PaletteTone(hue: key.hue, saturation: key.saturation, level: 1)
@@ -242,10 +344,58 @@ enum ThemePlanner {
         return palette[min(index, palette.count - 1)]
     }
 
+    private static func roomWindow(
+        for fixture: ThemeFixture,
+        fixtureIndex: Int,
+        totalFixtures: Int,
+        spatialField: SpatialFieldVector
+    ) -> (center: Double, start: Double, end: Double) {
+        let center = spatialField.fieldPosition(for: fixture.anchor, fallbackIndex: fixtureIndex, total: totalFixtures)
+        let span = min(1.0, max(0.32, 1.0 / Double(max(1, totalFixtures))))
+        let halfSpan = span * 0.5
+        let startPos = max(0, min(1 - span, center - halfSpan))
+        let endPos = min(1, startPos + span)
+        return (center, startPos, endPos)
+    }
+
+    private static func spreadForFixture(
+        _ theme: LightingTheme,
+        palette: [PaletteTone],
+        fixture: ThemeFixture,
+        over count: Int,
+        fixtureIndex: Int,
+        totalFixtures: Int,
+        spatialField: SpatialFieldVector
+    ) -> [PaletteTone] {
+        guard spatialField != .themeDefault, palette.count > 1 else {
+            return spread(theme, palette: palette, over: count, fixtureIndex: fixtureIndex)
+        }
+        let safeCount = max(1, count)
+        let window = roomWindow(for: fixture, fixtureIndex: fixtureIndex, totalFixtures: totalFixtures, spatialField: spatialField)
+        let stops = max(2, min(safeCount, maximumGradientStops))
+        return (0..<safeCount).map { index in
+            guard safeCount > 1 else { return PaletteTone.ramp(palette, position: window.center) }
+            let step = (index * (stops - 1) + (safeCount - 1) / 2) / (safeCount - 1)
+            let localFraction = Double(step) / Double(stops - 1)
+            let shapedFraction: Double
+            if spatialField == .radialCenter {
+                // Radiate from the middle segment outward toward both ends of the strip/wall
+                shapedFraction = min(1, max(0, abs(localFraction - 0.5) * 2.0))
+            } else {
+                shapedFraction = localFraction
+            }
+            let fieldPos = window.start + (window.end - window.start) * shapedFraction
+            return PaletteTone.ramp(palette, position: fieldPos)
+        }
+    }
+
     private static func segmentPlan(_ theme: LightingTheme, palette: [PaletteTone],
-                                    fixture: ThemeFixture, position: Int, count: Int,
-                                    canBlend: Bool, zoneLimit: Int?) -> ThemeFixturePlan {
-        let tones = spread(theme, palette: palette, over: count, fixtureIndex: position)
+                                    fixture: ThemeFixture, position: Int, of total: Int, count: Int,
+                                    canBlend: Bool, zoneLimit: Int?,
+                                    spatialField: SpatialFieldVector) -> ThemeFixturePlan {
+        let tones = spreadForFixture(theme, palette: palette, fixture: fixture,
+                                     over: count, fixtureIndex: position,
+                                     totalFixtures: total, spatialField: spatialField)
         var colors = tones.map { tone -> GoveeSegmentColor in
             let rgb = tone.rgb(atLevel: 1)
             return GoveeSegmentColor(red: rgb.red, green: rgb.green, blue: rgb.blue,
@@ -259,8 +409,9 @@ enum ThemePlanner {
             adaptation = .zoneLimited(lit: lit.count, of: count)
         }
 
+        let blends = spatialField != .themeDefault || theme.distribution.blendsSegments
         let state = GoveeSegmentState(colors: colors,
-                                      gradient: canBlend && theme.distribution.blendsSegments,
+                                      gradient: canBlend && blends,
                                       isActive: true)
         // The plan's representative tone is the strip's first colour rather
         // than an average of it: averaging a jewel palette gives mud, and this
@@ -278,14 +429,46 @@ enum ThemePlanner {
     }
 
     private static func matrixPlan(_ theme: LightingTheme, palette: [PaletteTone],
-                                   fixture: ThemeFixture, position: Int,
-                                   productID: UInt32, width: Int, height: Int) -> ThemeFixturePlan {
+                                   fixture: ThemeFixture, position: Int, of total: Int,
+                                   productID: UInt32, width: Int, height: Int,
+                                   spatialField: SpatialFieldVector) -> ThemeFixturePlan {
         var state = LIFXMatrixState(productID: productID, width: width, height: height, colors: [])
         let zones = state.activeZoneIndices
-        let tones = spread(theme, palette: palette, over: max(1, zones.count), fixtureIndex: position)
+        let window = roomWindow(for: fixture, fixtureIndex: position, totalFixtures: total, spatialField: spatialField)
+        let fallbackTones = spread(theme, palette: palette, over: max(1, zones.count), fixtureIndex: position)
+        var representativeTone: PaletteTone?
+
         for (offset, zone) in zones.enumerated() {
             guard state.colors.indices.contains(zone) else { continue }
-            let tone = tones[min(offset, tones.count - 1)]
+            let tone: PaletteTone
+            if spatialField != .themeDefault, palette.count > 1 {
+                let row = zone / max(1, state.width)
+                let col = zone % max(1, state.width)
+                let nx = state.width > 1 ? Double(col) / Double(state.width - 1) : 0.5
+                let ny = state.height > 1 ? Double(row) / Double(state.height - 1) : 0.5
+                let localPos: Double
+                switch spatialField {
+                case .themeDefault:
+                    localPos = Double(offset) / Double(max(1, zones.count - 1))
+                case .westToEast:
+                    localPos = nx
+                case .northToSouth:
+                    localPos = ny
+                case .diagonalSweep:
+                    localPos = min(1, max(0, (nx + ny) * 0.5))
+                case .radialCenter:
+                    let dx = nx - 0.5
+                    let dy = ny - 0.5
+                    localPos = min(1, max(0, sqrt(dx * dx + dy * dy) / sqrt(0.5)))
+                }
+                let fieldPos = window.start + (window.end - window.start) * localPos
+                tone = PaletteTone.ramp(palette, position: fieldPos)
+            } else {
+                tone = fallbackTones[min(offset, fallbackTones.count - 1)]
+            }
+            if representativeTone == nil {
+                representativeTone = tone
+            }
             // Matrix zones carry absolute brightness, so the theme's own level
             // folds in here rather than riding a separate device command.
             state.colors[zone] = LIFXMatrixColor(
@@ -297,7 +480,7 @@ enum ThemePlanner {
         }
         state.isActive = true
 
-        let tone = tones.first ?? palette[0]
+        let tone = representativeTone ?? fallbackTones.first ?? palette[0]
         return ThemeFixturePlan(
             fixtureID: fixture.id,
             tone: tone,

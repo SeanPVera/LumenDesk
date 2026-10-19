@@ -21,12 +21,14 @@ struct NanoleafSceneLibrary: View {
             VStack(alignment: .leading, spacing: 10) {
                 content
                 Text("LumenDesk never deletes scenes on the controller, and replaces one only after you confirm it by name.")
-                    .font(.caption).foregroundStyle(Lumen.meter)
+                    .font(.caption).foregroundStyle(Lumen.ash)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.top, 8)
         } label: {
-            Text("Scenes on the controller").font(.headline)
+            Text("Scenes on the controller")
+                .font(LumenType.display(size: 16, weight: .bold))
+                .foregroundStyle(Lumen.graphite)
         }
         .onChange(of: expanded) { open in
             if open, shapes.libraries[device.id] == nil { load() }
@@ -49,14 +51,14 @@ struct NanoleafSceneLibrary: View {
         case .loading:
             HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Reading scenes\u{2026}").font(.callout) }
         case .failed(let reason):
-            Text(reason).font(.callout).foregroundStyle(Lumen.meter)
+            Text(reason).font(.callout).foregroundStyle(Lumen.ash)
                 .fixedSize(horizontal: false, vertical: true)
             Button("Try again") { load() }
                 .buttonStyle(LumenSecondaryButtonStyle(compact: true))
                 .disabled(manager.isDemoMode)
         case .loaded(let effects, _):
             if effects.isEmpty {
-                Text("The controller has no stored scenes.").font(.callout).foregroundStyle(Lumen.meter)
+                Text("The controller has no stored scenes.").font(.callout).foregroundStyle(Lumen.ash)
             }
             ForEach(effects) { effect in row(effect) }
             Button("Refresh list") { load() }
@@ -68,9 +70,15 @@ struct NanoleafSceneLibrary: View {
         let playing = shapes.wall(device.id).output == .nativeEffect(name: effect.name)
         return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
-                Text(effect.name).font(.callout.weight(playing ? .semibold : .regular))
-                Text(effect.category.displayName).font(.caption).foregroundStyle(Lumen.meter)
-                if playing { Label("Playing", systemImage: "play.fill").font(.caption).foregroundStyle(Lumen.chalk) }
+                Text(effect.name)
+                    .font(.callout.weight(playing ? .semibold : .regular))
+                    .foregroundStyle(Lumen.graphite)
+                Text(effect.category.displayName).font(.caption).foregroundStyle(Lumen.ash)
+                if playing {
+                    Label("Playing", systemImage: "play.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Lumen.verdigris)
+                }
                 Spacer(minLength: 0)
             }
             HStack(spacing: 8) {
@@ -129,13 +137,17 @@ struct NanoleafEffectEditor: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 HStack {
-                    Text("Edit \u{201C}\(definition.name)\u{201D}").font(LumenType.display(size: 17))
+                    Text("Edit \u{201C}\(definition.name)\u{201D}")
+                        .font(LumenType.display(size: 18, weight: .bold))
+                        .foregroundStyle(Lumen.graphite)
                     Spacer()
-                    Button("Close") { dismiss() }.keyboardShortcut(.cancelAction)
+                    Button("Close") { dismiss() }
+                        .buttonStyle(LumenSecondaryButtonStyle(compact: true))
+                        .keyboardShortcut(.cancelAction)
                 }
                 if let plugin {
                     Text("\(plugin.name)\(plugin.description.map { " \u{00B7} \($0)" } ?? "")")
-                        .font(.caption).foregroundStyle(Lumen.meter)
+                        .font(.caption).foregroundStyle(Lumen.ash)
                 }
                 paletteEditor
                 optionsEditor
@@ -152,12 +164,13 @@ struct NanoleafEffectEditor: View {
                         .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
                 if busy { ProgressView().controlSize(.small) }
-                if let status { Text(status).font(.callout).foregroundStyle(Lumen.meter).fixedSize(horizontal: false, vertical: true) }
+                if let status { Text(status).font(.callout).foregroundStyle(Lumen.ash).fixedSize(horizontal: false, vertical: true) }
             }
             .padding(20)
         }
         .sheetFrame(minWidth: 480, idealWidth: 560, minHeight: 460, idealHeight: 640)
-        .background(Lumen.stage)
+        .background(Lumen.canvas)
+        .foregroundStyle(Lumen.graphite)
         .confirmationDialog("\u{201C}\(name)\u{201D} is already on the controller.", isPresented: $confirmingReplace,
                             titleVisibility: .visible) {
             Button("Replace it", role: .destructive) { saveScene(overwrite: true) }

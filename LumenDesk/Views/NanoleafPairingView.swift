@@ -13,19 +13,27 @@ struct NanoleafPairingView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 HStack {
-                    Text("Pair Nanoleaf Shapes or Aurora").font(.title2.bold())
+                    Text("Pair Nanoleaf Shapes or Aurora")
+                        .font(LumenType.display(size: 24, weight: .bold))
+                        .foregroundStyle(Lumen.graphite)
                     Spacer()
-                    Button("Done") { dismiss() }.disabled(isPairing)
+                    Button("Done") { dismiss() }
+                        .buttonStyle(LumenSecondaryButtonStyle(compact: true))
+                        .disabled(isPairing)
                 }
                 Text("Set up your Shapes or Aurora Light Panels in the Nanoleaf app first, then join the same Wi-Fi network.")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Lumen.ash)
                 if manager.isDemoMode {
-                    Text("Leave Demo Mode to pair your controller.").foregroundStyle(Lumen.warning)
+                    Text("Leave Demo Mode to pair your controller.").foregroundStyle(Lumen.ochre)
                 } else {
                     HStack {
-                        Text("Controllers on this network").font(.headline)
+                        Text("Controllers on this network")
+                            .font(LumenType.display(size: 16, weight: .bold))
+                            .foregroundStyle(Lumen.graphite)
                         Spacer()
-                        Button("Scan") { manager.scan() }.disabled(isPairing || manager.isScanning)
+                        Button("Scan") { manager.scan() }
+                            .buttonStyle(LumenSecondaryButtonStyle(compact: true))
+                            .disabled(isPairing || manager.isScanning)
                     }
                     ForEach(manager.nanoleafCandidates) { candidate in
                         Button {
@@ -35,23 +43,30 @@ struct NanoleafPairingView: View {
                             error = nil
                         } label: {
                             HStack {
-                                Image(systemName: "hexagon.fill").foregroundStyle(Lumen.cyan)
+                                Image(systemName: "hexagon.fill").foregroundStyle(Lumen.verdigris)
                                 VStack(alignment: .leading) {
-                                    Text(candidate.name)
-                                    Text(candidate.endpoint.host).font(.caption).foregroundStyle(.secondary)
+                                    Text(candidate.name).foregroundStyle(Lumen.graphite)
+                                    Text(candidate.endpoint.host).font(.caption).foregroundStyle(Lumen.ash)
                                 }
                                 Spacer()
-                                if serviceID == candidate.id { Image(systemName: "checkmark.circle.fill") }
+                                if serviceID == candidate.id {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(Lumen.ember)
+                                }
                             }
                             .padding(10)
-                            .background(Lumen.surfaceRaised, in: RoundedRectangle(cornerRadius: 8))
+                            .background(Lumen.floor, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .stroke(serviceID == candidate.id ? Lumen.ember : Lumen.rule, lineWidth: serviceID == candidate.id ? 2 : 1)
+                            )
                         }
                         .buttonStyle(.plain)
                         .disabled(isPairing)
                     }
                     if manager.nanoleafCandidates.isEmpty {
                         Text(manager.nanoleafDiscoveryError ?? "Scanning for Shapes and Aurora controllers. You can also enter the controller’s address from the Nanoleaf app or your router.")
-                            .font(.callout).foregroundStyle(.secondary)
+                            .font(.callout).foregroundStyle(Lumen.ash)
                     }
                     VStack(alignment: .leading, spacing: 8) {
                         TextField("IP address or local hostname", text: $host)
@@ -65,7 +80,8 @@ struct NanoleafPairingView: View {
                     .textFieldStyle(.roundedBorder)
                     .disabled(isPairing)
                     Text("Hold the controller’s power button for 5–7 seconds until the LED flashes. Press Pair within 30 seconds.")
-                    if let error { Text(error).foregroundStyle(Lumen.warning).accessibilityLabel("Pairing failed: \(error)") }
+                        .foregroundStyle(Lumen.graphite)
+                    if let error { Text(error).foregroundStyle(Lumen.ochre).accessibilityLabel("Pairing failed: \(error)") }
                     HStack {
                         if isPairing { ProgressView().controlSize(.small) }
                         Spacer()
@@ -74,13 +90,14 @@ struct NanoleafPairingView: View {
                             .disabled(isPairing || host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
                     Text("Pairing stays on this device in Keychain. Each controller appears as one light in your rooms.")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.caption).foregroundStyle(Lumen.ash)
                 }
             }
             .padding(24)
         }
         .sheetFrame(minWidth: 420, idealWidth: 520)
-        .background(LumenBackground(glow: false))
+        .background(Lumen.canvas)
+        .foregroundStyle(Lumen.graphite)
         .interactiveDismissDisabled(isPairing)
         .onAppear { if !manager.isDemoMode { manager.scan() } }
     }
@@ -111,7 +128,7 @@ struct NanoleafEffectsControl: View {
             if device.needsNanoleafPairing {
                 Button("Pair Nanoleaf Again") { showingPairing = true }
                 Text("Access expired. Hold the controller’s power button to reconnect.")
-                    .font(.caption).foregroundStyle(Lumen.warning)
+                    .font(.caption).foregroundStyle(Lumen.ochre)
             } else {
                 Menu {
                     ForEach(device.nanoleafEffects, id: \.self) { name in
@@ -121,7 +138,7 @@ struct NanoleafEffectsControl: View {
                     Label(device.nanoleafAppearance?.effect ?? "Nanoleaf Effects", systemImage: "hexagon.fill")
                 }
                 .disabled(device.nanoleafEffects.isEmpty || manager.animatingEffect(for: device.id) != nil)
-                Text("Effects saved on your \(device.nanoleafProductName) controller").font(.caption).foregroundStyle(.secondary)
+                Text("Effects saved on your \(device.nanoleafProductName) controller").font(.caption).foregroundStyle(Lumen.ash)
             }
         }
         .sheet(isPresented: $showingPairing) { NanoleafPairingView().environmentObject(manager) }

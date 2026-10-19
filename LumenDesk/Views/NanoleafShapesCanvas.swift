@@ -73,8 +73,8 @@ struct NanoleafWallCanvas: View {
                 }
                 if let dragStart, let dragCurrent {
                     Rectangle()
-                        .stroke(Lumen.lit, style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
-                        .background(Rectangle().fill(Lumen.lit.opacity(0.08)))
+                        .stroke(Lumen.ember, style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                        .background(Rectangle().fill(Lumen.ember.opacity(0.08)))
                         .frame(width: abs(dragCurrent.x - dragStart.x), height: abs(dragCurrent.y - dragStart.y))
                         .position(x: (dragStart.x + dragCurrent.x) / 2, y: (dragStart.y + dragCurrent.y) / 2)
                         .allowsHitTesting(false)
@@ -83,7 +83,7 @@ struct NanoleafWallCanvas: View {
                 if showsReference {
                     Label("Up on the wall", systemImage: "arrow.up")
                         .font(.caption)
-                        .foregroundStyle(Lumen.meter)
+                        .foregroundStyle(Lumen.ash)
                         .frame(maxHeight: .infinity, alignment: .top)
                         .padding(.top, 4)
                         .allowsHitTesting(false)
@@ -103,9 +103,9 @@ struct NanoleafWallCanvas: View {
             let center = mapping.screenCenter(of: entry)
             let radius = NanoleafGeometry.markerRadius(for: entry.kind) * mapping.scale
             let rect = CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)
-            context.stroke(Path(ellipseIn: rect), with: .color(Lumen.faint), lineWidth: 1)
+            context.stroke(Path(ellipseIn: rect), with: .color(Lumen.ash.opacity(0.6)), lineWidth: 1)
             if entry.kind == .controller, radius >= 7 {
-                context.draw(Text(Image(systemName: "powerplug")).font(.system(size: min(14, radius))).foregroundColor(Lumen.faint),
+                context.draw(Text(Image(systemName: "powerplug")).font(.system(size: min(14, radius))).foregroundColor(Lumen.ash),
                              at: CGPoint(x: center.x, y: center.y))
             }
         }
@@ -125,12 +125,12 @@ struct NanoleafWallCanvas: View {
             let selected = selection.contains(panel.panelID)
             if color == NanoleafRGB.black {
                 // Off reads as a dashed boundary, not only as a dark fill.
-                context.stroke(path, with: .color(Lumen.faint), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                context.stroke(path, with: .color(Lumen.ash.opacity(0.6)), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
             } else {
-                context.stroke(path, with: .color(Lumen.stage.opacity(0.9)), lineWidth: 1.5)
+                context.stroke(path, with: .color(Lumen.canvas.opacity(0.9)), lineWidth: 1.5)
             }
             if selected {
-                context.stroke(path, with: .color(Lumen.lit), lineWidth: 3)
+                context.stroke(path, with: .color(Lumen.ember), lineWidth: 3)
             }
             if cursor == panel.panelID {
                 // The keyboard cursor is a dashed ring inside the panel, so it
@@ -142,7 +142,7 @@ struct NanoleafWallCanvas: View {
                     if index == 0 { ring.move(to: inset) } else { ring.addLine(to: inset) }
                 }
                 ring.closeSubpath()
-                context.stroke(ring, with: .color(Lumen.lit), style: StrokeStyle(lineWidth: 1.5, dash: [5, 3]))
+                context.stroke(ring, with: .color(Lumen.ember), style: StrokeStyle(lineWidth: 1.5, dash: [5, 3]))
             }
             let inradius = (NanoleafGeometry.inradius(of: panel.kind) ?? 0) * mapping.scale
             guard inradius >= 9, let number = numbers[panel.panelID] else { continue }
@@ -152,10 +152,10 @@ struct NanoleafWallCanvas: View {
             if selected {
                 // Selection is also a filled badge, not only an outline colour.
                 let badge = CGRect(x: point.x - size * 0.95, y: point.y - size * 0.95, width: size * 1.9, height: size * 1.9)
-                context.fill(Path(ellipseIn: badge), with: .color(Lumen.lit))
-                context.draw(Text("\(number)").font(.system(size: size, weight: .bold)).foregroundColor(Lumen.stage), at: point)
+                context.fill(Path(ellipseIn: badge), with: .color(Lumen.ember))
+                context.draw(Text("\(number)").font(.system(size: size, weight: .bold)).foregroundColor(Lumen.canvas), at: point)
             } else {
-                let ink: Color = color.map { $0.luminance > 0.35 ? Lumen.stage : Lumen.chalk } ?? Lumen.meter
+                let ink: Color = color.map { $0.luminance > 0.35 ? Lumen.graphite : Lumen.canvas } ?? Lumen.ash
                 context.draw(Text(color == nil ? "?" : "\(number)").font(.system(size: size, weight: .semibold)).foregroundColor(ink),
                              at: point)
             }

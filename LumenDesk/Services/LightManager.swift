@@ -17,124 +17,122 @@ enum NapPhase: Equatable {
 final class LightManager: ObservableObject {
     static let maximumSchedulesPerRoom = 12
 
-    @Published private(set) var devices: [LightDevice] = []
-    @Published private(set) var rooms: [Room] = [] {
+    @Published var devices: [LightDevice] = []
+    @Published var rooms: [Room] = [] {
         // Room membership decides which lights a show's frames may reach.
         didSet { musicFixtureCache.removeAll() }
     }
-    @Published private(set) var favoriteIDs: Set<String> = []
-    @Published private(set) var scenes: [LightingScene] = []
-    @Published private(set) var isScanning: Bool = false
-    @Published private(set) var scanPhase: String = "Idle"
-    @Published private(set) var lastScanDate: Date?
-    @Published private(set) var scanResponseCount: Int = 0
+    @Published var favoriteIDs: Set<String> = []
+    @Published var scenes: [LightingScene] = []
+    @Published var isScanning: Bool = false
+    @Published var scanPhase: String = "Idle"
+    @Published var lastScanDate: Date?
+    @Published var scanResponseCount: Int = 0
     /// What the last LIFX and Govee discovery passes actually put on the wire.
     /// A scan that failed at the socket layer used to be indistinguishable from
     /// a scan that reached a healthy network with nothing on it.
-    @Published private(set) var lifxProbe: DiscoveryProbeReport?
-    @Published private(set) var goveeProbe: DiscoveryProbeReport?
+    @Published var lifxProbe: DiscoveryProbeReport?
+    @Published var goveeProbe: DiscoveryProbeReport?
     /// Interfaces the last scan went out on, sampled once when the scan starts.
     /// The diagnostics card renders on every state change, so reading
     /// `getifaddrs` from its body would mean a syscall per frame.
-    @Published private(set) var scanInterfaces: [String] = []
+    @Published var scanInterfaces: [String] = []
     @Published var statusMessage: String = ""
     @Published var commandError: String?
     @Published var commandErrorUndo: (() -> Void)?  // optional undo action on the error toast
-    @Published private(set) var canUndo: Bool = false
-    @Published private(set) var canRedo: Bool = false
-    @Published private(set) var collapsedRooms: Set<UUID> = []
+    @Published var canUndo: Bool = false
+    @Published var canRedo: Bool = false
+    @Published var collapsedRooms: Set<UUID> = []
     // Holds the last deleted room and its position for undo.
-    @Published private(set) var lastDeletedRoom: (room: Room, index: Int)? = nil
-    @Published private(set) var lastDeletedScene: (scene: LightingScene, index: Int)? = nil
-    @Published private(set) var stalenessGeneration: Int = 0
-    @Published private(set) var newlyDiscoveredIDs: Set<String> = []
-    @Published private(set) var whiteModeDeviceIDs: Set<String> = []
-    @Published private(set) var napPhase: NapPhase = .inactive
-    @Published private(set) var activeEffects: [LightScope: String] = [:]
-    @Published private(set) var activityEvents: [ActivityEvent] = []
-    @Published private(set) var lastSceneResult: SceneApplicationResult?
+    @Published var lastDeletedRoom: (room: Room, index: Int)? = nil
+    @Published var lastDeletedScene: (scene: LightingScene, index: Int)? = nil
+    @Published var stalenessGeneration: Int = 0
+    @Published var newlyDiscoveredIDs: Set<String> = []
+    @Published var whiteModeDeviceIDs: Set<String> = []
+    @Published var napPhase: NapPhase = .inactive
+    @Published var activeEffects: [LightScope: String] = [:]
+    @Published var activityEvents: [ActivityEvent] = []
+    @Published var lastSceneResult: SceneApplicationResult?
     /// Fixtures whose observed state changed without a LumenDesk command in
     /// flight. Direction A keeps this fact in the room instead of quietly
     /// replacing the user's intent or hiding another controller's action.
-    @Published private(set) var externallyChangedDeviceIDs: Set<String> = []
-    @Published private(set) var favoriteOrder: [FavoriteReference] = []
-    @Published private(set) var parliamentMembers: [ParliamentMember] = []
-    @Published private(set) var parliamentSessions: [ParliamentSession] = []
-    @Published private(set) var sceneCertifications: [SceneCertification] = []
-    @Published private(set) var recentColors: [RecentColor] = []
-    @Published private(set) var discoveryChanges: [DiscoveryChange] = []
-    @Published private(set) var sceneRevisions: [SceneRevision] = []
-    @Published private(set) var sceneDrafts: [UUID: LightingScene] = [:]
-    @Published private(set) var lastActionSummary: String?
-    @Published private(set) var rehearsalSceneID: UUID?
+    @Published var externallyChangedDeviceIDs: Set<String> = []
+    @Published var favoriteOrder: [FavoriteReference] = []
+    @Published var recentColors: [RecentColor] = []
+    @Published var discoveryChanges: [DiscoveryChange] = []
+    @Published var sceneRevisions: [SceneRevision] = []
+    @Published var sceneDrafts: [UUID: LightingScene] = [:]
+    @Published var lastActionSummary: String?
+    @Published var rehearsalSceneID: UUID?
     // Per-device Govee segment layouts (COB strips, string lights, neon ropes)
     // and reusable multi-color paint jobs, both persisted across sessions.
-    @Published private(set) var goveeSegmentStates: [String: GoveeSegmentState] = [:]
-    @Published private(set) var goveeSegmentPresets: [GoveeSegmentPreset] = []
-    @Published private(set) var lifxMatrixStates: [String: LIFXMatrixState] = [:]
-    @Published private(set) var musicModeConfiguration = MusicModeConfiguration.configuration(for: .soundcheck)
-    @Published private(set) var fixtureTopologies: [String: FixtureTopology] = [:] {
+    @Published var goveeSegmentStates: [String: GoveeSegmentState] = [:]
+    @Published var goveeSegmentPresets: [GoveeSegmentPreset] = []
+    @Published var lifxMatrixStates: [String: LIFXMatrixState] = [:]
+    @Published var musicModeConfiguration = MusicModeConfiguration.configuration(for: .soundcheck)
+    @Published var fixtureTopologies: [String: FixtureTopology] = [:] {
         didSet { musicFixtureCache.removeAll() }
     }
 
     let musicModeController: AudioReactiveSessionController
 
-    private var errorClearTask: Task<Void, Never>?
-    private var lifx: LIFXClient?
-    private var govee: GoveeClient?
-    private let nanoleaf: NanoleafClient
+    var errorClearTask: Task<Void, Never>?
+    var lifx: LIFXClient?
+    var govee: GoveeClient?
+    let nanoleaf: NanoleafClient
     /// Shapes arrangements, orientation, per-panel designs and live output.
     /// Views that draw a wall observe it directly, so a streamed frame never
     /// republishes the whole manager.
     let shapes: NanoleafShapesController
     /// Shapes walls a running show feeds panel by panel, keyed by device ID.
-    private var shapesStreams: [String: ShapesStream] = [:]
-    @Published private(set) var nanoleafCandidates: [NanoleafCandidate] = []
-    @Published private(set) var nanoleafDiscoveryError: String?
-    private var refreshTimer: Timer?
-    private var scheduleTimer: Timer?
-    private var napTimer: Timer?
-    private var brightnessTasks: [String: Task<Void, Never>] = [:]
-    private var napSnapshotBrightness: [String: Double] = [:]
-    private var scanGeneration: Int = 0     // incremented each scan; clears isScanning safely
-    private var hasStarted = false
-    private var hasStartedBackgroundServices = false
-    private var scanStartingIDs: Set<String> = []
-    private var scanStartingAddresses: [String: String] = [:]
-    private var devicesByID: [String: LightDevice] = [:]
-    private let demoWorkspaceController: DemoWorkspaceController
+    var shapesStreams: [String: ShapesStream] = [:]
+    @Published var nanoleafCandidates: [NanoleafCandidate] = []
+    @Published var nanoleafDiscoveryError: String?
+    var refreshTimer: Timer?
+    var scheduleTimer: Timer?
+    var napTimer: Timer?
+    var brightnessTasks: [String: Task<Void, Never>] = [:]
+    var deferredPersistenceTask: Task<Void, Never>?
+    var napSnapshotBrightness: [String: Double] = [:]
+    var scanGeneration: Int = 0     // incremented each scan; clears isScanning safely
+    var hasStarted = false
+    var hasStartedBackgroundServices = false
+    var scanStartingIDs: Set<String> = []
+    var scanStartingAddresses: [String: String] = [:]
+    var devicesByID: [String: LightDevice] = [:]
+    let demoWorkspaceController: DemoWorkspaceController
     let confirmationCoordinator: ConfirmationCoordinator
-    private let scheduleEngine: ScheduleEngine
-    private let persistenceStore: ApplicationPersistence
-    private let commandCoordinator: CommandCoordinator
-    private let changeClock: () -> Date
-    private let identifyDurationNanoseconds: UInt64
-    private let identifySleep: CommandCoordinator.Sleep
-    private var rehearsalSnapshot: [LightRuntimeSnapshot] = []
+    let scheduleEngine: ScheduleEngine
+    let persistenceStore: ApplicationPersistence
+    let commandCoordinator: CommandCoordinator
+    let changeClock: () -> Date
+    let identifyDurationNanoseconds: UInt64
+    let identifySleep: CommandCoordinator.Sleep
+    var rehearsalSnapshot: [LightRuntimeSnapshot] = []
 
-    private struct Identification {
+    struct Identification {
         let token: UUID
         let snapshot: LightRuntimeSnapshot
         var task: Task<Void, Never>?
     }
-    private var identifications: [String: Identification] = [:]
+    var identifications: [String: Identification] = [:]
 
     /// State saved before a held identify, so the fixture can be put back
     /// exactly as it was however the question ends. Lives here rather than
     /// beside `beginSustainedIdentify` because that sits in an extension, and
     /// an extension may not hold stored properties.
-    private struct IdentifyHold {
+    struct IdentifyHold {
         let snapshot: LightRuntimeSnapshot
         var task: Task<Void, Never>?
     }
 
-    private var identifyHold: IdentifyHold?
+    var identifyHold: IdentifyHold?
 
     /// One show's per-panel stream to a Shapes wall. Segment `i` of the show's
     /// fixture is `panelIDs[i]`, fixed when the show starts. Where each panel
     /// sits comes separately, from the wall's layout and orientation, so
     /// re-orienting the wall re-aims the show without renumbering its panels.
-    private struct ShapesStream {
+    struct ShapesStream {
         let owner: String
         let panelIDs: [Int]
     }
@@ -142,17 +140,17 @@ final class LightManager: ObservableObject {
     var isHoldingIdentify: Bool { identifyHold != nil }
     // Devices with a live razer overlay, including both editor previews and
     // applied layouts that must be held through the stream.
-    private var razerActiveIDs: Set<String> = []
+    var razerActiveIDs: Set<String> = []
     // The subset currently owned by an open Segment Studio preview. Refresh
     // keepalives must not overwrite these frames with the last applied layout.
-    private var segmentPreviewIDs: Set<String> = []
+    var segmentPreviewIDs: Set<String> = []
 
     // Custom display names keyed by device id, persisted across sessions.
-    private var customNames: [String: String] = [:]
+    var customNames: [String: String] = [:]
 
-    @Published private(set) var favoriteRoomIDs: Set<UUID> = []
-    @Published private(set) var favoriteSceneIDs: Set<UUID> = []
-    @Published private(set) var customBrightnessPresets: [Double] = []
+    @Published var favoriteRoomIDs: Set<UUID> = []
+    @Published var favoriteSceneIDs: Set<UUID> = []
+    @Published var customBrightnessPresets: [Double] = []
 
     // Configurable sunrise/sunset times (hour and minute).
     @Published var sunriseHour: Int   = 6
@@ -164,7 +162,7 @@ final class LightManager: ObservableObject {
     /// One animated effect running against one scope. Several runs can be
     /// active at once as long as their device sets don't overlap (e.g. a
     /// different effect per room).
-    private final class EffectRun {
+    final class EffectRun {
         let id = UUID()
         let effect: LightingEffect
         let scope: LightScope
@@ -209,31 +207,31 @@ final class LightManager: ObservableObject {
             self.animatedDeviceIDs = Set(deviceIDs)
         }
     }
-    private var effectRuns: [LightScope: EffectRun] = [:]
-    private let musicLightingRenderer = MusicLightingRenderer()
-    private var musicModelUpdateAt: [String: TimeInterval] = [:]
+    var effectRuns: [LightScope: EffectRun] = [:]
+    let musicLightingRenderer = MusicLightingRenderer()
+    var musicModelUpdateAt: [String: TimeInterval] = [:]
     /// Descriptors a running show renders through. Building them walks segment
     /// profiles and Shapes geometry, which is too much to repeat for every
     /// 20 Hz frame. Room and topology edits clear it outright; a one-second
     /// lifetime bounds how long anything rarer (a wall reporting a new layout)
     /// takes to reach output.
-    private struct MusicFixtureCache {
+    struct MusicFixtureCache {
         let runID: UUID
         let builtAt: TimeInterval
         let fixtures: [MusicFixtureDescriptor]
     }
-    private var musicFixtureCache: [LightScope: MusicFixtureCache] = [:]
+    var musicFixtureCache: [LightScope: MusicFixtureCache] = [:]
     /// Reduce Motion as the system reports it. Read and observed here rather
     /// than passed in by whichever view started a show, so a show started from
     /// a favorite, a scene card or Demo Mode honors it, and a change reaches
     /// running shows whatever screen is open.
-    private(set) var reducesMotion = false
-    private var reduceMotionObserver: NSObjectProtocol?
-    private var undoStack: [[LightRuntimeSnapshot]] = []
-    private var redoStack: [[LightRuntimeSnapshot]] = []
-    private var lastChangeTime: [String: Date] = [:]
-    private let undoLimit = 20
-    private let coalesceWindow: TimeInterval = 1.0
+    var reducesMotion = false
+    var reduceMotionObserver: NSObjectProtocol?
+    var undoStack: [[LightRuntimeSnapshot]] = []
+    var redoStack: [[LightRuntimeSnapshot]] = []
+    var lastChangeTime: [String: Date] = [:]
+    let undoLimit = 20
+    let coalesceWindow: TimeInterval = 1.0
 
     // MARK: - Init
 
@@ -278,9 +276,6 @@ final class LightManager: ObservableObject {
         sunsetMinute = persistedState.solarPreferences.sunsetMinute
         activityEvents = persistedState.activityEvents
         favoriteOrder = persistedState.favoriteOrder
-        parliamentMembers = persistedState.parliamentMembers
-        parliamentSessions = persistedState.parliamentSessions
-        sceneCertifications = persistedState.sceneCertifications
         recentColors = persistedState.recentColors
         if scheduleEngine == nil {
             self.scheduleEngine.restoreAutomationOverrides(
@@ -309,7 +304,7 @@ final class LightManager: ObservableObject {
     var commandStates: [String: DeviceCommandState] { commandCoordinator.commandStates }
     var confirmedStates: [String: ConfirmedDeviceState] { commandCoordinator.confirmedStates }
 
-    private var scheduleSolarTimes: ScheduleEngine.SolarTimes {
+    var scheduleSolarTimes: ScheduleEngine.SolarTimes {
         ScheduleEngine.SolarTimes(
             sunriseMinutes: min(23, max(0, sunriseHour)) * 60 + min(59, max(0, sunriseMinute)),
             sunsetMinutes: min(23, max(0, sunsetHour)) * 60 + min(59, max(0, sunsetMinute))
@@ -344,7 +339,7 @@ final class LightManager: ObservableObject {
         logActivity(.system, title: "LumenDesk started", detail: "Foreground discovery and room reconciliation are active.")
     }
 
-    private func startBackgroundServices() {
+    func startBackgroundServices() {
         guard !hasStartedBackgroundServices else { return }
         hasStartedBackgroundServices = true
         scheduleRefresh()
@@ -421,7 +416,7 @@ final class LightManager: ObservableObject {
     /// paced sweeps, the ARP warm-up gap, and a bulb's reply latency.
     static let scanWindow: TimeInterval = 5
 
-    private func scheduleRefresh() {
+    func scheduleRefresh() {
         refreshTimer?.invalidate()
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refreshAll() }
@@ -429,7 +424,7 @@ final class LightManager: ObservableObject {
         refreshTimer?.tolerance = 3
     }
 
-    private func startScheduleTimer() {
+    func startScheduleTimer() {
         scheduleTimer?.invalidate()
         let delay = scheduleEngine.delayUntilNextMinute
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
@@ -444,7 +439,7 @@ final class LightManager: ObservableObject {
         }
     }
 
-    private func checkSchedules() {
+    func checkSchedules() {
         let evaluation = scheduleEngine.evaluate(rooms: rooms, solarTimes: scheduleSolarTimes)
         if evaluation.didChangeOverrides || evaluation.didChangeMissedAutomations {
             objectWillChange.send()
@@ -514,7 +509,7 @@ final class LightManager: ObservableObject {
         if scheduleEngine.removeMissedAutomation(id: missed.id) { objectWillChange.send() }
     }
 
-    private func refreshAll() {
+    func refreshAll() {
         guard demoWorkspaceController.allowsLiveNetworking else { return }
         let now = Date()
         for d in devices {
@@ -535,7 +530,7 @@ final class LightManager: ObservableObject {
         }
     }
 
-    private func markSeen(_ device: LightDevice, confirmsPendingCommand: Bool = false) {
+    func markSeen(_ device: LightDevice, confirmsPendingCommand: Bool = false) {
         let wasStale = device.isStale
         device.lastSeen = Date()
         device.isStale = false
@@ -569,7 +564,7 @@ final class LightManager: ObservableObject {
         }
     }
 
-    private static func materiallyDiffers(
+    static func materiallyDiffers(
         _ lhs: ConfirmedDeviceState,
         _ rhs: ConfirmedDeviceState
     ) -> Bool {
@@ -584,7 +579,7 @@ final class LightManager: ObservableObject {
         externallyChangedDeviceIDs.subtract(deviceIDs)
     }
 
-    private func reportedStateMatchesExpectation(
+    func reportedStateMatchesExpectation(
         deviceID: String,
         isOn: Bool,
         brightness: Double,
@@ -606,17 +601,17 @@ final class LightManager: ObservableObject {
         )
     }
 
-    private func expectPower(_ device: LightDevice, on: Bool) {
+    func expectPower(_ device: LightDevice, on: Bool) {
         guard demoWorkspaceController.allowsLiveNetworking else { return }
         commandCoordinator.expectPower(deviceID: device.id, isOn: on)
     }
 
-    private func expectBrightness(_ device: LightDevice, value: Double) {
+    func expectBrightness(_ device: LightDevice, value: Double) {
         guard demoWorkspaceController.allowsLiveNetworking else { return }
         commandCoordinator.expectBrightness(deviceID: device.id, brightness: value)
     }
 
-    private func expectColor(_ device: LightDevice, color: Color) {
+    func expectColor(_ device: LightDevice, color: Color) {
         guard demoWorkspaceController.allowsLiveNetworking else { return }
         // Record what the light will actually report, not what the user picked.
         // A LIFX bulb carries brightness in its own HSBK field, so `sendColor`
@@ -629,12 +624,12 @@ final class LightManager: ObservableObject {
         commandCoordinator.expectColor(deviceID: device.id, red: rgb.r, green: rgb.g, blue: rgb.b)
     }
 
-    private func expectKelvin(_ device: LightDevice, kelvin: Int) {
+    func expectKelvin(_ device: LightDevice, kelvin: Int) {
         guard demoWorkspaceController.allowsLiveNetworking else { return }
         commandCoordinator.expectKelvin(deviceID: device.id, kelvin: kelvin)
     }
 
-    private func refresh(_ device: LightDevice) {
+    func refresh(_ device: LightDevice) {
         guard demoWorkspaceController.allowsLiveNetworking else { return }
         switch device.brand {
         case .nanoleaf: nanoleaf.refresh(device.backendID)
@@ -643,7 +638,7 @@ final class LightManager: ObservableObject {
         }
     }
 
-    private func appendDiscoveryChange(_ device: LightDevice, kind: DiscoveryChange.Kind, detail: String) {
+    func appendDiscoveryChange(_ device: LightDevice, kind: DiscoveryChange.Kind, detail: String) {
         guard !discoveryChanges.contains(where: { $0.deviceID == device.id && $0.kind == kind }) else { return }
         discoveryChanges.append(DiscoveryChange(deviceID: device.id, name: device.label, kind: kind, detail: detail))
     }
@@ -691,7 +686,7 @@ final class LightManager: ObservableObject {
 
     func dismissLastActionSummary() { lastActionSummary = nil }
 
-    private func announceAction(_ title: String, lights: [LightDevice]) {
+    func announceAction(_ title: String, lights: [LightDevice]) {
         lastActionSummary = "\(title) · \(lights.count) light\(lights.count == 1 ? "" : "s")"
         Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 6_000_000_000)
@@ -705,7 +700,7 @@ final class LightManager: ObservableObject {
         scheduleErrorClear()
     }
 
-    private func scheduleErrorClear() {
+    func scheduleErrorClear() {
         errorClearTask?.cancel()
         errorClearTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 5_000_000_000)
@@ -718,7 +713,7 @@ final class LightManager: ObservableObject {
 
     // MARK: - Command queue and confirmed state
 
-    private func enqueueCommand(for device: LightDevice, coalescingKey: String, summary: String, debounce: TimeInterval = 0.08, operation: @escaping @MainActor () -> Void) {
+    func enqueueCommand(for device: LightDevice, coalescingKey: String, summary: String, debounce: TimeInterval = 0.08, operation: @escaping @MainActor () -> Void) {
         externallyChangedDeviceIDs.remove(device.id)
         let simulated = isDemoMode ? CommandCoordinator.SimulatedCommand(
             isStale: { [weak device] in device?.isStale ?? true },
@@ -825,7 +820,7 @@ final class LightManager: ObservableObject {
         performSetPower(in: room, on: on)
     }
 
-    private func performSetPower(in room: Room, on: Bool) {
+    func performSetPower(in room: Room, on: Bool) {
         let lights = devices(in: room)
         guard !lights.isEmpty else { return }
         let staleCount = lights.filter { $0.isStale }.count
@@ -885,7 +880,7 @@ final class LightManager: ObservableObject {
         )
     }
 
-    private func performSetAllPower(on: Bool) {
+    func performSetAllPower(on: Bool) {
         let staleCount = devices.filter { $0.isStale }.count
         if staleCount > 0 {
             publishError("\(staleCount) light\(staleCount == 1 ? "" : "s") may be offline.")
@@ -970,7 +965,11 @@ final class LightManager: ObservableObject {
         }
     }
 
-    func applyTheme(_ theme: LightingTheme, scope: LightScope = .all) {
+    func applyTheme(
+        _ theme: LightingTheme,
+        scope: LightScope = .all,
+        spatialField: SpatialFieldVector = .themeDefault
+    ) {
         let targets = devices(in: scope)
         guard !targets.isEmpty else {
             publishError(scope == .all
@@ -978,24 +977,42 @@ final class LightManager: ObservableObject {
                          : "No lights in “\(scopeDisplayName(scope))” to theme.")
             return
         }
-        applyTheme(theme, to: targets, suffix: scope == .all ? "" : " in “\(scopeDisplayName(scope))”")
+        applyTheme(
+            theme,
+            to: targets,
+            in: scope,
+            spatialField: spatialField,
+            suffix: scope == .all ? "" : " in “\(scopeDisplayName(scope))”"
+        )
     }
 
     /// Palette distribution follows room order and respects an explicit selection.
-    func applyTheme(_ theme: LightingTheme, deviceIDs: Set<String>, in scope: LightScope) {
+    func applyTheme(
+        _ theme: LightingTheme,
+        deviceIDs: Set<String>,
+        in scope: LightScope,
+        spatialField: SpatialFieldVector = .themeDefault
+    ) {
         let targets = devices(in: scope).filter { deviceIDs.contains($0.id) }
         guard !targets.isEmpty else { return }
-        applyTheme(theme, to: targets, suffix: "")
+        applyTheme(theme, to: targets, in: scope, spatialField: spatialField, suffix: "")
     }
 
-    private func applyTheme(_ theme: LightingTheme, to targets: [LightDevice], suffix: String) {
+    func applyTheme(
+        _ theme: LightingTheme,
+        to targets: [LightDevice],
+        in scope: LightScope = .all,
+        spatialField: SpatialFieldVector = .themeDefault,
+        suffix: String
+    ) {
         stopEffects(touching: Set(targets.map(\.id)))
         // The plan sets each light's brightness; a slider send still in flight
         // would land after it and override the theme.
         cancelPendingBrightness(deviceIDs: Set(targets.map(\.id)))
         recordChange(targets)
 
-        let plan = ThemePlanner.plan(theme, fixtures: targets.map(themeFixture))
+        let fixtures = targets.map { themeFixture($0, in: scope) }
+        let plan = ThemePlanner.plan(theme, fixtures: fixtures, spatialField: spatialField)
         let plansByID = Dictionary(plan.fixtures.map { ($0.fixtureID, $0) },
                                    uniquingKeysWith: { first, _ in first })
         for device in targets {
@@ -1013,11 +1030,20 @@ final class LightManager: ObservableObject {
     /// What the planner needs to know about a light: what it can address, the
     /// white point to fall back on, and — for a fixture that can only run some
     /// of its zones — which zones the user already has lit.
-    private func themeFixture(_ device: LightDevice) -> ThemeFixture {
-        ThemeFixture(id: device.id,
-                     capability: themeCapability(for: device),
-                     kelvin: device.kelvin,
-                     preferredZones: activeSegmentState(for: device.id)?.poweredSegments ?? [])
+    func themeFixture(_ device: LightDevice, in scope: LightScope = .all) -> ThemeFixture {
+        let resolvedRoom: Room? = {
+            if case .room(let roomID) = scope {
+                return rooms.first(where: { $0.id == roomID }) ?? room(forLightID: device.id)
+            }
+            return room(forLightID: device.id)
+        }()
+        return ThemeFixture(
+            id: device.id,
+            capability: themeCapability(for: device),
+            kelvin: device.kelvin,
+            preferredZones: activeSegmentState(for: device.id)?.poweredSegments ?? [],
+            anchor: resolvedRoom.map { planAnchor(for: device.id, in: $0) }
+        )
     }
 
     /// Capability comes from what discovery reported, never from a guess. A
@@ -1049,7 +1075,7 @@ final class LightManager: ObservableObject {
     /// Sends one fixture's share of a theme down whichever path its hardware
     /// understands. Undo was recorded once for the whole batch and the toast is
     /// published once at the end, so every call here stays quiet.
-    private func applyThemePlan(
+    func applyThemePlan(
         _ plan: ThemeFixturePlan,
         to device: LightDevice,
         transitionDuration: TimeInterval = 1.8
@@ -1276,7 +1302,7 @@ final class LightManager: ObservableObject {
     /// the caller can overwrite those lights (themes) or carry the entries
     /// into a replacement run (effects).
     @discardableResult
-    private func stopEffects(touching deviceIDs: Set<String>) -> [String: LightRuntimeSnapshot] {
+    func stopEffects(touching deviceIDs: Set<String>) -> [String: LightRuntimeSnapshot] {
         var inherited: [String: LightRuntimeSnapshot] = [:]
         for (scope, run) in effectRuns {
             let runIDs = run.ownedDeviceIDs
@@ -1299,7 +1325,7 @@ final class LightManager: ObservableObject {
 
     /// User-facing message when Music Mode can't start its audio source.
     /// macOS uses system audio (Screen Recording); iOS uses the microphone.
-    private func musicModeFailureMessage(for result: AudioCaptureService.AudioStartResult, capture: MusicCapturePreference) -> String {
+    func musicModeFailureMessage(for result: AudioCaptureService.AudioStartResult, capture: MusicCapturePreference) -> String {
         switch capture {
         case .file:
             return "Music Mode couldn't open or play that audio file. Choose an accessible, supported audio file and try again."
@@ -1321,7 +1347,7 @@ final class LightManager: ObservableObject {
     }
 
     /// True when the device belongs to a currently animating effect run.
-    private func isEffectAnimating(_ deviceID: String) -> Bool {
+    func isEffectAnimating(_ deviceID: String) -> Bool {
         effectRuns.values.contains { $0.ownedDeviceIDs.contains(deviceID) }
     }
 
@@ -1338,7 +1364,7 @@ final class LightManager: ObservableObject {
         return (match.key, match.value.effect.name)
     }
 
-    private func runEffectFrame(_ run: EffectRun) {
+    func runEffectFrame(_ run: EffectRun) {
         guard effectRuns[run.scope] === run, !run.effect.colors.isEmpty else { return }
         run.phase += run.effect.speed
         let effect = run.effect
@@ -1380,7 +1406,7 @@ final class LightManager: ObservableObject {
     /// 0 to 1, so an effect moves across the panels instead of flashing the
     /// wall as one bulb. Whole lights pass their index for both arguments,
     /// which is exactly the sampling every light had before panels existed.
-    private func effectSample(_ effect: LightingEffect, phase effectPhase: Double, slot: Double,
+    func effectSample(_ effect: LightingEffect, phase effectPhase: Double, slot: Double,
                               paletteIndex index: Int, count: Int) -> (Color, Double) {
         let palette = effect.colors
         var color = palette[(index + Int(effectPhase)) % palette.count].color
@@ -1431,7 +1457,7 @@ final class LightManager: ObservableObject {
     /// right as the user oriented the wall. Each panel's level is folded
     /// into its colour; master brightness was opened to full when the show
     /// began, so the level is applied once.
-    private func streamEffectFrame(_ effect: LightingEffect, phase: Double, index: Int, count: Int,
+    func streamEffectFrame(_ effect: LightingEffect, phase: Double, index: Int, count: Int,
                                    to device: LightDevice, stream: ShapesStream) {
         guard let layout = shapes.layout(device.id) else { return }
         let placed = layout.spatialPositions(rotationDegrees: Double(shapes.displayOrientation(device.id)),
@@ -1451,7 +1477,7 @@ final class LightManager: ObservableObject {
     /// Effect frames are transient and never receive command acknowledgements.
     /// Sending them through the normal confirmation pipeline used to allocate
     /// three Tasks and publish several whole-app changes per light, per frame.
-    private func sendEffectFrame(_ device: LightDevice, color: Color, brightness: Double,
+    func sendEffectFrame(_ device: LightDevice, color: Color, brightness: Double,
                                  duration: TimeInterval, musicTimestamp: TimeInterval? = nil) {
         guard demoWorkspaceController.allowsLiveNetworking else { return }
         switch device.brand {
@@ -1486,7 +1512,7 @@ final class LightManager: ObservableObject {
         }
     }
 
-    private func restoreDeviceStates(_ states: [LightRuntimeSnapshot]) {
+    func restoreDeviceStates(_ states: [LightRuntimeSnapshot]) {
         cancelIdentifications(deviceIDs: Set(states.map(\.deviceID)), restore: false)
         for state in states {
             guard let device = device(withID: state.deviceID) else { continue }
@@ -1512,7 +1538,7 @@ final class LightManager: ObservableObject {
 
     // MARK: - Vendor send helpers
 
-    private func sendPower(_ device: LightDevice, on: Bool) {
+    func sendPower(_ device: LightDevice, on: Bool) {
         if device.brand == .govee, !on {
             // Govee drops the volatile stream overlay when power turns off.
             // Forget the local mode flag so the next power-on enables it once.
@@ -1535,7 +1561,7 @@ final class LightManager: ObservableObject {
         }
     }
 
-    private func sendBrightness(_ device: LightDevice, value: Double) {
+    func sendBrightness(_ device: LightDevice, value: Double) {
         let value = boundedBrightness(value)
         expectBrightness(device, value: value)
         let matrixUpdate: LIFXMatrixState?
@@ -1570,7 +1596,7 @@ final class LightManager: ObservableObject {
         }
     }
 
-    private func sendColor(
+    func sendColor(
         _ device: LightDevice,
         color: Color,
         debounce: TimeInterval = 0.08,
@@ -1603,7 +1629,7 @@ final class LightManager: ObservableObject {
         }
     }
 
-    private func sendColorTemperature(_ device: LightDevice, kelvin: Int) {
+    func sendColorTemperature(_ device: LightDevice, kelvin: Int) {
         let kelvin = device.brand == .nanoleaf ? NanoleafProtocol.kelvin(kelvin) : min(9000, max(1200, kelvin))
         device.kelvin = kelvin
         expectNanoleafAppearance(device, appearance: .init(colorMode: "ct"))
@@ -1628,7 +1654,7 @@ final class LightManager: ObservableObject {
 
     // MARK: - Undo / redo
 
-    private func snapshot(_ device: LightDevice) -> LightRuntimeSnapshot {
+    func snapshot(_ device: LightDevice) -> LightRuntimeSnapshot {
         LightRuntimeSnapshot(deviceID: device.id, isOn: device.isOn,
                     brightness: device.brightness, color: device.color, kelvin: device.kelvin,
                     segments: activeSegmentState(for: device.id),
@@ -1637,7 +1663,11 @@ final class LightManager: ObservableObject {
                     nanoleafDesign: device.brand == .nanoleaf ? shapes.showingDesign(for: device.id) : nil)
     }
 
-    private func recordChange(_ devices: [LightDevice]) {
+    func recomputeCanUndo() {
+        canUndo = !undoStack.isEmpty || lastDeletedScene != nil || lastDeletedRoom != nil
+    }
+
+    func recordChange(_ devices: [LightDevice]) {
         guard !devices.isEmpty else { return }
         cancelIdentifications(deviceIDs: Set(devices.map(\.id)), restore: true)
         let now = changeClock()
@@ -1652,21 +1682,41 @@ final class LightManager: ObservableObject {
         }
         undoStack.append(devices.map { snapshot($0) })
         if undoStack.count > undoLimit { undoStack.removeFirst() }
-        canUndo = true
+        recomputeCanUndo()
         for d in devices { lastChangeTime[d.id] = now }
     }
 
     func undo() {
-        guard let entry = undoStack.popLast() else { return }
-        let current = entry.compactMap { snap -> LightRuntimeSnapshot? in
-            guard let d = device(withID: snap.deviceID) else { return nil }
-            return snapshot(d)
+        if commandErrorUndo != nil {
+            if lastDeletedScene != nil {
+                undoDeleteScene()
+                return
+            }
+            if lastDeletedRoom != nil {
+                undoDeleteRoom()
+                return
+            }
         }
-        redoStack.append(current)
-        apply(entry)
-        lastChangeTime = [:]
-        canUndo = !undoStack.isEmpty
-        canRedo = !redoStack.isEmpty
+        if let entry = undoStack.popLast() {
+            let current = entry.compactMap { snap -> LightRuntimeSnapshot? in
+                guard let d = device(withID: snap.deviceID) else { return nil }
+                return snapshot(d)
+            }
+            redoStack.append(current)
+            apply(entry)
+            lastChangeTime = [:]
+            recomputeCanUndo()
+            canRedo = !redoStack.isEmpty
+            return
+        }
+        if lastDeletedScene != nil {
+            undoDeleteScene()
+            return
+        }
+        if lastDeletedRoom != nil {
+            undoDeleteRoom()
+            return
+        }
     }
 
     func redo() {
@@ -1678,11 +1728,11 @@ final class LightManager: ObservableObject {
         undoStack.append(current)
         apply(entry)
         lastChangeTime = [:]
-        canUndo = !undoStack.isEmpty
+        recomputeCanUndo()
         canRedo = !redoStack.isEmpty
     }
 
-    private func apply(_ entry: [LightRuntimeSnapshot]) {
+    func apply(_ entry: [LightRuntimeSnapshot]) {
         let ids = Set(entry.map(\.deviceID))
         cancelIdentifications(deviceIDs: ids, restore: false)
         stopEffects(touching: ids)
@@ -1712,11 +1762,11 @@ final class LightManager: ObservableObject {
 
     // MARK: - Internal helpers
 
-    private func boundedBrightness(_ value: Double) -> Double {
+    func boundedBrightness(_ value: Double) -> Double {
         value.isFinite ? max(0, min(1, value)) : 0
     }
 
-    fileprivate func upsert(_ device: LightDevice) {
+    func upsert(_ device: LightDevice) {
         scanResponseCount += 1
         // Apply any persisted custom name.
         device.customName = customNames[device.id]
@@ -1746,2961 +1796,11 @@ final class LightManager: ObservableObject {
         }
     }
 
-    private func sortDevices() {
+    func sortDevices() {
         devices.sort { $0.label.localizedCaseInsensitiveCompare($1.label) == .orderedAscending }
     }
 
-    fileprivate func device(withID id: String) -> LightDevice? {
+    func device(withID id: String) -> LightDevice? {
         devicesByID[id]
-    }
-}
-
-// MARK: - Nanoleaf Shapes
-
-extension LightManager {
-    private func configureNanoleaf() {
-        nanoleaf.onCandidates = { [weak self] candidates in
-            guard let self, self.demoWorkspaceController.acceptsLiveNetworkCallbacks else { return }
-            self.nanoleafCandidates = candidates
-        }
-        nanoleaf.onDiscoveryError = { [weak self] message in
-            guard let self, self.demoWorkspaceController.acceptsLiveNetworkCallbacks else { return }
-            self.nanoleafDiscoveryError = message
-        }
-        nanoleaf.onUpdate = { [weak self] pairing, info in
-            self?.nanoleafDidUpdate(pairing: pairing, info: info)
-        }
-        nanoleaf.onFailure = { [weak self] serial, error in
-            guard let self, self.demoWorkspaceController.acceptsLiveNetworkCallbacks else { return }
-            let id = "nanoleaf:\(serial)"
-            if let device = self.device(withID: id), error == .pairingRequired {
-                device.needsNanoleafPairing = true
-                device.isStale = true
-            }
-            if self.commandPendingIDs.contains(id) {
-                self.commandCoordinator.fail(deviceIDs: [id], summary: error.localizedDescription)
-                self.publishError(error.localizedDescription)
-            }
-        }
-        // Shapes: every live callback is dropped while Demo Mode holds the
-        // workspace, so a real wall can never write into the simulated one.
-        shapes.isLive = { [weak self] in self?.demoWorkspaceController.allowsLiveNetworking ?? false }
-        shapes.persist = { [weak self] in self?.persistApplicationState() }
-        shapes.restoreWholeWall = { [weak self] id in self?.restoreWholeWallAfterPreview(id) }
-        nanoleaf.onOperationFailure = { [weak self] serial, operation, error in
-            guard let self, self.demoWorkspaceController.acceptsLiveNetworkCallbacks else { return }
-            self.shapes.didFail(deviceID: "nanoleaf:\(serial)", operation: operation, error: error)
-        }
-        nanoleaf.onWriteAccepted = { [weak self] serial, operation in
-            guard let self, self.demoWorkspaceController.acceptsLiveNetworkCallbacks else { return }
-            self.shapes.didAccept(deviceID: "nanoleaf:\(serial)", operation: operation)
-        }
-        nanoleaf.onEvent = { [weak self] serial, event in
-            guard let self, self.demoWorkspaceController.acceptsLiveNetworkCallbacks else { return }
-            self.shapes.handle(deviceID: "nanoleaf:\(serial)", event: event)
-        }
-        nanoleaf.onStreamStatus = { [weak self] serial, status in
-            guard let self, self.demoWorkspaceController.acceptsLiveNetworkCallbacks else { return }
-            self.shapes.didChangeStream(deviceID: "nanoleaf:\(serial)", status: status)
-        }
-    }
-
-    func pairNanoleaf(host: String, port: Int = 16021, serviceID: String? = nil) async throws {
-        guard demoWorkspaceController.allowsLiveNetworking else { throw NanoleafError.unavailable }
-        try await nanoleaf.pair(endpoint: NanoleafEndpoint(host: host, port: port), serviceID: serviceID)
-        logActivity(.system, title: "Nanoleaf controller paired", detail: "Local control is ready.")
-    }
-
-    func nanoleafDidUpdate(pairing: NanoleafPairing, info: NanoleafInfo) {
-        guard demoWorkspaceController.acceptsLiveNetworkCallbacks, info.family != nil else { return }
-        let id = "nanoleaf:\(pairing.serial)"
-        if device(withID: id) == nil {
-            upsert(LightDevice(id: id, brand: .nanoleaf, backendID: pairing.serial,
-                               name: info.name, address: pairing.endpoint.host, sku: info.model))
-        }
-        guard let device = device(withID: id) else { return }
-        device.address = pairing.endpoint.host
-        device.name = info.name
-        device.needsNanoleafPairing = false
-        device.nanoleafEffects = info.effects.effectsList
-        if let owner = shapes.didRead(deviceID: id, info: info) {
-            releaseShapesStream(deviceID: id, owner: owner)
-        }
-        let color = Color(hue: Double(min(360, max(0, info.state.hue.value))) / 360,
-                          saturation: Double(min(100, max(0, info.state.sat.value))) / 100, brightness: 1)
-        let rgb = color.rgbComponents
-        let brightness = Double(min(100, max(0, info.state.brightness.value))) / 100
-        let kelvin = NanoleafProtocol.kelvin(info.state.ct.value)
-        let matches = commandCoordinator.reportedStateMatchesExpectation(
-            deviceID: id,
-            reported: ReportedDeviceState(isOn: info.state.on.value, brightness: brightness,
-                                           red: rgb.r, green: rgb.g, blue: rgb.b,
-                                           kelvin: kelvin, nanoleafAppearance: info.appearance)
-        )
-        if !isEffectAnimating(id) && (!commandPendingIDs.contains(id) || matches) {
-            device.isOn = info.state.on.value
-            device.brightness = brightness
-            device.kelvin = kelvin
-            // A wall showing LumenDesk's design reports the hue of its last
-            // solid colour, which is not what it shows; its swatch is the
-            // design's own.
-            device.color = shapes.showingDesign(for: id)?.representativeChroma?.swiftUIColor ?? color
-            device.nanoleafAppearance = info.appearance
-            if info.state.colorMode == "ct" { whiteModeDeviceIDs.insert(id) }
-            else { whiteModeDeviceIDs.remove(id) }
-        }
-        if isScanning { scanResponseCount += 1 }
-        markSeen(device, confirmsPendingCommand: matches)
-    }
-
-    private func expectNanoleafAppearance(_ device: LightDevice, appearance: NanoleafAppearance) {
-        guard device.brand == .nanoleaf else { return }
-        device.nanoleafAppearance = appearance
-        if appearance.colorMode == "ct" { whiteModeDeviceIDs.insert(device.id) }
-        else { whiteModeDeviceIDs.remove(device.id) }
-        guard demoWorkspaceController.allowsLiveNetworking else { return }
-        commandCoordinator.expectNanoleafAppearance(deviceID: device.id, appearance: appearance)
-    }
-
-    func selectNanoleafEffect(_ device: LightDevice, name: String) {
-        guard device.brand == .nanoleaf, device.nanoleafEffects.contains(name),
-              !isEffectAnimating(device.id) else { return }
-        recordChange([device])
-        device.isOn = true
-        sendPower(device, on: true)
-        sendNanoleafEffect(device, name: name)
-    }
-
-    private func sendNanoleafEffect(_ device: LightDevice, name: String) {
-        expectNanoleafAppearance(device, appearance: .init(colorMode: "effect", effect: name))
-        simulateShapesOutput(device, .nativeEffect(name: name))
-        // Share the color coalescing key so a queued color cannot overwrite an
-        // effect the user selected afterwards (or vice versa).
-        enqueueCommand(for: device, coalescingKey: "color", summary: "Selecting Nanoleaf effect") { [weak self, weak device] in
-            guard let self, let device else { return }
-            self.shapes.outputReplaced(device.id, by: .nativeEffect(name: name))
-            self.nanoleaf.selectEffect(device.backendID, name: name)
-        }
-    }
-
-    private func restoreNanoleafAppearance(_ appearance: NanoleafAppearance?, to device: LightDevice) -> Bool {
-        guard device.brand == .nanoleaf, let appearance else { return false }
-        if appearance.colorMode == "effect", let effect = appearance.effect {
-            sendNanoleafEffect(device, name: effect)
-            sendBrightness(device, value: device.brightness)
-            return true
-        }
-        if appearance.colorMode == "ct" {
-            sendColorTemperature(device, kelvin: device.kelvin)
-            return true
-        }
-        return false
-    }
-
-    // MARK: Shapes panels
-
-    /// Asks a Shapes controller for a fresh reading: layout, orientation and
-    /// what it is showing. Nothing is sent in Demo Mode.
-    func refreshShapes(_ device: LightDevice) {
-        guard device.brand == .nanoleaf else { return }
-        refresh(device)
-    }
-
-    static func shapesSnapshot(from state: PersistedApplicationState) -> NanoleafShapesController.Snapshot {
-        NanoleafShapesController.Snapshot(designs: state.nanoleafDesigns,
-                                          savedDesigns: state.nanoleafSavedDesigns,
-                                          groups: state.nanoleafPanelGroups,
-                                          arrangements: state.nanoleafArrangements)
-    }
-
-    /// Shows a per-panel design on a Shapes wall as LumenDesk's own static
-    /// layout. Each panel's intensity is part of the design; master
-    /// brightness stays on the controller's brightness channel, untouched.
-    func applyShapesDesign(_ design: NanoleafPanelDesign, to device: LightDevice,
-                           recordUndo: Bool = true, turnOn: Bool = true, announce: Bool = true) {
-        guard device.brand == .nanoleaf, let layout = shapes.layout(device.id) else { return }
-        if recordUndo {
-            if device.isStale {
-                publishError("\u{201C}\(device.label)\u{201D} may be offline — command sent anyway.")
-            }
-            stopEffects(touching: [device.id])
-            recordChange([device])
-        }
-        // An all-dark design is a request for nothing to be lit, so it must
-        // not switch the wall on to show it.
-        if turnOn, !device.isOn, design.lightsAnyPanel(of: layout) {
-            device.isOn = true
-            sendPower(device, on: true)
-        }
-        showShapesDesign(design, on: device)
-        if announce {
-            let count = design.reconciliation(against: layout).covered.count
-            logActivity(.command, title: "Panel design applied", detail: "\(device.label): \(count) panels")
-            lastActionSummary = "Painted \(count) panel\(count == 1 ? "" : "s") on \(device.label)"
-        }
-    }
-
-    /// The one path a design takes to a wall. It shares the colour command's
-    /// coalescing key, so a colour queued a moment earlier can never land on
-    /// top of the design, or the other way round.
-    private func showShapesDesign(_ design: NanoleafPanelDesign, on device: LightDevice, transition: Int = 3) {
-        if let chroma = design.representativeChroma { device.color = chroma.swiftUIColor }
-        // The controller reports a static layout as an effect with a
-        // reserved name, which reads back as effect mode and no scene.
-        expectNanoleafAppearance(device, appearance: .init(colorMode: "effect"))
-        if isDemoMode {
-            // Demo commands are simulated and never sent; the simulated
-            // wall takes the design as it is queued.
-            shapes.show(design, on: device.id, transition: transition)
-        }
-        enqueueCommand(for: device, coalescingKey: "color", summary: "Painting \(design.panelIDs.count) Nanoleaf panels") { [weak self, weak device] in
-            guard let self, let device else { return }
-            self.shapes.show(design, on: device.id, transition: transition)
-        }
-    }
-
-    /// In Demo Mode the solid colour, white or scene that replaces a design
-    /// reaches the simulated wall as the command is queued; live, it does so
-    /// when the command is actually sent.
-    private func simulateShapesOutput(_ device: LightDevice, _ output: NanoleafOutputState) {
-        guard device.brand == .nanoleaf, isDemoMode else { return }
-        shapes.outputReplaced(device.id, by: output)
-    }
-
-    /// Puts a Shapes wall's captured output back: LumenDesk's design when it
-    /// owned the wall, otherwise a stored scene or white. False when neither
-    /// applies, so the caller falls through to the plain colour path.
-    private func restoreNanoleafOutput(design: NanoleafPanelDesign?, appearance: NanoleafAppearance?,
-                                       to device: LightDevice) -> Bool {
-        guard device.brand == .nanoleaf else { return false }
-        if let design, shapes.layout(device.id) != nil {
-            showShapesDesign(design, on: device)
-            sendBrightness(device, value: device.brightness)
-            return true
-        }
-        return restoreNanoleafAppearance(appearance, to: device)
-    }
-
-    /// Ending an editor preview that had replaced a solid colour or white
-    /// puts that colour back.
-    private func restoreWholeWallAfterPreview(_ deviceID: String) {
-        guard let device = device(withID: deviceID) else { return }
-        if whiteModeDeviceIDs.contains(deviceID) {
-            sendColorTemperature(device, kelvin: device.kelvin)
-        } else {
-            sendColor(device, color: device.color)
-        }
-    }
-
-    /// Writes a wall's global orientation and re-aims any running Music Mode
-    /// show at the rotated wall. Effects re-read it on every frame.
-    func requestShapesOrientation(_ degrees: Int, for device: LightDevice) {
-        guard device.brand == .nanoleaf else { return }
-        shapes.requestOrientation(degrees, for: device.id)
-        musicFixtureCache.removeAll()
-        for scope in musicModeController.activeScopeIDs
-            where effectRuns[scope]?.ownedDeviceIDs.contains(device.id) == true {
-            musicModeController.update(scope: scope, configuration: musicModeConfiguration,
-                                       topology: fixtureTopology(for: scope),
-                                       fixtures: musicFixtureDescriptors(in: scope),
-                                       reducedMotion: effectRuns[scope]?.reducedMotion ?? false)
-        }
-    }
-
-    /// The wall direction a room's music sweep travels.
-    private func shapesAxis(for layout: FixtureTopologyLayout) -> NanoleafSpatialAxis {
-        switch layout {
-        case .leftToRight, .custom: return .leftToRight
-        case .frontToBack: return .topToBottom
-        case .circular: return .clockwise
-        }
-    }
-
-    /// Claims a Shapes wall for a show. With a known layout the show streams
-    /// panel by panel, and master brightness opens to full: each panel's
-    /// level rides in its own colour, and Nanoleaf's master brightness
-    /// multiplies every mode, so leaving it down would dim twice. Without a
-    /// layout the wall takes the show's whole-wall colour, as it always has.
-    private func beginShapesShow(_ device: LightDevice, owner: String, perPanel: Bool) {
-        guard device.brand == .nanoleaf else { return }
-        guard perPanel, shapes.canStream(device.id), let layout = shapes.layout(device.id) else {
-            shapes.outputReplaced(device.id, by: .solid)
-            return
-        }
-        shapesStreams[device.id] = ShapesStream(owner: owner, panelIDs: layout.paintablePanels.map(\.panelID))
-        shapes.beginStream(device.id, owner: owner)
-        sendBrightness(device, value: 1)
-    }
-
-    /// Ends a show's streams. With `keepingLastFrame`, the frame on the wall
-    /// becomes a static LumenDesk design, so a show that ends without
-    /// restoring leaves its final look under a name LumenDesk can account
-    /// for, not an external-control session nothing feeds.
-    private func endShapesStreams(ownedBy owner: String, keepingLastFrame: Bool) {
-        for (deviceID, stream) in shapesStreams where stream.owner == owner {
-            shapesStreams.removeValue(forKey: deviceID)
-            if keepingLastFrame, let device = device(withID: deviceID),
-               let design = shapes.lastStreamedDesign(deviceID, owner: owner) {
-                if let chroma = design.representativeChroma { device.color = chroma.swiftUIColor }
-                shapes.show(design, on: deviceID, transition: 1)
-            } else {
-                shapes.endStream(deviceID, owner: owner)
-            }
-        }
-    }
-
-    /// Another app took a wall a show was streaming to. The show keeps
-    /// running on its other lights but lets this one go: no more frames, its
-    /// controls come back, and stopping the show will not "restore" it over
-    /// the other app's choice.
-    private func releaseShapesStream(deviceID: String, owner: String) {
-        guard shapesStreams[deviceID]?.owner == owner else { return }
-        shapesStreams.removeValue(forKey: deviceID)
-        for run in effectRuns.values where run.streamOwner == owner {
-            run.releasedDeviceIDs.insert(deviceID)
-            run.snapshot.removeAll { $0.deviceID == deviceID }
-        }
-        let label = device(withID: deviceID)?.label ?? "Nanoleaf panels"
-        logActivity(.command, title: "Live output released",
-                    detail: "\(label) switched to a scene chosen elsewhere; LumenDesk stopped streaming to it.")
-    }
-
-    /// Diagnostics rows for a Shapes or Aurora wall: what was read, what is claimed,
-    /// and what the live stream did. None of it is evidence the panels lit.
-    func shapesDiagnostics(for device: LightDevice) -> [ScanDiagnostic] {
-        guard device.brand == .nanoleaf else { return [] }
-        let wall = shapes.wall(device.id)
-        var rows: [ScanDiagnostic] = []
-        if let layout = wall.arrangement?.layout {
-            rows.append(ScanDiagnostic(title: "Panel layout",
-                                       value: "\(layout.paintablePanels.count) panels · \(layout.shapeSummary)",
-                                       status: wall.topologyProblem == nil ? .good : .warning))
-        } else {
-            rows.append(ScanDiagnostic(title: "Panel layout", value: "Not read yet", status: .neutral))
-        }
-        if let problem = wall.topologyProblem {
-            rows.append(ScanDiagnostic(title: "Latest layout reading", value: problem.summary, status: .warning))
-        }
-        rows.append(ScanDiagnostic(title: "Orientation", value: wall.orientation.summary,
-                                   status: wall.orientation.isFailed ? .warning : .neutral))
-        rows.append(ScanDiagnostic(title: "Showing", value: wall.output.summary, status: .neutral))
-        if let family = device.nanoleafFamily {
-            rows.append(ScanDiagnostic(title: "Product",
-                                       value: "\(family.displayName) · live output over external control \(family.streamProtocol.rawValue)",
-                                       status: .neutral))
-        }
-        if let firmware = wall.firmware {
-            rows.append(ScanDiagnostic(title: "Firmware", value: firmware, status: .neutral))
-        }
-        if let metrics = shapes.streamMetrics(device.id) {
-            rows.append(ScanDiagnostic(title: "Live stream",
-                                       value: "\(metrics.datagramsSent) datagrams sent · \(metrics.framesCoalesced) frames merged · \(metrics.sendFailures) refused (UDP has no receipt)",
-                                       status: metrics.sendFailures > 0 ? .warning : .neutral))
-        }
-        if let failure = wall.lastFailure {
-            rows.append(ScanDiagnostic(title: "Last panel failure", value: failure, status: .warning))
-        }
-        return rows
-    }
-}
-
-// MARK: - LIFX delegate
-
-extension LightManager: LIFXClientDelegate {
-    nonisolated func lifxDiscovered(macHex: String, address: String) {
-        Task { @MainActor in
-            guard self.demoWorkspaceController.acceptsLiveNetworkCallbacks else { return }
-            let id = "lifx:\(macHex)"
-            if let existing = self.device(withID: id) {
-                self.scanResponseCount += 1
-                let oldAddress = existing.address
-                existing.address = address
-                if oldAddress != address {
-                    self.razerActiveIDs.remove(existing.id)
-                    self.appendDiscoveryChange(existing, kind: .changed, detail: "Address changed from \(oldAddress) to \(address)")
-                }
-                self.markSeen(existing)
-            } else {
-                let device = LightDevice(id: id, brand: .lifx, backendID: macHex,
-                                         name: "LIFX \(macHex.suffix(6))", address: address)
-                self.upsert(device)
-            }
-        }
-    }
-
-    nonisolated func lifxDidIdentify(macHex: String, vendorID: UInt32, productID: UInt32) {
-        Task { @MainActor in
-            guard self.demoWorkspaceController.acceptsLiveNetworkCallbacks,
-                  vendorID == 1,
-                  let device = self.device(withID: "lifx:\(macHex)") else { return }
-            device.productID = productID
-            if let sku = LIFXProductCatalog.sku(for: productID) {
-                device.sku = sku
-            }
-        }
-    }
-
-    nonisolated func lifxDidUpdate(macHex: String, label: String, color: LIFXHSBK, isOn: Bool) {
-        Task { @MainActor in
-            guard self.demoWorkspaceController.acceptsLiveNetworkCallbacks else { return }
-            let id = "lifx:\(macHex)"
-            guard let device = self.device(withID: id) else { return }
-            if self.isScanning { self.scanResponseCount += 1 }
-            if !label.isEmpty && label != device.name {
-                device.name = label
-                self.sortDevices()
-            }
-            let h = Double(color.hue) / 65535.0
-            let s = Double(color.saturation) / 65535.0
-            let reportedColor = Color(hue: h, saturation: s, brightness: 1.0)
-            let rgb = reportedColor.rgbComponents
-            let brightness = Double(color.brightness) / 65535.0
-            let matches = self.reportedStateMatchesExpectation(
-                deviceID: id,
-                isOn: isOn,
-                brightness: brightness,
-                red: rgb.r,
-                green: rgb.g,
-                blue: rgb.b,
-                kelvin: Int(color.kelvin)
-            )
-            if !self.isEffectAnimating(id) && (!self.commandPendingIDs.contains(id) || matches) {
-                if device.isOn != isOn { device.isOn = isOn }
-                if abs(device.brightness - brightness) > 0.001 { device.brightness = brightness }
-                if device.kelvin != Int(color.kelvin) { device.kelvin = Int(color.kelvin) }
-                if device.color.rgbDistance(to: reportedColor) > 0.005 { device.color = reportedColor }
-            }
-            self.markSeen(device, confirmsPendingCommand: matches)
-        }
-    }
-
-    nonisolated func lifxDidUpdateMatrix(macHex: String, productID: UInt32,
-                                         width: Int, height: Int,
-                                         colors: [LIFXHSBK]) {
-        Task { @MainActor in
-            guard self.demoWorkspaceController.acceptsLiveNetworkCallbacks,
-                  let device = self.device(withID: "lifx:\(macHex)") else { return }
-            if productID != 0 {
-                device.productID = productID
-                device.sku = LIFXProductCatalog.sku(for: productID) ?? device.sku
-            }
-            guard device.isLIFXLuna else { return }
-            let previous = self.lifxMatrixStates[device.id]
-            let matrix = LIFXMatrixState(
-                productID: device.productID ?? productID,
-                width: width,
-                height: height,
-                colors: colors.map(LIFXMatrixColor.init),
-                isActive: true
-            )
-            self.lifxMatrixStates[device.id] = matrix
-            if previous?.productID != matrix.productID || previous?.width != matrix.width || previous?.height != matrix.height {
-                self.musicFixtureCache.removeAll()
-                for scope in self.musicModeController.activeScopeIDs
-                    where self.effectRuns[scope]?.ownedDeviceIDs.contains(device.id) == true {
-                    self.musicModeController.updateFixtures(scope: scope, fixtures: self.musicFixtureDescriptors(in: scope))
-                }
-            }
-            self.markSeen(device)
-        }
-    }
-
-    nonisolated func lifxCommandFailed(_ error: Error) {
-        Task { @MainActor in
-            guard self.demoWorkspaceController.acceptsLiveNetworkCallbacks else { return }
-            let affected = Set(self.devices.lazy
-                .filter { $0.brand == .lifx && self.commandPendingIDs.contains($0.id) }
-                .map(\.id))
-            self.commandCoordinator.fail(deviceIDs: affected, summary: "LIFX rejected the command")
-            self.publishError("LIFX command failed: \(error)")
-        }
-    }
-
-    nonisolated func lifxDiscoveryProbe(_ report: DiscoveryProbeReport) {
-        Task { @MainActor in self.lifxProbe = report }
-    }
-}
-
-// MARK: - Govee delegate
-
-extension LightManager: GoveeClientDelegate {
-    nonisolated func goveeDiscovered(deviceID: String, address: String, sku: String?) {
-        Task { @MainActor in
-            guard self.demoWorkspaceController.acceptsLiveNetworkCallbacks else { return }
-            let id = "govee:\(deviceID)"
-            if let existing = self.device(withID: id) {
-                self.scanResponseCount += 1
-                let oldAddress = existing.address
-                existing.address = address
-                if let sku, existing.sku != sku { existing.sku = sku }
-                if oldAddress != address {
-                    // The client now targets a different endpoint. Treat the
-                    // volatile stream mode as unknown so it is enabled once
-                    // at the new address.
-                    self.razerActiveIDs.remove(existing.id)
-                    self.appendDiscoveryChange(existing, kind: .changed, detail: "Address changed from \(oldAddress) to \(address)")
-                }
-                self.markSeen(existing)
-                // On app launch the in-memory mode set is empty, so this
-                // enables streaming once. Routine discovery responses then
-                // refresh only the frame and cannot create an H60B0 flash.
-                self.reassertStreamHoldIfNeeded(existing)
-            } else {
-                let suffix = deviceID.split(separator: ":").suffix(2).joined(separator: "")
-                let display = sku.map { "\($0) \(suffix)" } ?? "Govee \(suffix)"
-                let device = LightDevice(id: id, brand: .govee, backendID: deviceID,
-                                         name: display, address: address, sku: sku)
-                self.upsert(device)
-                // First sighting after an app launch: restore any held layout.
-                self.reassertStreamHoldIfNeeded(device, forceModeEnable: true)
-            }
-        }
-    }
-
-    nonisolated func goveeDidUpdate(deviceID: String, isOn: Bool, brightness: Int,
-                                    r: Int, g: Int, b: Int, kelvin: Int) {
-        Task { @MainActor in
-            guard self.demoWorkspaceController.acceptsLiveNetworkCallbacks else { return }
-            let id = "govee:\(deviceID)"
-            guard let device = self.device(withID: id) else { return }
-            if self.isScanning { self.scanResponseCount += 1 }
-            let wasOn = device.isOn
-            let normalizedBrightness = Double(min(100, max(0, brightness))) / 100.0
-            let red = Double(min(255, max(0, r))) / 255.0
-            let green = Double(min(255, max(0, g))) / 255.0
-            let blue = Double(min(255, max(0, b))) / 255.0
-            let kelvin = kelvin <= 0 ? 0 : min(9000, max(1200, kelvin))
-            let matches = self.reportedStateMatchesExpectation(
-                deviceID: id,
-                isOn: isOn,
-                brightness: normalizedBrightness,
-                red: red,
-                green: green,
-                blue: blue,
-                kelvin: kelvin
-            )
-            if !self.isEffectAnimating(id) && (!self.commandPendingIDs.contains(id) || matches) {
-                if device.isOn != isOn { device.isOn = isOn }
-                if abs(device.brightness - normalizedBrightness) > 0.001 {
-                    device.brightness = normalizedBrightness
-                }
-                if kelvin > 0, device.kelvin != kelvin { device.kelvin = kelvin }
-                let reportedColor = Color(red: red, green: green, blue: blue)
-                if device.color.rgbDistance(to: reportedColor) > 0.005 { device.color = reportedColor }
-            }
-            if !isOn {
-                // A physical or externally initiated power-off clears razer mode.
-                self.razerActiveIDs.remove(id)
-            } else if !wasOn {
-                self.reassertStreamHoldIfNeeded(device)
-            }
-            self.markSeen(device, confirmsPendingCommand: matches)
-        }
-    }
-
-    nonisolated func goveeCommandFailed(deviceID: String, kind: String, error: Error) {
-        Task { @MainActor in
-            guard self.demoWorkspaceController.acceptsLiveNetworkCallbacks else { return }
-            let id = "govee:\(deviceID)"
-            // Only the light that actually failed. Failing every pending Govee
-            // command on one bad send reported errors for lights that were fine.
-            if self.commandPendingIDs.contains(id) {
-                self.commandCoordinator.fail(deviceIDs: [id], summary: "Govee light did not accept the command")
-            }
-            let device = self.device(withID: id)
-            let code = (error as? UDPSocket.SocketError)?.errnoCode
-            if let code, UDPSocket.isUnoccupied(code) {
-                // "No route to host" for a light that was discovered a moment
-                // ago means it stopped answering ARP: powered off, asleep, or
-                // moved. That is staleness, and the recovery is a rescan — not
-                // a raw errno in a toast.
-                device?.isStale = true
-                guard kind != GoveeClient.backgroundPollKind else { return }
-                let name = device?.label ?? "A Govee light"
-                self.publishError("\(name) is not answering at \(device?.address ?? "its last address"). It may be powered off or on another network — scan again to find it.")
-                return
-            }
-            // A background status poll should not raise the same alarm as
-            // something the user asked for.
-            guard kind != GoveeClient.backgroundPollKind else { return }
-            self.publishError("Govee command failed: \(error)")
-        }
-    }
-
-    nonisolated func goveeDiscoveryProbe(_ report: DiscoveryProbeReport) {
-        Task { @MainActor in self.goveeProbe = report }
-    }
-}
-
-// MARK: - LIFX Luna matrix color studio
-
-extension LightManager {
-    func lifxMatrixState(for device: LightDevice) -> LIFXMatrixState? {
-        guard device.isLIFXLuna else { return nil }
-        return lifxMatrixStates[device.id]
-    }
-
-    func activeLIFXMatrixState(for deviceID: String) -> LIFXMatrixState? {
-        guard let state = lifxMatrixStates[deviceID], state.isActive else { return nil }
-        return state
-    }
-
-    func refreshLIFXMatrix(_ device: LightDevice) {
-        guard device.isLIFXLuna else { return }
-        if isDemoMode {
-            if lifxMatrixStates[device.id] == nil {
-                lifxMatrixStates[device.id] = .demoLuna(brightness: device.brightness)
-            }
-            return
-        }
-        lifx?.refreshMatrix(macHex: device.backendID)
-    }
-
-    func applyLIFXMatrix(_ device: LightDevice, state: LIFXMatrixState,
-                         recordUndo: Bool = true, turnOn: Bool = true,
-                         announce: Bool = true,
-                         transitionDuration: TimeInterval = 0.25) {
-        guard device.isLIFXLuna else { return }
-        if recordUndo {
-            if device.isStale {
-                publishError("\u{201C}\(device.label)\u{201D} may be offline — command sent anyway.")
-            }
-            recordChange([device])
-        }
-
-        var next = state
-        next.productID = device.productID ?? state.productID
-        next.isActive = true
-        lifxMatrixStates[device.id] = next
-        if turnOn, !device.isOn {
-            device.isOn = true
-            sendPower(device, on: true)
-        }
-
-        commandCoordinator.recordUnconfirmedSend(
-            deviceID: device.id,
-            summary: "Applying \(next.zoneCount)-zone Luna layout"
-        )
-        if demoWorkspaceController.allowsLiveNetworking {
-            lifx?.setMatrixColors(
-                macHex: device.backendID,
-                colors: next.colors.map(\.hsbk),
-                width: next.width,
-                durationMS: UInt32(max(0, min(60_000, Int(transitionDuration * 1_000))))
-            )
-        }
-        if announce {
-            logActivity(.command, title: "Luna layout applied",
-                        detail: "\(device.label): \(next.zoneCount) color zones")
-            lastActionSummary = "Painted \(next.zoneCount) zones on \(device.label)"
-        }
-    }
-
-    fileprivate func markLIFXMatrixInactive(_ device: LightDevice) {
-        guard lifxMatrixStates[device.id]?.isActive == true else { return }
-        lifxMatrixStates[device.id]?.isActive = false
-    }
-}
-
-// MARK: - Govee Segment Studio (per-segment control for COB strips, string lights, neon ropes)
-
-extension LightManager {
-    /// Capability detected from the discovery SKU; nil for non-Govee devices
-    /// and Govee models the catalog doesn't recognize.
-    func segmentProfile(for device: LightDevice) -> GoveeSegmentProfile? {
-        guard device.brand == .govee else { return nil }
-        return GoveeSegmentProfile.detect(sku: device.sku)
-    }
-
-    /// Profile the Segment Studio runs with. Any Govee light may open the
-    /// studio — unrecognized SKUs get the generic profile (the studio labels
-    /// them as unrecognized; devices without RGBIC hardware simply ignore
-    /// segment packets).
-    func segmentStudioProfile(for device: LightDevice) -> GoveeSegmentProfile? {
-        guard device.brand == .govee else { return nil }
-        return segmentProfile(for: device) ?? .generic
-    }
-
-    /// The device's saved layout, or a fresh one seeded from its current color.
-    func segmentState(for device: LightDevice) -> GoveeSegmentState {
-        let profile = segmentStudioProfile(for: device) ?? .generic
-        if let saved = goveeSegmentStates[device.id] {
-            return profile.normalizedEditorState(saved)
-        }
-        return profile.normalizedEditorState(.seed(count: profile.defaultSegmentCount,
-                                                   color: device.color,
-                                                   gradient: false))
-    }
-
-    /// The saved layout only when it is what the light is currently showing.
-    func activeSegmentState(for deviceID: String) -> GoveeSegmentState? {
-        guard let state = goveeSegmentStates[deviceID], state.isActive else { return nil }
-        return state
-    }
-
-    /// Streams the draft layout in real time over razer mode while the studio
-    /// is editing. The overlay is volatile, so ending the preview without
-    /// applying is a true cancel: the light falls back to its last static
-    /// state (or, on stream-hold families, snaps back to the applied layout).
-    func previewSegments(_ device: LightDevice, state: GoveeSegmentState) {
-        guard device.brand == .govee, demoWorkspaceController.allowsLiveNetworking else { return }
-        segmentPreviewIDs.insert(device.id)
-        if !razerActiveIDs.contains(device.id) {
-            razerActiveIDs.insert(device.id)
-            govee?.setRazerMode(deviceID: device.backendID, on: true)
-        }
-        sendRazerLayout(device, state: state)
-    }
-
-    /// Ends a studio editing session's live stream. Static-write devices
-    /// drop the overlay so the light falls back to its stored state;
-    /// stream-hold devices keep the overlay up and snap it back to the
-    /// applied layout, because the overlay IS their persistence.
-    func endSegmentPreview(_ device: LightDevice) {
-        guard demoWorkspaceController.allowsLiveNetworking else { return }
-        segmentPreviewIDs.remove(device.id)
-        guard razerActiveIDs.contains(device.id) else { return }
-        if segmentStudioProfile(for: device)?.appliesViaStream == true,
-           let held = activeSegmentState(for: device.id) {
-            sendRazerLayout(device, state: held)
-        } else {
-            razerActiveIDs.remove(device.id)
-            govee?.setRazerMode(deviceID: device.backendID, on: false)
-        }
-    }
-
-    /// One razer frame carrying a whole layout. Frames have no brightness
-    /// channel, so each segment's own brightness is folded into its RGB, and
-    /// switched-off zones go out as black. Fixtures that can only run some of
-    /// their zones at once are clamped here as well, so no path — studio,
-    /// scene, effect, or Music Mode — can ask the lamp for a frame it has no
-    /// way to show.
-    private func sendRazerLayout(_ device: LightDevice, state: GoveeSegmentState) {
-        guard demoWorkspaceController.allowsLiveNetworking else { return }
-        let showable = (segmentStudioProfile(for: device) ?? .generic).enforcingZoneLimit(state)
-        let colors = showable.colors.map { segment -> (r: Int, g: Int, b: Int) in
-            let rgb = segment.renderedRGB255
-            let scale = segment.brightness
-            return (r: Int((Double(rgb.r) * scale).rounded()),
-                    g: Int((Double(rgb.g) * scale).rounded()),
-                    b: Int((Double(rgb.b) * scale).rounded()))
-        }
-        govee?.sendRazerFrame(deviceID: device.backendID, colors: colors, blend: showable.gradient)
-    }
-
-    /// Fits a generated layout to a fixture's zone rules. Effect and Music
-    /// Mode frames paint every segment, but a lamp that can only run some of
-    /// its zones at once should keep lighting the zones the user picked in the
-    /// studio — otherwise the clamp would choose a different pair from frame
-    /// to frame and the lamp would flicker between them.
-    private func zoneConstrained(_ state: GoveeSegmentState, for device: LightDevice) -> GoveeSegmentState {
-        guard let profile = segmentStudioProfile(for: device), profile.limitsSimultaneousZones else {
-            return state
-        }
-        var next = state
-        if let stored = goveeSegmentStates[device.id],
-           stored.segmentCount == next.segmentCount,
-           stored.poweredCount > 0 {
-            next.setPoweredSegments(stored.poweredSegments)
-        }
-        return profile.enforcingZoneLimit(next)
-    }
-
-    /// Puts a stream-hold device's applied layout on the light and leaves the
-    /// overlay up. Re-sending `razer-on` briefly clears the existing frame on
-    /// H60B0, so ordinary keepalives send only the atomic color frame. Mode is
-    /// enabled once per session, or explicitly after a known reconnect.
-    private func assertStreamHold(_ device: LightDevice, state: GoveeSegmentState,
-                                  forceModeEnable: Bool = false) {
-        guard demoWorkspaceController.allowsLiveNetworking else { return }
-        let shouldEnableMode = forceModeEnable || !razerActiveIDs.contains(device.id)
-        razerActiveIDs.insert(device.id)
-        if shouldEnableMode {
-            govee?.setRazerMode(deviceID: device.backendID, on: true)
-        }
-        sendRazerLayout(device, state: state)
-    }
-
-    /// Stream-hold layouts live only in the razer overlay. Called from the
-    /// 30-second refresh tick, discovery, stale recovery, and power-on so held
-    /// layouts stay current while LumenDesk is running. Ordinary refreshes
-    /// send only a frame; known reconnects can explicitly re-enable the mode.
-    /// Skipped while the light is off — a frame must never light up a light
-    /// the user switched off.
-    func reassertStreamHoldIfNeeded(_ device: LightDevice, forceModeEnable: Bool = false) {
-        guard device.brand == .govee, device.isOn, !segmentPreviewIDs.contains(device.id),
-              demoWorkspaceController.allowsLiveNetworking,
-              segmentStudioProfile(for: device)?.appliesViaStream == true,
-              let held = activeSegmentState(for: device.id) else { return }
-        assertStreamHold(device, state: held, forceModeEnable: forceModeEnable)
-    }
-
-    /// Saves the studio's draft without commanding the light, so a half
-    /// finished paint job survives closing the sheet. The layout only keeps
-    /// its "showing on the light" status while it still matches what was
-    /// applied — an edited-but-unapplied draft must not masquerade as live
-    /// state to scenes and undo.
-    func storeSegmentState(_ state: GoveeSegmentState, for device: LightDevice) {
-        let profile = segmentStudioProfile(for: device)
-        let state = profile?.enforcingZoneLimit(state) ?? state
-        let previous = goveeSegmentStates[device.id]
-        let changedFromAppliedState = previous?.isActive == true
-            && (previous?.colors != state.colors || previous?.gradient != state.gradient)
-        if profile?.appliesViaStream == true,
-           changedFromAppliedState {
-            return
-        }
-        var stored = state
-        stored.isActive = previous?.isActive == true
-            && previous?.colors == state.colors
-            && previous?.gradient == state.gradient
-        goveeSegmentStates[device.id] = stored
-        persistApplicationState()
-    }
-
-    /// Applies a layout durably. Strip-family firmware stores the layout via
-    /// the same Bluetooth-format commands the Govee Home app writes, relayed
-    /// over the LAN `ptReal` command. String/curtain-family firmware has no
-    /// static segment write at all (Govee's own API exposes none for them),
-    /// so their layouts are held on the light through the razer streaming
-    /// overlay and re-asserted automatically while LumenDesk runs.
-    func applySegments(_ device: LightDevice, state: GoveeSegmentState,
-                       recordUndo: Bool = true, turnOn: Bool = true, announce: Bool = true) {
-        guard device.brand == .govee else { return }
-        if recordUndo {
-            if device.isStale {
-                publishError("\u{201C}\(device.label)\u{201D} may be offline — command sent anyway.")
-            }
-            recordChange([device])
-        }
-        let profile = segmentStudioProfile(for: device)
-        var next = profile?.enforcingZoneLimit(state) ?? state
-        next.isActive = true
-        goveeSegmentStates[device.id] = next
-        persistApplicationState()
-        device.color = next.blendedColor
-        // An all-dark layout is the user asking for nothing to be lit, so it
-        // must not switch the light on to show it.
-        if turnOn, !device.isOn, !next.isFullyDark {
-            device.isOn = true
-            sendPower(device, on: true)
-        }
-        noteSegmentCommand(device, summary: "Applying \(next.segmentCount)-segment layout")
-        if demoWorkspaceController.allowsLiveNetworking {
-            if profile?.appliesViaStream == true {
-                // The overlay is the persistence: push the layout as a frame
-                // and deliberately leave razer mode up.
-                assertStreamHold(device, state: next)
-            } else {
-                // The razer overlay must come down BEFORE the static write.
-                // Firmware restores its pre-razer state when the overlay is
-                // disabled, so a layout written while streaming is active
-                // gets wiped the moment the studio closes. The razer-off is
-                // bundled into the apply's own packet batch (see
-                // GoveeClient.applySegments) so no re-enable can slip in
-                // between; here we only drop the bookkeeping so the studio's
-                // next edit knows to open a fresh streaming session.
-                razerActiveIDs.remove(device.id)
-                sendSegmentPackets(device, state: next)
-            }
-        }
-        if announce {
-            if profile?.limitsSimultaneousZones == true {
-                let unit = profile?.editorUnitName ?? "zone"
-                let summary = "\(next.poweredCount) of \(next.segmentCount) \(unit)s lit"
-                logActivity(.command, title: "Lamp zones applied", detail: "\(device.label): \(summary)")
-                lastActionSummary = "Set \(summary) on \(device.label)"
-            } else {
-                logActivity(.command, title: "Segment layout applied",
-                            detail: "\(device.label): \(next.segmentCount) segments\(next.gradient ? ", blended" : "")")
-                lastActionSummary = "Painted \(next.segmentCount) segments on \(device.label)"
-            }
-        }
-    }
-
-    func addSegmentPreset(name: String, stops: [GoveeSegmentColor], fill: GoveeSegmentPreset.Fill = .smooth) {
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !stops.isEmpty else { return }
-        // A preset carries colors, not which zones a fixture happens to be
-        // running, so saved stops are always powered.
-        let stops = stops.map { $0.settingPower(true) }
-        goveeSegmentPresets.append(GoveeSegmentPreset(name: trimmed, stops: stops, fill: fill))
-        persistApplicationState()
-        lastActionSummary = "Saved segment preset \u{201C}\(trimmed)\u{201D}"
-    }
-
-    func deleteSegmentPreset(_ presetID: UUID) {
-        goveeSegmentPresets.removeAll { $0.id == presetID }
-        persistApplicationState()
-    }
-
-    /// Sends the durable packet batch for a layout.
-    private func sendSegmentPackets(_ device: LightDevice, state: GoveeSegmentState) {
-        let packets = state.durableSegmentPackets(
-            supportsGradient: segmentStudioProfile(for: device)?.supportsGradient == true
-        )
-        govee?.applySegments(deviceID: device.backendID, packets: packets)
-    }
-
-    /// Segment layouts aren't echoed back by `devStatus`, so they can't ride
-    /// the expectation-matching confirmation pipeline — that would end every
-    /// apply with a false "did not confirm" error. Show a lightweight
-    /// sending → applied badge instead.
-    private func noteSegmentCommand(_ device: LightDevice, summary: String) {
-        commandCoordinator.recordUnconfirmedSend(deviceID: device.id, summary: summary)
-    }
-
-    /// Called whenever a solid color or white command goes to a Govee device,
-    /// so scenes and undo stop treating the stored layout as what is on
-    /// display. The layout itself is kept for one-tap re-apply.
-    fileprivate func markSegmentsInactive(_ device: LightDevice) {
-        // A live razer overlay — studio preview or stream-hold — shadows
-        // every static command; bring it down ahead of the solid color,
-        // white, or effect frame that triggered this call.
-        segmentPreviewIDs.remove(device.id)
-        if razerActiveIDs.contains(device.id) {
-            razerActiveIDs.remove(device.id)
-            govee?.setRazerMode(deviceID: device.backendID, on: false)
-        }
-        guard goveeSegmentStates[device.id]?.isActive == true else { return }
-        goveeSegmentStates[device.id]?.isActive = false
-        persistApplicationState()
-    }
-}
-
-// MARK: - Rooms
-
-extension LightManager {
-    var unassignedDevices: [LightDevice] {
-        let assigned = Set(rooms.flatMap { $0.lightIDs })
-        return devices
-            .filter { !assigned.contains($0.id) }
-            .sorted { $0.label.localizedCaseInsensitiveCompare($1.label) == .orderedAscending }
-    }
-
-    func devices(in room: Room) -> [LightDevice] {
-        room.lightIDs.compactMap { devicesByID[$0] }
-    }
-
-    func createRoom(name: String) {
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        rooms.append(Room(name: trimmed))
-        persistApplicationState()
-    }
-
-    func renameRoom(_ roomID: UUID, to name: String) {
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, let idx = rooms.firstIndex(where: { $0.id == roomID }) else { return }
-        rooms[idx].name = trimmed
-        persistApplicationState()
-    }
-
-    func deleteRoom(_ roomID: UUID) {
-        guard let idx = rooms.firstIndex(where: { $0.id == roomID }) else { return }
-        let room = rooms[idx]
-        confirmationCoordinator.request(
-            .init(
-                title: "Delete “\(room.name)”?",
-                message: "The room will be removed, but its lights will remain available and the deletion can be undone.",
-                confirmTitle: "Delete Room",
-                role: .destructive
-            ),
-            action: { [weak self] in self?.performDeleteRoom(roomID) }
-        )
-    }
-
-    private func performDeleteRoom(_ roomID: UUID) {
-        guard let idx = rooms.firstIndex(where: { $0.id == roomID }) else { return }
-        stopEffect(scope: .room(roomID))
-        let deleted = rooms[idx]
-        lastDeletedRoom = (room: deleted, index: idx)
-        rooms.remove(at: idx)
-        reconcileFavoriteOrder()
-        publishError("\u{201C}\(deleted.name)\u{201D} deleted.") {
-            self.undoDeleteRoom()
-        }
-    }
-
-    func undoDeleteRoom() {
-        guard let (room, index) = lastDeletedRoom else { return }
-        let insertAt = min(index, rooms.count)
-        rooms.insert(room, at: insertAt)
-        lastDeletedRoom = nil
-        reconcileFavoriteOrder()
-        commandError = nil
-        commandErrorUndo = nil
-    }
-
-    func moveRooms(from offsets: IndexSet, to destination: Int) {
-        rooms.move(fromOffsets: offsets, toOffset: destination)
-        persistApplicationState()
-    }
-
-    func moveRoom(_ roomID: UUID, by offset: Int) {
-        guard let idx = rooms.firstIndex(where: { $0.id == roomID }) else { return }
-        let target = idx + offset
-        guard rooms.indices.contains(target) else { return }
-        rooms.swapAt(idx, target)
-        persistApplicationState()
-    }
-
-    func assign(lightID: String, toRoom roomID: UUID?) {
-        for i in rooms.indices { rooms[i].lightIDs.removeAll { $0 == lightID } }
-        if let roomID, let idx = rooms.firstIndex(where: { $0.id == roomID }) {
-            rooms[idx].lightIDs.append(lightID)
-        }
-        persistApplicationState()
-    }
-
-    func assign(lightIDs: Set<String>, toRoom roomID: UUID?) {
-        for i in rooms.indices { rooms[i].lightIDs.removeAll { lightIDs.contains($0) } }
-        if let roomID, let idx = rooms.firstIndex(where: { $0.id == roomID }) {
-            let ordered = devices.map { $0.id }.filter { lightIDs.contains($0) }
-            rooms[idx].lightIDs.append(contentsOf: ordered)
-        }
-        persistApplicationState()
-    }
-
-    func moveLight(_ lightID: String, in roomID: UUID, by offset: Int) {
-        guard let r = rooms.firstIndex(where: { $0.id == roomID }),
-              let l = rooms[r].lightIDs.firstIndex(of: lightID) else { return }
-        let target = l + offset
-        guard rooms[r].lightIDs.indices.contains(target) else { return }
-        rooms[r].lightIDs.swapAt(l, target)
-        persistApplicationState()
-    }
-
-    func room(forLightID lightID: String) -> Room? {
-        rooms.first { $0.lightIDs.contains(lightID) }
-    }
-
-    // MARK: - Plan layout
-
-    /// Give every room a block on the board, leaving existing blocks alone.
-    ///
-    /// Layout is lazy rather than migrated: an archive written before the plan
-    /// existed simply has no frames, and the first draw fills them in. Rooms
-    /// that already carry a frame are never moved, so adding a room in March
-    /// does not rearrange the home you learned in January.
-    func ensurePlanLayout() {
-        guard rooms.contains(where: { $0.planFrame == nil }) else { return }
-
-        var occupied: [RoomPlanFrame] = rooms.compactMap(\.planFrame)
-        for index in rooms.indices where rooms[index].planFrame == nil {
-            let span = PlanLayout.defaultSpan(fixtureCount: rooms[index].lightIDs.count)
-            let frame = PlanLayout.firstFreeFrame(width: span.width, height: span.height,
-                                                  among: occupied)
-                ?? RoomPlanFrame(column: 0, row: occupied.map(\.maxRow).max() ?? 0)
-            rooms[index].planFrame = frame
-            occupied.append(frame)
-        }
-        persistApplicationState()
-    }
-
-    /// Move or resize a room's block.
-    ///
-    /// Returns false and changes nothing when the frame would overlap another
-    /// room or leave the board. A refused drop is the point: silently
-    /// reflowing a board somebody arranged by hand destroys the spatial
-    /// memory the plan is built on.
-    @discardableResult
-    func setPlanFrame(_ frame: RoomPlanFrame, for roomID: UUID) -> Bool {
-        var others: [UUID: RoomPlanFrame] = [:]
-        for room in rooms where room.id != roomID {
-            if let existing = room.planFrame { others[room.id] = existing }
-        }
-        guard PlanLayout.canPlace(frame, for: roomID, among: others),
-              let index = rooms.firstIndex(where: { $0.id == roomID }) else { return false }
-        rooms[index].planFrame = frame
-        persistApplicationState()
-        return true
-    }
-
-    /// Throw the board away and lay every room out from scratch.
-    func resetPlanLayout() {
-        let frames = PlanLayout.autoArrange(rooms.map { (id: $0.id, fixtureCount: $0.lightIDs.count) })
-        for index in rooms.indices { rooms[index].planFrame = frames[rooms[index].id] }
-        persistApplicationState()
-    }
-
-    /// Where a fixture stands inside its room, falling back to the
-    /// deterministic default so a room draws correctly before anyone has
-    /// dragged a single dot.
-    func planAnchor(for lightID: String, in room: Room) -> PlanAnchor {
-        if let stored = room.fixtureAnchors[lightID] { return stored }
-        guard let index = room.lightIDs.firstIndex(of: lightID) else {
-            return PlanAnchor(x: 0.5, y: 0.5)
-        }
-        let defaults = PlanLayout.defaultAnchors(count: room.lightIDs.count)
-        return defaults.indices.contains(index) ? defaults[index] : PlanAnchor(x: 0.5, y: 0.5)
-    }
-
-    func setPlanAnchor(_ anchor: PlanAnchor, for lightID: String, in roomID: UUID) {
-        guard let index = rooms.firstIndex(where: { $0.id == roomID }) else { return }
-        rooms[index].fixtureAnchors[lightID] = anchor
-        persistApplicationState()
-    }
-
-    /// Create a room and hand back its identifier, so a setup flow can assign
-    /// a fixture into it in the same gesture that names it. `createRoom(name:)`
-    /// keeps its existing signature for the call sites that do not need this.
-    @discardableResult
-    func addRoom(named name: String) -> UUID? {
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-        let room = Room(name: trimmed)
-        rooms.append(room)
-        persistApplicationState()
-        return room.id
-    }
-
-    /// Fixtures discovered but never sorted onto the plan. They surface in a
-    /// tray on the plan itself rather than being dumped into a junk room, so
-    /// the sorting flow keeps working long after onboarding is over.
-    var unplacedDevices: [LightDevice] {
-        let assigned = Set(rooms.flatMap(\.lightIDs))
-        return devices.filter { !assigned.contains($0.id) }
-    }
-
-    typealias ExportedConfiguration = PersistenceStore.ConfigurationArchive
-
-    func exportRoomsData() -> Data? { exportConfigurationData() }
-
-    func exportConfigurationData() -> Data? {
-        try? persistenceStore.exportConfiguration(from: persistedApplicationState())
-    }
-
-    /// Writes the exported configuration to `url` and reports what happened.
-    ///
-    /// Both halves of this used to be silent: encoding returned nil on failure
-    /// and the write went out through `try?`. A user whose export never landed
-    /// — a read-only volume, a folder they could not write — saw nothing at all
-    /// and was left believing their configuration was backed up.
-    @discardableResult
-    func exportConfiguration(to url: URL) -> Bool {
-        do {
-            let data = try persistenceStore.exportConfiguration(from: persistedApplicationState())
-            try data.write(to: url, options: .atomic)
-            lastActionSummary = "Configuration exported to \u{201C}\(url.lastPathComponent)\u{201D}"
-            logActivity(.system, title: "Configuration exported", detail: url.lastPathComponent)
-            return true
-        } catch {
-            publishError("Export failed \u{2014} could not write \u{201C}\(url.lastPathComponent)\u{201D}: \(error.localizedDescription)")
-            logActivity(.system, title: "Configuration export failed",
-                        detail: error.localizedDescription, isFailure: true)
-            return false
-        }
-    }
-
-    @discardableResult
-    func importRoomsData(_ data: Data) -> Bool {
-        do {
-            let importedState = try persistenceStore.importingConfiguration(
-                from: data,
-                into: persistedApplicationState()
-            )
-            if demoWorkspaceController.allowsLivePersistence {
-                // Persist the fully validated candidate atomically before
-                // replacing any live in-memory configuration.
-                try persistenceStore.save(importedState)
-            }
-            applyPersistedApplicationState(importedState)
-            for device in devices {
-                device.customName = customNames[device.id]
-            }
-            sortDevices()
-            reportImportMatchStatus(roomCount: rooms.count)
-            return true
-        } catch {
-            statusMessage = "Import failed — that file isn’t a valid LumenDesk configuration."
-            return false
-        }
-    }
-
-    func requestConfigurationImport(_ data: Data, fileName: String) {
-        let roomWord = rooms.count == 1 ? "room" : "rooms"
-        let sceneWord = scenes.count == 1 ? "scene" : "scenes"
-        confirmationCoordinator.request(
-            .init(
-                title: "Replace Current Configuration?",
-                message: "Importing “\(fileName)” will overwrite \(rooms.count) \(roomWord) and \(scenes.count) \(sceneWord), along with favorites, custom names, and saved segment layouts. This cannot be undone.",
-                confirmTitle: "Import Configuration",
-                role: .destructive,
-                requirement: .always
-            ),
-            action: { [weak self] in _ = self?.importRoomsData(data) }
-        )
-    }
-
-    private func reportImportMatchStatus(roomCount: Int) {
-        let importedIDs = Set(rooms.flatMap { $0.lightIDs })
-        let knownIDs = Set(devices.map { $0.id })
-        let missing = importedIDs.subtracting(knownIDs).count
-        if missing > 0 {
-            statusMessage = "Imported \(roomCount) room\(roomCount == 1 ? "" : "s"); \(missing) saved light\(missing == 1 ? "" : "s") not currently discovered."
-        } else {
-            statusMessage = "Imported \(roomCount) room\(roomCount == 1 ? "" : "s") and matched all saved lights."
-        }
-    }
-
-}
-
-// MARK: - Favorites
-
-extension LightManager {
-    func isFavorite(_ deviceID: String) -> Bool { favoriteIDs.contains(deviceID) }
-
-    func toggleFavorite(_ deviceID: String) {
-        if favoriteIDs.contains(deviceID) {
-            favoriteIDs.remove(deviceID)
-        } else {
-            favoriteIDs.insert(deviceID)
-        }
-        reconcileFavoriteOrder()
-    }
-
-    var favoriteDevices: [LightDevice] {
-        devices
-            .filter { favoriteIDs.contains($0.id) }
-            .sorted { $0.label.localizedCaseInsensitiveCompare($1.label) == .orderedAscending }
-    }
-
-    func isFavoriteRoom(_ roomID: UUID) -> Bool { favoriteRoomIDs.contains(roomID) }
-
-    func toggleFavoriteRoom(_ roomID: UUID) {
-        if favoriteRoomIDs.contains(roomID) { favoriteRoomIDs.remove(roomID) } else { favoriteRoomIDs.insert(roomID) }
-        reconcileFavoriteOrder()
-    }
-
-    func isFavoriteScene(_ sceneID: UUID) -> Bool { favoriteSceneIDs.contains(sceneID) }
-
-    func toggleFavoriteScene(_ sceneID: UUID) {
-        if favoriteSceneIDs.contains(sceneID) { favoriteSceneIDs.remove(sceneID) } else { favoriteSceneIDs.insert(sceneID) }
-        reconcileFavoriteOrder()
-    }
-
-    var favoriteRooms: [Room] { rooms.filter { favoriteRoomIDs.contains($0.id) } }
-    var favoriteScenes: [LightingScene] { scenes.filter { favoriteSceneIDs.contains($0.id) } }
-
-    func addBrightnessPreset(_ value: Double) {
-        customBrightnessPresets = PersistenceStore.sanitizedBrightnessPresets(
-            customBrightnessPresets + [value]
-        )
-        persistApplicationState()
-    }
-
-    func deleteBrightnessPreset(_ value: Double) {
-        customBrightnessPresets.removeAll { abs($0 - value) < 0.005 }
-        persistApplicationState()
-    }
-
-}
-
-// MARK: - Scenes
-
-extension LightManager {
-    func captureScene(name: String, scope: LightScope = .all) {
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        var snapshots: [String: DeviceSnapshot] = [:]
-        for d in devices(in: scope) {
-            let hsb = d.color.hsbComponents
-            snapshots[d.id] = DeviceSnapshot(
-                isOn: d.isOn,
-                brightness: d.brightness,
-                hue: hsb.h,
-                saturation: hsb.s,
-                kelvin: d.kelvin,
-                segments: activeSegmentState(for: d.id),
-                matrix: activeLIFXMatrixState(for: d.id),
-                nanoleafAppearance: d.nanoleafAppearance,
-                nanoleafDesign: d.brand == .nanoleaf ? shapes.showingDesign(for: d.id) : nil
-            )
-        }
-        scenes.append(LightingScene(name: trimmed, snapshots: snapshots))
-        persistApplicationState()
-        logActivity(.scene, title: "Scene captured", detail: "\(trimmed): \(snapshots.count) lights")
-    }
-
-    /// Direction A's durable room composition. `LightingScene` remains the
-    /// archive type so every existing scene migrates losslessly; the product
-    /// now presents the object consistently as a Look.
-    @discardableResult
-    func captureLook(name: String, deviceIDs: Set<String>) -> LightingScene? {
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let targets = devices.filter { deviceIDs.contains($0.id) }
-        guard !trimmed.isEmpty, !targets.isEmpty else { return nil }
-
-        var snapshots: [String: DeviceSnapshot] = [:]
-        for device in targets {
-            let hsb = device.color.hsbComponents
-            snapshots[device.id] = DeviceSnapshot(
-                isOn: device.isOn,
-                brightness: device.brightness,
-                hue: hsb.h,
-                saturation: hsb.s,
-                kelvin: device.kelvin,
-                segments: activeSegmentState(for: device.id),
-                matrix: activeLIFXMatrixState(for: device.id),
-                nanoleafAppearance: device.nanoleafAppearance,
-                nanoleafDesign: device.brand == .nanoleaf
-                    ? shapes.showingDesign(for: device.id) : nil
-            )
-        }
-        let look = LightingScene(name: trimmed, snapshots: snapshots)
-        scenes.append(look)
-        persistApplicationState()
-        lastActionSummary = "Saved Look “\(trimmed)”"
-        logActivity(.scene, title: "Look saved", detail: "\(trimmed): \(snapshots.count) fixtures")
-        return look
-    }
-
-    /// Applies only the part of a migrated or saved Look that belongs to the
-    /// open room. A Look can therefore survive fixture moves without reaching
-    /// into a different room.
-    func applyLook(_ look: LightingScene, deviceIDs: Set<String>) {
-        let snapshots = look.snapshots.filter { deviceIDs.contains($0.key) }
-        guard !snapshots.isEmpty else {
-            publishError("“\(look.name)” has no fixtures in this room.")
-            return
-        }
-        applyScene(
-            LightingScene(id: look.id, name: look.name,
-                          snapshots: snapshots, createdAt: look.createdAt),
-            allowTurningOff: true,
-            reviewed: true,
-            allowUnavailableTargets: true
-        )
-    }
-
-    /// A live, reversible preview using the same pure renderer and transport
-    /// branches as Apply. Leaving the composer restores the exact opening
-    /// power, brightness, colour, segment, matrix, and panel state.
-    func startLookPreview(
-        _ theme: LightingTheme,
-        deviceIDs: Set<String>,
-        in scope: LightScope = .all,
-        paletteAssignments: [String: Int]? = nil,
-        transitionDuration: TimeInterval = 1.8
-    ) {
-        stopSceneRehearsal(restore: true)
-        // `devices(in:)` preserves the room's explicit fixture order. Filtering
-        // the global discovery array here would make a composed gradient land
-        // on different fixtures than the room-ordered visual preview.
-        let targets = devices(in: scope).filter { deviceIDs.contains($0.id) }
-        guard !targets.isEmpty else {
-            publishError("Select at least one fixture to preview this Look.")
-            return
-        }
-        cancelIdentifications(deviceIDs: deviceIDs, restore: true)
-        stopEffects(touching: deviceIDs)
-        cancelPendingBrightness(deviceIDs: deviceIDs)
-        rehearsalSnapshot = targets.map(snapshot)
-        rehearsalSceneID = UUID()
-
-        let plan = plannedLook(theme, targets: targets, paletteAssignments: paletteAssignments)
-        let plans = Dictionary(plan.fixtures.map { ($0.fixtureID, $0) },
-                               uniquingKeysWith: { first, _ in first })
-        for device in targets {
-            guard let fixturePlan = plans[device.id] else { continue }
-            applyThemePlan(fixturePlan, to: device, transitionDuration: transitionDuration)
-        }
-        var summary = "Previewing “\(theme.name)”"
-        if let adaptation = lookAdaptationSummary(
-            theme,
-            deviceIDs: deviceIDs,
-            in: scope,
-            paletteAssignments: paletteAssignments
-        ) {
-            summary += " — \(adaptation)"
-        }
-        lastActionSummary = summary
-    }
-
-    /// Plain-language, capability-aware disclosure for the composer.
-    func lookAdaptationSummary(
-        _ theme: LightingTheme,
-        deviceIDs: Set<String>,
-        in scope: LightScope = .all,
-        paletteAssignments: [String: Int]? = nil
-    ) -> String? {
-        let targets = devices(in: scope).filter { deviceIDs.contains($0.id) }
-        guard !targets.isEmpty else { return nil }
-        let plan = plannedLook(theme, targets: targets, paletteAssignments: paletteAssignments)
-        var parts: [String] = []
-        if plan.solidCount > 0, theme.colors.count > 1 {
-            parts.append("\(plan.solidCount) single-colour fixture\(plan.solidCount == 1 ? "" : "s") hold one palette colour each")
-        }
-        if plan.spatialCount > 0 {
-            parts.append("\(plan.spatialCount) spatial fixture\(plan.spatialCount == 1 ? " carries" : "s carry") the palette across its surface")
-        }
-        if plan.zoneLimitedCount > 0 {
-            parts.append("\(plan.zoneLimitedCount) fixture\(plan.zoneLimitedCount == 1 ? " is" : "s are") limited to its active zones")
-        }
-        return parts.isEmpty ? nil : parts.joined(separator: "; ") + "."
-    }
-
-    private func plannedLook(
-        _ theme: LightingTheme,
-        targets: [LightDevice],
-        paletteAssignments: [String: Int]?
-    ) -> ThemePlan {
-        let fixtures = targets.map(themeFixture)
-        if let paletteAssignments {
-            return ThemePlanner.planExact(
-                theme,
-                fixtures: fixtures,
-                paletteIndices: paletteAssignments
-            )
-        }
-        return ThemePlanner.plan(theme, fixtures: fixtures)
-    }
-
-    func applyScene(_ scene: LightingScene) {
-        applyScene(scene, allowTurningOff: true, reviewed: false)
-    }
-
-    func deleteScene(_ sceneID: UUID) {
-        guard let idx = scenes.firstIndex(where: { $0.id == sceneID }) else { return }
-        let scene = scenes[idx]
-        confirmationCoordinator.request(
-            .init(
-                title: "Delete “\(scene.name)” everywhere?",
-                message: "The Look will be removed from every room shelf where it appears. You can undo the deletion afterward.",
-                confirmTitle: "Delete Everywhere",
-                role: .destructive,
-                requirement: .always
-            ),
-            action: { [weak self] in self?.performDeleteScene(sceneID) }
-        )
-    }
-
-    private func performDeleteScene(_ sceneID: UUID) {
-        guard let idx = scenes.firstIndex(where: { $0.id == sceneID }) else { return }
-        let deleted = scenes[idx]
-        lastDeletedScene = (scene: deleted, index: idx)
-        scenes.remove(at: idx)
-        favoriteSceneIDs.remove(sceneID)
-        reconcileFavoriteOrder()
-        publishError("Look “\(deleted.name)” deleted.") { self.undoDeleteScene() }
-    }
-
-    func undoDeleteScene() {
-        guard let (scene, index) = lastDeletedScene else { return }
-        scenes.insert(scene, at: min(index, scenes.count))
-        lastDeletedScene = nil
-        persistApplicationState()
-        commandError = nil
-        commandErrorUndo = nil
-    }
-
-    func renameScene(_ sceneID: UUID, to name: String) {
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, let idx = scenes.firstIndex(where: { $0.id == sceneID }) else { return }
-        scenes[idx].name = trimmed
-        persistApplicationState()
-    }
-
-    func updateScene(_ draft: LightingScene, revisionLabel: String = "Before edit") {
-        guard let index = scenes.firstIndex(where: { $0.id == draft.id }) else { return }
-        if rehearsalSceneID == draft.id { stopSceneRehearsal(restore: true) }
-        sceneRevisions.insert(SceneRevision(scene: scenes[index], label: revisionLabel), at: 0)
-        sceneRevisions = Array(sceneRevisions.prefix(60))
-        scenes[index] = draft
-        sceneDrafts.removeValue(forKey: draft.id)
-        persistApplicationState()
-        lastActionSummary = "Saved \(draft.name) — restore previous versions from scene History"
-    }
-
-    func revisions(for sceneID: UUID) -> [SceneRevision] { sceneRevisions.filter { $0.sceneID == sceneID } }
-
-    func recoveredDraft(for sceneID: UUID) -> LightingScene? { sceneDrafts[sceneID] }
-    func autosaveSceneDraft(_ draft: LightingScene) {
-        sceneDrafts[draft.id] = draft
-        persistApplicationState()
-    }
-    func discardSceneDraft(for sceneID: UUID) {
-        sceneDrafts.removeValue(forKey: sceneID)
-        persistApplicationState()
-    }
-
-    func restoreSceneRevision(_ revision: SceneRevision) {
-        guard let index = scenes.firstIndex(where: { $0.id == revision.sceneID }) else { return }
-        sceneRevisions.insert(SceneRevision(scene: scenes[index], label: "Before restore"), at: 0)
-        scenes[index].name = revision.name
-        scenes[index].snapshots = revision.snapshots
-        persistApplicationState()
-        lastActionSummary = "Restored \(revision.label)"
-    }
-
-    /// Puts one captured scene snapshot onto a light.
-    ///
-    /// Shared by Apply and Rehearse so a preview cannot drift from what
-    /// applying actually does. Rehearsal used to carry its own copy of this
-    /// logic, which had lost the Govee segment branch and never sent a Govee
-    /// brightness at all — so rehearsing a scene that captured a segment
-    /// layout previewed a solid wash, at the light's old brightness, while
-    /// Apply painted the real segments.
-    fileprivate func applySceneSnapshot(_ snap: DeviceSnapshot, to device: LightDevice) {
-        let snap = snap.normalized()
-        device.isOn = snap.isOn
-        device.brightness = snap.brightness
-        device.kelvin = snap.kelvin
-        if restoreNanoleafOutput(design: snap.nanoleafDesign, appearance: snap.nanoleafAppearance, to: device) {
-            // Restored the captured design or controller mode.
-        } else if let matrix = snap.matrix, device.isLIFXLuna {
-            applyLIFXMatrix(device, state: matrix, recordUndo: false,
-                            turnOn: false, announce: false)
-        } else if let segments = snap.segments, device.brand == .govee {
-            applySegments(device, state: segments, recordUndo: false, turnOn: false, announce: false)
-            sendBrightness(device, value: snap.brightness)
-        } else {
-            let color = Color(hue: snap.hue, saturation: snap.saturation, brightness: 1)
-            device.color = color
-            sendColor(device, color: color)
-            // Govee needs an explicit brightness message; LIFX carries
-            // brightness inside the same SetColor packet.
-            if device.brand == .govee { sendBrightness(device, value: snap.brightness) }
-        }
-        sendPower(device, on: snap.isOn)
-    }
-
-    func startSceneRehearsal(_ scene: LightingScene, deviceIDs: Set<String>) {
-        stopSceneRehearsal(restore: true)
-        let targets = devices.filter { deviceIDs.contains($0.id) && scene.snapshots[$0.id] != nil && !$0.isStale }
-        guard !targets.isEmpty else {
-            publishError("“\(scene.name)” has no currently available lights to preview.")
-            return
-        }
-        cancelIdentifications(deviceIDs: Set(targets.map(\.id)), restore: true)
-        stopEffects(touching: Set(targets.map(\.id)))
-        cancelPendingBrightness(deviceIDs: Set(targets.map(\.id)))
-        rehearsalSnapshot = targets.map(snapshot)
-        rehearsalSceneID = scene.id
-        for device in targets {
-            guard let value = scene.snapshots[device.id] else { continue }
-            applySceneSnapshot(value, to: device)
-        }
-        lastActionSummary = "Rehearsing \(scene.name) on \(targets.count) light\(targets.count == 1 ? "" : "s")"
-    }
-
-    func stopSceneRehearsal(restore: Bool = true) {
-        guard rehearsalSceneID != nil else { return }
-        if restore { restoreDeviceStates(rehearsalSnapshot) }
-        rehearsalSnapshot = []
-        rehearsalSceneID = nil
-        lastActionSummary = restore ? "Rehearsal ended — prior state restored" : "Rehearsal kept"
-    }
-
-    func duplicateNameMessage(_ candidate: String, excludingDeviceID: String? = nil) -> String? {
-        let normalized = candidate.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !normalized.isEmpty else { return nil }
-        let matches = devices.filter { $0.id != excludingDeviceID && $0.label.lowercased() == normalized }
-        guard !matches.isEmpty else { return nil }
-        let roomNames = rooms.filter { room in matches.contains(where: { room.lightIDs.contains($0.id) }) }.map(\.name)
-        return roomNames.isEmpty ? "Another light already uses this name." : "Already used in \(roomNames.joined(separator: ", ")). Consider adding the room name."
-    }
-
-    func duplicateSceneNameMessage(_ candidate: String, excludingSceneID: UUID? = nil) -> String? {
-        scenes.contains { $0.id != excludingSceneID && $0.name.caseInsensitiveCompare(candidate.trimmingCharacters(in: .whitespacesAndNewlines)) == .orderedSame } ? "Another scene already uses this name." : nil
-    }
-
-}
-
-// MARK: - Schedules
-
-extension LightManager {
-    func schedules(for roomID: UUID) -> [ScheduleEntry] {
-        rooms.first(where: { $0.id == roomID })?.schedules ?? []
-    }
-
-    @discardableResult
-    func addSchedule(_ entry: ScheduleEntry, to roomID: UUID) -> Bool {
-        guard let idx = rooms.firstIndex(where: { $0.id == roomID }),
-              rooms[idx].schedules.count < Self.maximumSchedulesPerRoom else { return false }
-        rooms[idx].schedules.append(entry)
-        // Sort by resolved clock-minute so the list is always chronological.
-        rooms[idx].schedules.sort { lhs, rhs in
-            scheduleEngine.scheduledMinute(for: lhs, solarTimes: scheduleSolarTimes)
-                < scheduleEngine.scheduledMinute(for: rhs, solarTimes: scheduleSolarTimes)
-        }
-        persistApplicationState()
-        return true
-    }
-
-    func deleteSchedule(_ entryID: UUID, from roomID: UUID) {
-        guard let idx = rooms.firstIndex(where: { $0.id == roomID }) else { return }
-        rooms[idx].schedules.removeAll { $0.id == entryID }
-        persistApplicationState()
-    }
-
-    func setScheduleEnabled(_ entryID: UUID, in roomID: UUID, enabled: Bool) {
-        guard let rIdx = rooms.firstIndex(where: { $0.id == roomID }),
-              let eIdx = rooms[rIdx].schedules.firstIndex(where: { $0.id == entryID }) else { return }
-        rooms[rIdx].schedules[eIdx].isEnabled = enabled
-        persistApplicationState()
-    }
-
-    var hasActiveSchedules: Bool {
-        scheduleEngine.hasEnabledSchedules(in: rooms)
-    }
-
-    func nextRunDescription(for entry: ScheduleEntry) -> String {
-        let next = scheduleEngine.nextOccurrence(for: entry, solarTimes: scheduleSolarTimes)
-        guard let next else { return "No next run" }
-        return "Next runs \(next.formatted(.relative(presentation: .named))) at \(next.formatted(date: .omitted, time: .shortened))"
-    }
-
-    func conflictWarnings(for roomID: UUID) -> [String] {
-        scheduleEngine.conflicts(in: schedules(for: roomID), solarTimes: scheduleSolarTimes).map { conflict in
-            "\(conflict.first.action.displayName) and \(conflict.second.action.displayName) are within 5 minutes."
-        }
-    }
-
-    // Estimates are for the Northern Hemisphere. Southern Hemisphere users should set times manually.
-    func applyEstimatedSolarTimes() {
-        let month = Calendar.current.component(.month, from: scheduleEngine.currentDate)
-        switch month {
-        case 4...8:
-            setSunriseTime(hour: 5, minute: 45)
-            setSunsetTime(hour: 20, minute: 30)
-        case 11, 12, 1, 2:
-            setSunriseTime(hour: 7, minute: 15)
-            setSunsetTime(hour: 17, minute: 0)
-        default:
-            setSunriseTime(hour: 6, minute: 30)
-            setSunsetTime(hour: 19, minute: 0)
-        }
-    }
-}
-
-// MARK: - Search
-
-extension LightManager {
-    func device(_ device: LightDevice, matchesQuery query: String) -> Bool {
-        let trimmed = query.trimmingCharacters(in: .whitespaces).lowercased()
-        if trimmed.isEmpty { return true }
-        return device.label.lowercased().contains(trimmed)
-            || device.name.lowercased().contains(trimmed)
-            || device.brand.displayName.lowercased().contains(trimmed)
-            || device.address.lowercased().contains(trimmed)
-    }
-
-    func room(_ room: Room, matchesQuery query: String) -> Bool {
-        let trimmed = query.trimmingCharacters(in: .whitespaces).lowercased()
-        if trimmed.isEmpty { return true }
-        if room.name.lowercased().contains(trimmed) { return true }
-        return devices(in: room).contains { device($0, matchesQuery: query) }
-    }
-}
-
-// MARK: - White mode persistence (UX: color mode survives re-renders)
-
-extension LightManager {
-    func isWhiteMode(_ deviceID: String) -> Bool { whiteModeDeviceIDs.contains(deviceID) }
-
-    func setWhiteMode(_ deviceID: String, white: Bool) {
-        if white { whiteModeDeviceIDs.insert(deviceID) } else { whiteModeDeviceIDs.remove(deviceID) }
-        persistApplicationState()
-    }
-}
-
-// MARK: - Nap Mode
-
-extension LightManager {
-    func startNapMode() {
-        guard napPhase == .inactive else { cancelNapMode(); return }
-        napSnapshotBrightness = Dictionary(uniqueKeysWithValues: devices.map { ($0.id, $0.brightness) })
-        napPhase = .dimming(endsAt: Date().addingTimeInterval(20 * 60))
-        scheduleNapTimer()
-    }
-
-    private func scheduleNapTimer() {
-        napTimer?.invalidate()
-        napTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.tickNapMode() }
-        }
-        napTimer?.tolerance = 1
-    }
-
-    func cancelNapMode() {
-        napTimer?.invalidate()
-        napTimer = nil
-        for (id, brightness) in napSnapshotBrightness {
-            if let d = device(withID: id) { d.brightness = brightness; sendBrightness(d, value: brightness) }
-        }
-        napSnapshotBrightness = [:]
-        napPhase = .inactive
-    }
-
-    private func tickNapMode() {
-        let now = Date()
-        switch napPhase {
-        case .inactive:
-            break
-        case .dimming(let endsAt):
-            let total: TimeInterval = 20 * 60
-            let remaining = endsAt.timeIntervalSince(now)
-            if remaining <= 0 {
-                for d in devices { d.brightness = 0.01; sendBrightness(d, value: 0.01) }
-                napPhase = .holding(endsAt: now.addingTimeInterval(70 * 60))
-            } else {
-                let factor = pow((remaining / total), 1.5)
-                for (id, startBrightness) in napSnapshotBrightness {
-                    if let d = device(withID: id), d.isOn {
-                        let target = max(0.01, startBrightness * factor)
-                        d.brightness = target
-                        sendBrightness(d, value: target)
-                    }
-                }
-            }
-        case .holding(let endsAt):
-            if endsAt.timeIntervalSince(now) <= 0 {
-                napPhase = .brightening(endsAt: now.addingTimeInterval(10 * 60))
-            }
-        case .brightening(let endsAt):
-            let total: TimeInterval = 10 * 60
-            let remaining = endsAt.timeIntervalSince(now)
-            if remaining <= 0 {
-                let warmWhite = Color(red: 1.0, green: 0.87, blue: 0.67)
-                for d in devices {
-                    if !d.isOn { d.isOn = true; sendPower(d, on: true) }
-                    d.color = warmWhite; d.brightness = 0.5
-                    sendColor(d, color: warmWhite)
-                    if d.brand == .govee { sendBrightness(d, value: 0.5) }
-                }
-                napTimer?.invalidate(); napTimer = nil
-                napSnapshotBrightness = [:]; napPhase = .inactive
-            } else {
-                let progress = (total - remaining) / total
-                for d in devices where d.isOn {
-                    let target = max(0.01, progress * 0.5)
-                    d.brightness = target; sendBrightness(d, value: target)
-                }
-            }
-        }
-    }
-
-    var napCountdownString: String {
-        let now = Date()
-        switch napPhase {
-        case .inactive: return ""
-        case .dimming(let endsAt):
-            return "Dimming · \(Int(max(0, endsAt.timeIntervalSince(now)) / 60))m"
-        case .holding(let endsAt):
-            return "Napping · \(Int(max(0, endsAt.timeIntervalSince(now)) / 60))m left"
-        case .brightening(let endsAt):
-            return "Waking · \(Int(max(0, endsAt.timeIntervalSince(now)) / 60))m"
-        }
-    }
-}
-
-// MARK: - Color helpers
-
-extension Color {
-    func rgbDistance(to other: Color) -> Double {
-        let lhs = rgbComponents
-        let rhs = other.rgbComponents
-        return max(abs(lhs.r - rhs.r), max(abs(lhs.g - rhs.g), abs(lhs.b - rhs.b)))
-    }
-
-    var hsbComponents: (h: Double, s: Double, b: Double) {
-        var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
-        #if os(macOS)
-        guard let ns = NSColor(self).usingColorSpace(.sRGB) else { return (0, 0, 1) }
-        ns.getHue(&h, saturation: &s, brightness: &b, alpha: &a)
-        #else
-        guard UIColor(self).getHue(&h, saturation: &s, brightness: &b, alpha: &a) else { return (0, 0, 1) }
-        #endif
-        return (Double(h), Double(s), Double(b))
-    }
-
-    /// The color a LIFX bulb reports back after being sent this one.
-    ///
-    /// LIFX HSBK keeps brightness in its own channel, so `LightManager.sendColor`
-    /// sends only this color's hue and saturation and supplies the device's
-    /// brightness separately. `StateLight` therefore always describes a
-    /// full-value color, whatever value the user picked.
-    var lifxReportedEquivalent: Color {
-        let hsb = hsbComponents
-        return Color(hue: hsb.h, saturation: hsb.s, brightness: 1)
-    }
-
-    var rgbComponents: (r: Double, g: Double, b: Double) {
-        var r: CGFloat = 0, g: CGFloat = 0, bb: CGFloat = 0, a: CGFloat = 0
-        #if os(macOS)
-        guard let ns = NSColor(self).usingColorSpace(.sRGB) else { return (1, 1, 1) }
-        ns.getRed(&r, green: &g, blue: &bb, alpha: &a)
-        #else
-        guard UIColor(self).getRed(&r, green: &g, blue: &bb, alpha: &a) else { return (1, 1, 1) }
-        #endif
-        return (Double(r), Double(g), Double(bb))
-    }
-}
-
-// MARK: - Music Mode
-
-extension LightManager {
-    var musicLIFXDispatch: MusicDispatchMetrics.Snapshot { lifx?.musicMetrics.snapshot() ?? .init() }
-    var musicGoveeDispatch: MusicDispatchMetrics.Snapshot { govee?.musicMetrics.snapshot() ?? .init() }
-    var musicRenderDiagnostics: MusicLightingRenderer.Diagnostics { musicLightingRenderer.diagnostics }
-
-    /// The platform's Reduce Motion switch.
-    static var systemReducesMotion: Bool {
-        #if os(macOS)
-        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        #else
-        UIAccessibility.isReduceMotionEnabled
-        #endif
-    }
-
-    /// Follows the system setting for the life of the manager, so a change
-    /// reaches running shows whether or not the Music screen is open.
-    private func observeSystemReduceMotion() {
-        #if os(macOS)
-        let center = NSWorkspace.shared.notificationCenter
-        let name = NSWorkspace.accessibilityDisplayOptionsDidChangeNotification
-        #else
-        let center = NotificationCenter.default
-        let name = UIAccessibility.reduceMotionStatusDidChangeNotification
-        #endif
-        reduceMotionObserver = center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                let enabled = LightManager.systemReducesMotion
-                if enabled != self.reducesMotion { self.setMusicReducedMotion(enabled) }
-            }
-        }
-    }
-
-    /// Applies Reduce Motion to every running show. The system observer calls
-    /// this; tests call it directly.
-    func setMusicReducedMotion(_ enabled: Bool) {
-        reducesMotion = enabled
-        for scope in musicModeController.activeScopeIDs { effectRuns[scope]?.reducedMotion = enabled }
-        refreshMusicSessions()
-    }
-
-    func setMusicModeConfiguration(_ configuration: MusicModeConfiguration) {
-        previewMusicModeConfiguration(configuration)
-        persistApplicationState()
-    }
-
-    /// Applies a configuration to running shows without writing it to disk.
-    /// A fader drag reports dozens of values a second, and saving each one
-    /// rewrote the whole state file on the main thread that also runs the
-    /// lighting timer. The release commits with `setMusicModeConfiguration`.
-    func previewMusicModeConfiguration(_ configuration: MusicModeConfiguration) {
-        musicModeConfiguration = configuration.normalized()
-        refreshMusicSessions()
-    }
-
-    private func refreshMusicSessions() {
-        for scope in musicModeController.activeScopeIDs {
-            effectRuns[scope]?.restorePreviousState = musicModeConfiguration.restorePreviousState
-            musicModeController.update(
-                scope: scope,
-                configuration: musicModeConfiguration,
-                topology: fixtureTopology(for: scope),
-                fixtures: musicFixtureDescriptors(in: scope),
-                reducedMotion: effectRuns[scope]?.reducedMotion ?? reducesMotion
-            )
-        }
-    }
-
-    func applyMusicModePreset(_ preset: MusicModePreset) {
-        guard preset != .custom else {
-            var custom = musicModeConfiguration
-            custom.preset = .custom
-            setMusicModeConfiguration(custom)
-            return
-        }
-        // A preset describes the show, not the setup: keep the app-wide light
-        // timing and the Spotify and Music choice.
-        setMusicModeConfiguration(MusicModeConfiguration.configuration(for: preset)
-            .preservingRoomCalibration(from: musicModeConfiguration))
-    }
-
-    func fixtureTopology(for scope: LightScope) -> FixtureTopology {
-        fixtureTopologies[topologyKey(for: scope)] ?? FixtureTopology()
-    }
-
-    func setFixtureTopology(_ topology: FixtureTopology, for scope: LightScope) {
-        let available = Set(musicFixtureDescriptors(in: scope).map(\.id))
-        var normalized = topology
-        normalized.fixtureOrder = topology.fixtureOrder.filter(available.contains)
-        normalized.excludedFixtureIDs = topology.excludedFixtureIDs.intersection(available)
-        if effectRuns[scope]?.effect.id == "music-pulse" {
-            // A running show has already powered, snapshotted, and taken
-            // ownership of exactly its non-excluded fixtures at start
-            // (`EffectRun.animatedDeviceIDs`). Changing exclusion mid-show
-            // would target a newly-included fixture with color frames
-            // without ever powering it on, and without a snapshot to
-            // restore it from on stop. The UI disables this while running;
-            // keep the currently-active exclusion set here too as a
-            // backstop. Order and layout remain safe to change live.
-            // `fixtureTopology(for:)` (not a raw dictionary lookup) so a
-            // scope with nothing persisted yet correctly freezes to no
-            // exclusions rather than falling through to the new value.
-            let activeTopology = fixtureTopology(for: scope)
-            normalized.excludedFixtureIDs = activeTopology.excludedFixtureIDs
-            for id in available where (activeTopology.role(for: id) == .off) != (normalized.role(for: id) == .off) {
-                normalized.roles[id] = activeTopology.roles[id]
-            }
-        }
-        fixtureTopologies[topologyKey(for: scope)] = normalized
-        persistApplicationState()
-        if musicModeController.activeScopeIDs.contains(scope) {
-            musicModeController.update(
-                scope: scope,
-                configuration: musicModeConfiguration,
-                topology: normalized,
-                fixtures: musicFixtureDescriptors(in: scope),
-                reducedMotion: effectRuns[scope]?.reducedMotion ?? false
-            )
-        }
-    }
-
-    func musicFixtureDescriptors(in scope: LightScope) -> [MusicFixtureDescriptor] {
-        let topology = fixtureTopology(for: scope)
-        return devices(in: scope).map { device in
-            let role = topology.role(for: device.id)
-            if device.isLIFXLuna, let matrix = lifxMatrixState(for: device) {
-                return MusicFixtureDescriptor(
-                    id: device.id, label: device.label, transport: .lifxLAN,
-                    segmentCount: matrix.zoneCount, role: role,
-                    segmentPositions: matrix.activeZoneIndices.map { zone in
-                        topology.layout == .frontToBack
-                            ? Double(zone / matrix.width) / Double(max(1, matrix.height - 1))
-                            : Double(zone % matrix.width) / Double(max(1, matrix.width - 1))
-                    }
-                )
-            }
-            if device.brand == .govee, segmentProfile(for: device) != nil {
-                return MusicFixtureDescriptor(
-                    id: device.id,
-                    label: device.label,
-                    transport: .goveeRealtimeSegments,
-                    segmentCount: segmentState(for: device).segmentCount,
-                    role: role
-                )
-            }
-            if device.brand == .nanoleaf, shapes.canStream(device.id), let layout = shapes.layout(device.id) {
-                // Segment i is the i-th light panel by ID, a numbering that
-                // never moves; where it sits on the wall, as oriented, comes
-                // from the layout along the room's own sweep direction.
-                let orientation = Double(shapes.displayOrientation(device.id))
-                var positions = layout.spatialPositions(rotationDegrees: orientation,
-                                                       axis: shapesAxis(for: topology.layout))
-                if positions.count > 1,
-                   let first = positions.first, let last = positions.last,
-                   last.position - first.position < 0.001 {
-                    // A vertical wall has no horizontal span (and vice versa).
-                    // Use its other physical axis rather than a uniform color.
-                    positions = layout.spatialPositions(rotationDegrees: orientation,
-                        axis: topology.layout == .frontToBack ? .leftToRight : .topToBottom)
-                }
-                let placed = Dictionary(
-                    positions.map { ($0.panelID, $0.position) },
-                    uniquingKeysWith: { first, _ in first })
-                let panels = layout.paintablePanels
-                return MusicFixtureDescriptor(
-                    id: device.id,
-                    label: device.label,
-                    transport: .nanoleafStream,
-                    segmentCount: panels.count,
-                    role: role,
-                    segmentPositions: panels.map { placed[$0.panelID] ?? 0.5 }
-                )
-            }
-            return MusicFixtureDescriptor(
-                id: device.id,
-                label: device.label,
-                transport: device.brand == .nanoleaf ? .nanoleafLAN : (device.brand == .lifx ? .lifxLAN : .goveeLAN),
-                role: role
-            )
-        }
-    }
-
-    private func topologyKey(for scope: LightScope) -> String {
-        switch scope {
-        case .all: return "all"
-        case .room(let roomID): return "room:\(roomID.uuidString.lowercased())"
-        }
-    }
-
-    private func cachedMusicFixtures(in scope: LightScope, runID: UUID, at timestamp: TimeInterval) -> [MusicFixtureDescriptor] {
-        if let cached = musicFixtureCache[scope], cached.runID == runID,
-           timestamp >= cached.builtAt, timestamp - cached.builtAt < 1 {
-            return cached.fixtures
-        }
-        let fixtures = musicFixtureDescriptors(in: scope)
-        musicFixtureCache[scope] = MusicFixtureCache(runID: runID, builtAt: timestamp, fixtures: fixtures)
-        return fixtures
-    }
-
-    private func renderMusicFrame(_ frame: MusicLightingFrame, scope: LightScope) {
-        guard let run = effectRuns[scope], run.effect.id == "music-pulse" else { return }
-        let fixtures = cachedMusicFixtures(in: scope, runID: run.id, at: frame.timestamp)
-        let ownedIDs = run.ownedDeviceIDs
-        // Ownership and reachability stay per frame: they are cheap, and a
-        // light that drops out must stop receiving frames at once.
-        let activeFixtures = fixtures.filter { ownedIDs.contains($0.id) && device(withID: $0.id)?.isStale == false }
-        let commands = musicLightingRenderer.enqueue(frame, fixtures: activeFixtures, at: ProcessInfo.processInfo.systemUptime)
-        for command in commands {
-            guard let device = device(withID: command.fixtureID), let first = command.states.first else { continue }
-            let color = Color(hue: first.hue, saturation: first.saturation, brightness: 1)
-            if frame.timestamp - (musicModelUpdateAt[device.id] ?? -Double.greatestFiniteMagnitude) >= 0.2 {
-                device.color = color
-                device.brightness = first.brightness
-                musicModelUpdateAt[device.id] = frame.timestamp
-            }
-
-            switch command.transport {
-            case .goveeLAN:
-                guard demoWorkspaceController.allowsLiveNetworking else { continue }
-                let rgb = color.rgbComponents
-                govee?.sendMusicColor(deviceID: device.backendID,
-                    r: Int(rgb.r * 255 * first.brightness), g: Int(rgb.g * 255 * first.brightness),
-                    b: Int(rgb.b * 255 * first.brightness))
-            case .lifxLAN:
-                if first.segmentID != nil, var matrix = lifxMatrixState(for: device) {
-                    let zones = matrix.activeZoneIndices
-                    for state in command.states {
-                        guard let segment = state.segmentID, zones.indices.contains(segment) else { continue }
-                        matrix.colors[zones[segment]] = LIFXMatrixColor(
-                            hue: UInt16((state.hue * 65_535).rounded()),
-                            saturation: UInt16((state.saturation * 65_535).rounded()),
-                            brightness: UInt16((state.brightness * 65_535).rounded()), kelvin: 3_500)
-                    }
-                    guard demoWorkspaceController.allowsLiveNetworking else { continue }
-                    lifx?.setMatrixColors(macHex: device.backendID, colors: matrix.colors.map(\.hsbk),
-                        width: matrix.width, durationMS: UInt32((first.transitionDuration * 1000).rounded()),
-                        musicTimestamp: frame.timestamp)
-                } else {
-                    sendEffectFrame(device, color: color, brightness: first.brightness,
-                                    duration: first.transitionDuration, musicTimestamp: frame.timestamp)
-                }
-            case .nanoleafLAN:
-                sendEffectFrame(
-                    device,
-                    color: color,
-                    brightness: first.brightness,
-                    duration: first.transitionDuration, musicTimestamp: frame.timestamp
-                )
-            case .nanoleafStream:
-                guard let stream = shapesStreams[device.id], !shapes.streamFailed(device.id, owner: stream.owner) else {
-                    // The wall's stream never opened: it still follows the
-                    // show, as one colour, rather than going dark.
-                    sendEffectFrame(device, color: color, brightness: first.brightness,
-                                    duration: first.transitionDuration, musicTimestamp: frame.timestamp)
-                    continue
-                }
-                let transition = max(0, min(10, Int((first.transitionDuration * 10).rounded())))
-                let frames = command.states.compactMap { state -> NanoleafPanelFrame? in
-                    guard let segment = state.segmentID, stream.panelIDs.indices.contains(segment) else { return nil }
-                    let rgb = NanoleafPanelColor(hue: state.hue, saturation: state.saturation,
-                                                 intensity: state.brightness).rgb
-                    return NanoleafPanelFrame(panelID: stream.panelIDs[segment], rgb: rgb, transition: transition)
-                }
-                shapes.submit(frames, to: device.id, owner: stream.owner)
-            case .goveeRealtimeSegments:
-                let states = musicCapabilityStates(command.states, fixtureID: command.fixtureID)
-                let segments = states.map { GoveeSegmentColor(color: Color(hue: $0.hue, saturation: $0.saturation, brightness: 1), brightness: $0.brightness, isOn: $0.brightness > 0) }
-                guard !segments.isEmpty else { continue }
-                previewSegments(device, state: GoveeSegmentState(colors: segments, gradient: false, isActive: false))
-            }
-        }
-    }
-
-    /// Shared by transport and preview: firmware masks are visible before send.
-    func musicCapabilityStates(_ states: [MusicLightingState], fixtureID: String) -> [MusicLightingState] {
-        guard let device = device(withID: fixtureID), device.brand == .govee,
-              states.first?.segmentID != nil else { return states }
-        let colors = states.map { GoveeSegmentColor(color: Color(hue: $0.hue, saturation: $0.saturation, brightness: 1), brightness: $0.brightness) }
-        let constrained = zoneConstrained(GoveeSegmentState(colors: colors, gradient: false, isActive: false), for: device)
-        return zip(states, constrained.colors).map { state, segment in
-            MusicLightingState(fixtureID: state.fixtureID, segmentID: state.segmentID, hue: state.hue,
-                saturation: state.saturation, brightness: segment.isOn ? segment.brightness : 0,
-                transitionDuration: state.transitionDuration, priority: state.priority)
-        }
-    }
-
-    private func finishMusicStreaming<S: Sequence>(for deviceIDs: S) where S.Element == String {
-        let ids = Set(deviceIDs)
-        musicLightingRenderer.reset(fixtureIDs: ids)
-        for id in ids {
-            musicModelUpdateAt.removeValue(forKey: id)
-            if let device = device(withID: id), device.brand == .govee {
-                govee?.cancelMusicFrames(deviceID: device.backendID)
-            }
-            guard let device = device(withID: id),
-                  device.brand == .govee,
-                  segmentProfile(for: device) != nil else { continue }
-            endSegmentPreview(device)
-        }
-    }
-}
-
-// MARK: - Second-pass UX services
-
-extension LightManager {
-    private func persistApplicationState() {
-        guard demoWorkspaceController.allowsLivePersistence else { return }
-        try? persistenceStore.save(persistedApplicationState())
-    }
-
-    private func persistedApplicationState() -> PersistedApplicationState {
-        var state = PersistedApplicationState()
-        state.rooms = rooms
-        state.favoriteIDs = favoriteIDs
-        state.scenes = scenes
-        state.customNames = customNames
-        state.collapsedRooms = collapsedRooms
-        state.solarPreferences = .init(
-            sunriseHour: sunriseHour,
-            sunriseMinute: sunriseMinute,
-            sunsetHour: sunsetHour,
-            sunsetMinute: sunsetMinute
-        )
-        state.whiteModeDeviceIDs = whiteModeDeviceIDs
-        state.favoriteRoomIDs = favoriteRoomIDs
-        state.favoriteSceneIDs = favoriteSceneIDs
-        state.customBrightnessPresets = customBrightnessPresets
-        state.activityEvents = activityEvents
-        state.favoriteOrder = favoriteOrder
-        state.parliamentMembers = parliamentMembers
-        state.parliamentSessions = parliamentSessions
-        state.sceneCertifications = sceneCertifications
-        state.recentColors = recentColors
-        state.automationOverrides = automationOverrides
-        state.sceneRevisions = sceneRevisions
-        state.sceneDrafts = sceneDrafts
-        state.goveeSegmentStates = goveeSegmentStates
-        state.goveeSegmentPresets = goveeSegmentPresets
-        state.musicModeConfiguration = musicModeConfiguration
-        state.fixtureTopologies = fixtureTopologies
-        let shapesState = shapes.snapshot()
-        state.nanoleafDesigns = shapesState.designs
-        state.nanoleafSavedDesigns = shapesState.savedDesigns
-        state.nanoleafPanelGroups = shapesState.groups
-        state.nanoleafArrangements = shapesState.arrangements
-        return state
-    }
-
-    private func applyPersistedApplicationState(_ state: PersistedApplicationState) {
-        rooms = state.rooms
-        favoriteIDs = state.favoriteIDs
-        scenes = state.scenes
-        customNames = state.customNames
-        collapsedRooms = state.collapsedRooms
-        sunriseHour = state.solarPreferences.sunriseHour
-        sunriseMinute = state.solarPreferences.sunriseMinute
-        sunsetHour = state.solarPreferences.sunsetHour
-        sunsetMinute = state.solarPreferences.sunsetMinute
-        whiteModeDeviceIDs = state.whiteModeDeviceIDs
-        favoriteRoomIDs = state.favoriteRoomIDs
-        favoriteSceneIDs = state.favoriteSceneIDs
-        customBrightnessPresets = state.customBrightnessPresets
-        activityEvents = state.activityEvents
-        favoriteOrder = state.favoriteOrder
-        parliamentMembers = state.parliamentMembers
-        parliamentSessions = state.parliamentSessions
-        sceneCertifications = state.sceneCertifications
-        recentColors = state.recentColors
-        scheduleEngine.restoreAutomationOverrides(state.automationOverrides)
-        sceneRevisions = state.sceneRevisions
-        sceneDrafts = state.sceneDrafts
-        goveeSegmentStates = state.goveeSegmentStates
-        goveeSegmentPresets = state.goveeSegmentPresets
-        musicModeConfiguration = state.musicModeConfiguration
-        fixtureTopologies = state.fixtureTopologies
-        shapes.importSnapshot(Self.shapesSnapshot(from: state))
-    }
-
-    func logActivity(_ kind: ActivityEvent.Kind, title: String, detail: String = "", isFailure: Bool = false) {
-        activityEvents.insert(ActivityEvent(kind: kind, title: title, detail: detail, isFailure: isFailure), at: 0)
-        if activityEvents.count > 250 { activityEvents.removeLast(activityEvents.count - 250) }
-        persistApplicationState()
-    }
-
-    func clearActivity() {
-        activityEvents.removeAll()
-        persistApplicationState()
-    }
-
-    func activityExportText() -> String {
-        activityEvents.reversed().map {
-            "[\($0.date.formatted(date: .numeric, time: .standard))] \($0.kind.rawValue.uppercased()) — \($0.title)\($0.detail.isEmpty ? "" : ": \($0.detail)")"
-        }.joined(separator: "\n")
-    }
-
-    func recentActivitySummary(for device: LightDevice) -> String? {
-        activityEvents.first { $0.detail.localizedCaseInsensitiveContains(device.label) || $0.detail.localizedCaseInsensitiveContains(device.id) }
-            .map { "\($0.title) · \($0.date.formatted(.relative(presentation: .named)))" }
-    }
-
-    func recentActivitySummary(for room: Room) -> String? {
-        activityEvents.first { $0.detail.localizedCaseInsensitiveContains(room.name) || $0.title.localizedCaseInsensitiveContains(room.name) }
-            .map { "\($0.title) · \($0.date.formatted(.relative(presentation: .named)))" }
-    }
-
-    func aggregatePowerState(for lights: [LightDevice]) -> AggregatePowerState {
-        let on = lights.filter(\.isOn).count
-        if on == 0 { return .off }
-        if on == lights.count { return .on }
-        return .mixed(on: on, total: lights.count)
-    }
-
-    func toggleAggregatePower(_ lights: [LightDevice]) {
-        let target = lights.filter(\.isOn).count < lights.count
-        setPower(deviceIDs: Set(lights.map(\.id)), on: target)
-        logActivity(.command, title: target ? "Lights turned on" : "Lights turned off", detail: "\(lights.count) selected lights")
-    }
-
-    /// Optimistically updates the UI while coalescing LAN traffic to one send per 120 ms.
-    func previewBrightness(_ device: LightDevice, value: Double) {
-        cancelIdentifications(deviceIDs: [device.id], restore: true)
-        let value = boundedBrightness(value)
-        device.brightness = value
-        brightnessTasks[device.id]?.cancel()
-        brightnessTasks[device.id] = Task { @MainActor [weak self, weak device] in
-            try? await Task.sleep(for: .milliseconds(120))
-            guard !Task.isCancelled, let self, let device else { return }
-            self.sendBrightness(device, value: value)
-            self.brightnessTasks[device.id] = nil
-        }
-    }
-
-    /// Cancels debounced brightness sends so a later undo, scene, or schedule
-    /// write is not overwritten by a stale slider flush.
-    func cancelPendingBrightness(deviceIDs: Set<String>? = nil) {
-        if let deviceIDs {
-            for id in deviceIDs {
-                brightnessTasks[id]?.cancel()
-                brightnessTasks[id] = nil
-            }
-        } else {
-            brightnessTasks.values.forEach { $0.cancel() }
-            brightnessTasks = [:]
-        }
-    }
-
-    var pendingBrightnessDeviceIDsForTesting: Set<String> { Set(brightnessTasks.keys) }
-
-    func commitBrightness(_ device: LightDevice, value: Double) {
-        cancelIdentifications(deviceIDs: [device.id], restore: true)
-        let value = boundedBrightness(value)
-        cancelPendingBrightness(deviceIDs: [device.id])
-        device.brightness = value
-        sendBrightness(device, value: value)
-        logActivity(.command, title: "Brightness changed", detail: "\(device.label): \(Int(value * 100))%")
-    }
-
-    func identify(_ device: LightDevice) {
-        if device.brand == .nanoleaf, !isDemoMode {
-            cancelIdentifications(deviceIDs: [device.id], restore: true)
-            // The controller's own identify flashes every panel and then puts
-            // back whatever was showing by itself, per-panel design included.
-            shapes.identifyWall(device.id)
-            logActivity(.recovery, title: "Identifying light", detail: device.label)
-            return
-        }
-        let saved = identifications[device.id]?.snapshot
-        cancelIdentifications(deviceIDs: [device.id], restore: true)
-        let inherited = stopEffects(touching: [device.id])
-        cancelPendingBrightness(deviceIDs: [device.id])
-        let original = saved ?? inherited[device.id] ?? snapshot(device)
-        let token = UUID()
-        identifications[device.id] = Identification(token: token, snapshot: original)
-        device.isOn = true
-        device.color = .cyan
-        device.brightness = 1
-        sendPower(device, on: true); sendColor(device, color: .cyan); sendBrightness(device, value: 1)
-        logActivity(.recovery, title: "Identifying light", detail: device.label)
-        let delay = identifyDurationNanoseconds
-        let sleep = identifySleep
-        identifications[device.id]?.task = Task { @MainActor [weak self, weak device] in
-            do { try await sleep(delay) } catch { return }
-            guard !Task.isCancelled, let self, let device,
-                  self.identifications[device.id]?.token == token else { return }
-            self.cancelIdentifications(deviceIDs: [device.id], restore: true)
-        }
-    }
-
-    // MARK: - Sustained identify
-
-    /// Breathe a fixture until told to stop.
-    ///
-    /// `identify(_:)` flashes for two seconds, which is right for "which one
-    /// is this?" asked about a row on screen. Sorting a rig asks the opposite
-    /// question: the user is looking at the room, not at the app, and the
-    /// bulb has to stay findable for as long as the question is up.
-    ///
-    /// It breathes between full and a third rather than strobing, at roughly
-    /// 0.7 Hz. That is well under any flash threshold and it reads as "this
-    /// one" from the other side of a room without being unpleasant to sit in.
-    func beginSustainedIdentify(_ device: LightDevice) {
-        endSustainedIdentify()
-        cancelIdentifications(deviceIDs: [device.id], restore: true)
-        let inherited = stopEffects(touching: [device.id])
-        cancelPendingBrightness(deviceIDs: [device.id])
-        var hold = IdentifyHold(snapshot: inherited[device.id] ?? snapshot(device), task: nil)
-        logActivity(.recovery, title: "Identifying light", detail: device.label)
-        hold.task = Task { @MainActor [weak self, weak device] in
-            var full = true
-            while !Task.isCancelled {
-                guard let self, let device else { return }
-                let level = full ? 1.0 : 0.35
-                device.isOn = true
-                device.color = .cyan
-                device.brightness = level
-                self.sendPower(device, on: true)
-                self.sendColor(device, color: .cyan)
-                self.sendBrightness(device, value: level)
-                full.toggle()
-                try? await Task.sleep(for: .milliseconds(700))
-            }
-        }
-        identifyHold = hold
-    }
-
-    /// Stop the breathing and restore the fixture, including any held segment
-    /// or matrix layout it was carrying before the question was asked.
-    func endSustainedIdentify() {
-        guard let hold = identifyHold else { return }
-        cancelIdentifications(deviceIDs: [hold.snapshot.deviceID], restore: true)
-    }
-
-    /// Stops both kinds of identification before another command owns a light.
-    /// Removing ownership first makes a cancelled delayed task harmless even
-    /// when its injected sleep finishes after a workspace transition.
-    private func cancelIdentifications(deviceIDs: Set<String>? = nil, restore: Bool) {
-        var originals: [LightRuntimeSnapshot] = []
-        let ids = deviceIDs ?? Set(identifications.keys)
-        for id in ids {
-            guard let identification = identifications.removeValue(forKey: id) else { continue }
-            identification.task?.cancel()
-            originals.append(identification.snapshot)
-        }
-        if let hold = identifyHold, deviceIDs == nil || ids.contains(hold.snapshot.deviceID) {
-            identifyHold = nil
-            hold.task?.cancel()
-            originals.append(hold.snapshot)
-        }
-        guard !originals.isEmpty else { return }
-        let cancelledIDs = Set(originals.map(\.deviceID))
-        commandCoordinator.cancel(deviceIDs: cancelledIDs)
-        cancelPendingBrightness(deviceIDs: cancelledIDs)
-        if restore { restoreDeviceStates(originals) }
-    }
-
-    var identifyingDeviceIDsForTesting: Set<String> { Set(identifications.keys) }
-
-    func retry(_ device: LightDevice) {
-        commandCoordinator.recover(deviceID: device.id, timedOut: { [weak self, weak device] in
-            guard let self, let device else { return }
-            self.publishError("\(device.label) is still not answering. Rescan or check its power and network.")
-        }) { [weak self, weak device] in
-            guard let self, let device else { return }
-            self.refresh(device)
-        }
-        logActivity(.recovery, title: "Retried unreachable light", detail: device.label)
-    }
-
-    func diagnostics(for device: LightDevice) -> [ScanDiagnostic] {
-        deviceDiagnostics(for: device) + shapesDiagnostics(for: device)
-    }
-
-    private func deviceDiagnostics(for device: LightDevice) -> [ScanDiagnostic] {
-        [
-            ScanDiagnostic(title: "Vendor", value: device.brand.displayName, status: .neutral),
-            ScanDiagnostic(title: "Model", value: device.sku ?? "Not reported", status: .neutral),
-            ScanDiagnostic(title: "Segment control",
-                           value: segmentProfile(for: device).map { "\($0.layout.displayName) · \(segmentState(for: device).segmentCount) segments" } ?? "Not detected",
-                           status: .neutral),
-            ScanDiagnostic(title: "Address", value: device.address, status: .neutral),
-            ScanDiagnostic(title: "Last seen", value: device.lastSeen.formatted(date: .abbreviated, time: .standard), status: device.isStale ? .warning : .good),
-            ScanDiagnostic(title: "Reachability", value: device.isStale ? "Not seen recently" : "Responding", status: device.isStale ? .warning : .good),
-            ScanDiagnostic(title: "Color temperature", value: device.brand == .nanoleaf ? "1,200–6,500 K" : "2,500–9,000 K", status: .neutral),
-            ScanDiagnostic(title: "LAN identifier", value: device.backendID, status: .neutral)
-        ]
-    }
-
-    var likelyLocalNetworkPermissionIssue: Bool {
-        lastScanDate != nil && scanResponseCount == 0 && devices.isEmpty
-    }
-
-    /// Why the last scan came back empty, in the user's terms.
-    ///
-    /// "No devices found" has at least four unrelated causes and the app used
-    /// to name only one of them. The probe reports separate "we never got on
-    /// the network" from "we probed every host and nothing answered", which are
-    /// different problems with different fixes.
-    var discoveryFailureHint: String? {
-        guard !isDemoMode, !isScanning, lastScanDate != nil, devices.isEmpty else { return nil }
-
-        if !nanoleafCandidates.isEmpty {
-            return "Nanoleaf controller found. Open Pair Nanoleaf in Devices to connect it."
-        }
-        if govee == nil && lifx == nil {
-            return "Neither protocol could open a socket. Another app may hold UDP 4002, or the app was denied network access."
-        }
-        if govee == nil {
-            return "Govee could not bind UDP 4002. Quit another local lighting app or a second copy of LumenDesk, then scan again."
-        }
-        if scanInterfaces.isEmpty {
-            return "No active IPv4 network interface. Join a Wi-Fi network or plug in Ethernet, then scan again."
-        }
-
-        let reports = [lifxProbe, goveeProbe].compactMap { $0 }
-        if reports.isEmpty { return nil }
-
-        // An empty address is not a fault. Sweeping a /24 that holds nine
-        // devices means ~245 of them answer "nothing here", which is the
-        // sweep working. Only a refusal — no permission, no route to the
-        // network, no buffers — says something is wrong with this machine.
-        let refusals = reports.reduce(0) { $0 + $1.datagramsFailed }
-        let reason = reports.compactMap(\.lastError).first
-
-        if reports.allSatisfy({ !$0.reachedNetwork }) {
-            if refusals > 0 {
-                return "No probe left this machine (\(reason ?? "every send was refused")). A VPN holding the default route, or a firewall filtering local traffic, is the usual cause."
-            }
-            return "Every address on \(scanInterfaces.joined(separator: ", ")) came back unreachable. Nothing is responding on this subnet — check that this machine is on the same network as the lights."
-        }
-        if refusals > 0 {
-            return "Probes went out on \(scanInterfaces.joined(separator: ", ")), but \(refusals) send\(refusals == 1 ? " was" : "s were") refused (\(reason ?? "unknown")). A VPN or firewall may be filtering local traffic."
-        }
-        return "Probes went out on \(scanInterfaces.joined(separator: ", ")) and nothing answered. Check that Local Network access is allowed, that the lights are powered on and on the same network and band (2.4 GHz for Govee), and that LAN control is enabled in the Govee Home app."
-    }
-
-    var scanDiagnostics: [ScanDiagnostic] {
-        var rows = [
-            ScanDiagnostic(title: "LIFX protocol", value: lifx == nil ? "Unavailable" : "Ready on UDP 56700", status: lifx == nil ? .warning : .good),
-            ScanDiagnostic(title: "Govee protocol", value: govee == nil ? "Unavailable" : "Ready on UDP 4001–4003", status: govee == nil ? .warning : .good)
-        ]
-        rows.append(ScanDiagnostic(title: "Nanoleaf Shapes and Aurora", value: nanoleafDiscoveryError ?? "Bonjour discovery · local pairing", status: nanoleafDiscoveryError == nil ? .good : .warning))
-        // The probe rows are the difference between "your network has no
-        // lights" and "nothing we sent ever left the machine". Without them a
-        // wrong interface, a refused route, and a denied Local Network grant
-        // all read as an empty room.
-        rows.append(networkInterfaceDiagnostic)
-        if let lifxProbe { rows.append(probeDiagnostic(title: "LIFX probes", report: lifxProbe)) }
-        if let goveeProbe { rows.append(probeDiagnostic(title: "Govee probes", report: goveeProbe)) }
-        rows.append(contentsOf: [
-            ScanDiagnostic(title: "Last scan", value: lastScanDate?.formatted(date: .abbreviated, time: .standard) ?? "Not yet scanned", status: .neutral),
-            ScanDiagnostic(title: "Responses", value: "\(scanResponseCount)", status: scanResponseCount == 0 ? .warning : .good),
-            ScanDiagnostic(title: "Discovered lights", value: "\(devices.count)", status: devices.isEmpty ? .warning : .good)
-        ])
-        return rows
-    }
-
-    private var networkInterfaceDiagnostic: ScanDiagnostic {
-        guard !scanInterfaces.isEmpty else {
-            return ScanDiagnostic(title: "Network interface",
-                                  value: lastScanDate == nil ? "Not yet scanned" : "No active IPv4 network",
-                                  status: lastScanDate == nil ? .neutral : .warning)
-        }
-        return ScanDiagnostic(title: "Network interface",
-                              value: scanInterfaces.joined(separator: ", "),
-                              status: .good)
-    }
-
-    private func probeDiagnostic(title: String, report: DiscoveryProbeReport) -> ScanDiagnostic {
-        // Unoccupied addresses are the expected bulk of a sweep, so they do
-        // not colour the row; only a refusal, or a pass that never got out at
-        // all, does.
-        let healthy = report.reachedNetwork && report.datagramsFailed == 0
-        return ScanDiagnostic(title: title, value: report.summary,
-                              status: healthy ? .good : .warning)
-    }
-
-    func updateSchedule(_ entry: ScheduleEntry, in roomID: UUID) {
-        guard let roomIndex = rooms.firstIndex(where: { $0.id == roomID }),
-              let entryIndex = rooms[roomIndex].schedules.firstIndex(where: { $0.id == entry.id }) else { return }
-        rooms[roomIndex].schedules[entryIndex] = entry
-        persistApplicationState()
-        logActivity(.schedule, title: "Schedule updated", detail: "\(rooms[roomIndex].name): \(entry.daySummary) at \(entry.timeString)")
-    }
-
-    func duplicateSchedule(_ entry: ScheduleEntry, in roomID: UUID) {
-        guard let roomIndex = rooms.firstIndex(where: { $0.id == roomID }),
-              rooms[roomIndex].schedules.count < Self.maximumSchedulesPerRoom else { return }
-        let copy = ScheduleEntry(hour: entry.hour, minute: entry.minute, offsetMinutes: entry.offsetMinutes, action: entry.action, weekdays: entry.weekdays)
-        rooms[roomIndex].schedules.append(copy); persistApplicationState()
-        logActivity(.schedule, title: "Schedule duplicated", detail: rooms[roomIndex].name)
-    }
-
-    func testSchedule(_ entry: ScheduleEntry, in room: Room) {
-        // A test is a user action standing in for the room controls, so it
-        // stays undoable the way those controls are.
-        applyScheduleAction(entry.action, to: devices(in: room), recordUndo: true)
-        logActivity(.schedule, title: "Schedule tested", detail: "\(room.name): \(entry.action.displayName)")
-    }
-
-    /// Shared show-takeover path for real scheduled runs, tests, and missed
-    /// catch-up. Stops effects that would repaint over the change and sends
-    /// brightness immediately (not the slider debounce). A schedule acts on
-    /// the room as it stood before any show: lights taken from a show return
-    /// to their saved state first, so the action never freezes a random show
-    /// frame into the room or discards the look the show would have restored.
-    private func applyScheduleAction(_ action: ScheduleAction, to lights: [LightDevice], recordUndo: Bool = false) {
-        guard !lights.isEmpty else { return }
-        let ids = Set(lights.map(\.id))
-        cancelIdentifications(deviceIDs: ids, restore: true)
-        let inherited = stopEffects(touching: ids)
-        cancelPendingBrightness(deviceIDs: ids)
-        restoreDeviceStates(lights.compactMap { inherited[$0.id] })
-        if recordUndo { recordChange(lights) }
-        switch action {
-        case .turnOn, .atSunrise:
-            for device in lights {
-                device.isOn = true
-                sendPower(device, on: true)
-            }
-        case .turnOff, .atSunset:
-            for device in lights {
-                device.isOn = false
-                sendPower(device, on: false)
-            }
-        default:
-            if let brightness = action.brightnessValue {
-                for device in lights {
-                    device.brightness = brightness
-                    sendBrightness(device, value: brightness)
-                }
-            }
-        }
-    }
-
-    func scenePreview(_ scene: LightingScene) -> SceneApplicationPreview {
-        let affected = devices.filter { scene.snapshots[$0.id] != nil }
-        let unreachable = affected.filter(\.isStale)
-        let missing = scene.snapshots.keys.filter { id in !devices.contains(where: { $0.id == id }) }
-        let unchanged = affected.filter { d in
-            guard let snap = scene.snapshots[d.id] else { return false }
-            let hsb = d.color.hsbComponents
-            return d.isOn == snap.isOn && abs(d.brightness - snap.brightness) < 0.01 && abs(hsb.h - snap.hue) < 0.01
-        }
-        return SceneApplicationPreview(scene: scene, affected: affected, unreachable: unreachable, missingIDs: missing, unchanged: unchanged)
-    }
-
-    /// Scenes recall fixture IDs, even when the selected room changes. Use
-    /// current room membership to make those targets visible before Apply.
-    func sceneScopeSummary(_ scene: LightingScene, selectedScope: LightScope = .all) -> SceneScopeSummary {
-        let savedIDs = Set(scene.snapshots.keys)
-        var remaining = savedIDs
-        var groups: [String] = []
-        for room in rooms.sorted(by: { $0.name.localizedStandardCompare($1.name) == .orderedAscending }) {
-            let ids = remaining.intersection(room.lightIDs)
-            guard !ids.isEmpty else { continue }
-            groups.append("\(room.name) (\(ids.count))")
-            remaining.subtract(ids)
-        }
-        let knownIDs = Set(devices.map(\.id))
-        let unassigned = remaining.intersection(knownIDs).count
-        if unassigned > 0 { groups.append("Unassigned (\(unassigned))") }
-        let undiscovered = remaining.subtracting(knownIDs).count
-        if undiscovered > 0 { groups.append("Undiscovered (\(undiscovered))") }
-        let selectedRoom: Room?
-        if case .room(let id) = selectedScope { selectedRoom = rooms.first { $0.id == id } }
-        else { selectedRoom = nil }
-        return SceneScopeSummary(
-            description: groups.isEmpty ? "No saved lights" : "Saved fixtures: " + groups.joined(separator: ", "),
-            outsideSelectedRoomCount: selectedRoom.map { savedIDs.subtracting($0.lightIDs).count } ?? 0,
-            selectedRoomName: selectedRoom?.name
-        )
-    }
-
-    func availableDeviceIDs(for scene: LightingScene) -> Set<String> {
-        Set(devices.lazy.filter { scene.snapshots[$0.id] != nil && !$0.isStale }.map(\.id))
-    }
-
-    func applyScene(_ scene: LightingScene, allowTurningOff: Bool, reviewed: Bool = false,
-                    allowUnavailableTargets: Bool = false) {
-        let preview = scenePreview(scene)
-        guard !preview.affected.isEmpty else { publishError("“\(scene.name)” has no discovered lights to change."); return }
-        let availableCount = preview.affected.count - preview.unreachable.count
-        guard availableCount > 0 || allowUnavailableTargets else {
-            publishError("“\(scene.name)” has no currently available lights to change.")
-            return
-        }
-        if !reviewed {
-            confirmationCoordinator.request(
-                .init(
-                    title: "Apply “\(scene.name)”?",
-                    message: "\(sceneScopeSummary(scene).description). This scene will change \(availableCount) available light\(availableCount == 1 ? "" : "s")\(preview.unreachable.isEmpty ? "." : "; \(preview.unreachable.count) offline light\(preview.unreachable.count == 1 ? "" : "s") may need retry.") You can undo the change afterward.",
-                    confirmTitle: "Apply Scene"
-                ),
-                action: { [weak self] in self?.applyScene(scene, allowTurningOff: allowTurningOff, reviewed: true) }
-            )
-            return
-        }
-        let result = applySceneSnapshots(scene, to: preview.affected, allowTurningOff: allowTurningOff)
-        lastSceneResult = SceneApplicationResult(scene: scene, allowTurningOff: allowTurningOff,
-                                                succeededIDs: result.succeeded, failedIDs: result.failed,
-                                                skippedOffIDs: result.skipped)
-        if result.failed.isEmpty {
-            lastActionSummary = "Applied Look “\(scene.name)” to \(result.succeeded.count) fixture\(result.succeeded.count == 1 ? "" : "s")"
-        } else {
-            publishError("Applied “\(scene.name)” to \(result.succeeded.count) fixture\(result.succeeded.count == 1 ? "" : "s"); \(result.failed.count) need\(result.failed.count == 1 ? "s" : "") attention.")
-        }
-        logActivity(.scene, title: "Scene applied", detail: "\(scene.name): \(result.succeeded.count) succeeded, \(result.failed.count) need retry", isFailure: !result.failed.isEmpty)
-    }
-
-    private func applySceneSnapshots(_ scene: LightingScene, to lights: [LightDevice], allowTurningOff: Bool)
-        -> (succeeded: [String], failed: [String], skipped: [String]) {
-        let targets = lights.filter { device in
-            guard let snap = scene.snapshots[device.id] else { return false }
-            return allowTurningOff || snap.isOn
-        }
-        let affectedIDs = Set(targets.map(\.id))
-        stopEffects(touching: affectedIDs)
-        cancelPendingBrightness(deviceIDs: affectedIDs)
-        recordChange(targets)
-        var succeeded: [String] = [], failed: [String] = [], skipped: [String] = []
-        for device in lights {
-            guard let snap = scene.snapshots[device.id] else { continue }
-            if !allowTurningOff && !snap.isOn { skipped.append(device.id); continue }
-            if device.isStale { failed.append(device.id) } else { succeeded.append(device.id) }
-            applySceneSnapshot(snap, to: device)
-        }
-        return (succeeded, failed, skipped)
-    }
-
-    func retryLastSceneFailures() {
-        guard let result = lastSceneResult, !result.failedIDs.isEmpty else { return }
-        let failedIDs = Set(result.failedIDs)
-        let failed = devices.filter { failedIDs.contains($0.id) }
-        guard !failed.isEmpty else {
-            publishError("The failed lights for “\(result.sceneName)” have not been rediscovered yet.")
-            return
-        }
-        for device in failed { refresh(device) }
-        let retried = applySceneSnapshots(result.scene, to: failed, allowTurningOff: result.allowTurningOff)
-        let succeeded = Set(result.succeededIDs).union(retried.succeeded).sorted()
-        let remainingFailures = Set(result.failedIDs).subtracting(retried.succeeded).subtracting(retried.skipped).sorted()
-        let skipped = Set(result.skippedOffIDs).union(retried.skipped).sorted()
-        // A rename may update the displayed title, but retry always applies
-        // the saved version of the scene that produced these failures.
-        let sceneName = scenes.first { $0.id == result.sceneID }?.name ?? result.sceneName
-        lastSceneResult = SceneApplicationResult(scene: result.scene, allowTurningOff: result.allowTurningOff,
-                                                succeededIDs: succeeded, failedIDs: remainingFailures,
-                                                skippedOffIDs: skipped, sceneName: sceneName)
-        logActivity(.scene, title: "Scene failures retried", detail: "\(sceneName): \(failed.count) retried, \(remainingFailures.count) need retry", isFailure: !remainingFailures.isEmpty)
-    }
-
-    func reconcileFavoriteOrder() {
-        let active = Set(favoriteIDs.map { FavoriteReference(kind: .light, rawID: $0) }
-            + favoriteRooms.map { FavoriteReference(kind: .room, rawID: $0.id.uuidString) }
-            + favoriteScenes.map { FavoriteReference(kind: .scene, rawID: $0.id.uuidString) })
-        favoriteOrder = favoriteOrder.filter(active.contains)
-        favoriteOrder.append(contentsOf: active.filter { !favoriteOrder.contains($0) }.sorted { $0.id < $1.id })
-        persistApplicationState()
-    }
-
-    func moveFavorite(from source: IndexSet, to destination: Int) {
-        reconcileFavoriteOrder(); favoriteOrder.move(fromOffsets: source, toOffset: destination)
-        persistApplicationState()
-    }
-
-    func rememberColor(_ color: Color, name: String) {
-        let candidate = RecentColor(color: color, name: name)
-        recentColors.removeAll { $0.hex == candidate.hex }
-        recentColors.insert(candidate, at: 0)
-        if recentColors.count > 8 { recentColors.removeLast(recentColors.count - 8) }
-        persistApplicationState()
-    }
-
-    func ensureParliament() {
-        let existing = Set(parliamentMembers.map(\.id))
-        for (index, device) in devices.enumerated() where !existing.contains(device.id) {
-            let titles = ["The Rt. Hon. Glow", "Baron von Bulb", "Dame Incandescence", "Minister Lux", "Sir Filament"]
-            let parties = ParliamentMember.Party.allCases
-            parliamentMembers.append(ParliamentMember(id: device.id, parliamentaryName: "\(titles[index % titles.count]) of \(device.label)", party: parties[index % parties.count], approval: 50, lastVote: "Newly seated"))
-        }
-        parliamentMembers.removeAll { member in !devices.contains(where: { $0.id == member.id }) }
-        persistApplicationState()
-    }
-
-    @discardableResult
-    func conveneParliament(motion: String) -> ParliamentSession {
-        ensureParliament()
-        var ayes = 0, noes = 0, abstentions = 0
-        for index in parliamentMembers.indices {
-            guard let device = device(withID: parliamentMembers[index].id), !device.isStale else {
-                abstentions += 1; parliamentMembers[index].lastVote = "Abstained (unreachable)"; continue
-            }
-            let bias = parliamentMembers[index].party == .efficiencyBloc && motion.lowercased().contains("off") ? 25 : 0
-            let vote = Int.random(in: 0..<100) < 55 + bias
-            if vote { ayes += 1; parliamentMembers[index].lastVote = "Aye" } else { noes += 1; parliamentMembers[index].lastVote = "No" }
-            parliamentMembers[index].approval = max(0, min(100, parliamentMembers[index].approval + (vote ? 1 : -1)))
-        }
-        let passed = ayes > noes
-        let session = ParliamentSession(id: UUID(), date: Date(), motion: motion, ayes: ayes, noes: noes, abstentions: abstentions, verdict: passed ? "Motion carried" : "Motion defeated")
-        parliamentSessions.insert(session, at: 0)
-        if parliamentSessions.count > 50 { parliamentSessions.removeLast() }
-        persistApplicationState()
-        logActivity(.parliament, title: session.verdict, detail: "\(ayes) ayes, \(noes) noes, \(abstentions) abstentions — \(motion)")
-        if passed { executiveIlluminationOrder(motion: motion) }
-        return session
-    }
-
-    func executiveIlluminationOrder(motion: String) {
-        if motion.lowercased().contains("off") { setAllPower(on: false) }
-        else if motion.lowercased().contains("on") { setAllPower(on: true) }
-        else { setAllBrightness(0.5) }
-        logActivity(.parliament, title: "Executive Illumination Order", detail: motion)
-    }
-
-    func certify(_ scene: LightingScene) -> SceneCertification {
-        let onCount = scene.snapshots.values.filter(\.isOn).count
-        let hues = scene.snapshots.values.map(\.hue)
-        let variety = Set(hues.map { Int($0 * 12) }).count
-        let score = min(100, 45 + onCount * 4 + variety * 7 + min(12, scene.name.count))
-        let seal: SceneCertification.Seal = score >= 85 ? .gold : (score >= 65 ? .silver : .bronze)
-        let findings = [
-            "Chromatic diversity: \(variety) recognized hue families.",
-            "Estimated moth attraction: \(max(1, onCount * 3)) ceremonial moths per hour.",
-            scene.name.count >= 4 ? "Scene nomenclature satisfies Article IV." : "Scene name is suspiciously terse.",
-            "Wall-paint diplomacy risk: \(score > 75 ? "Acceptable" : "Requires bilateral consultation")."
-        ]
-        let certification = SceneCertification(id: UUID(), sceneID: scene.id, issuedAt: Date(), score: score, seal: seal, findings: findings, treatyCode: "IBL-\(Int.random(in: 10000...99999))-LUX")
-        sceneCertifications.removeAll { $0.sceneID == scene.id }
-        sceneCertifications.append(certification); persistApplicationState()
-        logActivity(.compliance, title: "Scene certified \(seal.rawValue.capitalized)", detail: "\(scene.name) scored \(score)/100")
-        return certification
-    }
-
-    func certification(for sceneID: UUID) -> SceneCertification? { sceneCertifications.first { $0.sceneID == sceneID } }
-}
-
-// MARK: - Demo workspace
-
-extension LightManager {
-    func enterDemoMode() {
-        nanoleaf.pause()
-        guard !isDemoMode else { return }
-        cancelIdentifications(restore: true)
-        if rehearsalSceneID != nil { stopSceneRehearsal(restore: true) }
-        let liveEffects = activeEffects
-        stopAllEffects(restore: true)
-        let liveWorkspace = captureWorkspaceState(activeEffects: liveEffects)
-        guard let demoWorkspace = demoWorkspaceController.enter(liveWorkspace: liveWorkspace) else { return }
-        cancelWorkspaceTasks()
-        napTimer?.invalidate()
-        napTimer = nil
-        confirmationCoordinator.cancelPendingRequest()
-        objectWillChange.send()
-        applyWorkspaceState(demoWorkspace)
-        effectRuns = [:]
-        scheduleErrorClear()
-    }
-
-    func exitDemoMode() {
-        guard isDemoMode else { return }
-        cancelIdentifications(restore: false)
-        confirmationCoordinator.cancelPendingRequest()
-        if rehearsalSceneID != nil { stopSceneRehearsal(restore: false) }
-        stopAllEffects(restore: false)
-        napTimer?.invalidate()
-        napTimer = nil
-        cancelWorkspaceTasks()
-        errorClearTask?.cancel()
-        errorClearTask = nil
-        guard let restoredWorkspace = demoWorkspaceController.exit() else { return }
-        objectWillChange.send()
-        applyWorkspaceState(restoredWorkspace)
-        effectRuns = [:]
-
-        if napPhase != .inactive { scheduleNapTimer() }
-        for (scope, effectID) in restoredWorkspace.activeEffects {
-            if let effect = LightingCatalog.effects.first(where: { $0.id == effectID }) {
-                if effect.id == "music-pulse" {
-                    startMusicMode(configuration: musicModeConfiguration, scope: scope)
-                } else {
-                    startEffect(effect, scope: scope)
-                }
-            }
-        }
-        nanoleaf.discover()
-        // Restarting a previously active effect must not manufacture a new
-        // user-visible undo step merely because Demo Mode was exited.
-        undoStack = restoredWorkspace.undoStack
-        redoStack = restoredWorkspace.redoStack
-        canUndo = !undoStack.isEmpty
-        canRedo = !redoStack.isEmpty
-        lastChangeTime = restoredWorkspace.lastChangeTime
-        lastActionSummary = restoredWorkspace.lastActionSummary
-        for id in commandPendingIDs {
-            if let device = device(withID: id) {
-                commandCoordinator.resumePendingCommand(
-                    deviceID: id,
-                    refresh: { [weak self, weak device] in
-                        guard let self, let device else { return }
-                        self.refresh(device)
-                    },
-                    timedOut: { [weak self, weak device] in
-                        guard let self, let device else { return }
-                        self.publishError("\(device.label) did not confirm the change. Keep trying or rescan.")
-                    }
-                )
-            }
-        }
-    }
-
-    func resetDemoMode() {
-        guard isDemoMode else { return }
-        cancelIdentifications(restore: false)
-        confirmationCoordinator.cancelPendingRequest()
-        if rehearsalSceneID != nil { stopSceneRehearsal(restore: false) }
-        stopAllEffects(restore: false)
-        napTimer?.invalidate()
-        napTimer = nil
-        cancelWorkspaceTasks()
-        guard let demoWorkspace = demoWorkspaceController.reset(
-            currentWorkspace: captureWorkspaceState(activeEffects: [:])
-        ) else { return }
-        applyWorkspaceState(demoWorkspace)
-        effectRuns = [:]
-        scheduleErrorClear()
-    }
-
-    private func cancelWorkspaceTasks() {
-        scanGeneration += 1
-        cancelPendingBrightness()
-        commandCoordinator.cancelAllTasks(clearPendingAndExpectations: true)
-    }
-
-    private func captureWorkspaceState(
-        activeEffects capturedActiveEffects: [LightScope: String]? = nil
-    ) -> DemoWorkspaceController.WorkspaceState {
-        DemoWorkspaceController.WorkspaceState(
-            devices: devices,
-            rooms: rooms,
-            favoriteIDs: favoriteIDs,
-            scenes: scenes,
-            isScanning: isScanning,
-            scanPhase: scanPhase,
-            lastScanDate: lastScanDate,
-            scanResponseCount: scanResponseCount,
-            statusMessage: statusMessage,
-            commandError: commandError,
-            commandErrorUndo: commandErrorUndo,
-            commandState: commandCoordinator.state,
-            canUndo: canUndo,
-            canRedo: canRedo,
-            collapsedRooms: collapsedRooms,
-            lastDeletedRoom: lastDeletedRoom,
-            lastDeletedScene: lastDeletedScene,
-            stalenessGeneration: stalenessGeneration,
-            newlyDiscoveredIDs: newlyDiscoveredIDs,
-            whiteModeDeviceIDs: whiteModeDeviceIDs,
-            napPhase: napPhase,
-            napSnapshotBrightness: napSnapshotBrightness,
-            activeEffects: capturedActiveEffects ?? activeEffects,
-            activityEvents: activityEvents,
-            lastSceneResult: lastSceneResult,
-            favoriteOrder: favoriteOrder,
-            parliamentMembers: parliamentMembers,
-            parliamentSessions: parliamentSessions,
-            sceneCertifications: sceneCertifications,
-            recentColors: recentColors,
-            discoveryChanges: discoveryChanges,
-            scheduleState: scheduleEngine.state,
-            sceneRevisions: sceneRevisions,
-            sceneDrafts: sceneDrafts,
-            lastActionSummary: lastActionSummary,
-            rehearsalSnapshot: rehearsalSnapshot,
-            rehearsalSceneID: rehearsalSceneID,
-            goveeSegmentStates: goveeSegmentStates,
-            goveeSegmentPresets: goveeSegmentPresets,
-            lifxMatrixStates: lifxMatrixStates,
-            musicModeConfiguration: musicModeConfiguration,
-            fixtureTopologies: fixtureTopologies,
-            customNames: customNames,
-            favoriteRoomIDs: favoriteRoomIDs,
-            favoriteSceneIDs: favoriteSceneIDs,
-            customBrightnessPresets: customBrightnessPresets,
-            sunriseHour: sunriseHour,
-            sunriseMinute: sunriseMinute,
-            sunsetHour: sunsetHour,
-            sunsetMinute: sunsetMinute,
-            undoStack: undoStack,
-            redoStack: redoStack,
-            lastChangeTime: lastChangeTime,
-            razerActiveIDs: razerActiveIDs,
-            segmentPreviewIDs: segmentPreviewIDs,
-            scanStartingIDs: scanStartingIDs,
-            scanStartingAddresses: scanStartingAddresses,
-            nanoleafShapes: shapes.workspaceSnapshot()
-        )
-    }
-
-    private func applyWorkspaceState(_ workspace: DemoWorkspaceController.WorkspaceState) {
-        devices = workspace.devices
-        devicesByID = Dictionary(uniqueKeysWithValues: devices.map { ($0.id, $0) })
-        rooms = workspace.rooms
-        favoriteIDs = workspace.favoriteIDs
-        scenes = workspace.scenes
-        isScanning = workspace.isScanning
-        scanPhase = workspace.scanPhase
-        lastScanDate = workspace.lastScanDate
-        scanResponseCount = workspace.scanResponseCount
-        statusMessage = workspace.statusMessage
-        commandError = workspace.commandError
-        commandErrorUndo = workspace.commandErrorUndo
-        commandCoordinator.restore(workspace.commandState)
-        canUndo = workspace.canUndo
-        canRedo = workspace.canRedo
-        collapsedRooms = workspace.collapsedRooms
-        lastDeletedRoom = workspace.lastDeletedRoom
-        lastDeletedScene = workspace.lastDeletedScene
-        stalenessGeneration = workspace.stalenessGeneration
-        newlyDiscoveredIDs = workspace.newlyDiscoveredIDs
-        whiteModeDeviceIDs = workspace.whiteModeDeviceIDs
-        napPhase = workspace.napPhase
-        napSnapshotBrightness = workspace.napSnapshotBrightness
-        activeEffects = workspace.activeEffects
-        activityEvents = workspace.activityEvents
-        lastSceneResult = workspace.lastSceneResult
-        favoriteOrder = workspace.favoriteOrder
-        parliamentMembers = workspace.parliamentMembers
-        parliamentSessions = workspace.parliamentSessions
-        sceneCertifications = workspace.sceneCertifications
-        recentColors = workspace.recentColors
-        discoveryChanges = workspace.discoveryChanges
-        scheduleEngine.restore(workspace.scheduleState)
-        sceneRevisions = workspace.sceneRevisions
-        sceneDrafts = workspace.sceneDrafts
-        lastActionSummary = workspace.lastActionSummary
-        rehearsalSnapshot = workspace.rehearsalSnapshot
-        rehearsalSceneID = workspace.rehearsalSceneID
-        goveeSegmentStates = workspace.goveeSegmentStates
-        goveeSegmentPresets = workspace.goveeSegmentPresets
-        lifxMatrixStates = workspace.lifxMatrixStates
-        musicModeConfiguration = workspace.musicModeConfiguration
-        fixtureTopologies = workspace.fixtureTopologies
-        customNames = workspace.customNames
-        favoriteRoomIDs = workspace.favoriteRoomIDs
-        favoriteSceneIDs = workspace.favoriteSceneIDs
-        customBrightnessPresets = workspace.customBrightnessPresets
-        sunriseHour = workspace.sunriseHour
-        sunriseMinute = workspace.sunriseMinute
-        sunsetHour = workspace.sunsetHour
-        sunsetMinute = workspace.sunsetMinute
-        undoStack = workspace.undoStack
-        redoStack = workspace.redoStack
-        lastChangeTime = workspace.lastChangeTime
-        razerActiveIDs = workspace.razerActiveIDs
-        segmentPreviewIDs = workspace.segmentPreviewIDs
-        scanStartingIDs = workspace.scanStartingIDs
-        scanStartingAddresses = workspace.scanStartingAddresses
-        // Shows were stopped before the swap, so no stream belongs to the
-        // workspace arriving.
-        shapesStreams = [:]
-        shapes.restoreWorkspace(workspace.nanoleafShapes)
     }
 }

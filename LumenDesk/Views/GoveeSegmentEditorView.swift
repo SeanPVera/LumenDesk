@@ -224,8 +224,20 @@ struct GoveeSegmentEditorView: View {
                     segmentCell(index: index, width: 44)
                 }
             }
+            .overlay {
+                GeometryReader { proxy in
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .simultaneousGesture(
+                            dragSelectGesture(
+                                width: max(1, proxy.size.width),
+                                count: max(1, draft.segmentCount)
+                            )
+                        )
+                        .allowsHitTesting(false)
+                }
+            }
             .accessibilityLabel("Segment order from controller, \(draft.segmentCount) segments")
-
         }
     }
 
@@ -466,7 +478,7 @@ struct GoveeSegmentEditorView: View {
     @ViewBuilder
     private func segmentCell(index: Int, width: CGFloat) -> some View {
         let isSelected = selection.contains(index)
-        return Button { toggleSelection(index) } label: {
+        Button { toggleSelection(index) } label: {
             VStack(spacing: 3) {
                 Rectangle().fill(cellFill(index)).frame(height: 24)
                 HStack(spacing: 2) {

@@ -142,6 +142,17 @@ final class GoveeClient {
         enqueue(deviceID: deviceID, kind: Self.backgroundPollKind, payload: GoveeProtocol.statusRequest())
     }
 
+    func registerAddress(_ address: String, for deviceID: String) {
+        let trimmed = address.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !deviceID.isEmpty else { return }
+        queue.async { [weak self] in
+            guard let self else { return }
+            Self.learnAddress(deviceID: deviceID, address: trimmed,
+                              addressesByDevice: &self.addressByDevice,
+                              deviceByAddress: &self.deviceByAddress)
+        }
+    }
+
     func setPower(deviceID: String, on: Bool) {
         enqueue(deviceID: deviceID, kind: "turn", payload: GoveeProtocol.turnRequest(on: on))
     }

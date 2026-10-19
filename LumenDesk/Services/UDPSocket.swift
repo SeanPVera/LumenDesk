@@ -80,6 +80,7 @@ final class UDPSocket {
     private let queue: DispatchQueue
     private var source: DispatchSourceRead?
     private var receiveBuffer = [UInt8](repeating: 0, count: 4096)
+    private var probeGeneration: UInt64 = 0
 
     /// Called on `queue` for every datagram received.
     var onReceive: ((Data, String, UInt16) -> Void)?
@@ -322,15 +323,21 @@ final class UDPSocket {
 
         queue.async { [weak self] in
             guard let self else { return }
+            self.probeGeneration &+= 1
+            let generation = self.probeGeneration
             let start = DiscoveryProbeReport(interfaces: interfaces.map(\.description))
             self.broadcastRound(packet, targets: broadcasts, port: port,
                                 remaining: max(1, broadcastRounds), gap: broadcastGap,
-                                report: start) { afterBroadcast in
+                                report: start) { [weak self] afterBroadcast in
+                guard let self, self.probeGeneration == generation else { return }
                 var report = afterBroadcast
-                self.sweep(packet, hosts: hosts, port: port) { first in
+                self.sweep(packet, hosts: hosts, port: port) { [weak self] first in
+                    guard let self, self.probeGeneration == generation else { return }
                     report.absorb(first)
-                    self.queue.asyncAfter(deadline: .now() + warmupDelay) {
-                        self.sweep(packet, hosts: hosts, port: port) { second in
+                    self.queue.asyncAfter(deadline: .now() + warmupDelay) { [weak self] in
+                        guard let self, self.probeGeneration == generation else { return }
+                        self.sweep(packet, hosts: hosts, port: port) { [weak self] second in
+                            guard let self, self.probeGeneration == generation else { return }
                             report.absorb(second)
                             completion(report)
                         }

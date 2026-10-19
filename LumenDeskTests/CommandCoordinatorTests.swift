@@ -117,12 +117,16 @@ final class CommandCoordinatorTests: XCTestCase {
         XCTAssertEqual(refreshCount, 1)
         XCTAssertEqual(coordinator.commandState(for: "light-1").phase, .sending)
         XCTAssertEqual(coordinator.commandState(for: "light-1").retryCount, 1)
+        XCTAssertTrue(coordinator.state.recoveringDeviceIDs.contains("light-1"))
+        let actualObserved = ReportedDeviceState(isOn: false, brightness: 0.35, red: 1, green: 1, blue: 1, kelvin: 3500)
+        XCTAssertTrue(coordinator.reportedStateMatchesExpectation(deviceID: "light-1", reported: actualObserved))
         coordinator.recordObservation(
             deviceID: "light-1",
             confirmedState: confirmedState(isOn: true),
             confirmsPendingCommand: true
         )
         XCTAssertEqual(coordinator.commandState(for: "light-1").phase, .applied)
+        XCTAssertFalse(coordinator.state.recoveringDeviceIDs.contains("light-1"))
     }
 
     @MainActor

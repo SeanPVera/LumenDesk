@@ -1100,6 +1100,24 @@ final class DomainTests: XCTestCase {
         XCTAssertEqual(light.kelvin, 9000)
     }
 
+    func testMatrixAndSegmentColorInvariantsClampOutOfBoundsValues() {
+        let matrix = LIFXMatrixState(
+            productID: 219,
+            width: 500,
+            height: 0,
+            colors: [LIFXMatrixColor(hue: 0, saturation: 0, brightness: 65_535, kelvin: 3_500)]
+        )
+        XCTAssertEqual(matrix.width, 8)
+        XCTAssertEqual(matrix.height, 1)
+        XCTAssertEqual(matrix.colors.count, 64)
+
+        let segmentColor = GoveeSegmentColor(red: .infinity, green: -1, blue: 4, brightness: .nan)
+        XCTAssertEqual(segmentColor.red, 0)
+        XCTAssertEqual(segmentColor.green, 0)
+        XCTAssertEqual(segmentColor.blue, 1)
+        XCTAssertEqual(segmentColor.brightness, 1, "non-finite brightness falls back to full")
+    }
+
     @MainActor
     private func waitUntilState(_ condition: @escaping @MainActor () async -> Bool) async {
         for _ in 0..<1000 {

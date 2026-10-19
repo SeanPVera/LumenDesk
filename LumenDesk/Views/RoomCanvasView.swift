@@ -1394,4 +1394,3 @@ private struct RoomCanvasCommandToast: View {
         .shadow(color: Lumen.graphite.opacity(0.14), radius: 14, y: 6)
     }
 }
-

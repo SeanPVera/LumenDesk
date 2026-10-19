@@ -1804,4 +1804,3 @@ final class LightManager: ObservableObject {
         devicesByID[id]
     }
 }
-

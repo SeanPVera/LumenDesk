@@ -989,4 +989,3 @@ extension Color {
         return (Double(r), Double(g), Double(bb))
     }
 }
-

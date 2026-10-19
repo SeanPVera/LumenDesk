@@ -741,4 +741,3 @@ private struct BasicFixtureEditor: View {
         .background(Lumen.canvas)
     }
 }
-

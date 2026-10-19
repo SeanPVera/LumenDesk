@@ -233,4 +233,3 @@ extension LightManager: GoveeClientDelegate {
         Task { @MainActor in self.goveeProbe = report }
     }
 }
-

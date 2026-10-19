@@ -354,4 +354,3 @@ extension LightManager {
         return rows
     }
 }
-

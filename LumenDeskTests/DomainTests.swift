@@ -1115,7 +1115,7 @@ final class DomainTests: XCTestCase {
         XCTAssertEqual(segmentColor.red, 0)
         XCTAssertEqual(segmentColor.green, 0)
         XCTAssertEqual(segmentColor.blue, 1)
-        XCTAssertEqual(segmentColor.brightness, 0)
+        XCTAssertEqual(segmentColor.brightness, 1, "non-finite brightness falls back to full")
     }
 
     @MainActor

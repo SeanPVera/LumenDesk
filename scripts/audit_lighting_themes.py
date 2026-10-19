@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import colorsys
+import functools
 import itertools
 import math
 import pathlib
@@ -83,35 +84,44 @@ class Theme:
         self.colors = [int(c.strip(), 16) for c in match["colors"].split(",")]
         self.is_new = self.id not in ORIGINAL_IDS
 
+        # Precompute HSV, cylindrical 3D projections, and palette properties
+        # to avoid repeated recalculation during pairwise distance comparisons.
+        self._hsv = [colorsys.rgb_to_hsv(*rgb(c)) for c in self.colors]
+        self.points = [
+            (s * math.cos(h * 2 * math.pi), s * math.sin(h * 2 * math.pi), v)
+            for h, s, v in self._hsv
+        ]
+        values = [v for _, _, v in self._hsv]
+        peak = max(values) or 1.0
+        self._levels = [max(0.2, v / peak) for v in values]
+        self._emitted = [level * self.brightness for level in self._levels]
+        self._mean_luminance = sum(luminance(c) for c in self.colors) / len(self.colors)
+        self._mean_saturation = sum(s for _, s, _ in self._hsv) / len(self.colors)
+        self._warmth = sum(rgb(c)[0] - rgb(c)[2] for c in self.colors) / len(self.colors)
+
     # --- colour maths, mirroring PaletteTone ---
 
     def hsv(self) -> list[tuple[float, float, float]]:
-        out = []
-        for hexv in self.colors:
-            r, g, b = rgb(hexv)
-            out.append(colorsys.rgb_to_hsv(r, g, b))
-        return out
+        return self._hsv
 
     def levels(self) -> list[float]:
         """Values normalised against the palette's brightest entry, floored the
         way LightingTheme.normalizedTones floors them."""
-        values = [v for _, _, v in self.hsv()]
-        peak = max(values) or 1.0
-        return [max(0.2, v / peak) for v in values]
+        return self._levels
 
     def emitted(self) -> list[float]:
         """Relative light output per entry once the theme's brightness applies."""
-        return [level * self.brightness for level in self.levels()]
+        return self._emitted
 
     def mean_luminance(self) -> float:
-        return sum(luminance(c) for c in self.colors) / len(self.colors)
+        return self._mean_luminance
 
     def mean_saturation(self) -> float:
-        return sum(s for _, s, _ in self.hsv()) / len(self.colors)
+        return self._mean_saturation
 
     def warmth(self) -> float:
         """Positive leans warm (red/amber), negative leans cool (cyan/blue)."""
-        return sum(rgb(c)[0] - rgb(c)[2] for c in self.colors) / len(self.colors)
+        return self._warmth
 
     def shares(self, room: int = 8) -> list[float]:
         """Mirrors LightingTheme.distributionShares for the catalog table."""
@@ -160,18 +170,14 @@ def palette_index(distribution: str, position: int, count: int) -> int:
     return min(count - 1, position % count)
 
 
+@functools.lru_cache(maxsize=2048)
 def separation(a: Theme, b: Theme) -> float:
     """Symmetric mean nearest-neighbour distance between two palettes in a
     cylindrical hue/saturation/value space. Higher means easier to tell apart
-    when the two are lit in the same room."""
+    when the two are lit in the same room. Uses precomputed Theme.points and
+    lru_cache to eliminate redundant distance calculations."""
 
-    def points(theme: Theme) -> list[tuple[float, float, float]]:
-        out = []
-        for h, s, v in theme.hsv():
-            out.append((s * math.cos(h * 2 * math.pi), s * math.sin(h * 2 * math.pi), v))
-        return out
-
-    left, right = points(a), points(b)
+    left, right = a.points, b.points
 
     def half(xs, ys):
         return sum(min(math.dist(x, y) for y in ys) for x in xs) / len(xs)

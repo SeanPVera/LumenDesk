@@ -42,26 +42,26 @@ final class LightManager: ObservableObject {
     @Published var commandErrorUndo: (() -> Void)?  // optional undo action on the error toast
     @Published var canUndo: Bool = false
     @Published var canRedo: Bool = false
-    @Published var collapsedRooms: Set<UUID> = []
+    var collapsedRooms: Set<UUID> = []
     // Holds the last deleted room and its position for undo.
-    @Published var lastDeletedRoom: (room: Room, index: Int)? = nil
-    @Published var lastDeletedScene: (scene: LightingScene, index: Int)? = nil
-    @Published var stalenessGeneration: Int = 0
-    @Published var newlyDiscoveredIDs: Set<String> = []
-    @Published var whiteModeDeviceIDs: Set<String> = []
-    @Published var napPhase: NapPhase = .inactive
+    var lastDeletedRoom: (room: Room, index: Int)? = nil
+    var lastDeletedScene: (scene: LightingScene, index: Int)? = nil
+    var stalenessGeneration: Int = 0
+    var newlyDiscoveredIDs: Set<String> = []
+    var whiteModeDeviceIDs: Set<String> = []
+    var napPhase: NapPhase = .inactive
     @Published var activeEffects: [LightScope: String] = [:]
-    @Published var activityEvents: [ActivityEvent] = []
-    @Published var lastSceneResult: SceneApplicationResult?
+    var activityEvents: [ActivityEvent] = []
+    var lastSceneResult: SceneApplicationResult?
     /// Fixtures whose observed state changed without a LumenDesk command in
     /// flight. Direction A keeps this fact in the room instead of quietly
     /// replacing the user's intent or hiding another controller's action.
     @Published var externallyChangedDeviceIDs: Set<String> = []
-    @Published var favoriteOrder: [FavoriteReference] = []
+    var favoriteOrder: [FavoriteReference] = []
     @Published var recentColors: [RecentColor] = []
-    @Published var discoveryChanges: [DiscoveryChange] = []
-    @Published var sceneRevisions: [SceneRevision] = []
-    @Published var sceneDrafts: [UUID: LightingScene] = [:]
+    var discoveryChanges: [DiscoveryChange] = []
+    var sceneRevisions: [SceneRevision] = []
+    var sceneDrafts: [UUID: LightingScene] = [:]
     @Published var lastActionSummary: String?
     @Published var rehearsalSceneID: UUID?
     // Per-device Govee segment layouts (COB strips, string lights, neon ropes)

@@ -55,8 +55,8 @@ struct NanoleafWallCanvas: View {
     var onMarquee: (Set<Int>) -> Void = { _ in }
     var onIdentify: ((Int) -> Void)?
 
-    @State private var dragStart: CGPoint?
-    @State private var dragCurrent: CGPoint?
+    @State private var dragStart: CGPoint? = nil
+    @State private var dragCurrent: CGPoint? = nil
 
     var body: some View {
         GeometryReader { geometry in
@@ -226,37 +226,5 @@ struct NanoleafWallCanvas: View {
     private func accessibilityValue(for panelID: Int, selected: Bool) -> String {
         let colour = display.colors[panelID].map { NanoleafPanelColor(rgb: $0).spokenDescription } ?? "colour unknown"
         return selected ? "\(colour), selected" : colour
-    }
-}
-
-/// A small, non-interactive drawing of a wall for fixture tiles.
-struct NanoleafMiniWall: View {
-    @ObservedObject var shapes: NanoleafShapesController
-    let deviceID: String
-    let fallback: Color
-    let lit: Bool
-
-    var body: some View {
-        if let layout = shapes.layout(deviceID) {
-            NanoleafWallCanvas(layout: layout, rotation: Double(shapes.displayOrientation(deviceID)),
-                               display: lit ? display(layout) : NanoleafPanelDisplay.resolve(
-                                layout: layout, output: .off, lastSent: [:], draft: nil, wholeWall: nil),
-                               interactive: false, showsReference: false)
-                .accessibilityHidden(true)
-        } else {
-            Image(systemName: "hexagon")
-                .font(.system(size: 24, weight: .light))
-                .foregroundStyle(lit ? fallback : Lumen.meter)
-                .accessibilityHidden(true)
-        }
-    }
-
-    private func display(_ layout: NanoleafLayout) -> NanoleafPanelDisplay {
-        let wall = shapes.wall(deviceID)
-        let rgb = fallback.rgbComponents
-        let whole = NanoleafRGB(red: UInt8((rgb.r * 255).rounded()), green: UInt8((rgb.g * 255).rounded()),
-                                blue: UInt8((rgb.b * 255).rounded()))
-        return NanoleafPanelDisplay.resolve(layout: layout, output: wall.output, lastSent: wall.lastSent,
-                                            draft: nil, wholeWall: whole)
     }
 }

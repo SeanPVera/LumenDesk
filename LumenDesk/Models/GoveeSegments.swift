@@ -564,18 +564,26 @@ struct GoveeSegmentPreset: Identifiable, Codable, Equatable {
     var name: String
     var stops: [GoveeSegmentColor]
     var fill: Fill
+    var poweredZones: [Int]?
 
-    init(id: UUID = UUID(), name: String, stops: [GoveeSegmentColor], fill: Fill = .smooth) {
+    init(
+        id: UUID = UUID(),
+        name: String,
+        stops: [GoveeSegmentColor],
+        fill: Fill = .smooth,
+        poweredZones: [Int]? = nil
+    ) {
         self.id = id
         self.name = name
         self.stops = stops
         self.fill = fill
+        self.poweredZones = poweredZones
     }
 
     /// Renders the preset onto `count` segments. A preset is a paint job, not
-    /// a power state — which segments are lit belongs to the fixture, so every
-    /// rendered stop comes back powered and callers reapply their own layout's
-    /// on/off pattern.
+    /// a power state — unless `poweredZones` explicitly targets a zone-limited
+    /// lamp's allowed zone combination, every rendered stop comes back powered
+    /// and callers reapply their own layout's on/off pattern.
     func colors(for count: Int) -> [GoveeSegmentColor] {
         let target = max(1, count)
         guard !stops.isEmpty else { return Array(repeating: GoveeSegmentColor(hex: 0xFFFFFF), count: target) }
@@ -594,8 +602,46 @@ struct GoveeSegmentPreset: Identifiable, Codable, Equatable {
                 painted = Array(repeating: stops[0], count: target)
             }
         }
+        if let poweredZones {
+            let active = Set(poweredZones)
+            return painted.enumerated().map { index, color in
+                color.settingPower(active.contains(index))
+            }
+        }
         return painted.map { $0.settingPower(true) }
     }
+
+    /// Returns fixture-tailored presets followed by the universal built-in library.
+    static func recommended(for profile: GoveeSegmentProfile) -> [GoveeSegmentPreset] {
+        switch profile.layout {
+        case .lamp where profile.limitsSimultaneousZones:
+            return uplighterBuiltIns + builtIns
+        case .stringLights:
+            return stringLightBuiltIns + builtIns
+        default:
+            return builtIns
+        }
+    }
+
+    /// Curated 3-zone presets for the Govee Uplighter Floor Lamp (H60B0) that
+    /// pair specific Upper Ripple / Middle Ambient / Lower Daily Illumination
+    /// colors with a valid 1- or 2-zone power combination.
+    static let uplighterBuiltIns: [GoveeSegmentPreset] = [
+        uplighterPreset("Ripple + Reading", zones: [0, 2], [0x27B9E8, 0x7A5CFF, 0xFFF2CC]),
+        uplighterPreset("Aurora Halo", zones: [0, 1], [0x38E8D4, 0x8A35FF, 0xFFE4B5]),
+        uplighterPreset("Sunset Lounge", zones: [1, 2], [0x246BCE, 0xFF7A45, 0xFFD9A0]),
+        uplighterPreset("Deep Sea Ripple", zones: [0], [0x1B8CFF, 0x27B9E8, 0xFFF2CC]),
+        uplighterPreset("Warm Reading", zones: [2], [0x43E6D1, 0xFFB45C, 0xFFF4D6])
+    ]
+
+    /// Architectural downlight and bulb-strand presets tailored for H608B
+    /// RGBIC String Downlights and outdoor/indoor string lights.
+    static let stringLightBuiltIns: [GoveeSegmentPreset] = [
+        preset("Gallery Wash", .smooth, [0xFFF4E0, 0xFFE1B8, 0xFFC98B]),
+        preset("Sconce Rhythm", .repeating, [0xFFF2D6, 0xFFB35C]),
+        preset("Twilight Eaves", .smooth, [0xFF7E5F, 0xD64C7F, 0x5B3E96, 0x24478F]),
+        preset("Moonlit Canopy", .repeating, [0xE8F1FF, 0x6CA6FF, 0xFFE39E])
+    ]
 
     /// Built-in paint jobs, mirroring the flavor of the Govee Home app's scene
     /// library while staying fully local.
@@ -616,5 +662,14 @@ struct GoveeSegmentPreset: Identifiable, Codable, Equatable {
 
     private static func preset(_ name: String, _ fill: Fill, _ hexes: [UInt]) -> GoveeSegmentPreset {
         GoveeSegmentPreset(name: name, stops: hexes.map { GoveeSegmentColor(hex: $0) }, fill: fill)
+    }
+
+    private static func uplighterPreset(_ name: String, zones: [Int], _ hexes: [UInt]) -> GoveeSegmentPreset {
+        GoveeSegmentPreset(
+            name: name,
+            stops: hexes.map { GoveeSegmentColor(hex: $0) },
+            fill: .repeating,
+            poweredZones: zones
+        )
     }
 }

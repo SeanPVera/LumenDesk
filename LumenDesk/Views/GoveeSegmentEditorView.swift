@@ -18,22 +18,22 @@ struct GoveeSegmentEditorView: View {
     var initialDraft: GoveeSegmentState? = nil
     var onDraftChange: ((GoveeSegmentState?) -> Void)? = nil
 
-    @State private var draft = GoveeSegmentState(colors: [])
-    @State private var openingState: GoveeSegmentState?
+    @State private var draft: GoveeSegmentState = GoveeSegmentState(colors: [])
+    @State private var openingState: GoveeSegmentState? = nil
     @State private var selection: Set<Int> = []
     @State private var paintColor: Color = .white
     @State private var blendEndColor: Color = Color(hue: 0.62, saturation: 1, brightness: 1)
-    @State private var livePreview = true
-    @State private var savingPreset = false
-    @State private var presetName = ""
-    @State private var loaded = false
-    @State private var dragTargetSelected: Bool?
+    @State private var livePreview: Bool = true
+    @State private var savingPreset: Bool = false
+    @State private var presetName: String = ""
+    @State private var loaded: Bool = false
+    @State private var dragTargetSelected: Bool? = nil
     /// Zones that are on, newest first. Fixtures that can only run some of
     /// their zones at once give up the one that has been lit longest, so the
     /// studio remembers the order the user switched them on.
     @State private var zoneActivationOrder: [Int] = []
     /// Explains the most recent automatic swap, until the next power change.
-    @State private var zoneLimitNote: String?
+    @State private var zoneLimitNote: String? = nil
 
     private var profile: GoveeSegmentProfile { manager.segmentStudioProfile(for: device) ?? .generic }
     private var layout: GoveeSegmentLayout { profile.layout }
@@ -775,7 +775,7 @@ struct GoveeSegmentEditorView: View {
                     ForEach(manager.goveeSegmentPresets) { preset in
                         presetChip(preset, custom: true)
                     }
-                    ForEach(GoveeSegmentPreset.builtIns) { preset in
+                    ForEach(GoveeSegmentPreset.recommended(for: profile)) { preset in
                         presetChip(preset, custom: false)
                     }
                 }
@@ -1069,12 +1069,20 @@ struct GoveeSegmentEditorView: View {
     }
 
     /// Presets repaint the fixture without disturbing which zones it is
-    /// running — that choice belongs to the hardware, not to the paint job.
+    /// running, unless the preset explicitly targets an Uplighter zone combination.
     private func applyPreset(_ preset: GoveeSegmentPreset) {
         updateDraft { state in
-            let powered = state.poweredSegments
+            let powered = (limitsZones ? preset.poweredZones : nil) ?? state.poweredSegments
             state.colors = preset.colors(for: state.segmentCount)
             state.setPoweredSegments(powered)
+        }
+        if limitsZones, let presetZones = preset.poweredZones {
+            zoneActivationOrder = presetZones.reversed()
+            zoneLimitNote = nil
+            selection = Set(presetZones.filter { draft.colors.indices.contains($0) })
+            if let first = presetZones.first, draft.colors.indices.contains(first) {
+                paintColor = draft.colors[first].color
+            }
         }
     }
 

@@ -13,11 +13,11 @@ struct LIFXLunaEditorView: View {
     var initialDraft: LIFXMatrixState? = nil
     var onDraftChange: ((LIFXMatrixState?) -> Void)? = nil
 
-    @State private var draft: LIFXMatrixState?
+    @State private var draft: LIFXMatrixState? = nil
     @State private var selection: Set<Int> = []
     @State private var paintColor: Color = .purple
     @State private var gradientEndColor: Color = .cyan
-    @State private var hasEdits = false
+    @State private var hasEdits: Bool = false
 
     private var targetIndices: [Int] {
         guard let draft else { return [] }

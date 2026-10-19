@@ -48,10 +48,10 @@ struct RoomLiveView: View {
     @State private var response: RoomLiveResponse = .calm
     @State private var studioPreset: MusicModePreset = .ambient
     @State private var input: RoomLiveInput = .platform
-    @State private var audioFile: URL?
-    @State private var choosingFile = false
-    @State private var confirmingLocalAudio = false
-    @State private var showingStudioControls = false
+    @State private var audioFile: URL? = nil
+    @State private var choosingFile: Bool = false
+    @State private var confirmingLocalAudio: Bool = false
+    @State private var showingStudioControls: Bool = false
     @AppStorage(AppPreferenceKey.audioPrivacyAcknowledged) private var audioAcknowledged = false
 
     private var scope: LightScope { .room(room.id) }

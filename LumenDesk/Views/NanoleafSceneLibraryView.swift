@@ -11,8 +11,8 @@ struct NanoleafSceneLibrary: View {
     /// Starts an edit from a static scene's panel colours.
     let onPaintFrom: ([Int: NanoleafRGB], String) -> Void
 
-    @State private var expanded = false
-    @State private var editing: NanoleafEffectDefinition?
+    @State private var expanded: Bool = false
+    @State private var editing: NanoleafEffectDefinition? = nil
 
     private var ownedByShow: Bool { manager.animatingEffect(for: device.id) != nil }
 
@@ -119,9 +119,9 @@ struct NanoleafEffectEditor: View {
 
     @State private var definition: NanoleafEffectDefinition
     @State private var name: String
-    @State private var status: String?
-    @State private var busy = false
-    @State private var confirmingReplace = false
+    @State private var status: String? = nil
+    @State private var busy: Bool = false
+    @State private var confirmingReplace: Bool = false
 
     init(definition: NanoleafEffectDefinition, plugin: NanoleafPluginDescription?,
          preview: @escaping (NanoleafEffectDefinition) async throws -> Void,

@@ -140,7 +140,7 @@ struct RoomCanvasShellView: View {
     @AppStorage(AppPreferenceKey.roomCanvasOpenRequest) private var openRoomRequest = ""
     let startInSetup: Bool
     let onPrepared: () -> Void
-    @State private var handledInitialSetup = false
+    @State private var handledInitialSetup: Bool = false
 
     init(startInSetup: Bool = false, onPrepared: @escaping () -> Void = {}) {
         self.startInSetup = startInSetup
@@ -308,8 +308,8 @@ struct RoomCanvasShellView: View {
 private struct RoomCanvasSidebar: View {
     @EnvironmentObject private var manager: LightManager
     @ObservedObject var session: RoomCanvasSessionStore
-    @State private var renamingRoomID: UUID?
-    @State private var renamedRoomName = ""
+    @State private var renamingRoomID: UUID? = nil
+    @State private var renamedRoomName: String = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -696,6 +696,8 @@ struct DirectionARoomField: View {
                     let offset = dragOffsets[light.id] ?? .zero
                     FixtureCanvasNode(
                         light: light,
+                        segmentProfile: manager.segmentProfile(for: light),
+                        activeSegmentState: manager.activeSegmentState(for: light.id),
                         selected: selection.contains(light.id),
                         status: RoomCanvasStatus.resolve([light], manager: manager),
                         compact: compactWidth,
@@ -703,7 +705,7 @@ struct DirectionARoomField: View {
                         select: { toggle(light.id) }
                     )
                     .frame(width: nodeWidth(for: light, compact: compactWidth),
-                           height: condensed ? 64 : 82)
+                           height: condensed ? 68 : 86)
                     .position(
                         x: horizontalInset
                             + (geometry.size.width - horizontalInset * 2) * anchor.x
@@ -752,12 +754,20 @@ struct DirectionARoomField: View {
                         x: horizontalInset + (size.width - horizontalInset * 2) * anchor.x + offset.width,
                         y: verticalInset + (size.height - verticalInset * 2) * anchor.y + offset.height
                     )
+                    let activeSeg = manager.activeSegmentState(for: light.id)
+                    let poweredColors: [Color] = {
+                        guard let seg = activeSeg else { return [] }
+                        let lit = seg.poweredSegments.compactMap { seg.colors.indices.contains($0) ? seg.colors[$0].litColor : nil }
+                        return lit
+                    }()
+                    let primaryColor = poweredColors.first ?? light.color
+                    let secondaryColor = poweredColors.count > 1 ? poweredColors[poweredColors.count / 2] : primaryColor
                     Circle()
                         .fill(
                             RadialGradient(
                                 colors: [
-                                    light.color.opacity(0.24 * max(0.2, light.brightness)),
-                                    light.color.opacity(0.08 * max(0.2, light.brightness)),
+                                    primaryColor.opacity(0.24 * max(0.2, light.brightness)),
+                                    secondaryColor.opacity(0.10 * max(0.2, light.brightness)),
                                     Color.clear
                                 ],
                                 center: .center,
@@ -868,6 +878,8 @@ struct DirectionARoomField: View {
 
 private struct FixtureCanvasNode: View {
     @ObservedObject var light: LightDevice
+    let segmentProfile: GoveeSegmentProfile?
+    let activeSegmentState: GoveeSegmentState?
     let selected: Bool
     let status: RoomCanvasStatus
     let compact: Bool
@@ -876,26 +888,26 @@ private struct FixtureCanvasNode: View {
 
     var body: some View {
         Button(action: select) {
-            VStack(spacing: 5) {
+            VStack(spacing: 4) {
                 ZStack {
                     if light.isOn && !light.isStale {
                         Circle()
                             .fill(
                                 RadialGradient(
-                                    colors: [light.color.opacity(0.55 * light.brightness), light.color.opacity(0)],
+                                    colors: [primaryGlowColor.opacity(0.55 * light.brightness), primaryGlowColor.opacity(0)],
                                     center: .center,
                                     startRadius: 2,
                                     endRadius: 34
                                 )
                             )
-                            .frame(width: compact ? 54 : 74, height: condensed ? 44 : 64)
+                            .frame(width: compact ? 54 : 74, height: condensed ? 42 : 60)
                     }
                     RoundedRectangle(cornerRadius: 7, style: .continuous)
                         .fill(Lumen.graphite)
                         .frame(width: compact ? 32 : 38, height: condensed ? 26 : 30)
                     Image(systemName: fixtureSymbol)
                         .font(.system(size: compact ? 12 : (condensed ? 13 : 14), weight: .semibold))
-                        .foregroundStyle(light.isOn ? light.color : Lumen.canvas.opacity(0.66))
+                        .foregroundStyle(light.isOn ? primaryGlowColor : Lumen.canvas.opacity(0.66))
                     Image(systemName: status.symbol)
                         .font(.system(size: condensed ? 8 : 10, weight: .bold))
                         .foregroundStyle(status.color)
@@ -903,7 +915,8 @@ private struct FixtureCanvasNode: View {
                         .background(Lumen.floor, in: Circle())
                         .offset(x: compact ? 17 : 20, y: condensed ? -14 : -17)
                 }
-                .frame(width: compact ? 54 : 74, height: condensed ? 44 : 64)
+                .frame(width: compact ? 54 : 74, height: condensed ? 42 : 58)
+                segmentBadge
                 Text(light.label)
                     .font(LumenType.body(size: compact ? 9 : 11, weight: .semibold))
                     .foregroundStyle(Lumen.graphite)
@@ -927,8 +940,40 @@ private struct FixtureCanvasNode: View {
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
+    private var primaryGlowColor: Color {
+        if let state = activeSegmentState,
+           let firstOn = state.poweredSegments.first,
+           state.colors.indices.contains(firstOn) {
+            return state.colors[firstOn].litColor
+        }
+        return light.color
+    }
+
+    @ViewBuilder
+    private var segmentBadge: some View {
+        if light.isOn, let state = activeSegmentState, !state.colors.isEmpty {
+            if let profile = segmentProfile, profile.limitsSimultaneousZones {
+                HStack(spacing: 3) {
+                    ForEach(0..<min(3, state.colors.count), id: \.self) { index in
+                        let seg = state.colors[index]
+                        Capsule()
+                            .fill(seg.isOn ? seg.litColor : Lumen.graphite.opacity(0.22))
+                            .frame(width: compact ? 10 : 14, height: 4)
+                    }
+                }
+                .accessibilityHidden(true)
+            } else {
+                SegmentMiniStripView(colors: state.colors.map { $0.isOn ? $0.litColor : Lumen.graphite.opacity(0.22) })
+                    .frame(width: compact ? 44 : 64, height: 4)
+            }
+        }
+    }
+
     private var fixtureSymbol: String {
         if light.isLIFXLuna { return "circle.grid.3x3.fill" }
+        if light.brand == .govee, let profile = segmentProfile, profile.recognized {
+            return profile.layout.icon
+        }
         switch light.brand {
         case .nanoleaf: return "hexagon.fill"
         case .govee: return "lightswitch.on"
@@ -944,8 +989,8 @@ private struct RoomSelectionInspector: View {
     let compose: () -> Void
     let edit: (String) -> Void
     @StateObject private var output: RoomOutputState
-    @State private var renamingFixtureID: String?
-    @State private var renamedFixtureName = ""
+    @State private var renamingFixtureID: String? = nil
+    @State private var renamedFixtureName: String = ""
 
     init(room: Room, targets: [LightDevice], compose: @escaping () -> Void,
          edit: @escaping (String) -> Void) {
@@ -1150,6 +1195,22 @@ private struct RoomSelectionInspector: View {
                     }
                 }
 
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(GoveeSegmentPreset.uplighterBuiltIns) { preset in
+                            Button(preset.name) {
+                                var next = state
+                                let powered = preset.poweredZones ?? state.poweredSegments
+                                next.colors = preset.colors(for: state.segmentCount)
+                                next.setPoweredSegments(powered)
+                                manager.applySegments(device, state: next)
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        }
+                    }
+                }
+
                 ForEach(0..<min(profile.zoneNames.count, state.segmentCount), id: \.self) { index in
                     let segment = state.colors[index]
                     VStack(alignment: .leading, spacing: 6) {
@@ -1289,7 +1350,7 @@ private struct RoomSelectionInspector: View {
         if device.brand == .nanoleaf { return "panels" }
         if device.isLIFXLuna { return "matrix" }
         if let profile = manager.segmentProfile(for: device) {
-            return "\(profile.unitSingularName)s"
+            return "\(profile.editorUnitName)s"
         }
         return "segments"
     }
@@ -1315,10 +1376,10 @@ private struct LookShelf: View {
     @EnvironmentObject private var manager: LightManager
     let room: Room
     let compose: () -> Void
-    @State private var namingCurrent = false
-    @State private var currentName = ""
-    @State private var renamingLookID: UUID?
-    @State private var renamedLookName = ""
+    @State private var namingCurrent: Bool = false
+    @State private var currentName: String = ""
+    @State private var renamingLookID: UUID? = nil
+    @State private var renamedLookName: String = ""
 
     private var ids: Set<String> { Set(room.lightIDs) }
     private var roomLooks: [LightingScene] {

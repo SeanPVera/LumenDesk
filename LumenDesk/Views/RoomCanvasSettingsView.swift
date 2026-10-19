@@ -28,10 +28,10 @@ struct RoomCanvasSettingsView: View {
     @AppStorage(AppPreferenceKey.quietInterface) private var quietInterface = false
     @AppStorage(AppPreferenceKey.confirmationPolicy) private var confirmationPolicy = ConfirmationPolicy.balanced.rawValue
     @AppStorage(AppPreferenceKey.audioPrivacyAcknowledged) private var audioAcknowledged = false
-    @State private var backupDocument = RoomLookBackupDocument()
-    @State private var exportingBackup = false
-    @State private var importingBackup = false
-    @State private var backupStatus: String?
+    @State private var backupDocument: RoomLookBackupDocument = RoomLookBackupDocument()
+    @State private var exportingBackup: Bool = false
+    @State private var importingBackup: Bool = false
+    @State private var backupStatus: String? = nil
 
     var body: some View {
         ScrollView {
@@ -216,9 +216,9 @@ struct AddOrRepairRoomView: View {
     let onFinish: () -> Void
     @State private var step: AddRepairStep = .prepare
     @State private var selectedIDs: Set<String> = []
-    @State private var targetRoomID: UUID?
-    @State private var newRoomName = ""
-    @State private var showingManualPairing = false
+    @State private var targetRoomID: UUID? = nil
+    @State private var newRoomName: String = ""
+    @State private var showingManualPairing: Bool = false
     @State private var fixtureNameDrafts: [String: String] = [:]
 
     private var targetRoom: Room? {

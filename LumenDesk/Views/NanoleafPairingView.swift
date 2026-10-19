@@ -3,11 +3,11 @@ import SwiftUI
 struct NanoleafPairingView: View {
     @EnvironmentObject private var manager: LightManager
     @Environment(\.dismiss) private var dismiss
-    @State private var host = ""
-    @State private var port = "16021"
-    @State private var serviceID: String?
-    @State private var isPairing = false
-    @State private var error: String?
+    @State private var host: String = ""
+    @State private var port: String = "16021"
+    @State private var serviceID: String? = nil
+    @State private var isPairing: Bool = false
+    @State private var error: String? = nil
 
     var body: some View {
         ScrollView {
@@ -115,32 +115,5 @@ struct NanoleafPairingView: View {
                 self.error = (error as? NanoleafError ?? .unavailable).localizedDescription
             }
         }
-    }
-}
-
-struct NanoleafEffectsControl: View {
-    @EnvironmentObject private var manager: LightManager
-    @ObservedObject var device: LightDevice
-    @State private var showingPairing = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if device.needsNanoleafPairing {
-                Button("Pair Nanoleaf Again") { showingPairing = true }
-                Text("Access expired. Hold the controller’s power button to reconnect.")
-                    .font(.caption).foregroundStyle(Lumen.ochre)
-            } else {
-                Menu {
-                    ForEach(device.nanoleafEffects, id: \.self) { name in
-                        Button(name) { manager.selectNanoleafEffect(device, name: name) }
-                    }
-                } label: {
-                    Label(device.nanoleafAppearance?.effect ?? "Nanoleaf Effects", systemImage: "hexagon.fill")
-                }
-                .disabled(device.nanoleafEffects.isEmpty || manager.animatingEffect(for: device.id) != nil)
-                Text("Effects saved on your \(device.nanoleafProductName) controller").font(.caption).foregroundStyle(Lumen.ash)
-            }
-        }
-        .sheet(isPresented: $showingPairing) { NanoleafPairingView().environmentObject(manager) }
     }
 }

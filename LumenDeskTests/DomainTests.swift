@@ -1146,6 +1146,36 @@ final class DomainTests: XCTestCase {
         XCTAssertEqual(segmentColor.brightness, 1, "non-finite brightness falls back to full")
     }
 
+    func testRecommendedPresetsForUplighterAndStringLights() throws {
+        let uplighterProfile = try XCTUnwrap(GoveeSegmentProfile.detect(sku: "H60B0"))
+        let uplighterPresets = GoveeSegmentPreset.recommended(for: uplighterProfile)
+        XCTAssertEqual(
+            Array(uplighterPresets.prefix(GoveeSegmentPreset.uplighterBuiltIns.count).map(\.id)),
+            GoveeSegmentPreset.uplighterBuiltIns.map(\.id)
+        )
+        for preset in GoveeSegmentPreset.uplighterBuiltIns {
+            let zones = preset.poweredZones ?? []
+            XCTAssertFalse(zones.isEmpty)
+            XCTAssertLessThanOrEqual(zones.count, uplighterProfile.simultaneousZoneLimit ?? 2)
+            let colors = preset.colors(for: uplighterProfile.defaultSegmentCount)
+            XCTAssertEqual(colors.count, 3)
+            let litIndices = colors.enumerated().filter { $0.element.isOn }.map(\.offset)
+            XCTAssertEqual(Set(litIndices), Set(zones))
+        }
+
+        let stringProfile = try XCTUnwrap(GoveeSegmentProfile.detect(sku: "H608B"))
+        let stringPresets = GoveeSegmentPreset.recommended(for: stringProfile)
+        XCTAssertEqual(
+            Array(stringPresets.prefix(GoveeSegmentPreset.stringLightBuiltIns.count).map(\.id)),
+            GoveeSegmentPreset.stringLightBuiltIns.map(\.id)
+        )
+        for preset in GoveeSegmentPreset.stringLightBuiltIns {
+            let colors = preset.colors(for: stringProfile.defaultSegmentCount)
+            XCTAssertEqual(colors.count, 15)
+            XCTAssertTrue(colors.contains { $0.brightness > 0.1 })
+        }
+    }
+
     @MainActor
     private func waitUntilState(_ condition: @escaping @MainActor () async -> Bool) async {
         for _ in 0..<1000 {

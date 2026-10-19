@@ -4,6 +4,28 @@ What changed in each LumenDesk release. The release workflow copies the
 section whose heading matches the tag into that tag's GitHub release, above
 the install steps, so write each entry for someone deciding whether to update.
 
+## 2.1 - 2026-10-19
+
+### Govee String Downlights (H608B) and Uplighter Floor Lamp (H60B0)
+
+- **Govee H608B RGBIC String Downlights.** Added dedicated 15-pod architectural
+  downlight support (`H608A`–`H608F` / `H6088` / `H6089`) with pod-by-pod color
+  and brightness control, scalloped wall-wash preview in Segment Studio, live
+  Room Canvas pod strip indicators, and curated string/downlight presets
+  (*Gallery Wash*, *Sconce Rhythm*, *Twilight Eaves*, *Moonlit Canopy*).
+- **Govee H60B0 Uplighter Floor Lamp.** Fixed nonworking lamp controls by
+  modeling the hardware's three distinct zones (*Upper Ripple*, *Middle Ambient*,
+  *Lower Daily Illumination*) and enforcing its two-of-three simultaneous zone
+  limit across Segment Studio, quick zone-combination chips in the Room
+  Inspector, curated 1- and 2-zone Uplighter presets (*Ripple + Reading*,
+  *Aurora Halo*, *Sunset Lounge*, *Deep Sea Ripple*, *Warm Reading*), and
+  persistent UDP Razer streaming frames.
+- **Room Canvas & Runtime Polish.** Multi-zone lamps and string downlights now
+  render live zone/pod status badges and multi-color spatial field washes on the
+  Room Canvas. Trimmed unused legacy UI controls and internal `@Published`
+  broadcasts to reduce main-thread SwiftUI invalidation overhead during live
+  discovery and streaming.
+
 ## 2.0 - 2026-10-18
 
 ### Direction B — Spatial and live audio

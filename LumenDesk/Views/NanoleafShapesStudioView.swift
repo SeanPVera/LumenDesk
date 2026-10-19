@@ -22,27 +22,27 @@ struct NanoleafShapesStudio: View {
     var wide = true
 
     @State private var selection: Set<Int> = []
-    @State private var cursor: Int?
-    @State private var orientationDraft: Int?
+    @State private var cursor: Int? = nil
+    @State private var orientationDraft: Int? = nil
     @State private var paintColor: Color = Color(red: 1, green: 0.42, blue: 0.17)
     @State private var startColor: Color = .white
-    @State private var hexDraft = ""
-    @State private var hexProblem: String?
+    @State private var hexDraft: String = ""
+    @State private var hexProblem: String? = nil
     @State private var gradientStart: Color = Color(red: 1, green: 0.42, blue: 0.17)
     @State private var gradientEnd: Color = Color(red: 0.42, green: 0.24, blue: 1)
     @State private var gradientAxis: NanoleafSpatialAxis = .leftToRight
-    @State private var selectsByTouch = false
-    @State private var handledTouch: Date?
-    @State private var colorEditEnd: Task<Void, Never>?
-    @State private var studioMessage: String?
-    @State private var namingDesign = false
-    @State private var designName = ""
-    @State private var namingGroup = false
-    @State private var groupName = ""
-    @State private var storing = false
-    @State private var storeName = ""
-    @State private var storeConflict = false
-    @State private var storeBusy = false
+    @State private var selectsByTouch: Bool = false
+    @State private var handledTouch: Date? = nil
+    @State private var colorEditEnd: Task<Void, Never>? = nil
+    @State private var studioMessage: String? = nil
+    @State private var namingDesign: Bool = false
+    @State private var designName: String = ""
+    @State private var namingGroup: Bool = false
+    @State private var groupName: String = ""
+    @State private var storing: Bool = false
+    @State private var storeName: String = ""
+    @State private var storeConflict: Bool = false
+    @State private var storeBusy: Bool = false
 
     private var deviceID: String { device.id }
     private var wall: NanoleafShapesController.Wall { shapes.wall(deviceID) }

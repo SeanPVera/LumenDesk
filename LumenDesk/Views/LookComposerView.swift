@@ -65,14 +65,14 @@ struct LookComposerView: View {
     @Environment(\.dismiss) private var dismiss
     let room: Room
     let initialSelection: Set<String>
-    @State private var paletteID = ComposerPalette.choices.first?.id ?? "ember-moss"
+    @State private var paletteID: String = ComposerPalette.choices.first?.id ?? "ember-moss"
     @State private var selectedCategory: LightingTheme.Category? = nil
     @State private var brush: LookBrush = .gradient
     @State private var spatialField: SpatialFieldVector = .themeDefault
     @State private var customBrightness: Double = 0.62
-    @State private var scope: LookComposerScope
-    @State private var lookName = "Ember & Moss"
-    @State private var transitionSeconds = 1.8
+    @State private var scope: LookComposerScope = .room
+    @State private var lookName: String = "Ember & Moss"
+    @State private var transitionSeconds: Double = 1.8
     @State private var exactAssignments: [String: Int] = [:]
 
     init(room: Room, initialSelection: Set<String>) {

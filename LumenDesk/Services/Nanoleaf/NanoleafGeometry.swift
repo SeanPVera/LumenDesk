@@ -111,14 +111,28 @@ enum NanoleafGeometry {
     /// bounding box. Any fixed point would do for drawing, because the canvas
     /// re-centres; it has to be fixed so spatial effects do not drift when
     /// the orientation changes.
+    ///
+    /// Single-pass calculation avoids allocating intermediate footprint point arrays.
     static func pivot(of layout: NanoleafLayout) -> NanoleafPoint {
-        let points = footprint(of: layout)
-        guard let first = points.first else { return NanoleafPoint(0, 0) }
-        var minX = first.x, maxX = first.x, minY = first.y, maxY = first.y
-        for point in points {
-            minX = min(minX, point.x); maxX = max(maxX, point.x)
-            minY = min(minY, point.y); maxY = max(maxY, point.y)
+        var minX = Double.greatestFiniteMagnitude
+        var maxX = -Double.greatestFiniteMagnitude
+        var minY = Double.greatestFiniteMagnitude
+        var maxY = -Double.greatestFiniteMagnitude
+
+        for entry in layout.panels {
+            if let outline = outline(of: entry) {
+                for point in outline {
+                    minX = min(minX, point.x); maxX = max(maxX, point.x)
+                    minY = min(minY, point.y); maxY = max(maxY, point.y)
+                }
+            } else {
+                let radius = markerRadius(for: entry.kind)
+                minX = min(minX, entry.x - radius); maxX = max(maxX, entry.x + radius)
+                minY = min(minY, entry.y - radius); maxY = max(maxY, entry.y + radius)
+            }
         }
+
+        guard minX <= maxX else { return NanoleafPoint(0, 0) }
         return NanoleafPoint((minX + maxX) / 2, (minY + maxY) / 2)
     }
 }
@@ -194,19 +208,53 @@ struct NanoleafCanvasMapping: Equatable {
          inset: Double = 24, fit: Fit = .tight) {
         let wall = NanoleafWallTransform(layout: layout, rotationDegrees: rotationDegrees)
         self.wall = wall
-        let points = NanoleafGeometry.footprint(of: layout).map(wall.wall(fromRaw:))
         let availableWidth = max(1, width - inset * 2)
         let availableHeight = max(1, height - inset * 2)
-        guard let first = points.first else {
+
+        var minX = Double.greatestFiniteMagnitude
+        var maxX = -Double.greatestFiniteMagnitude
+        var minY = Double.greatestFiniteMagnitude
+        var maxY = -Double.greatestFiniteMagnitude
+        var maxRadiusSq = 0.0
+
+        // Single-pass bounds and maximum radius calculation in wall space without intermediate array allocations.
+        for entry in layout.panels {
+            if let outline = NanoleafGeometry.outline(of: entry) {
+                for rawPoint in outline {
+                    let wallPoint = wall.wall(fromRaw: rawPoint)
+                    minX = min(minX, wallPoint.x); maxX = max(maxX, wallPoint.x)
+                    minY = min(minY, wallPoint.y); maxY = max(maxY, wallPoint.y)
+                    if fit == .rotationStable {
+                        let distSq = wallPoint.x * wallPoint.x + wallPoint.y * wallPoint.y
+                        if distSq > maxRadiusSq { maxRadiusSq = distSq }
+                    }
+                }
+            } else {
+                let radius = NanoleafGeometry.markerRadius(for: entry.kind)
+                let corners = [
+                    NanoleafPoint(entry.x - radius, entry.y - radius),
+                    NanoleafPoint(entry.x + radius, entry.y + radius),
+                    NanoleafPoint(entry.x - radius, entry.y + radius),
+                    NanoleafPoint(entry.x + radius, entry.y - radius)
+                ]
+                for rawPoint in corners {
+                    let wallPoint = wall.wall(fromRaw: rawPoint)
+                    minX = min(minX, wallPoint.x); maxX = max(maxX, wallPoint.x)
+                    minY = min(minY, wallPoint.y); maxY = max(maxY, wallPoint.y)
+                    if fit == .rotationStable {
+                        let distSq = wallPoint.x * wallPoint.x + wallPoint.y * wallPoint.y
+                        if distSq > maxRadiusSq { maxRadiusSq = distSq }
+                    }
+                }
+            }
+        }
+
+        guard minX <= maxX else {
             scale = 1
             origin = NanoleafPoint(width / 2, height / 2)
             return
         }
-        var minX = first.x, maxX = first.x, minY = first.y, maxY = first.y
-        for point in points {
-            minX = min(minX, point.x); maxX = max(maxX, point.x)
-            minY = min(minY, point.y); maxY = max(maxY, point.y)
-        }
+
         let center: NanoleafPoint
         switch fit {
         case .tight:
@@ -215,7 +263,7 @@ struct NanoleafCanvasMapping: Equatable {
             center = NanoleafPoint((minX + maxX) / 2, (minY + maxY) / 2)
         case .rotationStable:
             // The pivot is the wall origin, so the swept circle is centred there.
-            let radius = max(1, points.map { ($0.x * $0.x + $0.y * $0.y).squareRoot() }.max() ?? 1)
+            let radius = max(1, maxRadiusSq.squareRoot())
             scale = min(availableWidth, availableHeight) / (radius * 2)
             center = NanoleafPoint(0, 0)
         }
@@ -313,12 +361,29 @@ extension NanoleafLayout {
         guard !panels.isEmpty else { return [] }
         let wall = NanoleafWallTransform(layout: self, rotationDegrees: rotationDegrees)
         let centers = panels.map { (id: $0.panelID, point: wall.wall(fromRaw: NanoleafPoint($0.x, $0.y))) }
-        let meanX = centers.reduce(0) { $0 + $1.point.x } / Double(centers.count)
-        let meanY = centers.reduce(0) { $0 + $1.point.y } / Double(centers.count)
-        let xs = centers.map(\.point.x), ys = centers.map(\.point.y)
-        let minX = xs.min() ?? 0, maxX = xs.max() ?? 0
-        let minY = ys.min() ?? 0, maxY = ys.max() ?? 0
-        let maxDistance = centers.map { hypot($0.point.x - meanX, $0.point.y - meanY) }.max() ?? 0
+
+        // Single-pass accumulation of bounds and centroid without intermediate array allocations.
+        var sumX = 0.0, sumY = 0.0
+        var minX = Double.greatestFiniteMagnitude, maxX = -Double.greatestFiniteMagnitude
+        var minY = Double.greatestFiniteMagnitude, maxY = -Double.greatestFiniteMagnitude
+
+        for center in centers {
+            sumX += center.point.x
+            sumY += center.point.y
+            minX = min(minX, center.point.x); maxX = max(maxX, center.point.x)
+            minY = min(minY, center.point.y); maxY = max(maxY, center.point.y)
+        }
+
+        let meanX = sumX / Double(centers.count)
+        let meanY = sumY / Double(centers.count)
+
+        var maxDistance = 0.0
+        if axis == .outward || axis == .clockwise {
+            for center in centers {
+                let dist = hypot(center.point.x - meanX, center.point.y - meanY)
+                if dist > maxDistance { maxDistance = dist }
+            }
+        }
 
         func position(_ point: NanoleafPoint) -> Double {
             switch axis {

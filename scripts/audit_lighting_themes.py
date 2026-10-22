@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import colorsys
+import functools
 import itertools
 import math
 import pathlib
@@ -83,14 +84,35 @@ class Theme:
         self.colors = [int(c.strip(), 16) for c in match["colors"].split(",")]
         self.is_new = self.id not in ORIGINAL_IDS
 
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Theme):
+            return NotImplemented
+        return self.id == other.id
+
+    def __hash__(self) -> int:
+        return hash(self.id)
+
     # --- colour maths, mirroring PaletteTone ---
 
-    def hsv(self) -> list[tuple[float, float, float]]:
+    # Precalculate and cache HSV values and 3D cylindrical projections per theme instance
+    # to avoid re-converting RGB->HSV and recomputing trig functions during O(N^2) pairwise separation checks.
+    @functools.cached_property
+    def _hsv(self) -> list[tuple[float, float, float]]:
         out = []
         for hexv in self.colors:
             r, g, b = rgb(hexv)
             out.append(colorsys.rgb_to_hsv(r, g, b))
         return out
+
+    def hsv(self) -> list[tuple[float, float, float]]:
+        return self._hsv
+
+    @functools.cached_property
+    def points(self) -> list[tuple[float, float, float]]:
+        return [
+            (s * math.cos(h * 2 * math.pi), s * math.sin(h * 2 * math.pi), v)
+            for h, s, v in self._hsv
+        ]
 
     def levels(self) -> list[float]:
         """Values normalised against the palette's brightest entry, floored the
@@ -160,20 +182,15 @@ def palette_index(distribution: str, position: int, count: int) -> int:
     return min(count - 1, position % count)
 
 
+# Cache separation results across pairwise comparisons (memoized for (Theme, Theme) pairs)
+@functools.lru_cache(maxsize=None)
 def separation(a: Theme, b: Theme) -> float:
     """Symmetric mean nearest-neighbour distance between two palettes in a
     cylindrical hue/saturation/value space. Higher means easier to tell apart
     when the two are lit in the same room."""
+    left, right = a.points, b.points
 
-    def points(theme: Theme) -> list[tuple[float, float, float]]:
-        out = []
-        for h, s, v in theme.hsv():
-            out.append((s * math.cos(h * 2 * math.pi), s * math.sin(h * 2 * math.pi), v))
-        return out
-
-    left, right = points(a), points(b)
-
-    def half(xs, ys):
+    def half(xs: list[tuple[float, float, float]], ys: list[tuple[float, float, float]]) -> float:
         return sum(min(math.dist(x, y) for y in ys) for x in xs) / len(xs)
 
     return (half(left, right) + half(right, left)) / 2

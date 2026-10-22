@@ -9,3 +9,7 @@
 ## 2026-10-12 - Backward Day-Stepping for Schedule Evaluation
 **Learning:** Replacing minute-by-minute scanning in schedule evaluation with backward day-stepping reduces complexity from $O(\text{minutes})$ to $O(\text{days})$. Re-constructing `Date` instances per calendar day instead of mutating a single `Date` object avoids hour drift caused by JS Date hour-adjustments across DST spring-forward transitions.
 **Action:** In date/time interval matching, iterate over candidate days and re-instantiate local-time components per candidate date to safely handle DST boundaries without minute-walking.
+
+## 2026-10-18 - Hoisting Cylindrical Coordinate Transformations in Palette Distance Audits
+**Learning:** Precomputing cylindrical 3D point projections `(s * cos(h*2pi), s * sin(h*2pi), v)` and caching HSV color space conversions on immutable palette instances hoists trigonometric calculations out of $O(N^2)$ pairwise comparison loops. Decorating symmetric distance evaluations with `@functools.lru_cache` eliminates redundant calculations across multiple verification passes.
+**Action:** When computing pairwise distance metrics across immutable dataset elements, precalculate coordinate representations on individual element instances and memoize distance calculations.

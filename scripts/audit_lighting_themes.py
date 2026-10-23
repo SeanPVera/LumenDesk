@@ -82,15 +82,30 @@ class Theme:
         self.distribution = match["distribution"]
         self.colors = [int(c.strip(), 16) for c in match["colors"].split(",")]
         self.is_new = self.id not in ORIGINAL_IDS
+        # Cache for memoized HSV values and cylindrical spatial point calculations
+        self._hsv: list[tuple[float, float, float]] | None = None
+        self._points: list[tuple[float, float, float]] | None = None
 
     # --- colour maths, mirroring PaletteTone ---
 
     def hsv(self) -> list[tuple[float, float, float]]:
-        out = []
-        for hexv in self.colors:
-            r, g, b = rgb(hexv)
-            out.append(colorsys.rgb_to_hsv(r, g, b))
-        return out
+        if self._hsv is None:
+            out = []
+            for hexv in self.colors:
+                r, g, b = rgb(hexv)
+                out.append(colorsys.rgb_to_hsv(r, g, b))
+            self._hsv = out
+        return self._hsv
+
+    def points(self) -> list[tuple[float, float, float]]:
+        """3D cylindrical points (x, y, v) in hue/saturation/value space.
+        Memoized on first call to avoid redundant trig and float math during pairwise separation checks."""
+        if self._points is None:
+            out = []
+            for h, s, v in self.hsv():
+                out.append((s * math.cos(h * 2 * math.pi), s * math.sin(h * 2 * math.pi), v))
+            self._points = out
+        return self._points
 
     def levels(self) -> list[float]:
         """Values normalised against the palette's brightest entry, floored the
@@ -165,13 +180,7 @@ def separation(a: Theme, b: Theme) -> float:
     cylindrical hue/saturation/value space. Higher means easier to tell apart
     when the two are lit in the same room."""
 
-    def points(theme: Theme) -> list[tuple[float, float, float]]:
-        out = []
-        for h, s, v in theme.hsv():
-            out.append((s * math.cos(h * 2 * math.pi), s * math.sin(h * 2 * math.pi), v))
-        return out
-
-    left, right = points(a), points(b)
+    left, right = a.points(), b.points()
 
     def half(xs, ys):
         return sum(min(math.dist(x, y) for y in ys) for x in xs) / len(xs)

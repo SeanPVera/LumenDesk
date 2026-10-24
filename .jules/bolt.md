@@ -9,3 +9,7 @@
 ## 2026-10-12 - Backward Day-Stepping for Schedule Evaluation
 **Learning:** Replacing minute-by-minute scanning in schedule evaluation with backward day-stepping reduces complexity from $O(\text{minutes})$ to $O(\text{days})$. Re-constructing `Date` instances per calendar day instead of mutating a single `Date` object avoids hour drift caused by JS Date hour-adjustments across DST spring-forward transitions.
 **Action:** In date/time interval matching, iterate over candidate days and re-instantiate local-time components per candidate date to safely handle DST boundaries without minute-walking.
+
+## 2026-10-24 - Zero-Allocation Metre Tracking in Audio Loop
+**Learning:** In Swift real-time audio and beat tracking routines invoked on every beat/frame, candidate scoring routines that allocate local dynamic arrays (`[Double]`, `[Int]`) or dictionaries (`[Int: Double]`) and use $O(N)$ array shifting (`removeFirst`) cause repeated heap allocations. Pre-allocating instance scratch storage, using fixed-capacity ring buffers, and consolidating reduction passes (`max`, `sum`, `firstIndex`) eliminates all allocations and memory shifts on the hot path.
+**Action:** In DSP and real-time audio components, use instance scratch storage and ring buffers instead of local heap arrays/dictionaries or array element shifting.

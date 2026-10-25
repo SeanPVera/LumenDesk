@@ -151,7 +151,10 @@ final class MusicChoreographyEngine {
     private var highEnergyBeganAt: TimeInterval?
     private var sustainedEnergyEvent = false
     private var lastTimestamp: TimeInterval?
-    private var brightnessEnvelopes: [String: Double] = [:]
+    // Cached brightness envelopes stored as a contiguous array aligned with `cachedTargets`.
+    // Replaces dictionary lookups ([String: Double]) to avoid string key formatting and
+    // hash lookups on every target for every audio frame.
+    private var cachedBrightnessEnvelopes: [Double] = []
     private var flashLimiter = FlashSafetyLimiter()
 
     // Musical state carried between frames.
@@ -176,7 +179,6 @@ final class MusicChoreographyEngine {
     private var cachedTopology: FixtureTopology?
     private var cachedFixtures: [MusicFixtureDescriptor] = []
     private var cachedTargets: [MusicSpatialTarget] = []
-    private var cachedEnvelopeKeys: [String] = []
     private var hasHitTargets = false
     private var hasAccentTargets = false
     private var hasMotionTargets = false
@@ -191,7 +193,7 @@ final class MusicChoreographyEngine {
         highEnergyBeganAt = nil
         sustainedEnergyEvent = false
         lastTimestamp = nil
-        brightnessEnvelopes.removeAll(keepingCapacity: true)
+        cachedBrightnessEnvelopes.removeAll(keepingCapacity: true)
         flashLimiter.reset()
         dynamics = 0
         fastEnergy = 0
@@ -207,7 +209,6 @@ final class MusicChoreographyEngine {
         cachedTopology = nil
         cachedFixtures.removeAll(keepingCapacity: true)
         cachedTargets.removeAll(keepingCapacity: true)
-        cachedEnvelopeKeys.removeAll(keepingCapacity: true)
         hasHitTargets = false
         hasAccentTargets = false
         hasMotionTargets = false
@@ -412,14 +413,19 @@ final class MusicChoreographyEngine {
                 min(upperBrightness, rawBrightness)
             )
 
-            let envelopeKey = cachedEnvelopeKeys[index]
-            let previous = brightnessEnvelopes[envelopeKey] ?? rawBrightness
+            // Index into the contiguous brightness envelope array to avoid string formatting and
+            // dictionary hashing lookups per spatial target on every audio frame.
+            let previous = (index < cachedBrightnessEnvelopes.count && cachedBrightnessEnvelopes[index] >= 0)
+                ? cachedBrightnessEnvelopes[index]
+                : rawBrightness
             let coefficient = rawBrightness > previous ? attack : release
             var brightness = previous + (rawBrightness - previous) * coefficient
             brightness += flashIntensity * max(0, upperBrightness - brightness)
             brightness = max(brightnessFloor,
                              min(upperBrightness, brightness))
-            brightnessEnvelopes[envelopeKey] = brightness
+            if index < cachedBrightnessEnvelopes.count {
+                cachedBrightnessEnvelopes[index] = brightness
+            }
 
             // Colour: a palette entry held for a whole number of bars and
             // cross-faded over one beat at the bar line, plus a spatial offset
@@ -470,11 +476,13 @@ final class MusicChoreographyEngine {
             cachedTopology = topology
             cachedFixtures = fixtures
             cachedTargets = topology.expandedTargets(for: fixtures)
-            cachedEnvelopeKeys = cachedTargets.map { "\($0.fixtureID)#\($0.segmentID ?? -1)" }
+            cachedBrightnessEnvelopes = Array(repeating: -1.0, count: cachedTargets.count)
             hasHitTargets = cachedTargets.contains { $0.role == .hit }
             hasAccentTargets = cachedTargets.contains { $0.role == .accent }
             hasMotionTargets = cachedTargets.contains { $0.role == .motion }
             hasWashTargets = cachedTargets.contains { $0.role == .wash || $0.role == .auto }
+        } else if cachedBrightnessEnvelopes.count != cachedTargets.count {
+            cachedBrightnessEnvelopes = Array(repeating: -1.0, count: cachedTargets.count)
         }
         return cachedTargets
     }

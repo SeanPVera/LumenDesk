@@ -83,14 +83,18 @@ class Theme:
         self.colors = [int(c.strip(), 16) for c in match["colors"].split(",")]
         self.is_new = self.id not in ORIGINAL_IDS
 
+        # Precompute HSV values and 3D cylindrical coordinates once per theme
+        # to avoid recalculating them during O(N^2) pairwise separation checks.
+        self._hsv = [colorsys.rgb_to_hsv(*rgb(c)) for c in self.colors]
+        self.points = [
+            (s * math.cos(h * 2 * math.pi), s * math.sin(h * 2 * math.pi), v)
+            for h, s, v in self._hsv
+        ]
+
     # --- colour maths, mirroring PaletteTone ---
 
     def hsv(self) -> list[tuple[float, float, float]]:
-        out = []
-        for hexv in self.colors:
-            r, g, b = rgb(hexv)
-            out.append(colorsys.rgb_to_hsv(r, g, b))
-        return out
+        return self._hsv
 
     def levels(self) -> list[float]:
         """Values normalised against the palette's brightest entry, floored the
@@ -165,16 +169,20 @@ def separation(a: Theme, b: Theme) -> float:
     cylindrical hue/saturation/value space. Higher means easier to tell apart
     when the two are lit in the same room."""
 
-    def points(theme: Theme) -> list[tuple[float, float, float]]:
-        out = []
-        for h, s, v in theme.hsv():
-            out.append((s * math.cos(h * 2 * math.pi), s * math.sin(h * 2 * math.pi), v))
-        return out
+    left, right = a.points, b.points
 
-    left, right = points(a), points(b)
-
-    def half(xs, ys):
-        return sum(min(math.dist(x, y) for y in ys) for x in xs) / len(xs)
+    # Use explicit nested loops rather than generator expressions to avoid allocation
+    # overhead across thousands of palette pair distance calculations.
+    def half(xs: list[tuple[float, float, float]], ys: list[tuple[float, float, float]]) -> float:
+        total = 0.0
+        for x in xs:
+            min_d = float("inf")
+            for y in ys:
+                d = math.dist(x, y)
+                if d < min_d:
+                    min_d = d
+            total += min_d
+        return total / len(xs)
 
     return (half(left, right) + half(right, left)) / 2
 

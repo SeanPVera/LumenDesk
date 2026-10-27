@@ -151,7 +151,8 @@ final class MusicChoreographyEngine {
     private var highEnergyBeganAt: TimeInterval?
     private var sustainedEnergyEvent = false
     private var lastTimestamp: TimeInterval?
-    private var brightnessEnvelopes: [String: Double] = [:]
+    // Positional brightness envelopes corresponding 1-to-1 with targets indices.
+    private var brightnessEnvelopes: [Double] = []
     private var flashLimiter = FlashSafetyLimiter()
 
     // Musical state carried between frames.
@@ -176,7 +177,6 @@ final class MusicChoreographyEngine {
     private var cachedTopology: FixtureTopology?
     private var cachedFixtures: [MusicFixtureDescriptor] = []
     private var cachedTargets: [MusicSpatialTarget] = []
-    private var cachedEnvelopeKeys: [String] = []
     private var hasHitTargets = false
     private var hasAccentTargets = false
     private var hasMotionTargets = false
@@ -207,7 +207,6 @@ final class MusicChoreographyEngine {
         cachedTopology = nil
         cachedFixtures.removeAll(keepingCapacity: true)
         cachedTargets.removeAll(keepingCapacity: true)
-        cachedEnvelopeKeys.removeAll(keepingCapacity: true)
         hasHitTargets = false
         hasAccentTargets = false
         hasMotionTargets = false
@@ -412,14 +411,17 @@ final class MusicChoreographyEngine {
                 min(upperBrightness, rawBrightness)
             )
 
-            let envelopeKey = cachedEnvelopeKeys[index]
-            let previous = brightnessEnvelopes[envelopeKey] ?? rawBrightness
+            // Direct array indexing eliminates string key allocation and dictionary hashing overhead in the render loop.
+            let envVal = index < brightnessEnvelopes.count ? brightnessEnvelopes[index] : .nan
+            let previous = envVal.isNaN ? rawBrightness : envVal
             let coefficient = rawBrightness > previous ? attack : release
             var brightness = previous + (rawBrightness - previous) * coefficient
             brightness += flashIntensity * max(0, upperBrightness - brightness)
             brightness = max(brightnessFloor,
                              min(upperBrightness, brightness))
-            brightnessEnvelopes[envelopeKey] = brightness
+            if index < brightnessEnvelopes.count {
+                brightnessEnvelopes[index] = brightness
+            }
 
             // Colour: a palette entry held for a whole number of bars and
             // cross-faded over one beat at the bar line, plus a spatial offset
@@ -470,11 +472,11 @@ final class MusicChoreographyEngine {
             cachedTopology = topology
             cachedFixtures = fixtures
             cachedTargets = topology.expandedTargets(for: fixtures)
-            cachedEnvelopeKeys = cachedTargets.map { "\($0.fixtureID)#\($0.segmentID ?? -1)" }
             hasHitTargets = cachedTargets.contains { $0.role == .hit }
             hasAccentTargets = cachedTargets.contains { $0.role == .accent }
             hasMotionTargets = cachedTargets.contains { $0.role == .motion }
             hasWashTargets = cachedTargets.contains { $0.role == .wash || $0.role == .auto }
+            brightnessEnvelopes = Array(repeating: .nan, count: cachedTargets.count)
         }
         return cachedTargets
     }

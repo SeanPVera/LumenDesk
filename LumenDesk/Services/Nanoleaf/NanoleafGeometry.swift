@@ -16,6 +16,9 @@ struct NanoleafPoint: Equatable, Hashable, Codable {
 // MARK: - Panel outlines
 
 enum NanoleafGeometry {
+    /// Cached constant for sqrt(3.0) used in triangular panel calculations.
+    private static let sqrt3 = 3.0.squareRoot()
+
     /// A light panel's outline in the controller's layout space (y up),
     /// counter-clockwise. Nil for anything that is not a Shapes light panel.
     ///
@@ -44,7 +47,7 @@ enum NanoleafGeometry {
             return polygon(center: center, circumradius: side,
                            firstVertexDegrees: panel.orientation, count: 6)
         case .triangle, .miniTriangle, .lightPanelTriangle:
-            return polygon(center: center, circumradius: side / 3.0.squareRoot(),
+            return polygon(center: center, circumradius: side / sqrt3,
                            firstVertexDegrees: panel.orientation + 90, count: 3)
         default:
             return nil
@@ -55,8 +58,8 @@ enum NanoleafGeometry {
     static func inradius(of kind: NanoleafShapeKind) -> Double? {
         guard let side = kind.sideLength else { return nil }
         switch kind {
-        case .hexagon: return side * 3.0.squareRoot() / 2
-        case .triangle, .miniTriangle, .lightPanelTriangle: return side / (2 * 3.0.squareRoot())
+        case .hexagon: return side * sqrt3 / 2
+        case .triangle, .miniTriangle, .lightPanelTriangle: return side / (2 * sqrt3)
         default: return nil
         }
     }
@@ -81,15 +84,23 @@ enum NanoleafGeometry {
 
     /// Whether a convex, counter-clockwise polygon contains a point. Points
     /// on an edge count as inside, so a click exactly on a seam still lands.
+    ///
+    /// Optimization: edge vector diffs and cross product are calculated first;
+    /// expensive floating-point squareRoot() is deferred and only evaluated when
+    /// cross < 0.
     static func convexPolygon(_ polygon: [NanoleafPoint], contains point: NanoleafPoint,
                               tolerance: Double = 1e-9) -> Bool {
         guard polygon.count >= 3 else { return false }
         for index in polygon.indices {
             let a = polygon[index]
             let b = polygon[(index + 1) % polygon.count]
-            let cross = (b.x - a.x) * (point.y - a.y) - (b.y - a.y) * (point.x - a.x)
-            let length = ((b.x - a.x) * (b.x - a.x) + (b.y - a.y) * (b.y - a.y)).squareRoot()
-            if cross < -tolerance * max(1, length) { return false }
+            let dx = b.x - a.x
+            let dy = b.y - a.y
+            let cross = dx * (point.y - a.y) - dy * (point.x - a.x)
+            if cross < 0 {
+                let length = (dx * dx + dy * dy).squareRoot()
+                if cross < -tolerance * max(1, length) { return false }
+            }
         }
         return true
     }
@@ -107,12 +118,8 @@ enum NanoleafGeometry {
         }
     }
 
-    /// The centre the wall view rotates about: the middle of the layout's
-    /// bounding box. Any fixed point would do for drawing, because the canvas
-    /// re-centres; it has to be fixed so spatial effects do not drift when
-    /// the orientation changes.
-    static func pivot(of layout: NanoleafLayout) -> NanoleafPoint {
-        let points = footprint(of: layout)
+    /// The centre the wall view rotates about, given layout footprint points.
+    static func pivot(of points: [NanoleafPoint]) -> NanoleafPoint {
         guard let first = points.first else { return NanoleafPoint(0, 0) }
         var minX = first.x, maxX = first.x, minY = first.y, maxY = first.y
         for point in points {
@@ -120,6 +127,14 @@ enum NanoleafGeometry {
             minY = min(minY, point.y); maxY = max(maxY, point.y)
         }
         return NanoleafPoint((minX + maxX) / 2, (minY + maxY) / 2)
+    }
+
+    /// The centre the wall view rotates about: the middle of the layout's
+    /// bounding box. Any fixed point would do for drawing, because the canvas
+    /// re-centres; it has to be fixed so spatial effects do not drift when
+    /// the orientation changes.
+    static func pivot(of layout: NanoleafLayout) -> NanoleafPoint {
+        pivot(of: footprint(of: layout))
     }
 }
 
@@ -192,9 +207,14 @@ struct NanoleafCanvasMapping: Equatable {
 
     init(layout: NanoleafLayout, rotationDegrees: Double, width: Double, height: Double,
          inset: Double = 24, fit: Fit = .tight) {
-        let wall = NanoleafWallTransform(layout: layout, rotationDegrees: rotationDegrees)
+        // Optimization: footprint(of: layout) is computed once and reused for both the
+        // wall transform pivot calculation and the transformed wall points mapping,
+        // eliminating redundant layout flatMaps and array allocations.
+        let rawFootprint = NanoleafGeometry.footprint(of: layout)
+        let wall = NanoleafWallTransform(rotationDegrees: rotationDegrees,
+                                         pivot: NanoleafGeometry.pivot(of: rawFootprint))
         self.wall = wall
-        let points = NanoleafGeometry.footprint(of: layout).map(wall.wall(fromRaw:))
+        let points = rawFootprint.map(wall.wall(fromRaw:))
         let availableWidth = max(1, width - inset * 2)
         let availableHeight = max(1, height - inset * 2)
         guard let first = points.first else {

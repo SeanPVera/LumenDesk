@@ -215,7 +215,12 @@ struct NanoleafCanvasMapping: Equatable {
             center = NanoleafPoint((minX + maxX) / 2, (minY + maxY) / 2)
         case .rotationStable:
             // The pivot is the wall origin, so the swept circle is centred there.
-            let radius = max(1, points.map { ($0.x * $0.x + $0.y * $0.y).squareRoot() }.max() ?? 1)
+            var maxDistSq = 0.0
+            for point in points {
+                let distSq = point.x * point.x + point.y * point.y
+                if distSq > maxDistSq { maxDistSq = distSq }
+            }
+            let radius = max(1, maxDistSq.squareRoot())
             scale = min(availableWidth, availableHeight) / (radius * 2)
             center = NanoleafPoint(0, 0)
         }
@@ -313,12 +318,37 @@ extension NanoleafLayout {
         guard !panels.isEmpty else { return [] }
         let wall = NanoleafWallTransform(layout: self, rotationDegrees: rotationDegrees)
         let centers = panels.map { (id: $0.panelID, point: wall.wall(fromRaw: NanoleafPoint($0.x, $0.y))) }
-        let meanX = centers.reduce(0) { $0 + $1.point.x } / Double(centers.count)
-        let meanY = centers.reduce(0) { $0 + $1.point.y } / Double(centers.count)
-        let xs = centers.map(\.point.x), ys = centers.map(\.point.y)
-        let minX = xs.min() ?? 0, maxX = xs.max() ?? 0
-        let minY = ys.min() ?? 0, maxY = ys.max() ?? 0
-        let maxDistance = centers.map { hypot($0.point.x - meanX, $0.point.y - meanY) }.max() ?? 0
+        guard let firstCenter = centers.first else { return [] }
+
+        var sumX = 0.0
+        var sumY = 0.0
+        var minX = firstCenter.point.x
+        var maxX = firstCenter.point.x
+        var minY = firstCenter.point.y
+        var maxY = firstCenter.point.y
+
+        for center in centers {
+            let px = center.point.x
+            let py = center.point.y
+            sumX += px
+            sumY += py
+            if px < minX { minX = px }
+            if px > maxX { maxX = px }
+            if py < minY { minY = py }
+            if py > maxY { maxY = py }
+        }
+
+        let count = Double(centers.count)
+        let meanX = sumX / count
+        let meanY = sumY / count
+
+        var maxDistance = 0.0
+        if axis == .outward {
+            for center in centers {
+                let dist = hypot(center.point.x - meanX, center.point.y - meanY)
+                if dist > maxDistance { maxDistance = dist }
+            }
+        }
 
         func position(_ point: NanoleafPoint) -> Double {
             switch axis {

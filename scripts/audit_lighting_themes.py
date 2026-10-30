@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import colorsys
+import functools
 import itertools
 import math
 import pathlib
@@ -83,8 +84,17 @@ class Theme:
         self.colors = [int(c.strip(), 16) for c in match["colors"].split(",")]
         self.is_new = self.id not in ORIGINAL_IDS
 
+    def __hash__(self) -> int:
+        return hash(self.id)
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, Theme):
+            return self.id == other.id
+        return False
+
     # --- colour maths, mirroring PaletteTone ---
 
+    @functools.cached_property
     def hsv(self) -> list[tuple[float, float, float]]:
         out = []
         for hexv in self.colors:
@@ -92,23 +102,36 @@ class Theme:
             out.append(colorsys.rgb_to_hsv(r, g, b))
         return out
 
+    @functools.cached_property
+    def points(self) -> list[tuple[float, float, float]]:
+        """Pre-calculated cylindrical coordinates for palette distance calculation."""
+        out = []
+        for h, s, v in self.hsv:
+            out.append((s * math.cos(h * 2 * math.pi), s * math.sin(h * 2 * math.pi), v))
+        return out
+
+    @functools.cached_property
     def levels(self) -> list[float]:
         """Values normalised against the palette's brightest entry, floored the
         way LightingTheme.normalizedTones floors them."""
-        values = [v for _, _, v in self.hsv()]
+        values = [v for _, _, v in self.hsv]
         peak = max(values) or 1.0
         return [max(0.2, v / peak) for v in values]
 
+    @functools.cached_property
     def emitted(self) -> list[float]:
         """Relative light output per entry once the theme's brightness applies."""
-        return [level * self.brightness for level in self.levels()]
+        return [level * self.brightness for level in self.levels]
 
+    @functools.cached_property
     def mean_luminance(self) -> float:
         return sum(luminance(c) for c in self.colors) / len(self.colors)
 
+    @functools.cached_property
     def mean_saturation(self) -> float:
-        return sum(s for _, s, _ in self.hsv()) / len(self.colors)
+        return sum(s for _, s, _ in self.hsv) / len(self.colors)
 
+    @functools.cached_property
     def warmth(self) -> float:
         """Positive leans warm (red/amber), negative leans cool (cyan/blue)."""
         return sum(rgb(c)[0] - rgb(c)[2] for c in self.colors) / len(self.colors)
@@ -160,18 +183,12 @@ def palette_index(distribution: str, position: int, count: int) -> int:
     return min(count - 1, position % count)
 
 
+@functools.lru_cache(maxsize=None)
 def separation(a: Theme, b: Theme) -> float:
     """Symmetric mean nearest-neighbour distance between two palettes in a
     cylindrical hue/saturation/value space. Higher means easier to tell apart
     when the two are lit in the same room."""
-
-    def points(theme: Theme) -> list[tuple[float, float, float]]:
-        out = []
-        for h, s, v in theme.hsv():
-            out.append((s * math.cos(h * 2 * math.pi), s * math.sin(h * 2 * math.pi), v))
-        return out
-
-    left, right = points(a), points(b)
+    left, right = a.points, b.points
 
     def half(xs, ys):
         return sum(min(math.dist(x, y) for y in ys) for x in xs) / len(xs)
@@ -223,9 +240,9 @@ def audit(themes: list[Theme]) -> list[str]:
         check(0.05 <= theme.brightness <= 1.0, f"{theme.id} brightness {theme.brightness} out of range")
         check(bool(theme.summary), f"{theme.id} has no summary")
         check(theme.distribution in DISTRIBUTION_SUMMARY, f"{theme.id} has an unknown distribution")
-        check(min(theme.levels()) >= 0.2, f"{theme.id} has an entry that emits nothing")
+        check(min(theme.levels) >= 0.2, f"{theme.id} has an entry that emits nothing")
         if theme.distribution == "wash":
-            values = [v for _, _, v in theme.hsv()]
+            values = [v for _, _, v in theme.hsv]
             ratio = values[0] / max(values)
             check(ratio >= 0.85,
                   f"{theme.id} washes the room with a colour at {ratio:.0%} of its own palette peak")
@@ -237,8 +254,8 @@ def audit(themes: list[Theme]) -> list[str]:
         gap = separation(a, b)
         if gap >= 0.10:
             continue
-        warm_gap = abs(a.warmth() - b.warmth())
-        lum_gap = abs(a.mean_luminance() - b.mean_luminance())
+        warm_gap = abs(a.warmth - b.warmth)
+        lum_gap = abs(a.mean_luminance - b.mean_luminance)
         bright_gap = abs(a.brightness - b.brightness)
         if warm_gap >= 0.08 or lum_gap >= 0.10 or bright_gap >= 0.15:
             continue
@@ -249,13 +266,13 @@ def audit(themes: list[Theme]) -> list[str]:
 
     # A catalog that is all one temperature, or all one output level, is not a
     # balanced collection however many rows it has.
-    warm = [t for t in themes if t.warmth() > 0.12]
-    cool = [t for t in themes if t.warmth() < -0.05]
+    warm = [t for t in themes if t.warmth > 0.12]
+    cool = [t for t in themes if t.warmth < -0.05]
     check(len(warm) >= 12, f"only {len(warm)} warm-leaning themes")
     check(len(cool) >= 8, f"only {len(cool)} cool-leaning themes")
     check(len([t for t in themes if t.brightness <= 0.4]) >= 6, "too few low-output themes")
     check(len([t for t in themes if t.brightness >= 0.75]) >= 6, "too few high-output themes")
-    check(len([t for t in themes if t.mean_saturation() <= 0.30]) >= 8,
+    check(len([t for t in themes if t.mean_saturation <= 0.30]) >= 8,
           "too few restrained, low-saturation themes")
     check(len({t.distribution for t in themes}) == 5, "not every distribution is used")
 
@@ -347,11 +364,11 @@ def document(themes: list[Theme]) -> str:
     add("")
     add("| Theme | Luminance | Saturation | Warm ← → Cool | Lowest entry output |")
     add("| --- | --- | --- | --- | --- |")
-    for theme in sorted(themes, key=lambda t: -t.warmth()):
-        bias = theme.warmth()
+    for theme in sorted(themes, key=lambda t: -t.warmth):
+        bias = theme.warmth
         arrow = "warm" if bias > 0.12 else ("cool" if bias < -0.05 else "neutral")
-        add(f"| {theme.name} | {theme.mean_luminance():.2f} | {theme.mean_saturation():.2f} "
-            f"| {bias:+.2f} {arrow} | {min(theme.emitted()):.0%} |")
+        add(f"| {theme.name} | {theme.mean_luminance:.2f} | {theme.mean_saturation:.2f} "
+            f"| {bias:+.2f} {arrow} | {min(theme.emitted):.0%} |")
     add("")
 
     # CI runs `git diff --check`, which rejects a blank line at end of file.

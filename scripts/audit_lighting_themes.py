@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import colorsys
+from functools import cached_property
 import itertools
 import math
 import pathlib
@@ -85,6 +86,7 @@ class Theme:
 
     # --- colour maths, mirroring PaletteTone ---
 
+    @cached_property
     def hsv(self) -> list[tuple[float, float, float]]:
         out = []
         for hexv in self.colors:
@@ -92,10 +94,20 @@ class Theme:
             out.append(colorsys.rgb_to_hsv(r, g, b))
         return out
 
+    @cached_property
+    def points(self) -> list[tuple[float, float, float]]:
+        # Precompute 3D coordinates in cylindrical HSV space.
+        # Hoisting this calculation prevents re-converting RGB->HSV and
+        # re-evaluating trigonometric functions on every pairwise distance check.
+        out = []
+        for h, s, v in self.hsv:
+            out.append((s * math.cos(h * 2 * math.pi), s * math.sin(h * 2 * math.pi), v))
+        return out
+
     def levels(self) -> list[float]:
         """Values normalised against the palette's brightest entry, floored the
         way LightingTheme.normalizedTones floors them."""
-        values = [v for _, _, v in self.hsv()]
+        values = [v for _, _, v in self.hsv]
         peak = max(values) or 1.0
         return [max(0.2, v / peak) for v in values]
 
@@ -107,7 +119,7 @@ class Theme:
         return sum(luminance(c) for c in self.colors) / len(self.colors)
 
     def mean_saturation(self) -> float:
-        return sum(s for _, s, _ in self.hsv()) / len(self.colors)
+        return sum(s for _, s, _ in self.hsv) / len(self.colors)
 
     def warmth(self) -> float:
         """Positive leans warm (red/amber), negative leans cool (cyan/blue)."""
@@ -160,23 +172,27 @@ def palette_index(distribution: str, position: int, count: int) -> int:
     return min(count - 1, position % count)
 
 
+_SEPARATION_CACHE: dict[tuple[str, str], float] = {}
+
+
 def separation(a: Theme, b: Theme) -> float:
     """Symmetric mean nearest-neighbour distance between two palettes in a
     cylindrical hue/saturation/value space. Higher means easier to tell apart
     when the two are lit in the same room."""
+    # Pairwise separations are symmetric and requested multiple times across
+    # audit() and main(). Memoizing on theme IDs saves recalculating 1,128 combinations.
+    cache_key = (a.id, b.id) if a.id <= b.id else (b.id, a.id)
+    if cache_key in _SEPARATION_CACHE:
+        return _SEPARATION_CACHE[cache_key]
 
-    def points(theme: Theme) -> list[tuple[float, float, float]]:
-        out = []
-        for h, s, v in theme.hsv():
-            out.append((s * math.cos(h * 2 * math.pi), s * math.sin(h * 2 * math.pi), v))
-        return out
-
-    left, right = points(a), points(b)
+    left, right = a.points, b.points
 
     def half(xs, ys):
         return sum(min(math.dist(x, y) for y in ys) for x in xs) / len(xs)
 
-    return (half(left, right) + half(right, left)) / 2
+    result = (half(left, right) + half(right, left)) / 2
+    _SEPARATION_CACHE[cache_key] = result
+    return result
 
 
 def parse() -> list[Theme]:
@@ -225,7 +241,7 @@ def audit(themes: list[Theme]) -> list[str]:
         check(theme.distribution in DISTRIBUTION_SUMMARY, f"{theme.id} has an unknown distribution")
         check(min(theme.levels()) >= 0.2, f"{theme.id} has an entry that emits nothing")
         if theme.distribution == "wash":
-            values = [v for _, _, v in theme.hsv()]
+            values = [v for _, _, v in theme.hsv]
             ratio = values[0] / max(values)
             check(ratio >= 0.85,
                   f"{theme.id} washes the room with a colour at {ratio:.0%} of its own palette peak")

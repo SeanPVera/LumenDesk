@@ -427,28 +427,46 @@ extension LightManager {
     /// A live, reversible preview using the same pure renderer and transport
     /// branches as Apply. Leaving the composer restores the exact opening
     /// power, brightness, colour, segment, matrix, and panel state.
+    @discardableResult
     func startLookPreview(
         _ theme: LightingTheme,
         deviceIDs: Set<String>,
         in scope: LightScope = .all,
         paletteAssignments: [String: Int]? = nil,
         spatialField: SpatialFieldVector = .themeDefault,
-        transitionDuration: TimeInterval = 1.8
-    ) {
-        stopSceneRehearsal(restore: true)
+        transitionDuration: TimeInterval = 1.8,
+        updating previewID: UUID? = nil
+    ) -> UUID? {
+        // A delayed composer edit must never restart a preview after Restore,
+        // Apply, dismissal, or another owner has ended/replaced its session.
+        if let previewID {
+            guard rehearsalSceneID == previewID else { return nil }
+        } else {
+            stopSceneRehearsal(restore: true)
+        }
         // `devices(in:)` preserves the room's explicit fixture order. Filtering
         // the global discovery array here would make a composed gradient land
         // on different fixtures than the room-ordered visual preview.
         let targets = devices(in: scope).filter { deviceIDs.contains($0.id) }
         guard !targets.isEmpty else {
+            stopSceneRehearsal(restore: true)
             publishError("Select at least one fixture to preview this Look.")
-            return
+            return nil
         }
-        cancelIdentifications(deviceIDs: deviceIDs, restore: true)
-        stopEffects(touching: deviceIDs)
-        cancelPendingBrightness(deviceIDs: deviceIDs)
-        rehearsalSnapshot = targets.map(snapshot)
-        rehearsalSceneID = UUID()
+        let targetIDs = Set(targets.map(\.id))
+        cancelIdentifications(deviceIDs: targetIDs, restore: true)
+        let inherited = stopEffects(touching: targetIDs)
+        cancelPendingBrightness(deviceIDs: targetIDs)
+        // A queued solid-colour write must not land after an immediate panel
+        // or matrix write and flatten the new brush back to one colour.
+        commandCoordinator.cancel(deviceIDs: targetIDs)
+        let originals = Dictionary(rehearsalSnapshot.map { ($0.deviceID, $0) },
+                                   uniquingKeysWith: { first, _ in first })
+        // Refresh the composition in place. Only lights leaving the scope
+        // are restored; included lights keep their true opening snapshot.
+        restoreDeviceStates(rehearsalSnapshot.filter { !targetIDs.contains($0.deviceID) })
+        rehearsalSnapshot = targets.map { originals[$0.id] ?? inherited[$0.id] ?? snapshot($0) }
+        if previewID == nil { rehearsalSceneID = UUID() }
 
         let plan = plannedLook(
             theme,
@@ -474,6 +492,7 @@ extension LightManager {
             summary += " — \(adaptation)"
         }
         lastActionSummary = summary
+        return rehearsalSceneID
     }
 
     /// Saves a composed Look directly from its planned fixture states without
@@ -738,7 +757,12 @@ extension LightManager {
 
     func stopSceneRehearsal(restore: Bool = true) {
         guard rehearsalSceneID != nil else { return }
-        if restore { restoreDeviceStates(rehearsalSnapshot) }
+        if restore {
+            let ids = Set(rehearsalSnapshot.map(\.deviceID))
+            cancelPendingBrightness(deviceIDs: ids)
+            commandCoordinator.cancel(deviceIDs: ids)
+            restoreDeviceStates(rehearsalSnapshot)
+        }
         rehearsalSnapshot = []
         rehearsalSceneID = nil
         lastActionSummary = restore ? "Rehearsal ended — prior state restored" : "Rehearsal kept"

@@ -1,7 +1,8 @@
 import SwiftUI
 import Foundation
 
-private enum LookBrush: String, CaseIterable, Identifiable {
+enum LookBrush: String, CaseIterable, Identifiable {
+    case original = "Original"
     case spatialWash = "Spatial wash"
     case gradient = "Gradient"
     case exactFixture = "Exact fixture"
@@ -9,14 +10,34 @@ private enum LookBrush: String, CaseIterable, Identifiable {
 
     var distribution: ThemeDistribution {
         switch self {
+        case .original: return .scattered // unused; applying(to:) returns the source theme
         case .spatialWash: return .wash
         case .gradient: return .gradient
         case .exactFixture: return .alternating
         }
     }
 
+    func applying(to source: LightingTheme) -> LightingTheme {
+        switch self {
+        case .original:
+            return source
+        case .spatialWash, .gradient, .exactFixture:
+            return LightingTheme(
+                id: "\(source.id)-\(id)",
+                name: source.name,
+                summary: source.summary,
+                category: source.category,
+                icon: source.icon,
+                colors: source.colors,
+                brightness: source.brightness,
+                distribution: distribution
+            )
+        }
+    }
+
     var summary: String {
         switch self {
+        case .original: return "Keeps the theme\u{2019}s original spread and brightness."
         case .spatialWash: return "One key colour fills the room; spatial fixtures hold a quiet secondary tone."
         case .gradient: return "The palette travels through fixture order and across supported surfaces."
         case .exactFixture: return "Choose the exact palette colour each selected fixture should hold."
@@ -30,7 +51,7 @@ private enum LookComposerScope: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
-private struct ComposerPalette: Identifiable {
+struct ComposerPalette: Identifiable {
     let id: String
     let name: String
     let theme: LightingTheme
@@ -74,6 +95,7 @@ struct LookComposerView: View {
     @State private var lookName: String = "Ember & Moss"
     @State private var transitionSeconds: Double = 1.8
     @State private var exactAssignments: [String: Int] = [:]
+    @State private var previewID: UUID?
 
     init(room: Room, initialSelection: Set<String>) {
         self.room = room
@@ -109,16 +131,26 @@ struct LookComposerView: View {
         })
     }
     private var authoredTheme: LightingTheme {
-        let source = selectedPalette.theme
+        let brushed = brush.applying(to: selectedPalette.theme)
         return LightingTheme(
-            id: "\(source.id)-\(brush.id)",
-            name: source.name,
-            summary: source.summary,
-            category: source.category,
-            icon: source.icon,
-            colors: source.colors,
+            id: brushed.id,
+            name: brushed.name,
+            summary: brushed.summary,
+            category: brushed.category,
+            icon: brushed.icon,
+            colors: brushed.colors,
             brightness: customBrightness,
-            distribution: brush.distribution
+            distribution: brushed.distribution
+        )
+    }
+
+    private var previewRequest: ComposerPreviewRequest {
+        ComposerPreviewRequest(
+            theme: authoredTheme,
+            targetIDs: targetIDs,
+            paletteAssignments: paletteAssignments,
+            transitionDuration: transitionSeconds,
+            previewID: previewID
         )
     }
 
@@ -146,6 +178,7 @@ struct LookComposerView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
+                        previewID = nil
                         manager.stopSceneRehearsal(restore: true)
                         dismiss()
                     }
@@ -166,6 +199,23 @@ struct LookComposerView: View {
         }
         .onChange(of: scope) { _ in synchronizeExactAssignments() }
         .onChange(of: brush) { _ in synchronizeExactAssignments() }
+        .task(id: previewRequest) {
+            let request = previewRequest
+            guard let id = request.previewID, manager.rehearsalSceneID == id else { return }
+            // Coalesce rapid brush, scope, swatch, and transition edits.
+            do { try await Task.sleep(nanoseconds: 150_000_000) }
+            catch { return }
+            guard !Task.isCancelled else { return }
+            previewID = manager.startLookPreview(
+                request.theme,
+                deviceIDs: request.targetIDs,
+                in: .room(currentRoom.id),
+                paletteAssignments: request.paletteAssignments,
+                spatialField: spatialField,
+                transitionDuration: request.transitionDuration,
+                updating: id
+            )
+        }
     }
 
     private var previewColumn: some View {
@@ -508,18 +558,20 @@ struct LookComposerView: View {
 
             HStack(spacing: 9) {
                 Button("Restore before preview") {
+                    previewID = nil
                     manager.stopSceneRehearsal(restore: true)
                 }
                 .buttonStyle(.bordered)
                 .disabled(manager.rehearsalSceneID == nil)
                 Button("Preview") {
-                    manager.startLookPreview(
+                    previewID = manager.startLookPreview(
                         authoredTheme,
                         deviceIDs: targetIDs,
                         in: .room(currentRoom.id),
                         paletteAssignments: paletteAssignments,
                         spatialField: spatialField,
-                        transitionDuration: transitionSeconds
+                        transitionDuration: transitionSeconds,
+                        updating: previewID == manager.rehearsalSceneID ? previewID : nil
                     )
                 }
                 .buttonStyle(.bordered)
@@ -542,15 +594,17 @@ struct LookComposerView: View {
 
     private func save() {
         if manager.rehearsalSceneID != nil {
-            manager.startLookPreview(
+            previewID = manager.startLookPreview(
                 authoredTheme,
                 deviceIDs: targetIDs,
                 in: .room(currentRoom.id),
                 paletteAssignments: paletteAssignments,
                 spatialField: spatialField,
-                transitionDuration: transitionSeconds
+                transitionDuration: transitionSeconds,
+                updating: previewID == manager.rehearsalSceneID ? previewID : nil
             )
             manager.stopSceneRehearsal(restore: false)
+            previewID = nil
             _ = manager.captureLook(name: lookName, deviceIDs: targetIDs)
         } else {
             _ = manager.saveLookFromPlan(
@@ -585,6 +639,15 @@ struct LookComposerView: View {
         }
         exactAssignments = updated
     }
+}
+
+
+private struct ComposerPreviewRequest: Equatable {
+    let theme: LightingTheme
+    let targetIDs: Set<String>
+    let paletteAssignments: [String: Int]?
+    let transitionDuration: Double
+    let previewID: UUID?
 }
 
 private struct ComposerRoomPreview: View {
@@ -647,9 +710,9 @@ private struct ComposerRoomPreview: View {
                     let anchor = manager.planAnchor(for: light.id, in: room)
                     let plan = plans[light.id]
                     VStack(spacing: 4) {
-                        Circle()
-                            .fill(plan?.tone.emittedColor(scaledBy: plan?.brightness ?? 0) ?? Lumen.graphite.opacity(0.12))
+                        ComposerFixtureSwatch(plan: plan)
                             .frame(width: 34, height: 34)
+                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                             .shadow(color: plan?.tone.displayColor.opacity(0.45) ?? .clear, radius: 14)
                         Text(light.label)
                             .font(LumenType.body(size: 10, weight: .semibold))
@@ -686,5 +749,66 @@ private struct ComposerRoomPreview: View {
                 RadialGradient(colors: colors, center: .center, startRadius: 8, endRadius: 150)
             }
         }
+    }
+}
+
+/// Planned segment, matrix, or panel colours for a fixture, scaled by the
+/// look's overall brightness so the onscreen preview matches live output.
+struct ComposerFixtureSwatch: View {
+    let plan: ThemeFixturePlan?
+
+    var body: some View {
+        Group {
+            if let plan {
+                if let matrix = plan.matrix {
+                    VStack(spacing: 1) {
+                        ForEach(0..<matrix.height, id: \.self) { row in
+                            HStack(spacing: 1) {
+                                ForEach(0..<matrix.width, id: \.self) { column in
+                                    let index = row * matrix.width + column
+                                    let cell = matrix.containsZone(index) ? matrix.colors[index] : nil
+                                    Rectangle().fill(
+                                        cell.map { color in
+                                            Color(
+                                                hue: Double(color.hue) / 65_535,
+                                                saturation: Double(color.saturation) / 65_535,
+                                                brightness: max(0.04, Double(color.brightness) / 65_535 * plan.brightness)
+                                            )
+                                        } ?? .clear
+                                    )
+                                }
+                            }
+                        }
+                    }
+                } else if let segments = plan.segments {
+                    HStack(spacing: 0) {
+                        ForEach(sampledIndices(segments.colors.count), id: \.self) { index in
+                            let segment = segments.colors[index]
+                            let level = segment.isOn ? segment.brightness * plan.brightness : 0
+                            Rectangle().fill(Color(red: segment.red * level, green: segment.green * level,
+                                                   blue: segment.blue * level))
+                        }
+                    }
+                } else if let panels = plan.panels {
+                    HStack(spacing: 1) {
+                        ForEach(sampledIndices(panels.count), id: \.self) { index in
+                            Rectangle().fill(panels[index].emittedColor(scaledBy: plan.brightness))
+                        }
+                    }
+                } else {
+                    let rgb = plan.tone.rgb(atLevel: plan.brightness)
+                    Rectangle().fill(Color(red: rgb.red, green: rgb.green, blue: rgb.blue))
+                }
+            } else {
+                Rectangle().fill(Lumen.graphite.opacity(0.12))
+            }
+        }
+        .accessibilityHidden(true)
+    }
+
+    private func sampledIndices(_ count: Int) -> [Int] {
+        guard count > 1 else { return count == 1 ? [0] : [] }
+        let samples = min(count, 24)
+        return (0..<samples).map { $0 * (count - 1) / (samples - 1) }
     }
 }

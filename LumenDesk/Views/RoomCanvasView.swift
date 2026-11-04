@@ -1403,6 +1403,17 @@ private struct LookShelf: View {
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 9) {
+                    Menu {
+                        LightingThemeCategoryMenuContent { theme in
+                            _ = manager.startLookPreview(
+                                theme, deviceIDs: ids, in: .room(room.id), transitionDuration: 1.2
+                            )
+                        }
+                    } label: {
+                        Label("Color themes", systemImage: "swatchpalette")
+                    }
+                    .buttonStyle(RoomLookButtonStyle())
+                    .help("Preview a theme on the room without saving a Look")
                     ForEach(RoomLookTemplate.everyday) { template in
                         Button {
                             guard let theme = LightingCatalog.theme(withID: template.themeID) else { return }

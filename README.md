@@ -28,7 +28,8 @@ A Look is a saved room composition. The canvas includes immediate Evening,
 Reading, Movie, and Bright templates, saved Looks, and **Save current**.
 The built-in collection includes 48 curated static themes, all rendered through
 the same capability-aware planner. **Color themes** in the room or selection
-controls and the Look shelf exposes the complete collection, grouped by mood.
+controls and the Look shelf previews a theme on the room without applying it as a
+saved Look; the complete collection is grouped by mood.
 
 The Look Composer includes every theme alongside Ember & Moss. **Original**
 keeps a theme's authored spread and brightness; Spatial wash, Gradient, and

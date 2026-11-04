@@ -1010,16 +1010,17 @@ final class RoomCanvasRenderTests: XCTestCase {
                           manager, width: 760, height: 760)
         let room = try XCTUnwrap(manager.rooms.first)
         try await capture("look-composer-680", LookComposerView(
-            room: room, initialSelection: [], initiallyControlsWholeRoom: true
+            room: room, initialSelection: []
         ), manager, width: 680, height: 900)
         try await capture("look-composer-1040", LookComposerView(
-            room: room, initialSelection: [], initiallyControlsWholeRoom: true
+            room: room, initialSelection: []
         ), manager, width: 1040, height: 1000)
         let theme = try XCTUnwrap(LightingCatalog.theme(withID: "aurora"))
         for brush in [LookBrush.spatialWash, .gradient] {
             try await capture("look-preview-\(brush.id)", ComposerRoomPreview(
                 room: room, lights: manager.devices(in: room), targetIDs: Set(room.lightIDs),
-                theme: brush.applying(to: theme), paletteAssignments: nil
+                theme: brush.applying(to: theme), paletteAssignments: nil,
+                spatialField: .themeDefault
             ), manager, width: 680, height: 360)
         }
     }

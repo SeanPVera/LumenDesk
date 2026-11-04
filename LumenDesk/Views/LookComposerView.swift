@@ -650,7 +650,7 @@ private struct ComposerPreviewRequest: Equatable {
     let previewID: UUID?
 }
 
-private struct ComposerRoomPreview: View {
+struct ComposerRoomPreview: View {
     @EnvironmentObject private var manager: LightManager
     let room: Room
     let lights: [LightDevice]

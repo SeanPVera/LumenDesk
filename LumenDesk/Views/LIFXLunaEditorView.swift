@@ -13,11 +13,11 @@ struct LIFXLunaEditorView: View {
     var initialDraft: LIFXMatrixState? = nil
     var onDraftChange: ((LIFXMatrixState?) -> Void)? = nil
 
-    @State private var draft: LIFXMatrixState?
+    @State private var draft: LIFXMatrixState? = nil
     @State private var selection: Set<Int> = []
     @State private var paintColor: Color = .purple
     @State private var gradientEndColor: Color = .cyan
-    @State private var hasEdits = false
+    @State private var hasEdits: Bool = false
 
     private var targetIndices: [Int] {
         guard let draft else { return [] }
@@ -178,12 +178,22 @@ struct LIFXLunaEditorView: View {
             RoundedRectangle(cornerRadius: 4, style: .continuous)
                 .fill(color)
                 .frame(maxWidth: .infinity, minHeight: 52)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 4, style: .continuous)
-                        .stroke(selected ? Color.white : Lumen.hairlineStrong,
-                                lineWidth: selected ? 3 : 0.5)
-                        .allowsHitTesting(false)
-                )
+                .overlay {
+                    if selected {
+                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .stroke(Lumen.graphite, lineWidth: 3)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                    .inset(by: 1.5)
+                                    .stroke(Lumen.floor, lineWidth: 1.5)
+                            )
+                            .allowsHitTesting(false)
+                    } else {
+                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .stroke(Lumen.hairlineStrong, lineWidth: 0.5)
+                            .allowsHitTesting(false)
+                    }
+                }
                 .overlay(alignment: .bottomLeading) {
                     Text("\(number)").font(.caption2.monospacedDigit())
                         .foregroundStyle(Lumen.chalk).padding(.horizontal, 5).padding(.vertical, 2)

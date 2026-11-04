@@ -40,7 +40,7 @@ enum AggregatePowerState: Equatable {
 }
 
 struct ActivityEvent: Identifiable, Codable, Equatable {
-    enum Kind: String, Codable, CaseIterable { case scan, command, schedule, scene, recovery, system, parliament, compliance }
+    enum Kind: String, Codable, CaseIterable { case scan, command, schedule, scene, recovery, system }
     let id: UUID
     let date: Date
     let kind: Kind
@@ -109,41 +109,6 @@ struct FavoriteReference: Codable, Hashable, Identifiable {
     let kind: Kind
     let rawID: String
     var id: String { "\(kind.rawValue):\(rawID)" }
-}
-
-struct ParliamentMember: Identifiable, Codable, Equatable {
-    enum Party: String, Codable, CaseIterable {
-        case warmCoalition = "Warm Coalition"
-        case chromaticLeft = "Chromatic Left"
-        case efficiencyBloc = "Efficiency Bloc"
-        case nocturnalCaucus = "Nocturnal Caucus"
-    }
-    let id: String
-    let parliamentaryName: String
-    let party: Party
-    var approval: Int
-    var lastVote: String
-}
-
-struct ParliamentSession: Identifiable, Codable, Equatable {
-    let id: UUID
-    let date: Date
-    let motion: String
-    let ayes: Int
-    let noes: Int
-    let abstentions: Int
-    let verdict: String
-}
-
-struct SceneCertification: Identifiable, Codable, Equatable {
-    enum Seal: String, Codable { case bronze, silver, gold }
-    let id: UUID
-    let sceneID: UUID
-    let issuedAt: Date
-    let score: Int
-    let seal: Seal
-    let findings: [String]
-    let treatyCode: String
 }
 
 struct RecentColor: Identifiable, Codable, Equatable {
@@ -245,7 +210,7 @@ enum AppPreferenceKey {
     static let showMenuBarUrgentOnly = "LumenDesk.menuBarUrgentOnly.v1"
     static let audioPrivacyAcknowledged = "LumenDesk.audioPrivacyAcknowledged.v1"
     /// Ephemeral cross-scene handoff from the menu-bar controller to the
-    /// independent room-control session. The workspace clears it after consuming
+    /// independent Room Canvas session. The canvas clears it after consuming
     /// the requested room so choosing the same room again still produces a
     /// fresh navigation event.
     static let roomCanvasOpenRequest = "LumenDesk.roomCanvasOpenRequest.v1"

@@ -198,6 +198,21 @@ final class DomainTests: XCTestCase {
         XCTAssertEqual(h7028.defaultSegmentCount, 15)
         XCTAssertEqual(h7028.stringLightStyle, .bulb)
         XCTAssertFalse(h7028.hasFixedSegmentCount)
+
+        let h608b = try XCTUnwrap(GoveeSegmentProfile.detect(sku: "H608B"))
+        XCTAssertEqual(h608b.layout, .stringLights)
+        XCTAssertEqual(h608b.defaultSegmentCount, 15)
+        XCTAssertTrue(h608b.supportsGradient)
+        XCTAssertTrue(h608b.appliesViaStream)
+        XCTAssertFalse(h608b.hasFixedSegmentCount)
+        XCTAssertEqual(h608b.stringLightStyle, .bulb)
+
+        let h608a = try XCTUnwrap(GoveeSegmentProfile.detect(sku: "H608A"))
+        XCTAssertEqual(h608a.defaultSegmentCount, 25)
+        let h608c = try XCTUnwrap(GoveeSegmentProfile.detect(sku: "H608C"))
+        XCTAssertEqual(h608c.defaultSegmentCount, 10)
+        let h608d = try XCTUnwrap(GoveeSegmentProfile.detect(sku: "H608D"))
+        XCTAssertEqual(h608d.defaultSegmentCount, 50)
     }
 
     func testCurtainProfileIsNotMisclassifiedAsAString() throws {
@@ -307,6 +322,19 @@ final class DomainTests: XCTestCase {
         XCTAssertEqual(stored.poweredCount, 2)
         XCTAssertEqual(stored.poweredSegments, [0, 1])
         XCTAssertEqual(manager.segmentState(for: device).poweredSegments, [0, 1])
+
+        // Picking a whole-fixture color while Uplighter zones [0, 2] are active
+        // paints those active zones without dropping stream-hold zone selection.
+        var upperAndLower = stored
+        upperAndLower.setPoweredSegments([0, 2])
+        manager.applySegments(device, state: upperAndLower)
+        manager.sendColor(device, color: Color(red: 0, green: 1, blue: 0))
+
+        let repainted = try XCTUnwrap(manager.activeSegmentState(for: device.id))
+        XCTAssertEqual(repainted.poweredSegments, [0, 2])
+        XCTAssertEqual(repainted.colors[0].green, 1, accuracy: 0.01)
+        XCTAssertEqual(repainted.colors[2].green, 1, accuracy: 0.01)
+        XCTAssertFalse(repainted.colors[1].isOn)
     }
 
     @MainActor
@@ -1098,6 +1126,54 @@ final class DomainTests: XCTestCase {
         XCTAssertEqual(light.kelvin, 1200)
         manager.setKelvin(light, kelvin: Int.max)
         XCTAssertEqual(light.kelvin, 9000)
+    }
+
+    func testMatrixAndSegmentColorInvariantsClampOutOfBoundsValues() {
+        let matrix = LIFXMatrixState(
+            productID: 219,
+            width: 500,
+            height: 0,
+            colors: [LIFXMatrixColor(hue: 0, saturation: 0, brightness: 65_535, kelvin: 3_500)]
+        )
+        XCTAssertEqual(matrix.width, 8)
+        XCTAssertEqual(matrix.height, 1)
+        XCTAssertEqual(matrix.colors.count, 64)
+
+        let segmentColor = GoveeSegmentColor(red: .infinity, green: -1, blue: 4, brightness: .nan)
+        XCTAssertEqual(segmentColor.red, 0)
+        XCTAssertEqual(segmentColor.green, 0)
+        XCTAssertEqual(segmentColor.blue, 1)
+        XCTAssertEqual(segmentColor.brightness, 1, "non-finite brightness falls back to full")
+    }
+
+    func testRecommendedPresetsForUplighterAndStringLights() throws {
+        let uplighterProfile = try XCTUnwrap(GoveeSegmentProfile.detect(sku: "H60B0"))
+        let uplighterPresets = GoveeSegmentPreset.recommended(for: uplighterProfile)
+        XCTAssertEqual(
+            Array(uplighterPresets.prefix(GoveeSegmentPreset.uplighterBuiltIns.count).map(\.id)),
+            GoveeSegmentPreset.uplighterBuiltIns.map(\.id)
+        )
+        for preset in GoveeSegmentPreset.uplighterBuiltIns {
+            let zones = preset.poweredZones ?? []
+            XCTAssertFalse(zones.isEmpty)
+            XCTAssertLessThanOrEqual(zones.count, uplighterProfile.simultaneousZoneLimit ?? 2)
+            let colors = preset.colors(for: uplighterProfile.defaultSegmentCount)
+            XCTAssertEqual(colors.count, 3)
+            let litIndices = colors.enumerated().filter { $0.element.isOn }.map(\.offset)
+            XCTAssertEqual(Set(litIndices), Set(zones))
+        }
+
+        let stringProfile = try XCTUnwrap(GoveeSegmentProfile.detect(sku: "H608B"))
+        let stringPresets = GoveeSegmentPreset.recommended(for: stringProfile)
+        XCTAssertEqual(
+            Array(stringPresets.prefix(GoveeSegmentPreset.stringLightBuiltIns.count).map(\.id)),
+            GoveeSegmentPreset.stringLightBuiltIns.map(\.id)
+        )
+        for preset in GoveeSegmentPreset.stringLightBuiltIns {
+            let colors = preset.colors(for: stringProfile.defaultSegmentCount)
+            XCTAssertEqual(colors.count, 15)
+            XCTAssertTrue(colors.contains { $0.brightness > 0.1 })
+        }
     }
 
     @MainActor

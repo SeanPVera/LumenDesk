@@ -18,22 +18,22 @@ struct GoveeSegmentEditorView: View {
     var initialDraft: GoveeSegmentState? = nil
     var onDraftChange: ((GoveeSegmentState?) -> Void)? = nil
 
-    @State private var draft = GoveeSegmentState(colors: [])
-    @State private var openingState: GoveeSegmentState?
+    @State private var draft: GoveeSegmentState = GoveeSegmentState(colors: [])
+    @State private var openingState: GoveeSegmentState? = nil
     @State private var selection: Set<Int> = []
     @State private var paintColor: Color = .white
     @State private var blendEndColor: Color = Color(hue: 0.62, saturation: 1, brightness: 1)
-    @State private var livePreview = true
-    @State private var savingPreset = false
-    @State private var presetName = ""
-    @State private var loaded = false
-    @State private var dragTargetSelected: Bool?
+    @State private var livePreview: Bool = true
+    @State private var savingPreset: Bool = false
+    @State private var presetName: String = ""
+    @State private var loaded: Bool = false
+    @State private var dragTargetSelected: Bool? = nil
     /// Zones that are on, newest first. Fixtures that can only run some of
     /// their zones at once give up the one that has been lit longest, so the
     /// studio remembers the order the user switched them on.
     @State private var zoneActivationOrder: [Int] = []
     /// Explains the most recent automatic swap, until the next power change.
-    @State private var zoneLimitNote: String?
+    @State private var zoneLimitNote: String? = nil
 
     private var profile: GoveeSegmentProfile { manager.segmentStudioProfile(for: device) ?? .generic }
     private var layout: GoveeSegmentLayout { profile.layout }
@@ -83,8 +83,12 @@ struct GoveeSegmentEditorView: View {
             // A show can take ownership while this editor is mounted. Its
             // stream uses the same transport; leaving must not shut it down.
             if manager.animatingEffect(for: device.id) == nil {
-                manager.endSegmentPreview(device)
-                manager.storeSegmentState(draft, for: device)
+                if onDraftChange == nil, let openingState, draft != openingState {
+                    manager.applySegments(device, state: draft)
+                } else {
+                    manager.endSegmentPreview(device)
+                    manager.storeSegmentState(draft, for: device)
+                }
             }
             onDraftChange?(draft == openingState ? nil : draft)
         }
@@ -224,8 +228,20 @@ struct GoveeSegmentEditorView: View {
                     segmentCell(index: index, width: 44)
                 }
             }
+            .overlay {
+                GeometryReader { proxy in
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .simultaneousGesture(
+                            dragSelectGesture(
+                                width: max(1, proxy.size.width),
+                                count: max(1, draft.segmentCount)
+                            )
+                        )
+                        .allowsHitTesting(false)
+                }
+            }
             .accessibilityLabel("Segment order from controller, \(draft.segmentCount) segments")
-
         }
     }
 
@@ -297,47 +313,97 @@ struct GoveeSegmentEditorView: View {
         .accessibilityLabel("Uplighter lighting zones")
     }
 
-    /// One zone card: tapping it selects the zone for painting, the switch on
-    /// the trailing edge decides whether the lamp lights it at all.
+    /// One zone card: tapping it selects the zone for painting, the inline
+    /// color picker and brightness slider edit that zone directly, and the
+    /// switch on the trailing edge decides whether the lamp lights it at all.
     private func uplighterZoneRow(_ index: Int) -> some View {
         let isSelected = selection.contains(index)
         let isLit = zoneIsOn(index)
-        return HStack(spacing: 10) {
-            Button {
-                toggleSelection(index)
-            } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: uplighterZoneIcon(index))
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(isLit ? heldColor(at: index) : Color.secondary)
-                        .frame(width: 32, height: 32)
-                        .background(heldColor(at: index).opacity(isLit ? 0.16 : 0.05), in: Circle())
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(profile.zoneNames[index])
-                            .font(.callout.weight(.semibold))
-                            .foregroundStyle(isLit ? Color.primary : Color.secondary)
-                        Text(uplighterZoneDetail(index))
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+        let zoneBrightness = draft.colors.indices.contains(index) ? draft.colors[index].brightness : 1.0
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Button {
+                    toggleSelection(index)
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: uplighterZoneIcon(index))
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(isLit ? heldColor(at: index) : Color.secondary)
+                            .frame(width: 32, height: 32)
+                            .background(heldColor(at: index).opacity(isLit ? 0.16 : 0.05), in: Circle())
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(profile.zoneNames[index])
+                                .font(.callout.weight(.semibold))
+                                .foregroundStyle(isLit ? Color.primary : Color.secondary)
+                            Text(uplighterZoneDetail(index))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        uplighterZoneSwatch(index)
+                        Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                            .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                            .accessibilityHidden(true)
                     }
-                    Spacer()
-                    uplighterZoneSwatch(index)
-                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                        .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
-                        .accessibilityHidden(true)
+                    .contentShape(Rectangle())
                 }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("\(profile.zoneNames[index]), \(isSelected ? "selected" : "not selected"), \(isLit ? "on" : "off")")
-            .accessibilityAddTraits(isSelected ? .isSelected : [])
-            Toggle("", isOn: zonePowerBinding(index))
-                .toggleStyle(.switch)
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(profile.zoneNames[index]), \(isSelected ? "selected" : "not selected"), \(isLit ? "on" : "off")")
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
+
+                ColorPicker("", selection: Binding(
+                    get: { heldColor(at: index) },
+                    set: { newColor in
+                        if !selection.contains(index) { selection.insert(index) }
+                        paintColor = newColor
+                        updateDraft { state in
+                            guard state.colors.indices.contains(index) else { return }
+                            let existing = state.colors[index]
+                            state.colors[index] = GoveeSegmentColor(
+                                color: newColor,
+                                brightness: existing.brightness,
+                                isOn: existing.isOn
+                            )
+                        }
+                    }
+                ), supportsOpacity: false)
                 .labelsHidden()
-                .tint(Lumen.pink)
-                .accessibilityLabel("\(profile.zoneNames[index]) power")
+                .accessibilityLabel("\(profile.zoneNames[index]) color")
+
+                Toggle("", isOn: zonePowerBinding(index))
+                    .toggleStyle(.switch)
+                    .labelsHidden()
+                    .tint(Lumen.pink)
+                    .accessibilityLabel("\(profile.zoneNames[index]) power")
+            }
+
+            HStack(spacing: 8) {
+                Text("Intensity")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Slider(
+                    value: Binding(
+                        get: { zoneBrightness },
+                        set: { newValue in
+                            if !selection.contains(index) { selection.insert(index) }
+                            updateDraft { state in
+                                guard state.colors.indices.contains(index) else { return }
+                                state.colors[index].brightness = newValue
+                            }
+                        }
+                    ),
+                    in: 0.05...1.0
+                )
+                .controlSize(.small)
+                .accessibilityLabel("\(profile.zoneNames[index]) brightness")
+                Text("\(Int((zoneBrightness * 100).rounded()))%")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .frame(width: 36, alignment: .trailing)
+            }
         }
         .padding(.horizontal, 12)
+        .padding(.vertical, 10)
         .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
         .background(heldColor(at: index).opacity(isLit ? 0.08 : 0.02), in: RoundedRectangle(cornerRadius: 6))
         .overlay {
@@ -389,6 +455,12 @@ struct GoveeSegmentEditorView: View {
                     }
                     Spacer(minLength: 0)
                 }
+                HStack(spacing: 6) {
+                    ForEach(0..<min(profile.zoneNames.count, draft.segmentCount), id: \.self) { zone in
+                        zoneCombinationChip([zone], label: "\(profile.zoneShortName(zone)) only")
+                    }
+                    Spacer(minLength: 0)
+                }
             }
             if let zoneLimitNote {
                 Label(zoneLimitNote, systemImage: "arrow.triangle.swap")
@@ -424,13 +496,14 @@ struct GoveeSegmentEditorView: View {
         return names.dropLast().joined(separator: ", ") + " and " + last
     }
 
-    private func zoneCombinationChip(_ zones: [Int]) -> some View {
+    private func zoneCombinationChip(_ zones: [Int], label: String? = nil) -> some View {
         let isCurrent = draft.poweredSegments == zones
         let names = zoneNameList(zones)
+        let title = label ?? zones.map { profile.zoneShortName($0) }.joined(separator: " + ")
         return Button {
             applyZoneCombination(zones)
         } label: {
-            Text(zones.map { profile.zoneShortName($0) }.joined(separator: " + "))
+            Text(title)
                 .font(.caption.weight(isCurrent ? .semibold : .regular))
                 .frame(minHeight: 44)
                 .padding(.horizontal, 9)
@@ -466,7 +539,7 @@ struct GoveeSegmentEditorView: View {
     @ViewBuilder
     private func segmentCell(index: Int, width: CGFloat) -> some View {
         let isSelected = selection.contains(index)
-        return Button { toggleSelection(index) } label: {
+        Button { toggleSelection(index) } label: {
             VStack(spacing: 3) {
                 Rectangle().fill(cellFill(index)).frame(height: 24)
                 HStack(spacing: 2) {
@@ -702,7 +775,7 @@ struct GoveeSegmentEditorView: View {
                     ForEach(manager.goveeSegmentPresets) { preset in
                         presetChip(preset, custom: true)
                     }
-                    ForEach(GoveeSegmentPreset.builtIns) { preset in
+                    ForEach(GoveeSegmentPreset.recommended(for: profile)) { preset in
                         presetChip(preset, custom: false)
                     }
                 }
@@ -916,6 +989,12 @@ struct GoveeSegmentEditorView: View {
             ? nil
             : "\(zoneNameList(displaced)) switched off — this lamp lights \(zoneLimit) \(unitName)s at a time."
         updateDraft { $0 = limited }
+        if on {
+            selection.subtract(displaced)
+            selection.insert(index)
+        } else {
+            selection.remove(index)
+        }
     }
 
     /// Lights exactly one of the fixture's allowed zone combinations.
@@ -923,6 +1002,7 @@ struct GoveeSegmentEditorView: View {
         zoneActivationOrder = zones.reversed()
         zoneLimitNote = nil
         updateDraft { $0.setPoweredSegments(zones) }
+        selection = Set(zones.filter { draft.colors.indices.contains($0) })
     }
 
     /// Central mutation point: every edit optionally persists the draft and
@@ -975,12 +1055,16 @@ struct GoveeSegmentEditorView: View {
     }
 
     /// Presets repaint the fixture without disturbing which zones it is
-    /// running — that choice belongs to the hardware, not to the paint job.
+    /// running, unless the preset explicitly targets an Uplighter zone combination.
     private func applyPreset(_ preset: GoveeSegmentPreset) {
         updateDraft { state in
-            let powered = state.poweredSegments
+            let powered = (limitsZones ? preset.poweredZones : nil) ?? state.poweredSegments
             state.colors = preset.colors(for: state.segmentCount)
             state.setPoweredSegments(powered)
+        }
+        if limitsZones, let presetZones = preset.poweredZones {
+            zoneActivationOrder = presetZones.reversed()
+            zoneLimitNote = nil
         }
     }
 

@@ -62,8 +62,8 @@ targets:
         # override them on the xcodebuild command line without editing
         # tracked files. Keep them here or regeneration drops them and
         # the bundle ships an empty version string.
-        MARKETING_VERSION: "1.1.0"
-        CURRENT_PROJECT_VERSION: "1"
+        MARKETING_VERSION: "2.1"
+        CURRENT_PROJECT_VERSION: "291"
         # The sandbox entitlements only exist on macOS; iOS device builds are
         # signed without an entitlements file (Local Network needs none).
         CODE_SIGN_ENTITLEMENTS[sdk=macosx*]: LumenDesk/LumenDesk.entitlements

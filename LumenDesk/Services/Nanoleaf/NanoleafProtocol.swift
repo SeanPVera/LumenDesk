@@ -10,12 +10,48 @@ struct NanoleafEndpoint: Codable, Equatable {
         // path, query or fragment. The port is a separate, validated field.
         guard !host.isEmpty, (1...65535).contains(port),
               host.rangeOfCharacter(from: CharacterSet(charactersIn: "/?#@\\ \t\n\r")) == nil,
-              !host.contains(":") || host.filter({ $0 == ":" }).count > 1 else {
+              !host.contains(":") || host.filter({ $0 == ":" }).count > 1,
+              Self.isPermittedLocalOrLANHost(host) else {
             throw NanoleafError.invalidAddress
         }
         self.host = host
         self.port = port
         _ = try url(path: "/api/v1/new")
+    }
+
+    static func isPermittedLocalOrLANHost(_ rawHost: String) -> Bool {
+        let lower = rawHost.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        guard !lower.isEmpty, lower != "localhost", !lower.hasSuffix(".localhost"),
+              lower != "::1", lower != "0.0.0.0", lower != "::" else {
+            return false
+        }
+        if let ipv4 = LocalSubnet.ipv4Address(from: lower) {
+            let a = (ipv4 >> 24) & 0xFF
+            let b = (ipv4 >> 16) & 0xFF
+            let c = (ipv4 >> 8) & 0xFF
+            // Reject loopback (127.0.0.0/8) and link-local cloud metadata (169.254.0.0/16)
+            if a == 127 || (a == 169 && b == 254) { return false }
+            // Permit RFC1918 private ranges and RFC5737 TEST-NET documentation blocks
+            if a == 10 { return true }
+            if a == 172 && (16...31).contains(b) { return true }
+            if a == 192 && b == 168 { return true }
+            if a == 192 && b == 0 && c == 2 { return true }
+            if a == 198 && b == 51 && c == 100 { return true }
+            if a == 203 && b == 0 && c == 113 { return true }
+            return false
+        }
+        if lower.contains(":") {
+            // Permit IPv6 ULA (fc00::/7 -> fc.. or fd..) and link-local (fe80::/10)
+            return lower.hasPrefix("fc") || lower.hasPrefix("fd") || lower.hasPrefix("fe80:")
+        }
+        let trimmedDots = lower.hasSuffix(".") ? String(lower.dropLast()) : lower
+        if !trimmedDots.contains(".") {
+            return true
+        }
+        for suffix in [".local", ".lan", ".home", ".internal", ".localdomain"] {
+            if trimmedDots.hasSuffix(suffix) { return true }
+        }
+        return false
     }
 
     func url(path: String) throws -> URL {

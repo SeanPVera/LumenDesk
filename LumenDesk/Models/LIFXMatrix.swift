@@ -37,11 +37,32 @@ struct LIFXMatrixColor: Codable, Equatable {
 
     init(color: Color, brightness: Double, kelvin: Int) {
         let hsb = color.hsbComponents
+        let safeH = hsb.h.isFinite ? min(1, max(0, hsb.h)) : 0
+        let safeS = hsb.s.isFinite ? min(1, max(0, hsb.s)) : 0
+        let safeB = brightness.isFinite ? min(1, max(0, brightness)) : 0
         self.init(
-            hue: UInt16(max(0, min(65_535, Int((hsb.h * 65_535).rounded())))),
-            saturation: UInt16(max(0, min(65_535, Int((hsb.s * 65_535).rounded())))),
-            brightness: UInt16(max(0, min(65_535, Int((brightness * 65_535).rounded())))),
+            hue: UInt16(max(0, min(65_535, Int((safeH * 65_535).rounded())))),
+            saturation: UInt16(max(0, min(65_535, Int((safeS * 65_535).rounded())))),
+            brightness: UInt16(max(0, min(65_535, Int((safeB * 65_535).rounded())))),
             kelvin: UInt16(max(1_500, min(9_000, kelvin)))
+        )
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case hue, saturation, brightness, kelvin
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let hue = try container.decode(UInt16.self, forKey: .hue)
+        let saturation = try container.decode(UInt16.self, forKey: .saturation)
+        let brightness = try container.decode(UInt16.self, forKey: .brightness)
+        let rawKelvin = try container.decode(UInt16.self, forKey: .kelvin)
+        self.init(
+            hue: hue,
+            saturation: saturation,
+            brightness: brightness,
+            kelvin: min(9_000, max(1_500, rawKelvin))
         )
     }
 
@@ -77,7 +98,8 @@ struct LIFXMatrixColor: Codable, Equatable {
 
     func settingBrightness(_ value: Double) -> LIFXMatrixColor {
         var copy = self
-        copy.brightness = UInt16(max(0, min(65_535, Int((value * 65_535).rounded()))))
+        let safe = value.isFinite ? min(1, max(0, value)) : 0
+        copy.brightness = UInt16(max(0, min(65_535, Int((safe * 65_535).rounded()))))
         return copy
     }
 }
@@ -99,6 +121,20 @@ struct LIFXMatrixState: Codable, Equatable {
         let off = LIFXMatrixColor(hue: 0, saturation: 0, brightness: 0, kelvin: 3_500)
         self.colors = Array((colors + Array(repeating: off, count: 64)).prefix(64))
         self.isActive = isActive
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case productID, width, height, colors, isActive
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let productID = try container.decode(UInt32.self, forKey: .productID)
+        let width = try container.decode(Int.self, forKey: .width)
+        let height = try container.decode(Int.self, forKey: .height)
+        let colors = try container.decode([LIFXMatrixColor].self, forKey: .colors)
+        let isActive = (try? container.decode(Bool.self, forKey: .isActive)) ?? true
+        self.init(productID: productID, width: width, height: height, colors: colors, isActive: isActive)
     }
 
     /// Luna reports a 5×6 matrix but has 26 physical zones; the four corner

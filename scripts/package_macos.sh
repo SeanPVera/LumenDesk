@@ -76,7 +76,12 @@ log() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 warn() { printf '\033[33mwarning: %s\033[0m\n' "$*" >&2; }
 die() { printf '\033[31merror: %s\033[0m\n' "$*" >&2; exit 1; }
 
-command -v xcodebuild >/dev/null 2>&1 || die "xcodebuild not found. This script needs Xcode on macOS."
+HAS_XCODEBUILD=0
+if xcodebuild -version >/dev/null 2>&1; then
+    HAS_XCODEBUILD=1
+elif ! command -v swiftc >/dev/null 2>&1; then
+    die "Neither Xcode nor CommandLineTools swiftc found."
+fi
 
 # ---------------------------------------------------------------------------
 # Version resolution
@@ -86,10 +91,12 @@ if [[ -z "$VERSION" ]]; then
     TAG="$(git describe --tags --exact-match 2>/dev/null || true)"
     if [[ -n "$TAG" ]]; then
         VERSION="${TAG#v}"
-    else
+    elif [[ "$HAS_XCODEBUILD" == "1" ]]; then
         VERSION="$(xcodebuild -project "$PROJECT" -scheme "$SCHEME" \
             -showBuildSettings -configuration Release 2>/dev/null \
             | awk '/ MARKETING_VERSION = /{print $3; exit}')"
+    else
+        VERSION="$(awk '/MARKETING_VERSION = /{gsub(/;/, "", $3); print $3; exit}' "$PROJECT/project.pbxproj")"
     fi
 fi
 [[ -n "$VERSION" ]] || die "Could not resolve a version. Pass --version."
@@ -157,7 +164,7 @@ case "$MODE" in
 esac
 
 # ---------------------------------------------------------------------------
-# Archive
+# Archive / Build
 # ---------------------------------------------------------------------------
 
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/lumendesk-package.XXXXXX")"
@@ -165,69 +172,65 @@ trap 'rm -rf "$WORK_DIR"' EXIT
 
 ARCHIVE_PATH="$WORK_DIR/$APP_NAME.xcarchive"
 EXPORT_DIR="$WORK_DIR/export"
-
-ARCHIVE_SETTINGS=(
-    "MARKETING_VERSION=$VERSION"
-    "CURRENT_PROJECT_VERSION=$BUILD_NUMBER"
-)
-
-case "$MODE" in
-    unsigned)
-        # arm64 refuses to execute a binary with no signature at all, so ad-hoc
-        # sign rather than passing CODE_SIGNING_ALLOWED=NO.
-        ARCHIVE_SETTINGS+=(
-            "CODE_SIGN_STYLE=Manual"
-            "CODE_SIGN_IDENTITY=-"
-            "CODE_SIGNING_REQUIRED=NO"
-            "DEVELOPMENT_TEAM="
-            "PROVISIONING_PROFILE_SPECIFIER="
-        )
-        ;;
-    self-signed)
-        # No secure timestamp: a self-signed leaf has nothing to anchor to and
-        # the request would only add a network round trip that can fail.
-        ARCHIVE_SETTINGS+=(
-            "CODE_SIGN_STYLE=Manual"
-            "CODE_SIGN_IDENTITY=$SIGNING_IDENTITY"
-            "DEVELOPMENT_TEAM="
-            "PROVISIONING_PROFILE_SPECIFIER="
-        )
-        ;;
-    signed)
-        ARCHIVE_SETTINGS+=(
-            "CODE_SIGN_STYLE=Manual"
-            "CODE_SIGN_IDENTITY=$SIGNING_IDENTITY"
-            "DEVELOPMENT_TEAM=$TEAM_ID"
-            "PROVISIONING_PROFILE_SPECIFIER="
-            "OTHER_CODE_SIGN_FLAGS=--timestamp"
-        )
-        ;;
-esac
-
-log "Archiving"
-xcodebuild archive \
-    -project "$PROJECT" \
-    -scheme "$SCHEME" \
-    -configuration Release \
-    -destination "generic/platform=macOS" \
-    -archivePath "$ARCHIVE_PATH" \
-    "${ARCHIVE_SETTINGS[@]}"
-
-# ---------------------------------------------------------------------------
-# Export
-# ---------------------------------------------------------------------------
-
 mkdir -p "$EXPORT_DIR"
 
-if [[ "$MODE" != "signed" && "$MODE" != "notarized" ]]; then
-    # exportArchive only knows how to produce Developer ID output, so for the
-    # ad-hoc and self-signed cases lift the app straight out of the archive.
-    # It is already signed by the archive step either way.
-    log "Extracting app from archive"
-    cp -R "$ARCHIVE_PATH/Products/Applications/$APP_NAME.app" "$EXPORT_DIR/"
-else
-    log "Exporting signed app"
-    cat > "$WORK_DIR/ExportOptions.plist" <<PLIST
+if [[ "$HAS_XCODEBUILD" == "1" ]]; then
+    ARCHIVE_SETTINGS=(
+        "MARKETING_VERSION=$VERSION"
+        "CURRENT_PROJECT_VERSION=$BUILD_NUMBER"
+    )
+
+    case "$MODE" in
+        unsigned)
+            # arm64 refuses to execute a binary with no signature at all, so ad-hoc
+            # sign rather than passing CODE_SIGNING_ALLOWED=NO.
+            ARCHIVE_SETTINGS+=(
+                "CODE_SIGN_STYLE=Manual"
+                "CODE_SIGN_IDENTITY=-"
+                "CODE_SIGNING_REQUIRED=NO"
+                "DEVELOPMENT_TEAM="
+                "PROVISIONING_PROFILE_SPECIFIER="
+            )
+            ;;
+        self-signed)
+            # No secure timestamp: a self-signed leaf has nothing to anchor to and
+            # the request would only add a network round trip that can fail.
+            ARCHIVE_SETTINGS+=(
+                "CODE_SIGN_STYLE=Manual"
+                "CODE_SIGN_IDENTITY=$SIGNING_IDENTITY"
+                "DEVELOPMENT_TEAM="
+                "PROVISIONING_PROFILE_SPECIFIER="
+            )
+            ;;
+        signed)
+            ARCHIVE_SETTINGS+=(
+                "CODE_SIGN_STYLE=Manual"
+                "CODE_SIGN_IDENTITY=$SIGNING_IDENTITY"
+                "DEVELOPMENT_TEAM=$TEAM_ID"
+                "PROVISIONING_PROFILE_SPECIFIER="
+                "OTHER_CODE_SIGN_FLAGS=--timestamp"
+            )
+            ;;
+    esac
+
+    log "Archiving"
+    xcodebuild archive \
+        -project "$PROJECT" \
+        -scheme "$SCHEME" \
+        -configuration Release \
+        -destination "generic/platform=macOS" \
+        -archivePath "$ARCHIVE_PATH" \
+        "${ARCHIVE_SETTINGS[@]}"
+
+    if [[ "$MODE" != "signed" && "$MODE" != "notarized" ]]; then
+        # exportArchive only knows how to produce Developer ID output, so for the
+        # ad-hoc and self-signed cases lift the app straight out of the archive.
+        # It is already signed by the archive step either way.
+        log "Extracting app from archive"
+        cp -R "$ARCHIVE_PATH/Products/Applications/$APP_NAME.app" "$EXPORT_DIR/"
+    else
+        log "Exporting signed app"
+        cat > "$WORK_DIR/ExportOptions.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -248,10 +251,69 @@ else
 </plist>
 PLIST
 
-    xcodebuild -exportArchive \
-        -archivePath "$ARCHIVE_PATH" \
-        -exportPath "$EXPORT_DIR" \
-        -exportOptionsPlist "$WORK_DIR/ExportOptions.plist"
+        xcodebuild -exportArchive \
+            -archivePath "$ARCHIVE_PATH" \
+            -exportPath "$EXPORT_DIR" \
+            -exportOptionsPlist "$WORK_DIR/ExportOptions.plist"
+    fi
+else
+    log "Building release app bundle via CommandLineTools swiftc"
+    APP_BUNDLE="$EXPORT_DIR/$APP_NAME.app"
+    mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources"
+
+    SDK_ARGS=()
+    if [[ -d "/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk" ]]; then
+        SDK_ARGS=(-sdk "/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk")
+    fi
+
+    SWIFT_FILES=()
+    while IFS= read -r file; do
+        SWIFT_FILES+=("$file")
+    done < <(find LumenDesk -name "*.swift" | sort)
+
+    swiftc ${SDK_ARGS[@]+"${SDK_ARGS[@]}"} -O -target arm64-apple-macos13.0 \
+        -lsqlite3 \
+        "${SWIFT_FILES[@]}" \
+        -o "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
+
+    sed \
+        -e "s/\$(EXECUTABLE_NAME)/$APP_NAME/g" \
+        -e "s/\$(PRODUCT_BUNDLE_IDENTIFIER)/$BUNDLE_ID/g" \
+        -e "s/\$(PRODUCT_NAME)/$APP_NAME/g" \
+        -e "s/\$(MARKETING_VERSION)/$VERSION/g" \
+        -e "s/\$(CURRENT_PROJECT_VERSION)/$BUILD_NUMBER/g" \
+        -e "s/\$(MACOSX_DEPLOYMENT_TARGET)/13.0/g" \
+        LumenDesk/Info.plist > "$APP_BUNDLE/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Add :CFBundleIconFile string AppIcon" "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null || true
+
+    cp -R LumenDesk/Resources/Fonts "$APP_BUNDLE/Contents/Resources/Fonts"
+
+    ICONSET_DIR="$WORK_DIR/AppIcon.iconset"
+    mkdir -p "$ICONSET_DIR"
+    SRC_ICON_DIR="LumenDesk/Assets.xcassets/AppIcon.appiconset"
+    cp "$SRC_ICON_DIR/AppIcon-macOS-16.png"   "$ICONSET_DIR/icon_16x16.png"
+    cp "$SRC_ICON_DIR/AppIcon-macOS-32.png"   "$ICONSET_DIR/icon_16x16@2x.png"
+    cp "$SRC_ICON_DIR/AppIcon-macOS-32.png"   "$ICONSET_DIR/icon_32x32.png"
+    cp "$SRC_ICON_DIR/AppIcon-macOS-64.png"   "$ICONSET_DIR/icon_32x32@2x.png"
+    cp "$SRC_ICON_DIR/AppIcon-macOS-128.png"  "$ICONSET_DIR/icon_128x128.png"
+    cp "$SRC_ICON_DIR/AppIcon-macOS-256.png"  "$ICONSET_DIR/icon_128x128@2x.png"
+    cp "$SRC_ICON_DIR/AppIcon-macOS-256.png"  "$ICONSET_DIR/icon_256x256.png"
+    cp "$SRC_ICON_DIR/AppIcon-macOS-512.png"  "$ICONSET_DIR/icon_256x256@2x.png"
+    cp "$SRC_ICON_DIR/AppIcon-macOS-512.png"  "$ICONSET_DIR/icon_512x512.png"
+    cp "$SRC_ICON_DIR/AppIcon-macOS-1024.png" "$ICONSET_DIR/icon_512x512@2x.png"
+    iconutil -c icns "$ICONSET_DIR" -o "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
+
+    CODESIGN_ID="-"
+    CODESIGN_EXTRA=()
+    if [[ "$MODE" == "self-signed" ]]; then
+        CODESIGN_ID="$SIGNING_IDENTITY"
+    elif [[ "$MODE" == "signed" || "$MODE" == "notarized" ]]; then
+        CODESIGN_ID="$SIGNING_IDENTITY"
+        CODESIGN_EXTRA=(--options runtime --timestamp)
+    fi
+    codesign --force --sign "$CODESIGN_ID" ${CODESIGN_EXTRA[@]+"${CODESIGN_EXTRA[@]}"} \
+        --entitlements LumenDesk/LumenDesk.entitlements \
+        "$APP_BUNDLE"
 fi
 
 APP_PATH="$EXPORT_DIR/$APP_NAME.app"

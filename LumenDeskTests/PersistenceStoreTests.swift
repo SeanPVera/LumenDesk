@@ -461,6 +461,17 @@ final class PersistenceStoreTests: XCTestCase {
         XCTAssertEqual(spy.saveAttempts, 1)
     }
 
+    func testSQLiteDatabaseUsesWALAndReadsWithoutReconfiguring() throws {
+        let url = temporaryPersistenceFileURL().deletingPathExtension().appendingPathExtension("sqlite3")
+        let database = SQLiteStateDatabase(fileURL: url)
+        XCTAssertThrowsError(try database.load())
+        var state = PersistedApplicationState()
+        state.rooms = [Room(name: "Control Room")]
+        try database.save(state)
+        let loaded = try database.load()
+        XCTAssertEqual(loaded.rooms.map(\.name), ["Control Room"])
+    }
+
     private func setLegacy<Value: Encodable>(
         _ value: Value,
         key: String,

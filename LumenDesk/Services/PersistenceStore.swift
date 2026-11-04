@@ -18,9 +18,6 @@ struct PersistedApplicationState: Codable, Equatable {
     var customBrightnessPresets: [Double] = []
     var activityEvents: [ActivityEvent] = []
     var favoriteOrder: [FavoriteReference] = []
-    var parliamentMembers: [ParliamentMember] = []
-    var parliamentSessions: [ParliamentSession] = []
-    var sceneCertifications: [SceneCertification] = []
     var recentColors: [RecentColor] = []
     var automationOverrides: [UUID: RoomAutomationOverride] = [:]
     var sceneRevisions: [SceneRevision] = []
@@ -59,9 +56,6 @@ struct PersistedApplicationState: Codable, Equatable {
         case customBrightnessPresets
         case activityEvents
         case favoriteOrder
-        case parliamentMembers
-        case parliamentSessions
-        case sceneCertifications
         case recentColors
         case automationOverrides
         case sceneRevisions
@@ -93,9 +87,6 @@ struct PersistedApplicationState: Codable, Equatable {
         customBrightnessPresets = (try? container.decode([Double].self, forKey: .customBrightnessPresets)) ?? []
         activityEvents = (try? container.decode([ActivityEvent].self, forKey: .activityEvents)) ?? []
         favoriteOrder = (try? container.decode([FavoriteReference].self, forKey: .favoriteOrder)) ?? []
-        parliamentMembers = (try? container.decode([ParliamentMember].self, forKey: .parliamentMembers)) ?? []
-        parliamentSessions = (try? container.decode([ParliamentSession].self, forKey: .parliamentSessions)) ?? []
-        sceneCertifications = (try? container.decode([SceneCertification].self, forKey: .sceneCertifications)) ?? []
         recentColors = (try? container.decode([RecentColor].self, forKey: .recentColors)) ?? []
         automationOverrides = (try? container.decode([UUID: RoomAutomationOverride].self, forKey: .automationOverrides)) ?? [:]
         sceneRevisions = (try? container.decode([SceneRevision].self, forKey: .sceneRevisions)) ?? []
@@ -281,9 +272,6 @@ final class PersistenceStore: ApplicationPersistence {
         static let brightnessPresets = "LumenDesk.brightnessPresets.v1"
         static let activity = "LumenDesk.activity.v1"
         static let favoriteOrder = "LumenDesk.favoriteOrder.v1"
-        static let parliament = "LumenDesk.parliament.v1"
-        static let parliamentSessions = "LumenDesk.parliamentSessions.v1"
-        static let certifications = "LumenDesk.certifications.v1"
         static let recentColors = "LumenDesk.recentColors.v1"
         static let automationOverrides = "LumenDesk.automationOverrides.v1"
         static let sceneRevisions = "LumenDesk.sceneRevisions.v1"
@@ -294,8 +282,7 @@ final class PersistenceStore: ApplicationPersistence {
         static let all = [
             rooms, favorites, scenes, customNames, collapsedRooms, solar,
             whiteMode, favoriteRooms, favoriteScenes, brightnessPresets,
-            activity, favoriteOrder, parliament, parliamentSessions,
-            certifications, recentColors, automationOverrides,
+            activity, favoriteOrder, recentColors, automationOverrides,
             sceneRevisions, sceneDrafts, goveeSegments, segmentPresets
         ]
     }
@@ -354,6 +341,13 @@ final class PersistenceStore: ApplicationPersistence {
                 return state
             } catch {
                 if isUnsupportedDatabaseVersion(error) { return PersistedApplicationState() }
+                if isTransientDatabaseBusy(error) {
+                    if let backupState = try? database.loadBackup(),
+                       backupState.schemaVersion <= PersistedApplicationState.currentSchemaVersion {
+                        return migratedAndNormalized(backupState)
+                    }
+                    return PersistedApplicationState()
+                }
             }
 
             do {
@@ -366,7 +360,9 @@ final class PersistenceStore: ApplicationPersistence {
                 if previousVersion != state.schemaVersion { try? save(state) }
                 return state
             } catch {
-                if isUnsupportedDatabaseVersion(error) { return PersistedApplicationState() }
+                if isUnsupportedDatabaseVersion(error) || isTransientDatabaseBusy(error) {
+                    return PersistedApplicationState()
+                }
             }
 
             // A valid SQLite signature does not guarantee a readable database.
@@ -392,7 +388,9 @@ final class PersistenceStore: ApplicationPersistence {
                 let recovered = try recoverDatabaseBackup()
                 return migratedAndNormalized(recovered)
             } catch {
-                if isUnsupportedDatabaseVersion(error) { return PersistedApplicationState() }
+                if isUnsupportedDatabaseVersion(error) || isTransientDatabaseBusy(error) {
+                    return PersistedApplicationState()
+                }
             }
         }
 
@@ -545,9 +543,6 @@ final class PersistenceStore: ApplicationPersistence {
         migrated.solarPreferences = .init()
         migrated.automationOverrides = [:]
         migrated.activityEvents = []
-        migrated.parliamentMembers = []
-        migrated.parliamentSessions = []
-        migrated.sceneCertifications = []
         migrated.scenes = migrated.scenes.map { $0.normalized() }
         migrated.sceneDrafts = migrated.sceneDrafts.mapValues { $0.normalized() }
         return migrated
@@ -590,6 +585,12 @@ final class PersistenceStore: ApplicationPersistence {
         if fileManager.fileExists(atPath: fileURL.path) {
             try? fileManager.moveItem(at: fileURL, to: corruptURL)
         }
+        for suffix in ["-journal", "-wal", "-shm"] {
+            let sidecar = URL(fileURLWithPath: fileURL.path + suffix)
+            if fileManager.fileExists(atPath: sidecar.path) {
+                try? fileManager.removeItem(at: sidecar)
+            }
+        }
         try? fileManager.copyItem(at: database.backupURL, to: fileURL)
         return recovered
     }
@@ -600,6 +601,12 @@ final class PersistenceStore: ApplicationPersistence {
         return false
     }
 
+    private func isTransientDatabaseBusy(_ error: Error) -> Bool {
+        guard let databaseError = error as? SQLiteStateDatabase.DatabaseError else { return false }
+        if case .busy = databaseError { return true }
+        return false
+    }
+
     private func quarantineUnreadableDatabase() {
         guard fileManager.fileExists(atPath: fileURL.path) else { return }
         let quarantineURL = fileURL.appendingPathExtension("unreadable-\(UUID().uuidString)")
@@ -607,7 +614,7 @@ final class PersistenceStore: ApplicationPersistence {
 
         // SQLite can leave these beside a failed primary. Moving them prevents
         // stale journal pages from being attached to the newly migrated store.
-        for suffix in ["-wal", "-shm"] {
+        for suffix in ["-journal", "-wal", "-shm"] {
             let sidecar = URL(fileURLWithPath: fileURL.path + suffix)
             guard fileManager.fileExists(atPath: sidecar.path) else { continue }
             let quarantinedSidecar = URL(fileURLWithPath: quarantineURL.path + suffix)
@@ -647,9 +654,6 @@ final class PersistenceStore: ApplicationPersistence {
         state.customBrightnessPresets = legacyValue([Double].self, key: LegacyKey.brightnessPresets, defaults: defaults) ?? []
         state.activityEvents = legacyValue([ActivityEvent].self, key: LegacyKey.activity, defaults: defaults) ?? []
         state.favoriteOrder = legacyValue([FavoriteReference].self, key: LegacyKey.favoriteOrder, defaults: defaults) ?? []
-        state.parliamentMembers = legacyValue([ParliamentMember].self, key: LegacyKey.parliament, defaults: defaults) ?? []
-        state.parliamentSessions = legacyValue([ParliamentSession].self, key: LegacyKey.parliamentSessions, defaults: defaults) ?? []
-        state.sceneCertifications = legacyValue([SceneCertification].self, key: LegacyKey.certifications, defaults: defaults) ?? []
         state.recentColors = legacyValue([RecentColor].self, key: LegacyKey.recentColors, defaults: defaults) ?? []
         state.automationOverrides = legacyValue([UUID: RoomAutomationOverride].self, key: LegacyKey.automationOverrides, defaults: defaults) ?? [:]
         state.sceneRevisions = legacyValue([SceneRevision].self, key: LegacyKey.sceneRevisions, defaults: defaults) ?? []

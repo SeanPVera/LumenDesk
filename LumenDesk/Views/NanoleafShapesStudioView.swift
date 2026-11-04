@@ -22,27 +22,27 @@ struct NanoleafShapesStudio: View {
     var wide = true
 
     @State private var selection: Set<Int> = []
-    @State private var cursor: Int?
-    @State private var orientationDraft: Int?
+    @State private var cursor: Int? = nil
+    @State private var orientationDraft: Int? = nil
     @State private var paintColor: Color = Color(red: 1, green: 0.42, blue: 0.17)
     @State private var startColor: Color = .white
-    @State private var hexDraft = ""
-    @State private var hexProblem: String?
+    @State private var hexDraft: String = ""
+    @State private var hexProblem: String? = nil
     @State private var gradientStart: Color = Color(red: 1, green: 0.42, blue: 0.17)
     @State private var gradientEnd: Color = Color(red: 0.42, green: 0.24, blue: 1)
     @State private var gradientAxis: NanoleafSpatialAxis = .leftToRight
-    @State private var selectsByTouch = false
-    @State private var handledTouch: Date?
-    @State private var colorEditEnd: Task<Void, Never>?
-    @State private var studioMessage: String?
-    @State private var namingDesign = false
-    @State private var designName = ""
-    @State private var namingGroup = false
-    @State private var groupName = ""
-    @State private var storing = false
-    @State private var storeName = ""
-    @State private var storeConflict = false
-    @State private var storeBusy = false
+    @State private var selectsByTouch: Bool = false
+    @State private var handledTouch: Date? = nil
+    @State private var colorEditEnd: Task<Void, Never>? = nil
+    @State private var studioMessage: String? = nil
+    @State private var namingDesign: Bool = false
+    @State private var designName: String = ""
+    @State private var namingGroup: Bool = false
+    @State private var groupName: String = ""
+    @State private var storing: Bool = false
+    @State private var storeName: String = ""
+    @State private var storeConflict: Bool = false
+    @State private var storeBusy: Bool = false
 
     private var deviceID: String { device.id }
     private var wall: NanoleafShapesController.Wall { shapes.wall(deviceID) }
@@ -61,9 +61,11 @@ struct NanoleafShapesStudio: View {
                     ScrollView { content(wide: geometry.size.width >= 900).padding(20) }
                 }
                 .sheetFrame(minWidth: 620, idealWidth: 1040, minHeight: 600, idealHeight: 820)
-                .background(Lumen.stage)
+                .background(Lumen.canvas)
+                .foregroundStyle(Lumen.graphite)
             } else {
                 content(wide: wide)
+                    .foregroundStyle(Lumen.graphite)
             }
         }
         .onChange(of: wall.arrangement?.layout.paintableIDs ?? []) { ids in
@@ -110,7 +112,7 @@ struct NanoleafShapesStudio: View {
             }
         }
         .padding(presentation == .inline ? 16 : 0)
-        .background(presentation == .inline ? Lumen.deck : Color.clear)
+        .background(presentation == .inline ? Lumen.floor : Color.clear)
     }
 
     // MARK: Header
@@ -121,20 +123,22 @@ struct NanoleafShapesStudio: View {
                 Label("\(device.nanoleafProductName) panels \u{2014} \(device.label)",
                       systemImage: device.nanoleafFamily == .lightPanels ? "triangle" : "hexagon")
                     .font(LumenType.display(size: 17, weight: .semibold))
-                Text(statusLine).font(.callout).foregroundStyle(Lumen.meter)
+                Text(statusLine).font(.callout).foregroundStyle(Lumen.ash)
                     .fixedSize(horizontal: false, vertical: true)
                 if manager.isDemoMode {
                     Label("Demo Mode: a simulated wall. Nothing is sent to a controller.", systemImage: "play.rectangle")
-                        .font(.caption).foregroundStyle(Lumen.meter)
+                        .font(.caption).foregroundStyle(Lumen.ash)
                 }
                 if device.isStale {
                     Label("Not responding. Edits stay in the draft until the controller answers.", systemImage: "exclamationmark.triangle")
-                        .font(.caption).foregroundStyle(Lumen.warn)
+                        .font(.caption).foregroundStyle(Lumen.ochre)
                 }
             }
             Spacer(minLength: 8)
             if presentation == .sheet {
-                Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Done") { dismiss() }
+                    .buttonStyle(LumenSecondaryButtonStyle(compact: true))
+                    .keyboardShortcut(.cancelAction)
             }
         }
     }
@@ -152,10 +156,10 @@ struct NanoleafShapesStudio: View {
         VStack(alignment: .leading, spacing: 10) {
             Text(wall.topologyProblem.map { "The controller\u{2019}s layout couldn\u{2019}t be read: \($0.summary)" }
                  ?? "Waiting for the controller to report its layout.")
-                .font(.callout).foregroundStyle(Lumen.meter)
+                .font(.callout).foregroundStyle(Lumen.ash)
                 .fixedSize(horizontal: false, vertical: true)
             Text("Panels can be painted once the arrangement is known. Power, brightness, colour and stored scenes still work.")
-                .font(.caption).foregroundStyle(Lumen.meter)
+                .font(.caption).foregroundStyle(Lumen.ash)
                 .fixedSize(horizontal: false, vertical: true)
             Button("Read the layout again") { manager.refreshShapes(device) }
                 .buttonStyle(LumenSecondaryButtonStyle(compact: true))
@@ -174,8 +178,8 @@ struct NanoleafShapesStudio: View {
                                onMarquee: { selection.formUnion($0); cursor = $0.sorted().first },
                                onIdentify: { shapes.identifyPanel($0, on: deviceID) })
                 .frame(height: height)
-                .background(Lumen.stage)
-                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Lumen.ruleSoft, lineWidth: 1).allowsHitTesting(false))
+                .background(Lumen.floor, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Lumen.rule, lineWidth: 1).allowsHitTesting(false))
                 .focusableCompat()
                 .onMoveCompat { direction in moveCursor(direction, in: layout) }
                 .onExitCommandCompat { selection = [] }
@@ -184,7 +188,7 @@ struct NanoleafShapesStudio: View {
             if let orientationDraft {
                 Label("Previewing \(orientationDraft)\u{00B0} here. The wall and its effects change when you apply it.",
                       systemImage: "rotate.right")
-                    .font(.caption).foregroundStyle(Lumen.warn)
+                    .font(.caption).foregroundStyle(Lumen.ochre)
             }
             legend(for: display(layout).source)
             selectionBar(layout)
@@ -192,17 +196,17 @@ struct NanoleafShapesStudio: View {
                 exactPanelValues(layout, session: session)
             }
             if let message = studioMessage ?? wall.lastChange?.summary {
-                Label(message, systemImage: "info.circle").font(.caption).foregroundStyle(Lumen.meter)
+                Label(message, systemImage: "info.circle").font(.caption).foregroundStyle(Lumen.ash)
                     .fixedSize(horizontal: false, vertical: true)
             }
             if let problem = wall.topologyProblem {
                 Label("The latest layout reading was damaged (\(problem.summary)); the last good layout is shown.",
                       systemImage: "exclamationmark.triangle")
-                    .font(.caption).foregroundStyle(Lumen.warn)
+                    .font(.caption).foregroundStyle(Lumen.ochre)
                     .fixedSize(horizontal: false, vertical: true)
             }
             if let failure = wall.lastFailure {
-                Label(failure, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(Lumen.warn)
+                Label(failure, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(Lumen.ochre)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -218,9 +222,9 @@ struct NanoleafShapesStudio: View {
         case .unknown: origin = "Colours unknown: the wall is playing something LumenDesk can\u{2019}t read"
         }
         return VStack(alignment: .leading, spacing: 4) {
-            Text(origin).font(.caption.weight(.semibold)).foregroundStyle(Lumen.chalk)
+            Text(origin).font(.caption.weight(.semibold)).foregroundStyle(Lumen.graphite)
             Text("Filled number = selected \u{00B7} dashed edge = off \u{00B7} hatched ? = unknown \u{00B7} dashed ring = keyboard cursor. \(brightnessNote)")
-                .font(.caption).foregroundStyle(Lumen.meter)
+                .font(.caption).foregroundStyle(Lumen.ash)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }

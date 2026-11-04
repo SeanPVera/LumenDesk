@@ -344,6 +344,17 @@ final class NanoleafTests: XCTestCase {
         XCTAssertFalse(export.contains("testToken123"))
     }
 
+    func testEndpointRejectsLoopbackLinkLocalAndPublicHosts() throws {
+        for forbidden in ["127.0.0.1", "127.0.1.1", "localhost", "sub.localhost", "::1", "0.0.0.0", "169.254.169.254", "8.8.8.8", "example.com"] {
+            XCTAssertFalse(NanoleafEndpoint.isPermittedLocalOrLANHost(forbidden), "Must reject \(forbidden)")
+            XCTAssertThrowsError(try NanoleafEndpoint(host: forbidden))
+        }
+        for allowed in ["192.168.1.42", "10.0.0.5", "172.16.0.9", "192.0.2.44", "fd00::1", "fe80::1", "nanoleaf-shapes.local", "studio.lan"] {
+            XCTAssertTrue(NanoleafEndpoint.isPermittedLocalOrLANHost(allowed), "Must allow \(allowed)")
+            XCTAssertNoThrow(try NanoleafEndpoint(host: allowed))
+        }
+    }
+
     @MainActor
     private func makeClient(_ fixture: NanoleafFixture, store: MemoryNanoleafCredentials = MemoryNanoleafCredentials()) -> NanoleafClient {
         NanoleafURLProtocol.fixture = fixture

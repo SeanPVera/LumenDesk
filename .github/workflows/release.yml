@@ -221,11 +221,18 @@ jobs:
           TAG="${GITHUB_REF_NAME}"
           DMG="$(ls dist/*.dmg)"
 
-          gh release create "$TAG" \
-            --title "LumenDesk ${TAG#v}" \
-            --notes-file "$RUNNER_TEMP/notes.md" \
-            --verify-tag \
-            "$DMG" "$DMG.sha256"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" \
+              --title "LumenDesk ${TAG#v}" \
+              --notes-file "$RUNNER_TEMP/notes.md"
+            gh release upload "$TAG" "$DMG" "$DMG.sha256" --clobber
+          else
+            gh release create "$TAG" \
+              --title "LumenDesk ${TAG#v}" \
+              --notes-file "$RUNNER_TEMP/notes.md" \
+              --verify-tag \
+              "$DMG" "$DMG.sha256"
+          fi
 
       - name: Clean up keychain
         if: always()

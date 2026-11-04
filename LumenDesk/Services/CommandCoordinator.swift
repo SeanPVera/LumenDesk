@@ -405,8 +405,11 @@ final class CommandCoordinator {
         refresh: @escaping @MainActor () -> Void,
         timedOut: @escaping @MainActor () -> Void
     ) {
-        refresh()
         updateState {
+            state.pendingDeviceIDs.insert(deviceID)
+            if state.expectedStates[deviceID] == nil {
+                state.recoveringDeviceIDs.insert(deviceID)
+            }
             state.commandStates[deviceID] = DeviceCommandState(
                 lifecycle: .sending,
                 summary: "Checking confirmed state",
@@ -415,6 +418,7 @@ final class CommandCoordinator {
             )
         }
         startTimeout(deviceID: deviceID, summary: "state refresh", timedOut: timedOut)
+        refresh()
     }
 
     func recover(

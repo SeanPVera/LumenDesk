@@ -333,12 +333,44 @@ extension NanoleafLayout {
         guard !panels.isEmpty else { return [] }
         let wall = NanoleafWallTransform(layout: self, rotationDegrees: rotationDegrees)
         let centers = panels.map { (id: $0.panelID, point: wall.wall(fromRaw: NanoleafPoint($0.x, $0.y))) }
-        let meanX = centers.reduce(0) { $0 + $1.point.x } / Double(centers.count)
-        let meanY = centers.reduce(0) { $0 + $1.point.y } / Double(centers.count)
-        let xs = centers.map(\.point.x), ys = centers.map(\.point.y)
-        let minX = xs.min() ?? 0, maxX = xs.max() ?? 0
-        let minY = ys.min() ?? 0, maxY = ys.max() ?? 0
-        let maxDistance = centers.map { hypot($0.point.x - meanX, $0.point.y - meanY) }.max() ?? 0
+        // Optimization: compute bounding extents (min/max for X and Y) and coordinate sums
+        // in a single linear pass over centers, eliminating 6 separate passes and 2 intermediate
+        // array heap allocations (xs and ys).
+        guard let first = centers.first else { return [] }
+        var sumX = first.point.x
+        var sumY = first.point.y
+        var minX = first.point.x
+        var maxX = first.point.x
+        var minY = first.point.y
+        var maxY = first.point.y
+
+        for entry in centers.dropFirst() {
+            let px = entry.point.x
+            let py = entry.point.y
+            sumX += px
+            sumY += py
+            if px < minX { minX = px }
+            if px > maxX { maxX = px }
+            if py < minY { minY = py }
+            if py > maxY { maxY = py }
+        }
+
+        let meanX = sumX / Double(centers.count)
+        let meanY = sumY / Double(centers.count)
+
+        // Optimization: calculate maxDistance only when outward axis is active, and compute
+        // it in a single pass without allocating an intermediate [Double] array on the heap.
+        let maxDistance: Double
+        if axis == .outward {
+            var maxDist: Double = 0
+            for entry in centers {
+                let dist = hypot(entry.point.x - meanX, entry.point.y - meanY)
+                if dist > maxDist { maxDist = dist }
+            }
+            maxDistance = maxDist
+        } else {
+            maxDistance = 0
+        }
 
         func position(_ point: NanoleafPoint) -> Double {
             switch axis {

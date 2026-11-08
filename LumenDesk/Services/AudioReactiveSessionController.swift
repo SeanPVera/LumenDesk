@@ -424,7 +424,8 @@ final class AudioReactiveSessionController: ObservableObject {
               let session = sessions[scope], session.synthetic || (sourceStatus != .unavailable && sourceStatus != .requestingPermission),
               session.configuration.masterBrightness > 0, session.configuration.effectIntensity > 0,
               session.configuration.beatSensitivity > 0 else { return false }
-        return !session.topology.expandedTargets(for: session.fixtures).isEmpty
+        // Fast boolean check avoids allocating and expanding all spatial target structs.
+        return session.topology.hasActiveTargets(for: session.fixtures)
     }
 
     private func clearCalibration(for scope: LightScope) {

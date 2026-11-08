@@ -585,12 +585,19 @@ struct FixtureTopology: Codable, Equatable {
         }
     }
 
+    /// Fast boolean check for active targets without allocating spatial target structs.
+    func hasActiveTargets(for fixtures: [MusicFixtureDescriptor]) -> Bool {
+        fixtures.contains { !excludedFixtureIDs.contains($0.id) && $0.resolvedRole != .off }
+    }
+
     func expandedTargets(for fixtures: [MusicFixtureDescriptor]) -> [MusicSpatialTarget] {
         let ordered = includedFixtures(fixtures)
         let count = ordered.reduce(0) { $0 + max(1, $1.segmentCount) }
         guard count > 0 else { return [] }
-        var flatIndex = 0
+        // Pre-allocate exact required capacity to avoid dynamic array resizes during expansion.
         var result: [MusicSpatialTarget] = []
+        result.reserveCapacity(count)
+        var flatIndex = 0
         for fixture in ordered {
             let segmentCount = max(1, fixture.segmentCount)
             let role = fixture.resolvedRole

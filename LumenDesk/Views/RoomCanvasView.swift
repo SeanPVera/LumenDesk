@@ -280,6 +280,9 @@ struct RoomCanvasShellView: View {
             guard let room = selectedRoom else { return }
             let ordered = room.lightIDs.filter { session.selectedFixtureIDs.contains($0) }
             if let first = ordered.first { session.editorDeviceID = first }
+        case .saveLook:
+            // Handled by the room's Looks bar, which owns the naming alert.
+            break
         }
     }
 
@@ -549,27 +552,32 @@ private struct RoomCanvasEmptyState: View {
     let openSetup: () -> Void
 
     var body: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 18) {
             ZStack {
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .fill(Lumen.floor)
-                    .frame(width: 112, height: 96)
-                Image(systemName: "square.dashed")
-                    .font(.system(size: 40, weight: .light))
+                RoundedRectangle(cornerRadius: Polar.radiusPanel, style: .continuous)
+                    .strokeBorder(Polar.wall, style: StrokeStyle(lineWidth: 1.5, dash: [6, 5]))
+                    .frame(width: 132, height: 112)
+                LumenHexMark(size: 56)
+                    .opacity(0.85)
             }
             Text("Make the room the interface")
-                .font(LumenType.display(size: 30, weight: .bold))
+                .font(.polarDisplay(30))
+                .foregroundStyle(Polar.chalk)
             Text("Find a fixture, identify it in the room, then place it where you expect to find it.")
-                .font(LumenType.body(size: 15))
-                .foregroundStyle(Lumen.meter)
+                .font(.polarUI(15))
+                .foregroundStyle(Polar.meter)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 460)
-            Button("Add or repair room", action: openSetup)
-                .buttonStyle(.borderedProminent)
-                .tint(Lumen.ember)
+            Button(action: openSetup) {
+                Label("Add lights", systemImage: "plus")
+            }
+            .buttonStyle(PolarButtonStyle(kind: .prominent))
+            Text("\u{2318}N")
+                .font(.polarMono(11))
+                .foregroundStyle(Polar.meter)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Lumen.canvas)
+        .background(Polar.stage)
     }
 }
 
@@ -1563,6 +1571,11 @@ private struct LookShelf: View {
         .padding(.vertical, 12)
         .background(Lumen.deck)
         .overlay(alignment: .top) { Rectangle().fill(Lumen.rule).frame(height: 1) }
+        .onReceive(NotificationCenter.default.publisher(for: .lumenCommand)) { notification in
+            guard LumenCommandBus.command(from: notification) == .saveLook else { return }
+            currentName = suggestedName
+            namingCurrent = true
+        }
         .alert("Save current as a Look", isPresented: $namingCurrent) {
             TextField("Look name", text: $currentName)
             Button("Cancel", role: .cancel) {}

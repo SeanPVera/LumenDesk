@@ -77,5 +77,8 @@ final class LightPageModelTests: XCTestCase {
                                 userInfo: ["command": LumenCommand.openLightPage.rawValue])
         XCTAssertEqual(LumenCommandBus.command(from: note), .openLightPage)
         XCTAssertNil(LumenCommandBus.command(from: Notification(name: .lumenCommand)))
+        let save = Notification(name: .lumenCommand, object: nil,
+                                userInfo: ["command": LumenCommand.saveLook.rawValue])
+        XCTAssertEqual(LumenCommandBus.command(from: save), .saveLook)
     }
 }

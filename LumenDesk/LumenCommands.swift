@@ -14,6 +14,7 @@ enum LumenCommand: String {
     case openLive
     case identifySelected
     case openLightPage
+    case saveLook
 }
 
 extension Notification.Name {
@@ -41,6 +42,19 @@ struct LumenDeskCommands: Commands {
                 .keyboardShortcut("n", modifiers: [.command, .shift])
             Button("Add Lights\u{2026}") { LumenCommandBus.post(.addLights) }
                 .keyboardShortcut("n", modifiers: .command)
+        }
+
+        CommandGroup(after: .saveItem) {
+            Button("Save Current as Look\u{2026}") { LumenCommandBus.post(.saveLook) }
+                .keyboardShortcut("s", modifiers: .command)
+                .disabled(manager.rooms.isEmpty)
+        }
+
+        CommandGroup(replacing: .help) {
+            Link("LumenDesk Help", destination: URL(string: "https://github.com/SeanPVera/LumenDesk#readme")!)
+            Divider()
+            Text("Rooms \u{2318}1\u{2013}9 \u{00B7} Looks \u{2318}L \u{00B7} Live \u{21E7}\u{2318}L")
+            Text("Light page \u{2318}\u{21A9} \u{00B7} Back \u{2318}[ \u{00B7} Identify \u{2318}I")
         }
 
         CommandGroup(before: .toolbar) {

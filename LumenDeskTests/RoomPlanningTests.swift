@@ -1050,7 +1050,7 @@ final class RoomCanvasRenderTests: XCTestCase {
                                                                   initialStep: .place),
                           manager, width: 820, height: 640)
         let shapes = NanoleafCandidate(id: "render-shapes", name: "Shapes E8FF",
-                                       endpoint: NanoleafEndpoint(host: "0.0.0.0", port: 16021), model: "NL42")
+                                       endpoint: try NanoleafEndpoint(host: "192.0.2.10", port: 16021), model: "NL42")
         try await capture("nanoleaf-pairing", NanoleafPairingView(candidate: shapes, preferredRoomID: room.id,
                                                                   initialPhase: .listening(elapsed: 11)),
                           manager, width: 520, height: 660)

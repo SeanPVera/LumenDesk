@@ -91,6 +91,14 @@
 		B300000000000000000011 /* Views/NanoleafShapesStudioView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000011 /* Views/NanoleafShapesStudioView.swift */; };
 		B300000000000000000012 /* Views/NanoleafSceneLibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000012 /* Views/NanoleafSceneLibraryView.swift */; };
 		B300000000000000000013 /* NanoleafShapesManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300000000000000000013 /* NanoleafShapesManagerTests.swift */; };
+		B400000000000000000001 /* Design/PolarTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = A400000000000000000001 /* Design/PolarTokens.swift */; };
+		B400000000000000000002 /* Design/PolarComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A400000000000000000002 /* Design/PolarComponents.swift */; };
+		B400000000000000000003 /* Models/LightPageModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A400000000000000000003 /* Models/LightPageModel.swift */; };
+		B400000000000000000004 /* Views/LightPages/LightPageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A400000000000000000004 /* Views/LightPages/LightPageView.swift */; };
+		B400000000000000000005 /* Views/LightPages/GoveeHeroPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A400000000000000000005 /* Views/LightPages/GoveeHeroPanel.swift */; };
+		B400000000000000000006 /* Views/PolarScreens.swift in Sources */ = {isa = PBXBuildFile; fileRef = A400000000000000000006 /* Views/PolarScreens.swift */; };
+		B400000000000000000007 /* LumenCommands.swift in Sources */ = {isa = PBXBuildFile; fileRef = A400000000000000000007 /* LumenCommands.swift */; };
+		B400000000000000000008 /* LightPageModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A400000000000000000008 /* LightPageModelTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -192,6 +200,14 @@
 		A300000000000000000011 /* Views/NanoleafShapesStudioView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/NanoleafShapesStudioView.swift; sourceTree = "<group>"; };
 		A300000000000000000012 /* Views/NanoleafSceneLibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/NanoleafSceneLibraryView.swift; sourceTree = "<group>"; };
 		A300000000000000000013 /* NanoleafShapesManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NanoleafShapesManagerTests.swift; sourceTree = "<group>"; };
+		A400000000000000000001 /* Design/PolarTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Design/PolarTokens.swift; sourceTree = "<group>"; };
+		A400000000000000000002 /* Design/PolarComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Design/PolarComponents.swift; sourceTree = "<group>"; };
+		A400000000000000000003 /* Models/LightPageModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/LightPageModel.swift; sourceTree = "<group>"; };
+		A400000000000000000004 /* Views/LightPages/LightPageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/LightPages/LightPageView.swift; sourceTree = "<group>"; };
+		A400000000000000000005 /* Views/LightPages/GoveeHeroPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/LightPages/GoveeHeroPanel.swift; sourceTree = "<group>"; };
+		A400000000000000000006 /* Views/PolarScreens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/PolarScreens.swift; sourceTree = "<group>"; };
+		A400000000000000000007 /* LumenCommands.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LumenCommands.swift; sourceTree = "<group>"; };
+		A400000000000000000008 /* LightPageModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LightPageModelTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -242,6 +258,13 @@
 				A30000000000000000000D /* Views/NanoleafShapesCanvas.swift */,
 				A100000000000000000001 /* LumenDeskApp.swift */,
 				A100000000000000000018 /* Theme.swift */,
+				A400000000000000000007 /* LumenCommands.swift */,
+				A400000000000000000006 /* Views/PolarScreens.swift */,
+				A400000000000000000005 /* Views/LightPages/GoveeHeroPanel.swift */,
+				A400000000000000000004 /* Views/LightPages/LightPageView.swift */,
+				A400000000000000000003 /* Models/LightPageModel.swift */,
+				A400000000000000000002 /* Design/PolarComponents.swift */,
+				A400000000000000000001 /* Design/PolarTokens.swift */,
 				A10000000000000000002E /* DesignControls.swift */,
 				C100000000000000000003 /* Models */,
 				C100000000000000000004 /* Services */,
@@ -362,6 +385,7 @@
 				A300000000000000000010 /* NanoleafShapesControllerTests.swift */,
 				A200000000000000000001 /* ProtocolTests.swift */,
 				A200000000000000000002 /* DomainTests.swift */,
+				A400000000000000000008 /* LightPageModelTests.swift */,
 				A200000000000000000003 /* NetworkUtilityTests.swift */,
 				A200000000000000000004 /* DemoWorkspaceControllerTests.swift */,
 				A200000000000000000005 /* ConfirmationCoordinatorTests.swift */,
@@ -504,6 +528,13 @@
 				B100000000000000000015 /* ScheduleEntry.swift in Sources */,
 				B100000000000000000016 /* MenuBarPopoverView.swift in Sources */,
 				B100000000000000000018 /* Theme.swift in Sources */,
+				B400000000000000000007 /* LumenCommands.swift in Sources */,
+				B400000000000000000006 /* Views/PolarScreens.swift in Sources */,
+				B400000000000000000005 /* Views/LightPages/GoveeHeroPanel.swift in Sources */,
+				B400000000000000000004 /* Views/LightPages/LightPageView.swift in Sources */,
+				B400000000000000000003 /* Models/LightPageModel.swift in Sources */,
+				B400000000000000000002 /* Design/PolarComponents.swift in Sources */,
+				B400000000000000000001 /* Design/PolarTokens.swift in Sources */,
 				B10000000000000000002E /* DesignControls.swift in Sources */,
 				B10000000000000000001A /* LightingCatalog.swift in Sources */,
 				B10000000000000000001B /* AudioLevelMonitor.swift in Sources */,
@@ -547,6 +578,7 @@
 				B300000000000000000010 /* NanoleafShapesControllerTests.swift in Sources */,
 				B200000000000000000001 /* ProtocolTests.swift in Sources */,
 				B200000000000000000002 /* DomainTests.swift in Sources */,
+				B400000000000000000008 /* LightPageModelTests.swift in Sources */,
 				B200000000000000000003 /* NetworkUtilityTests.swift in Sources */,
 				B200000000000000000004 /* DemoWorkspaceControllerTests.swift in Sources */,
 				B200000000000000000005 /* ConfirmationCoordinatorTests.swift in Sources */,

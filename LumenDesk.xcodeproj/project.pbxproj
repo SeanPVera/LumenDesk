@@ -212,7 +212,7 @@
 		A400000000000000000007 /* LumenCommands.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LumenCommands.swift; sourceTree = "<group>"; };
 		A400000000000000000008 /* LightPageModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LightPageModelTests.swift; sourceTree = "<group>"; };
 		A400000000000000000009 /* Models/LookDraft.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/LookDraft.swift; sourceTree = "<group>"; };
-		A400000000000000000010 /* Services/LightManager+LookDrafts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/LightManager+LookDrafts.swift; sourceTree = "<group>"; };
+		A400000000000000000010 /* Services/LightManager+LookDrafts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Services/LightManager+LookDrafts.swift"; sourceTree = "<group>"; };
 		A400000000000000000011 /* PolarComposerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PolarComposerTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 

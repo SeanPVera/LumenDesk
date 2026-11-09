@@ -306,11 +306,15 @@ struct ColorBulbControls: View {
                             .accessibilityLabel(swatch.label)
                         }
                     }
-                    ColorPicker("Custom colour", selection: Binding(
-                        get: { device.color },
-                        set: { manager.setColor(device, color: $0) }
-                    ), supportsOpacity: false)
-                    .font(.polarUI(13, weight: .semibold))
+                    HStack(spacing: 8) {
+                        ColorPicker("Custom colour", selection: Binding(
+                            get: { device.color },
+                            set: { manager.setColor(device, color: $0) }
+                        ), supportsOpacity: false)
+                        .polarColorWell(device.color, width: 30, height: 30)
+                        .accessibilityLabel("Custom colour")
+                        Text("Custom").font(.polarUI(12, weight: .semibold)).foregroundStyle(Polar.meter)
+                    }
                 }
             }
             Text("\(Int(device.kelvinRange.lowerBound))–\(Int(device.kelvinRange.upperBound)) K. Drag the dial or use the arrow keys.")

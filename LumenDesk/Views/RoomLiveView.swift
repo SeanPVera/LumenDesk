@@ -235,7 +235,7 @@ struct RoomLiveView: View {
 
             if manager.isDemoMode && input == .platform {
                 HStack {
-                    Text("Demo groove").font(.polarUI(12))
+                    Text("Demo groove").font(.polarUI(12)).lineLimit(1).fixedSize()
                     Spacer()
                     Picker("Demo groove", selection: Binding(
                         get: { manager.musicModeController.selectedGrooveID },

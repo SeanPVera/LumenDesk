@@ -574,3 +574,23 @@ struct PolarSwatchButtonStyle: ButtonStyle {
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }
+
+/// Covers the system colour well with a Polar swatch. The swatch ignores hits,
+/// so clicks still reach the ColorPicker underneath and open the system panel.
+extension View {
+    func polarColorWell(_ color: Color, width: CGFloat = 34, height: CGFloat = 22) -> some View {
+        self
+            .labelsHidden()
+            .frame(width: width, height: height)
+            .overlay(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(color)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.22), lineWidth: 1)
+                    )
+                    .allowsHitTesting(false)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+    }
+}

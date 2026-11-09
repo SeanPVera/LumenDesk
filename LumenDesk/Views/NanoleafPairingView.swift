@@ -78,7 +78,7 @@ struct NanoleafPairingView: View {
             header
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
-                    if manager.isDemoMode && initialPhase == .ready {
+                    if manager.isDemoMode {
                         demoNote
                     }
                     stepFound
@@ -413,13 +413,14 @@ struct FlowChips<ID: Hashable>: View {
     let choose: (ID) -> Void
 
     var body: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 6, alignment: .leading)],
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 132), spacing: 6, alignment: .leading)],
                   alignment: .leading, spacing: 6) {
             ForEach(Array(items.enumerated()), id: \.offset) { _, item in
                 let isChosen = selected == item.0
                 Button(item.1) { choose(item.0) }
                     .buttonStyle(PolarButtonStyle(kind: isChosen ? .selected : .quiet, compact: true))
                     .lineLimit(1)
+                    .fixedSize()
                     .accessibilityAddTraits(isChosen ? .isSelected : [])
             }
         }

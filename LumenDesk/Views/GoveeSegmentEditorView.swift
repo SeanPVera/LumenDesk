@@ -679,7 +679,7 @@ struct GoveeSegmentEditorView: View {
                                 label: "Paint recent color \(recent.name)")
                 }
                 ColorPicker("", selection: $paintColor, supportsOpacity: false)
-                    .labelsHidden()
+                    .polarColorWell(paintColor, width: 30, height: 30)
                     .onChange(of: paintColor) { newValue in paintTargets(with: newValue) }
                     .accessibilityLabel("Paint color")
                     .disabled(targetIndexes.isEmpty)
@@ -695,7 +695,7 @@ struct GoveeSegmentEditorView: View {
                     .disabled(targetIndexes.count < 2)
                     .help("Fades from the paint color to the end color across the selected \(unitName)s")
                 ColorPicker("", selection: $blendEndColor, supportsOpacity: false)
-                    .labelsHidden()
+                    .polarColorWell(blendEndColor)
                     .accessibilityLabel("Blend end color")
                 Text("\u{2192} end color").font(.polarUI(11)).foregroundStyle(Polar.meter)
                 Spacer(minLength: 0)

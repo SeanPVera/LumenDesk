@@ -1183,11 +1183,17 @@ private struct RoomSelectionInspector: View {
                         valueLabel: kelvinValueLabel
                     )
 
-                    ColorPicker("Output colour", selection: Binding(
-                        get: { targets.first?.color ?? .white },
-                        set: { manager.setColor(deviceIDs: ids, color: $0) }
-                    ), supportsOpacity: false)
-                    .font(LumenType.body(size: 13, weight: .semibold))
+                    HStack {
+                        Text("Output colour")
+                            .font(LumenType.body(size: 13, weight: .semibold))
+                        Spacer()
+                        ColorPicker("Output colour", selection: Binding(
+                            get: { targets.first?.color ?? .white },
+                            set: { manager.setColor(deviceIDs: ids, color: $0) }
+                        ), supportsOpacity: false)
+                        .polarColorWell(targets.first?.color ?? .white, width: 44, height: 24)
+                        .accessibilityLabel("Output colour")
+                    }
 
                     if manager.externallyChangedDeviceIDs.isDisjoint(with: ids) == false {
                         VStack(alignment: .leading, spacing: 8) {

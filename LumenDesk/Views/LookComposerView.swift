@@ -525,8 +525,7 @@ private struct LookComposerRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             HStack(spacing: 8) {
                 ColorPicker("", selection: colorBinding, supportsOpacity: false)
-                    .labelsHidden()
-                    .frame(width: 30)
+                    .polarColorWell(row.color, width: 30, height: 22)
                     .accessibilityLabel("\(device.label) color")
                 Text(row.hex)
                     .font(.polarMono(11))

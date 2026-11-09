@@ -15,10 +15,14 @@ enum LumenCommand: String {
     case identifySelected
     case openLightPage
     case saveLook
+    case duplicateLook
 }
 
 extension Notification.Name {
     static let lumenCommand = Notification.Name("LumenDesk.command")
+    /// Posted by the room window when ⌘S should open the Looks bar's
+    /// "Save current as a Look" prompt (no composer is open).
+    static let lumenSaveCurrentLook = Notification.Name("LumenDesk.saveCurrentLook")
 }
 
 enum LumenCommandBus {
@@ -48,6 +52,9 @@ struct LumenDeskCommands: Commands {
             Button("Save Current as Look\u{2026}") { LumenCommandBus.post(.saveLook) }
                 .keyboardShortcut("s", modifiers: .command)
                 .disabled(manager.rooms.isEmpty)
+            Button("Duplicate Look") { LumenCommandBus.post(.duplicateLook) }
+                .keyboardShortcut("d", modifiers: .command)
+                .disabled(manager.scenes.isEmpty)
         }
 
         CommandGroup(replacing: .help) {
@@ -55,6 +62,7 @@ struct LumenDeskCommands: Commands {
             Divider()
             Text("Rooms \u{2318}1\u{2013}9 \u{00B7} Looks \u{2318}L \u{00B7} Live \u{21E7}\u{2318}L")
             Text("Light page \u{2318}\u{21A9} \u{00B7} Back \u{2318}[ \u{00B7} Identify \u{2318}I")
+            Text("Save Look \u{2318}S \u{00B7} Duplicate Look \u{2318}D")
         }
 
         CommandGroup(before: .toolbar) {

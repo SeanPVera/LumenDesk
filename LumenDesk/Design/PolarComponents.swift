@@ -15,7 +15,8 @@ import UIKit
 
 // MARK: Orb
 
-/// The silhouette an orb takes, chosen from what the fixture physically is.
+/// What kind of fixture an orb stands for. Every fixture is drawn as the
+/// same round, glowing orb; the kind only picks the small model glyph inside.
 enum OrbSilhouette: Equatable {
     case bulb       // single emitter: LIFX colour bulbs
     case matrix     // LIFX Luna
@@ -26,26 +27,17 @@ enum OrbSilhouette: Equatable {
     case pods       // string pods
     case panels     // Nanoleaf hexagons
 
-    var cornerFraction: CGFloat {
+    /// SF Symbol drawn faintly inside the orb. Plain bulbs carry none.
+    var glyph: String? {
         switch self {
-        case .bulb, .pods: return 0.5
-        case .matrix: return 0.26
-        case .strip, .bars: return 0.5
-        case .curtain: return 0.18
-        case .lamp: return 0.5
-        case .panels: return 0
-        }
-    }
-
-    /// Width-to-height ratio of the orb core.
-    var aspect: CGFloat {
-        switch self {
-        case .bulb, .pods, .panels: return 1
-        case .matrix: return 1
-        case .strip: return 2.2
-        case .bars: return 2.6
-        case .curtain: return 1.3
-        case .lamp: return 0.62
+        case .bulb: return nil
+        case .matrix: return "circle.grid.3x3.fill"
+        case .strip: return "line.3.horizontal"
+        case .curtain: return "rectangle.split.3x1"
+        case .bars: return "chart.bar.fill"
+        case .lamp: return "lamp.floor.fill"
+        case .pods: return "ellipsis"
+        case .panels: return "hexagon.fill"
         }
     }
 }
@@ -53,7 +45,7 @@ enum OrbSilhouette: Equatable {
 /// A regular, flat-topped hexagon.
 struct PolarHexagon: Shape {
     func path(in rect: CGRect) -> Path {
-        let w = rect.width, h = rect.height
+        let w = rect.width
         var path = Path()
         path.move(to: CGPoint(x: rect.minX + w * 0.25, y: rect.minY))
         path.addLine(to: CGPoint(x: rect.minX + w * 0.75, y: rect.minY))
@@ -62,20 +54,22 @@ struct PolarHexagon: Shape {
         path.addLine(to: CGPoint(x: rect.minX + w * 0.25, y: rect.maxY))
         path.addLine(to: CGPoint(x: rect.minX, y: rect.midY))
         path.closeSubpath()
-        _ = h
         return path
     }
 }
 
-/// A fixture drawn as light: a lit core in the fixture's own colour, with a
-/// glow whose reach and strength follow its level. Off fixtures keep their
-/// silhouette as an unlit glass core so the stage still reads as a room.
+/// A fixture drawn as light: a round, lit core in the fixture's colour and a
+/// soft circular glow whose reach and strength follow its level. Off
+/// fixtures keep an unlit glass core so the stage still reads as a room.
+///
+/// The glow is built only from radial gradients inside circles (no
+/// `.shadow`), so it never picks up a square edge from layer bounds.
 struct GlowingOrb: View {
     var color: Color
     var level: Double
     var isOn: Bool
     var silhouette: OrbSilhouette = .bulb
-    /// Height of the core, in points. Width follows the silhouette.
+    /// Diameter of the core, in points.
     var size: CGFloat = 44
     var selected: Bool = false
     var stale: Bool = false
@@ -83,44 +77,59 @@ struct GlowingOrb: View {
 
     private var lit: Bool { isOn && !stale }
     private var clampedLevel: Double { min(max(level, 0), 1) }
-    private var coreWidth: CGFloat { size * silhouette.aspect }
-
-    private var core: AnyShape {
-        if silhouette == .panels { return AnyShape(PolarHexagon()) }
-        return AnyShape(RoundedRectangle(cornerRadius: size * silhouette.cornerFraction, style: .continuous))
-    }
 
     var body: some View {
         ZStack {
             if lit {
-                Ellipse()
+                // Wide, faint room glow.
+                Circle()
                     .fill(RadialGradient(
-                        colors: [color.opacity(reduceTransparency ? 0.30 : 0.55 * (0.35 + clampedLevel * 0.65)),
+                        colors: [color.opacity(reduceTransparency ? 0.22 : 0.42 * (0.35 + clampedLevel * 0.65)),
                                  color.opacity(0)],
                         center: .center,
-                        startRadius: size * 0.2,
-                        endRadius: max(coreWidth, size) * (0.9 + clampedLevel * 0.6)
+                        startRadius: size * 0.35,
+                        endRadius: size * (1.25 + clampedLevel * 0.75)
                     ))
-                    .frame(width: coreWidth + size * 2.2, height: size * 3.2)
+                    .frame(width: size * 4.2, height: size * 4.2)
+                    .allowsHitTesting(false)
+                // Tight halo hugging the core.
+                Circle()
+                    .fill(RadialGradient(
+                        colors: [color.opacity(0.55 * (0.4 + clampedLevel * 0.6)), color.opacity(0)],
+                        center: .center,
+                        startRadius: size * 0.42,
+                        endRadius: size * 0.9
+                    ))
+                    .frame(width: size * 1.8, height: size * 1.8)
                     .allowsHitTesting(false)
             }
-            core
+            Circle()
                 .fill(lit
-                      ? AnyShapeStyle(LinearGradient(
-                            colors: [color.mixed(with: .white, amount: 0.28), color],
-                            startPoint: .top, endPoint: .bottom))
+                      ? AnyShapeStyle(RadialGradient(
+                            colors: [color.mixed(with: .white, amount: 0.45), color,
+                                     color.mixed(with: .black, amount: 0.12)],
+                            center: UnitPoint(x: 0.38, y: 0.32),
+                            startRadius: 0,
+                            endRadius: size * 0.7))
                       : AnyShapeStyle(Polar.raised))
-                .overlay(core.stroke(Color.white.opacity(lit ? 0.22 : 0.08), lineWidth: 1))
-                .shadow(color: lit ? color.opacity(0.65 * clampedLevel + 0.2) : .clear, radius: size * 0.35)
-                .frame(width: coreWidth, height: size)
-                .opacity(lit ? 0.55 + clampedLevel * 0.45 : 1)
+                .overlay(Circle().stroke(Color.white.opacity(lit ? 0.18 : 0.10), lineWidth: 1))
+                .frame(width: size, height: size)
+                .opacity(lit ? 0.6 + clampedLevel * 0.4 : 1)
+            if let glyph = silhouette.glyph, size >= 26 {
+                Image(systemName: glyph)
+                    .font(.system(size: size * 0.34, weight: .semibold))
+                    .foregroundStyle(lit ? Color.black.opacity(0.30) : Polar.meter.opacity(0.55))
+            }
             if selected {
-                core
+                Circle()
+                    .stroke(Polar.select.opacity(0.28), lineWidth: 6)
+                    .frame(width: size + 16, height: size + 16)
+                Circle()
                     .stroke(Polar.select, lineWidth: 2)
-                    .frame(width: coreWidth + 10, height: size + 10)
+                    .frame(width: size + 10, height: size + 10)
             }
         }
-        .frame(width: coreWidth + 12, height: size + 12)
+        .frame(width: size + 18, height: size + 18)
         .accessibilityHidden(true)
     }
 }
@@ -551,5 +560,17 @@ struct SegmentStrip: View {
         } else {
             face
         }
+    }
+}
+
+// MARK: Swatch button
+
+/// Press feedback for colour chips without the system's disabled dimming,
+/// which turns saturated swatches muddy on the dark stage.
+struct PolarSwatchButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.92 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }

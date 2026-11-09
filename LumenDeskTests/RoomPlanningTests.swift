@@ -1007,8 +1007,9 @@ final class RoomCanvasRenderTests: XCTestCase {
         try await capture("room-canvas-1100", RoomCanvasShellView(), manager, width: 1100, height: 900)
         try await capture("room-canvas-1280", RoomCanvasShellView(), manager, width: 1280, height: 800)
         try await capture("room-canvas-1440", RoomCanvasShellView(), manager, width: 1440, height: 1000)
-        try await capture("room-canvas-settings", NavigationStack { RoomCanvasSettingsView() },
-                          manager, width: 760, height: 760)
+        try await capture("room-canvas-settings", RoomCanvasSettingsView(), manager, width: 640, height: 520)
+        try await capture("settings-network", RoomCanvasSettingsView(initialTab: .network),
+                          manager, width: 640, height: 620)
         let room = try XCTUnwrap(manager.rooms.first)
         try await capture("look-composer-680", LookComposerView(
             room: room, initialSelection: []
@@ -1041,6 +1042,24 @@ final class RoomCanvasRenderTests: XCTestCase {
             try await capture(name, LightPageView(device: device), manager, width: 1280, height: 900)
         }
         try await capture("looks-library", LooksLibraryView(room: room, compose: {}), manager, width: 860, height: 620)
+        // Polar screens: Add lights (3 steps), Nanoleaf pairing, Live and
+        // the empty room. The Sample Room keeps every one of them offline.
+        try await capture("add-lights-discover", AddOrRepairRoomView(selectedRoomID: .constant(room.id), onFinish: {}),
+                          manager, width: 820, height: 640)
+        try await capture("add-lights-place", AddOrRepairRoomView(selectedRoomID: .constant(room.id), onFinish: {},
+                                                                  initialStep: .place),
+                          manager, width: 820, height: 640)
+        let shapes = NanoleafCandidate(id: "render-shapes", name: "Shapes E8FF",
+                                       endpoint: NanoleafEndpoint(host: "0.0.0.0", port: 16021), model: "NL42")
+        try await capture("nanoleaf-pairing", NanoleafPairingView(candidate: shapes, preferredRoomID: room.id,
+                                                                  initialPhase: .listening(elapsed: 11)),
+                          manager, width: 520, height: 660)
+        try await capture("nanoleaf-pairing-failed", NanoleafPairingView(
+            candidate: shapes, preferredRoomID: room.id,
+            initialPhase: .failed("No token within 30s. Hold the button until the LED flashes and retry, or check Wi\u{2011}Fi.")
+        ), manager, width: 520, height: 660)
+        try await capture("live", RoomLiveView(room: room), manager, width: 960, height: 640)
+        try await capture("empty-room", RoomCanvasEmptyState(openSetup: {}), manager, width: 1000, height: 640)
 
         let theme = try XCTUnwrap(LightingCatalog.theme(withID: "aurora"))
         for brush in [LookBrush.spatialWash, .gradient] {

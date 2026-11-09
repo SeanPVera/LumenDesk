@@ -46,7 +46,7 @@ struct LumenDeskApp: App {
         }
 
         Settings {
-            NavigationStack { RoomCanvasSettingsView() }
+            RoomCanvasSettingsView(style: .toolbarTabs)
                 .environmentObject(manager)
                 .preferredColorScheme(.dark)
                 .managedActionConfirmations(manager)

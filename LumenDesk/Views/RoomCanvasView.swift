@@ -17,6 +17,8 @@ final class RoomCanvasSessionStore: ObservableObject {
     @Published var showingLive = false
     @Published var showingSettings = false
     @Published var showingLooks = false
+    /// The Look open in the composer for editing; nil composes a new one.
+    @Published var editingLookID: UUID?
     /// The light whose page is open in the detail column, replacing the
     /// Room Stage until the person goes back.
     @Published var editorDeviceID: String?
@@ -214,11 +216,13 @@ struct RoomCanvasShellView: View {
         }
         .sheet(isPresented: $session.showingComposer, onDismiss: {
             manager.stopSceneRehearsal(restore: true)
+            session.editingLookID = nil
         }) {
             if let selectedRoom {
                 LookComposerView(
                     room: selectedRoom,
-                    initialSelection: session.selectedFixtureIDs
+                    initialSelection: session.selectedFixtureIDs,
+                    editing: session.editingLookID.flatMap { id in manager.scenes.first { $0.id == id } }
                 )
                 .environmentObject(manager)
             }
@@ -237,7 +241,8 @@ struct RoomCanvasShellView: View {
             }
         }
         .sheet(isPresented: $session.showingSettings) {
-            NavigationStack { RoomCanvasSettingsView() }
+            RoomCanvasSettingsView(showsDone: true)
+                .sheetFrame(minWidth: 560, idealWidth: 640, minHeight: 460, idealHeight: 540)
                 .environmentObject(manager)
         }
         .sheet(isPresented: $session.showingLooks) {
@@ -245,6 +250,12 @@ struct RoomCanvasShellView: View {
                 LooksLibraryView(
                     room: selectedRoom,
                     compose: {
+                        session.editingLookID = nil
+                        session.showingLooks = false
+                        session.showingComposer = true
+                    },
+                    edit: { look in
+                        session.editingLookID = look.id
                         session.showingLooks = false
                         session.showingComposer = true
                     }
@@ -281,8 +292,19 @@ struct RoomCanvasShellView: View {
             let ordered = room.lightIDs.filter { session.selectedFixtureIDs.contains($0) }
             if let first = ordered.first { session.editorDeviceID = first }
         case .saveLook:
-            // Handled by the room's Looks bar, which owns the naming alert.
-            break
+            // The composer saves its own draft; otherwise the room's Looks
+            // bar opens its "Save current as a Look" prompt.
+            guard !session.showingComposer, selectedRoom != nil else { return }
+            NotificationCenter.default.post(name: .lumenSaveCurrentLook, object: nil)
+        case .duplicateLook:
+            // The composer duplicates its draft itself.
+            guard !session.showingComposer else { return }
+            if let lastID = manager.lastSceneResult?.scene.id,
+               manager.scenes.contains(where: { $0.id == lastID }) {
+                manager.duplicateLook(lastID)
+            } else {
+                manager.publishError("Apply a Look first, then press \u{2318}D to duplicate it. You can also right-click any Look.")
+            }
         }
     }
 
@@ -548,7 +570,7 @@ private struct RoomCanvasSidebar: View {
     }
 }
 
-private struct RoomCanvasEmptyState: View {
+struct RoomCanvasEmptyState: View {
     let openSetup: () -> Void
 
     var body: some View {
@@ -1001,14 +1023,7 @@ private struct FixtureCanvasNode: View {
     let select: () -> Void
     var open: (() -> Void)? = nil
 
-    private var orbSize: CGFloat {
-        let base: CGFloat = compact ? 30 : (condensed ? 34 : 44)
-        switch silhouette {
-        case .strip, .bars: return base * 0.62
-        case .curtain: return base * 0.86
-        default: return base
-        }
-    }
+    private var orbSize: CGFloat { compact ? 30 : (condensed ? 34 : 42) }
 
     var body: some View {
         VStack(spacing: 4) {
@@ -1025,7 +1040,7 @@ private struct FixtureCanvasNode: View {
                         .offset(x: 4, y: -4)
                 }
             }
-            .frame(height: (condensed ? 34 : 44) + 14)
+            .frame(height: orbSize + 18)
             segmentBadge
             Text(light.label)
                 .font(.polarUI(compact ? 12 : 13, weight: .semibold))
@@ -1551,6 +1566,7 @@ private struct LookShelf: View {
                                 renamedLookName = look.name
                                 renamingLookID = look.id
                             }
+                            Button("Duplicate Look") { manager.duplicateLook(look.id) }
                             Button("Delete Look", role: .destructive) {
                                 manager.deleteScene(look.id)
                             }
@@ -1571,8 +1587,7 @@ private struct LookShelf: View {
         .padding(.vertical, 12)
         .background(Lumen.deck)
         .overlay(alignment: .top) { Rectangle().fill(Lumen.rule).frame(height: 1) }
-        .onReceive(NotificationCenter.default.publisher(for: .lumenCommand)) { notification in
-            guard LumenCommandBus.command(from: notification) == .saveLook else { return }
+        .onReceive(NotificationCenter.default.publisher(for: .lumenSaveCurrentLook)) { _ in
             currentName = suggestedName
             namingCurrent = true
         }

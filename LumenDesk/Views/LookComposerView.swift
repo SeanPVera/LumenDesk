@@ -81,573 +81,573 @@ struct ComposerPalette: Identifiable {
     }()
 }
 
+/// Polar Look Composer: a per-fixture table (include, room, fixture, colour,
+/// level), a stage preview with an explicit Preview switch, and Save/Revert.
+///
+/// Preview is OFF by default and the composer never touches a light while
+/// it is off: editing the table only changes the draft and the on-screen
+/// stage. Turning Preview on shows the draft on the lights through the same
+/// path Apply uses; turning it off, Revert-and-off, Cancel or closing the
+/// sheet restores the exact opening state.
 struct LookComposerView: View {
     @EnvironmentObject private var manager: LightManager
     @Environment(\.dismiss) private var dismiss
     let room: Room
     let initialSelection: Set<String>
-    @State private var paletteID: String = ComposerPalette.choices.first?.id ?? "ember-moss"
-    @State private var selectedCategory: LightingTheme.Category? = nil
-    @State private var brush: LookBrush = .gradient
-    @State private var spatialField: SpatialFieldVector = .themeDefault
-    @State private var customBrightness: Double = 0.62
-    @State private var scope: LookComposerScope = .room
-    @State private var lookName: String = "Ember & Moss"
-    @State private var transitionSeconds: Double = 1.8
-    @State private var exactAssignments: [String: Int] = [:]
-    @State private var previewID: UUID?
+    let editing: LightingScene?
 
-    init(room: Room, initialSelection: Set<String>) {
+    @State private var rows: [LookDraftRow] = []
+    @State private var openingRows: [LookDraftRow] = []
+    @State private var lookName: String = ""
+    @State private var openingName: String = ""
+    @State private var allRooms: Bool = false
+    @State private var paletteID: String? = nil
+    @State private var previewOn: Bool = false
+    @State private var previewID: UUID? = nil
+    @State private var loaded: Bool = false
+
+    init(room: Room, initialSelection: Set<String>, editing: LightingScene? = nil) {
         self.room = room
         self.initialSelection = initialSelection
-        _scope = State(initialValue: initialSelection.isEmpty ? .room : .selection)
+        self.editing = editing
     }
 
     private var currentRoom: Room { manager.rooms.first(where: { $0.id == room.id }) ?? room }
-    private var roomIDs: Set<String> { Set(currentRoom.lightIDs) }
-    private var targetIDs: Set<String> {
-        if scope == .selection {
-            return RoomWorkspaceSelection.targets(
-                selected: initialSelection,
-                available: currentRoom.lightIDs
-            )
+
+    /// Lights in table order: the open room first, then (with All rooms)
+    /// every other room in sidebar order.
+    private var tableLights: [LightDevice] {
+        var seen = Set<String>()
+        var result: [LightDevice] = []
+        let rooms = allRooms ? [currentRoom] + manager.rooms.filter { $0.id != currentRoom.id } : [currentRoom]
+        for room in rooms {
+            for light in manager.devices(in: room) where seen.insert(light.id).inserted {
+                result.append(light)
+            }
         }
-        return roomIDs
-    }
-    private var selectedPalette: ComposerPalette {
-        ComposerPalette.choices.first(where: { $0.id == paletteID }) ?? ComposerPalette.choices[0]
-    }
-    private var filteredPalettes: [ComposerPalette] {
-        guard let selectedCategory else { return ComposerPalette.choices }
-        return ComposerPalette.choices.filter { $0.theme.category == selectedCategory }
-    }
-    private var orderedTargetLights: [LightDevice] {
-        manager.devices(in: currentRoom).filter { targetIDs.contains($0.id) }
-    }
-    private var paletteAssignments: [String: Int]? {
-        guard brush == .exactFixture else { return nil }
-        return Dictionary(uniqueKeysWithValues: orderedTargetLights.map { light in
-            (light.id, exactAssignment(for: light))
-        })
-    }
-    private var authoredTheme: LightingTheme {
-        let brushed = brush.applying(to: selectedPalette.theme)
-        return LightingTheme(
-            id: brushed.id,
-            name: brushed.name,
-            summary: brushed.summary,
-            category: brushed.category,
-            icon: brushed.icon,
-            colors: brushed.colors,
-            brightness: customBrightness,
-            distribution: brushed.distribution
-        )
+        return result
     }
 
-    private var previewRequest: ComposerPreviewRequest {
-        ComposerPreviewRequest(
-            theme: authoredTheme,
-            targetIDs: targetIDs,
-            paletteAssignments: paletteAssignments,
-            transitionDuration: transitionSeconds,
-            previewID: previewID
-        )
+    private var includedCount: Int { rows.filter(\.included).count }
+    private var hasChanges: Bool { rows != openingRows || lookName != openingName }
+    private var canSave: Bool {
+        includedCount > 0 && !lookName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func roomOf(_ id: String) -> Room? {
+        if currentRoom.lightIDs.contains(id) { return currentRoom }
+        return manager.rooms.first { $0.lightIDs.contains(id) }
+    }
+
+    private func light(_ id: String) -> LightDevice? { manager.devices.first { $0.id == id } }
+
+    private var draftSnapshots: [String: DeviceSnapshot] {
+        let kelvins = Dictionary(manager.devices.map { ($0.id, $0.kelvin) }, uniquingKeysWith: { first, _ in first })
+        return LookDraftBuilder.snapshots(rows, kelvins: kelvins, original: editing, originalRows: openingRows)
     }
 
     var body: some View {
-        NavigationStack {
+        VStack(spacing: 0) {
+            headerBar
             GeometryReader { geometry in
-                ScrollView {
-                    if geometry.size.width >= 850 {
-                        HStack(alignment: .top, spacing: 24) {
-                            previewColumn.frame(maxWidth: .infinity)
-                            inspector.frame(width: 330)
-                        }
-                        .padding(24)
-                    } else {
-                        VStack(alignment: .leading, spacing: 22) {
-                            previewColumn
-                            inspector
-                        }
-                        .padding(20)
+                if geometry.size.width >= 820 {
+                    HStack(spacing: 0) {
+                        tablePane
+                        Rectangle().fill(Polar.ruleSoft).frame(width: 1)
+                        stagePane.frame(width: 300)
                     }
-                }
-            }
-            .background(Lumen.canvas)
-            .navigationTitle("Look Composer")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
-                        previewID = nil
-                        manager.stopSceneRehearsal(restore: true)
-                        dismiss()
+                } else {
+                    ScrollView {
+                        VStack(spacing: 0) {
+                            stagePane.frame(height: 520)
+                            Rectangle().fill(Polar.ruleSoft).frame(height: 1)
+                            tableRows.padding(PolarSpacing.md)
+                        }
                     }
                 }
             }
         }
-        .font(LumenType.body())
-        .foregroundStyle(Lumen.graphite)
-        .sheetFrame(minWidth: 680, idealWidth: 1040, minHeight: 620, idealHeight: 780)
-        .onAppear {
-            customBrightness = selectedPalette.theme.brightness
-            synchronizeExactAssignments()
+        .background(Polar.stage)
+        .foregroundStyle(Polar.chalk)
+        .font(.polarUI(13))
+        .sheetFrame(minWidth: 680, idealWidth: 1040, minHeight: 620, idealHeight: 760)
+        .onAppear(perform: load)
+        .onDisappear {
+            if previewOn { endPreview(restore: true) }
         }
-        .onChange(of: paletteID) { _ in
-            lookName = selectedPalette.name
-            customBrightness = selectedPalette.theme.brightness
-            synchronizeExactAssignments()
+        .onChange(of: allRooms) { _ in mergeRowsForScope() }
+        .task(id: rows) {
+            // Only a running preview follows edits; with Preview off the
+            // draft stays on screen and nothing is sent.
+            guard previewOn, let id = previewID else { return }
+            do { try await Task.sleep(nanoseconds: 140_000_000) } catch { return }
+            guard !Task.isCancelled, previewOn else { return }
+            if manager.previewComposedLook(draftSnapshots, updating: id) == nil {
+                previewOn = false
+                previewID = nil
+            }
         }
-        .onChange(of: scope) { _ in synchronizeExactAssignments() }
-        .onChange(of: brush) { _ in synchronizeExactAssignments() }
-        .task(id: previewRequest) {
-            let request = previewRequest
-            guard let id = request.previewID, manager.rehearsalSceneID == id else { return }
-            // Coalesce rapid brush, scope, swatch, and transition edits.
-            do { try await Task.sleep(nanoseconds: 150_000_000) }
-            catch { return }
-            guard !Task.isCancelled else { return }
-            previewID = manager.startLookPreview(
-                request.theme,
-                deviceIDs: request.targetIDs,
-                in: .room(currentRoom.id),
-                paletteAssignments: request.paletteAssignments,
-                spatialField: spatialField,
-                transitionDuration: request.transitionDuration,
-                updating: id
-            )
+        .onReceive(manager.$rehearsalSceneID) { current in
+            // Another owner (Apply, a show, a workspace switch) ended it.
+            if previewOn, current != previewID {
+                previewOn = false
+                previewID = nil
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .lumenCommand)) { note in
+            switch LumenCommandBus.command(from: note) {
+            case .saveLook?: if canSave { save() }
+            case .duplicateLook?: saveCopy()
+            default: break
+            }
         }
     }
 
-    private var previewColumn: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            VStack(alignment: .leading, spacing: 5) {
-                HStack {
-                    Text("PALETTE · \(ComposerPalette.choices.count) CURATED")
-                        .font(LumenType.instrumentLabel(size: 10))
-                        .tracking(1.2)
-                        .foregroundStyle(Lumen.meter)
-                    Spacer()
-                    Text(selectedPalette.theme.category.rawValue)
-                        .font(LumenType.instrumentLabel(size: 10))
-                        .foregroundStyle(Lumen.verdigris)
-                }
-                Text(selectedPalette.name)
-                    .font(LumenType.display(size: 30, weight: .bold))
-                Text(selectedPalette.theme.summary)
-                    .font(LumenType.body(size: 13))
-                    .foregroundStyle(Lumen.meter)
+    // MARK: Header
+
+    private var headerBar: some View {
+        HStack(spacing: PolarSpacing.sm) {
+            Button {
+                cancel()
+            } label: {
+                Label("Looks", systemImage: "chevron.left")
             }
+            .buttonStyle(PolarButtonStyle(kind: .quiet, compact: true))
+            .keyboardShortcut(.cancelAction)
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    Button {
-                        selectedCategory = nil
-                    } label: {
-                        Text("All (\(ComposerPalette.choices.count))")
-                            .font(LumenType.body(size: 11, weight: .semibold))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 5)
-                            .background(
-                                selectedCategory == nil ? Lumen.graphite : Lumen.floor,
-                                in: Capsule(style: .continuous)
-                            )
-                            .foregroundStyle(selectedCategory == nil ? Lumen.canvas : Lumen.graphite)
-                            .overlay(
-                                Capsule(style: .continuous)
-                                    .stroke(selectedCategory == nil ? Color.clear : Lumen.rule, lineWidth: 1)
-                            )
-                    }
-                    .buttonStyle(.plain)
+            TextField("Look name", text: $lookName)
+                .textFieldStyle(.plain)
+                .font(.polarDisplay(17, weight: .bold))
+                .frame(maxWidth: 220)
+                .accessibilityLabel("Look name")
+            Text(roomsCaption)
+                .font(.polarUI(12))
+                .foregroundStyle(Polar.meter)
+                .lineLimit(1)
+            Spacer(minLength: 8)
+            if editing != nil {
+                Button("Duplicate") { saveCopy() }
+                    .buttonStyle(PolarButtonStyle(kind: .quiet, compact: true))
+                    .help("Save this draft as a new Look (\u{2318}D)")
+                    .disabled(!canSave)
+            }
+            Button("Revert") { revert() }
+                .buttonStyle(PolarButtonStyle(kind: .quiet))
+                .disabled(!hasChanges)
+            Button("Save Look") { save() }
+                .buttonStyle(PolarButtonStyle(kind: .prominent))
+                .disabled(!canSave)
+        }
+        .padding(.horizontal, PolarSpacing.md)
+        .padding(.vertical, 10)
+        .background(Polar.desk)
+        .overlay(alignment: .bottom) { Rectangle().fill(Polar.ruleSoft).frame(height: 1) }
+    }
 
-                    ForEach(LightingTheme.Category.allCases, id: \.self) { category in
-                        Button {
-                            selectedCategory = category
-                        } label: {
-                            Text(category.rawValue)
-                                .font(LumenType.body(size: 11, weight: .semibold))
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 5)
-                                .background(
-                                    selectedCategory == category ? Lumen.graphite : Lumen.floor,
-                                    in: Capsule(style: .continuous)
-                                )
-                                .foregroundStyle(selectedCategory == category ? Lumen.canvas : Lumen.graphite)
-                                .overlay(
-                                    Capsule(style: .continuous)
-                                        .stroke(selectedCategory == category ? Color.clear : Lumen.rule, lineWidth: 1)
-                                )
-                        }
-                        .buttonStyle(.plain)
-                    }
+    private var roomsCaption: String {
+        if !allRooms { return currentRoom.name }
+        return manager.rooms.map(\.name).joined(separator: " \u{00B7} ")
+    }
+
+    // MARK: Table
+
+    private var tablePane: some View {
+        ScrollView {
+            tableRows.padding(PolarSpacing.md)
+        }
+    }
+
+    private var tableRows: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: PolarSpacing.sm) {
+                PolarSectionLabel("Per-fixture color & level \u{00B7} \(includedCount) of \(rows.count) included")
+                Spacer(minLength: 8)
+                Picker("Scope", selection: $allRooms) {
+                    Text("This room").tag(false)
+                    Text("All rooms").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 190)
+            }
+            paletteStrip
+            columnHeader
+            ForEach($rows) { $row in
+                if let device = light(row.id) {
+                    LookComposerRow(row: $row, device: device, roomName: roomOf(row.id)?.name ?? "No room")
                 }
             }
+            if rows.isEmpty {
+                Text("This room has no fixtures yet. Add lights first, then compose a Look.")
+                    .font(.polarUI(13))
+                    .foregroundStyle(Polar.meter)
+                    .padding(.vertical, PolarSpacing.lg)
+            }
+        }
+    }
 
+    private var paletteStrip: some View {
+        HStack(spacing: 8) {
+            Text("Start from")
+                .font(.polarUI(12))
+                .foregroundStyle(Polar.meter)
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 10) {
-                    ForEach(filteredPalettes) { palette in
+                HStack(spacing: 6) {
+                    ForEach(ComposerPalette.choices.prefix(14)) { palette in
                         Button {
                             paletteID = palette.id
+                            rows = LookDraftBuilder.repaint(rows, palette: palette.theme.colors.map { UInt32($0.hex & 0xFFFFFF) })
                         } label: {
-                            VStack(alignment: .leading, spacing: 8) {
-                                HStack(spacing: 0) {
-                                    ForEach(palette.theme.colors.indices, id: \.self) { index in
-                                        Rectangle().fill(palette.theme.colors[index].color)
+                            HStack(spacing: 6) {
+                                HStack(spacing: -4) {
+                                    ForEach(Array(palette.theme.colors.prefix(4).enumerated()), id: \.offset) { _, color in
+                                        Circle().fill(color.color)
+                                            .overlay(Circle().stroke(Polar.desk, lineWidth: 1.5))
+                                            .frame(width: 12, height: 12)
                                     }
                                 }
-                                .frame(width: 124, height: 34)
-                                .clipShape(RoundedRectangle(cornerRadius: 7))
-                                Text(palette.name)
-                                    .font(LumenType.body(size: 11, weight: .semibold))
-                                    .lineLimit(1)
+                                Text(palette.name).lineLimit(1)
                             }
-                            .padding(9)
-                            .background(Lumen.floor, in: RoundedRectangle(cornerRadius: 10))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 10)
-                                    .stroke(paletteID == palette.id ? Lumen.ember : Lumen.rule,
-                                            lineWidth: paletteID == palette.id ? 2 : 1)
-                            )
                         }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 9) {
-                Text("Brush")
-                    .font(LumenType.body(size: 13, weight: .semibold))
-                Picker("Brush", selection: $brush) {
-                    ForEach(LookBrush.allCases) { Text($0.rawValue).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                Text(brush.summary)
-                    .font(LumenType.body(size: 12))
-                    .foregroundStyle(Lumen.meter)
-            }
-
-            if brush != .exactFixture {
-                VStack(alignment: .leading, spacing: 9) {
-                    HStack {
-                        Text("2D Spatial Field")
-                            .font(LumenType.body(size: 13, weight: .semibold))
-                        Spacer()
-                        Label(spatialField.displayName, systemImage: spatialField.icon)
-                            .font(LumenType.instrumentLabel(size: 10))
-                            .foregroundStyle(Lumen.verdigris)
-                    }
-                    Picker("2D Spatial Field", selection: $spatialField) {
-                        ForEach(SpatialFieldVector.allCases) { vector in
-                            Text(vector.shortLabel).tag(vector)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    Text(spatialField.summary)
-                        .font(LumenType.body(size: 12))
-                        .foregroundStyle(Lumen.meter)
-                }
-            }
-
-            exactAssignmentEditor
-
-            ComposerRoomPreview(
-                room: currentRoom,
-                lights: manager.devices(in: currentRoom),
-                targetIDs: targetIDs,
-                theme: authoredTheme,
-                paletteAssignments: paletteAssignments,
-                spatialField: spatialField
-            )
-            .frame(minHeight: 300)
-
-            ambientEffectsSection
-        }
-    }
-
-    private var ambientEffectsSection: some View {
-        let roomScope: LightScope = .room(currentRoom.id)
-        let activeEffectID = manager.activeEffects[roomScope]
-        return VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("AMBIENT MOTION EFFECTS")
-                        .font(LumenType.instrumentLabel(size: 10))
-                        .tracking(1.2)
-                        .foregroundStyle(Lumen.meter)
-                    Text("Continuous generative motion across \(currentRoom.name)")
-                        .font(LumenType.body(size: 12))
-                        .foregroundStyle(Lumen.meter)
-                }
-                Spacer()
-                if let activeEffectID, activeEffectID != "music-pulse" {
-                    Button("Stop Motion") {
-                        manager.stopEffect(scope: roomScope, restore: true)
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                }
-            }
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 10) {
-                    ForEach(LightingCatalog.effects) { effect in
-                        let isActive = activeEffectID == effect.id
-                        Button {
-                            if isActive {
-                                manager.stopEffect(scope: roomScope, restore: true)
-                            } else {
-                                manager.startEffect(effect, scope: roomScope)
-                            }
-                        } label: {
-                            VStack(alignment: .leading, spacing: 6) {
-                                HStack(spacing: 6) {
-                                    Image(systemName: effect.icon)
-                                        .font(.system(size: 12, weight: .semibold))
-                                        .foregroundStyle(isActive ? Lumen.ember : Lumen.graphite)
-                                    Text(effect.name)
-                                        .font(LumenType.body(size: 12, weight: .semibold))
-                                        .lineLimit(1)
-                                }
-                                HStack(spacing: 0) {
-                                    ForEach(effect.colors.indices, id: \.self) { index in
-                                        Rectangle().fill(effect.colors[index].color)
-                                    }
-                                }
-                                .frame(width: 132, height: 14)
-                                .clipShape(RoundedRectangle(cornerRadius: 4))
-                                Text(effect.summary)
-                                    .font(LumenType.body(size: 10))
-                                    .foregroundStyle(Lumen.meter)
-                                    .lineLimit(2)
-                                    .frame(width: 132, alignment: .leading)
-                            }
-                            .padding(10)
-                            .background(Lumen.floor, in: RoundedRectangle(cornerRadius: 10))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 10)
-                                    .stroke(isActive ? Lumen.ember : Lumen.rule, lineWidth: isActive ? 2 : 1)
-                            )
-                        }
-                        .buttonStyle(.plain)
+                        .buttonStyle(PolarButtonStyle(kind: paletteID == palette.id ? .selected : .quiet, compact: true))
+                        .help("Recolour the included fixtures with \(palette.name)")
                     }
                 }
             }
         }
-        .padding(14)
-        .background(Lumen.deck.opacity(0.65), in: RoundedRectangle(cornerRadius: 12))
     }
 
-    @ViewBuilder
-    private var exactAssignmentEditor: some View {
-        if brush == .exactFixture {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Fixture assignments")
-                    .font(LumenType.body(size: 13, weight: .semibold))
-                Text("Each fixture keeps the chosen swatch. Addressable strips, matrices, and panels repeat it across their surface.")
-                    .font(LumenType.body(size: 11))
-                    .foregroundStyle(Lumen.meter)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                ForEach(orderedTargetLights) { light in
-                    HStack(spacing: 10) {
-                        Text(light.label)
-                            .font(LumenType.body(size: 12, weight: .semibold))
-                            .lineLimit(1)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        HStack(spacing: 7) {
-                            ForEach(selectedPalette.theme.colors.indices, id: \.self) { index in
-                                Button {
-                                    exactAssignments[light.id] = index
-                                } label: {
-                                    Circle()
-                                        .fill(selectedPalette.theme.colors[index].color)
-                                        .frame(width: 22, height: 22)
-                                        .padding(3)
-                                        .overlay(
-                                            Circle()
-                                                .stroke(
-                                                    exactAssignment(for: light) == index
-                                                        ? Lumen.graphite : Color.clear,
-                                                    lineWidth: 2
-                                                )
-                                        )
-                                }
-                                .buttonStyle(.plain)
-                                .accessibilityLabel("Assign palette colour \(index + 1) to \(light.label)")
-                                .accessibilityAddTraits(
-                                    exactAssignment(for: light) == index ? .isSelected : []
-                                )
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
-                    .background(Lumen.floor, in: RoundedRectangle(cornerRadius: 9))
-                    .overlay(RoundedRectangle(cornerRadius: 9).stroke(Lumen.rule, lineWidth: 1))
-                }
-            }
-            .padding(14)
-            .background(Lumen.deck.opacity(0.72), in: RoundedRectangle(cornerRadius: 12))
+    private var columnHeader: some View {
+        HStack(spacing: 12) {
+            Color.clear.frame(width: 18)
+            Text("ROOM").frame(width: 104, alignment: .leading)
+            Text("FIXTURE").frame(maxWidth: .infinity, alignment: .leading)
+            Text("COLOR").frame(width: 120, alignment: .leading)
+            Text("LEVEL").frame(width: 190, alignment: .leading)
         }
+        .font(.polarMono(10, weight: .semibold))
+        .tracking(0.8)
+        .foregroundStyle(Polar.meter)
+        .padding(.horizontal, 14)
     }
 
-    private var inspector: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text("Look details")
-                .font(LumenType.display(size: 22, weight: .bold))
-            VStack(alignment: .leading, spacing: 7) {
-                Text("Look name").font(LumenType.instrumentLabel(size: 10)).foregroundStyle(Lumen.meter)
-                TextField("Look name", text: $lookName).textFieldStyle(.roundedBorder)
-            }
+    // MARK: Stage
 
-            VStack(alignment: .leading, spacing: 7) {
-                Text("Scope").font(LumenType.instrumentLabel(size: 10)).foregroundStyle(Lumen.meter)
-                Picker("Scope", selection: $scope) {
-                    ForEach(LookComposerScope.allCases) { entry in
-                        Text(entry.rawValue).tag(entry)
+    private var stagePane: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 8) {
+                PolarSectionLabel("Stage preview")
+                HStack(alignment: .top, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(previewOn ? "Preview ON \u{2014} showing the Look on your lights"
+                                       : "Preview OFF \u{2014} lights untouched")
+                            .font(.polarUI(13, weight: .semibold))
+                            .foregroundStyle(previewOn ? Polar.mint : Polar.chalk)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("Explicit: fixtures stay as they are unless Preview is on. Saving never changes a light.")
+                            .font(.polarUI(11))
+                            .foregroundStyle(Polar.meter)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
+                    Spacer(minLength: 0)
+                    Toggle("Preview", isOn: previewBinding)
+                        .toggleStyle(.switch)
+                        .labelsHidden()
+                        .tint(Polar.mint)
+                        .accessibilityLabel("Preview on lights")
+                        .disabled(includedCount == 0 && !previewOn)
                 }
-                .pickerStyle(.segmented)
-                Text("\(targetIDs.count) of \(roomIDs.count) fixtures")
-                    .font(LumenType.readout(size: 11))
-                    .foregroundStyle(Lumen.meter)
             }
+            .polarPanel(fill: Polar.desk, padding: 14)
 
-            VStack(alignment: .leading, spacing: 7) {
-                HStack {
-                    Text("Room level").font(LumenType.body(size: 13, weight: .semibold))
-                    Spacer()
-                    Text("\(Int((customBrightness * 100).rounded()))%")
-                        .font(LumenType.readout(size: 12))
-                }
-                Slider(value: $customBrightness, in: 0.05...1.0)
-                    .tint(Lumen.ember)
-                    .accessibilityLabel("Room level")
-                    .accessibilityValue("\(Int((customBrightness * 100).rounded())) percent")
+            Text(previewOn ? "PREVIEW ON" : "PREVIEW OFF")
+                .font(.polarMono(11, weight: .bold))
+                .tracking(1)
+                .foregroundStyle(previewOn ? Polar.mint : Polar.meter)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 6)
+                .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(previewOn ? Polar.mint.opacity(0.12) : Polar.raised.opacity(0.6)))
+                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(previewOn ? Polar.mint.opacity(0.45) : Polar.ruleSoft, lineWidth: 1))
+
+            ComposerStage(rows: rows.filter(\.included), lit: previewOn, anchor: { id in
+                guard let room = roomOf(id) else { return PlanAnchor(x: 0.5, y: 0.5) }
+                return manager.planAnchor(for: id, in: room)
+            }, silhouette: { id in
+                light(id).map { LightPageModel.resolve($0).silhouette } ?? .bulb
+            })
+            .frame(maxHeight: .infinity)
+
+            Text("Orbs show included fixtures at their Look colours. Preview off dims the stage and leaves live lights alone.")
+                .font(.polarUI(11))
+                .foregroundStyle(Polar.meter)
+                .fixedSize(horizontal: false, vertical: true)
+            Button {
+                save()
+            } label: {
+                Text("Save Look").frame(maxWidth: .infinity)
             }
-
-            VStack(alignment: .leading, spacing: 7) {
-                Text("Adaptation")
-                    .font(LumenType.instrumentLabel(size: 10))
-                    .foregroundStyle(Lumen.meter)
-                Text(manager.lookAdaptationSummary(
-                    authoredTheme,
-                    deviceIDs: targetIDs,
-                    in: .room(currentRoom.id),
-                    paletteAssignments: paletteAssignments,
-                    spatialField: spatialField
-                )
-                     ?? "Every selected fixture can carry this composition directly.")
-                    .font(LumenType.body(size: 12))
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(12)
-            .background(Lumen.verdigris.opacity(0.11), in: RoundedRectangle(cornerRadius: 10))
-
-            VStack(alignment: .leading, spacing: 7) {
-                HStack {
-                    Text("Transition").font(LumenType.body(size: 13, weight: .semibold))
-                    Spacer()
-                    Text(String(format: "%.1f seconds", transitionSeconds))
-                        .font(LumenType.readout(size: 12))
-                }
-                Slider(value: $transitionSeconds, in: 0.2...5, step: 0.1)
-                Text("Ease · device-native where supported")
-                    .font(LumenType.body(size: 11))
-                    .foregroundStyle(Lumen.meter)
-            }
-
-            HStack(spacing: 9) {
-                Button("Restore before preview") {
-                    previewID = nil
-                    manager.stopSceneRehearsal(restore: true)
-                }
-                .buttonStyle(.bordered)
-                .disabled(manager.rehearsalSceneID == nil)
-                Button("Preview") {
-                    previewID = manager.startLookPreview(
-                        authoredTheme,
-                        deviceIDs: targetIDs,
-                        in: .room(currentRoom.id),
-                        paletteAssignments: paletteAssignments,
-                        spatialField: spatialField,
-                        transitionDuration: transitionSeconds,
-                        updating: previewID == manager.rehearsalSceneID ? previewID : nil
-                    )
-                }
-                .buttonStyle(.bordered)
-            }
-
-            Button(action: save) {
-                Label("Save Look", systemImage: "checkmark.circle.fill")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(Lumen.ember)
-            .disabled(lookName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || targetIDs.isEmpty)
-
-            RoomCanvasStatusBadge(status: manager.rehearsalSceneID == nil ? .confirmed : .pending)
+            .buttonStyle(PolarButtonStyle(kind: .prominent))
+            .disabled(!canSave)
         }
-        .padding(18)
-        .background(Lumen.floor, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Lumen.rule, lineWidth: 1))
+        .padding(PolarSpacing.md)
+        .background(Polar.deck)
     }
 
-    private func save() {
-        if manager.rehearsalSceneID != nil {
-            previewID = manager.startLookPreview(
-                authoredTheme,
-                deviceIDs: targetIDs,
-                in: .room(currentRoom.id),
-                paletteAssignments: paletteAssignments,
-                spatialField: spatialField,
-                transitionDuration: transitionSeconds,
-                updating: previewID == manager.rehearsalSceneID ? previewID : nil
-            )
-            manager.stopSceneRehearsal(restore: false)
-            previewID = nil
-            _ = manager.captureLook(name: lookName, deviceIDs: targetIDs)
+    private var previewBinding: Binding<Bool> {
+        Binding(
+            get: { previewOn },
+            set: { on in
+                if on {
+                    previewID = manager.previewComposedLook(draftSnapshots)
+                    previewOn = previewID != nil
+                } else {
+                    endPreview(restore: true)
+                }
+            }
+        )
+    }
+
+    // MARK: Actions
+
+    private func load() {
+        guard !loaded else { return }
+        loaded = true
+        let lights = tableLights
+        if let editing {
+            rows = LookDraftBuilder.rows(editing: editing, lights: lights)
+            lookName = editing.name
+            // A Look reaching beyond this room opens with every room shown.
+            if !Set(editing.snapshots.keys).isSubset(of: Set(currentRoom.lightIDs)) {
+                allRooms = true
+                rows = LookDraftBuilder.rows(editing: editing, lights: tableLights)
+            }
         } else {
-            _ = manager.saveLookFromPlan(
-                name: lookName,
-                theme: authoredTheme,
-                deviceIDs: targetIDs,
-                in: .room(currentRoom.id),
-                paletteAssignments: paletteAssignments,
-                spatialField: spatialField
+            let palette = ComposerPalette.choices.first
+            paletteID = palette?.id
+            rows = LookDraftBuilder.rows(
+                palette: palette?.theme.colors.map { UInt32($0.hex & 0xFFFFFF) } ?? [],
+                level: palette?.theme.brightness ?? 0.62,
+                lights: lights,
+                selection: RoomWorkspaceSelection.targets(selected: initialSelection, available: currentRoom.lightIDs)
+                    == Set(currentRoom.lightIDs) ? [] : initialSelection
             )
+            lookName = palette?.name ?? "New Look"
         }
+        openingRows = rows
+        openingName = lookName
+    }
+
+    /// Switching the scope keeps every edited row and adds the newcomers,
+    /// excluded, at their live colour.
+    private func mergeRowsForScope() {
+        let existing = Dictionary(rows.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        rows = tableLights.map { light in
+            if let row = existing[light.id] { return row }
+            let c = light.color.rgbComponents
+            return LookDraftRow(id: light.id, included: false,
+                                rgb: LookDraftBuilder.rgb(red: c.r, green: c.g, blue: c.b),
+                                level: max(LookDraftBuilder.minimumLevel, light.brightness))
+        }
+    }
+
+    private func revert() {
+        let opening = Dictionary(openingRows.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        rows = rows.compactMap { opening[$0.id] } + openingRows.filter { row in !rows.contains { $0.id == row.id } }
+        lookName = openingName
+    }
+
+    private func endPreview(restore: Bool) {
+        if previewID != nil, manager.rehearsalSceneID == previewID {
+            manager.stopSceneRehearsal(restore: restore)
+        }
+        previewOn = false
+        previewID = nil
+    }
+
+    private func cancel() {
+        endPreview(restore: true)
         dismiss()
     }
 
-    private func exactAssignment(for light: LightDevice) -> Int {
-        let count = selectedPalette.theme.colors.count
-        guard count > 0 else { return 0 }
-        let fallback = orderedTargetLights.firstIndex(where: { $0.id == light.id }) ?? 0
-        return min(count - 1, max(0, exactAssignments[light.id] ?? fallback % count))
+    private func save() {
+        guard canSave else { return }
+        let snapshots = draftSnapshots
+        guard manager.saveComposedLook(name: lookName, snapshots: snapshots, replacing: editing?.id) != nil else { return }
+        // A running preview already shows the saved Look, so keep it on the
+        // lights rather than snapping back; with Preview off nothing moved.
+        endPreview(restore: false)
+        dismiss()
     }
 
-    private func synchronizeExactAssignments() {
-        let count = selectedPalette.theme.colors.count
-        guard count > 0 else {
-            exactAssignments = [:]
-            return
-        }
-        var updated: [String: Int] = [:]
-        for (index, light) in orderedTargetLights.enumerated() {
-            let existing = exactAssignments[light.id] ?? index % count
-            updated[light.id] = min(count - 1, max(0, existing))
-        }
-        exactAssignments = updated
+    /// ⌘D: save the current draft as a new Look and keep composing.
+    private func saveCopy() {
+        guard canSave else { return }
+        let name = LookDraftBuilder.copyName(for: lookName.trimmingCharacters(in: .whitespacesAndNewlines),
+                                             existing: manager.scenes.map(\.name))
+        _ = manager.saveComposedLook(name: name, snapshots: draftSnapshots, replacing: nil)
     }
 }
 
+/// One table row: include checkbox, room chip, fixture, colour, level.
+private struct LookComposerRow: View {
+    @Binding var row: LookDraftRow
+    @ObservedObject var device: LightDevice
+    let roomName: String
 
-private struct ComposerPreviewRequest: Equatable {
-    let theme: LightingTheme
-    let targetIDs: Set<String>
-    let paletteAssignments: [String: Int]?
-    let transitionDuration: Double
-    let previewID: UUID?
+    private var modelLine: String {
+        let line = LightPageModel.resolve(device).modelLine
+        if !line.isEmpty { return line }
+        return [device.brand.displayName, device.sku].compactMap { $0 }.joined(separator: " ")
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            PolarCheckbox(isOn: $row.included, label: "Include \(device.label)")
+            Text(roomName)
+                .font(.polarUI(11, weight: .semibold))
+                .foregroundStyle(Polar.select)
+                .lineLimit(1)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(Capsule().fill(Polar.accent.opacity(0.16)))
+                .frame(width: 104, alignment: .leading)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(device.label)
+                    .font(.polarUI(13, weight: .semibold))
+                    .lineLimit(1)
+                Text(modelLine)
+                    .font(.polarUI(11))
+                    .foregroundStyle(Polar.meter)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 8) {
+                ColorPicker("", selection: colorBinding, supportsOpacity: false)
+                    .labelsHidden()
+                    .frame(width: 30)
+                    .accessibilityLabel("\(device.label) color")
+                Text(row.hex)
+                    .font(.polarMono(11))
+                    .foregroundStyle(Polar.meter)
+            }
+            .frame(width: 120, alignment: .leading)
+            HStack(spacing: 8) {
+                Slider(value: $row.level, in: LookDraftBuilder.minimumLevel...1)
+                    .tint(Polar.accent)
+                    .accessibilityLabel("\(device.label) level")
+                    .accessibilityValue("\(Int((row.level * 100).rounded())) percent")
+                Text("\(Int((row.level * 100).rounded()))%")
+                    .font(.polarMono(11, weight: .semibold))
+                    .frame(width: 38, alignment: .trailing)
+            }
+            .frame(width: 190)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Polar.desk))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .stroke(row.included ? Polar.rule : Polar.ruleSoft, lineWidth: 1))
+        .opacity(row.included ? 1 : 0.55)
+    }
+
+    private var colorBinding: Binding<Color> {
+        Binding(
+            get: { row.color },
+            set: { color in
+                let c = color.rgbComponents
+                row.rgb = LookDraftBuilder.rgb(red: c.r, green: c.g, blue: c.b)
+            }
+        )
+    }
+}
+
+/// A square Polar checkbox that works the same on macOS and iOS.
+struct PolarCheckbox: View {
+    @Binding var isOn: Bool
+    let label: String
+
+    var body: some View {
+        Button {
+            isOn.toggle()
+        } label: {
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                .fill(isOn ? Polar.accent : Polar.raised)
+                .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .stroke(isOn ? Polar.accent : Polar.rule, lineWidth: 1))
+                .overlay {
+                    if isOn {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 10, weight: .heavy))
+                            .foregroundStyle(.white)
+                    }
+                }
+                .frame(width: 18, height: 18)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(PolarSwatchButtonStyle())
+        .accessibilityLabel(label)
+        .accessibilityValue(isOn ? "Included" : "Not included")
+        .accessibilityAddTraits(isOn ? .isSelected : [])
+    }
+}
+
+/// The composer's stage: included fixtures as glowing orbs at their room
+/// positions in the draft's colours. Dimmed while Preview is off.
+private struct ComposerStage: View {
+    let rows: [LookDraftRow]
+    let lit: Bool
+    let anchor: (String) -> PlanAnchor
+    let silhouette: (String) -> OrbSilhouette
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                RoundedRectangle(cornerRadius: Polar.radiusCard, style: .continuous)
+                    .fill(Polar.stage)
+                PolarStageGrid(spacing: 28)
+                    .stroke(Polar.wall.opacity(0.55), lineWidth: 0.5)
+                    .clipShape(RoundedRectangle(cornerRadius: Polar.radiusCard, style: .continuous))
+                ForEach(rows) { row in
+                    let point = anchor(row.id)
+                    GlowingOrb(color: row.color, level: row.level, isOn: true,
+                               silhouette: silhouette(row.id), size: 22)
+                        .position(x: 24 + (geometry.size.width - 48) * point.x,
+                                  y: 24 + (geometry.size.height - 48) * point.y)
+                }
+                .opacity(lit ? 1 : 0.45)
+                .saturation(lit ? 1 : 0.7)
+            }
+            .overlay(RoundedRectangle(cornerRadius: Polar.radiusCard, style: .continuous)
+                .stroke(Polar.ruleSoft, lineWidth: 1))
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Stage preview, \(rows.count) fixtures\(lit ? ", preview on" : "")")
+    }
+}
+
+/// Square grid lines for stage backdrops.
+struct PolarStageGrid: Shape {
+    var spacing: CGFloat = 32
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        guard spacing > 2 else { return path }
+        var x = rect.minX + spacing
+        while x < rect.maxX {
+            path.move(to: CGPoint(x: x, y: rect.minY))
+            path.addLine(to: CGPoint(x: x, y: rect.maxY))
+            x += spacing
+        }
+        var y = rect.minY + spacing
+        while y < rect.maxY {
+            path.move(to: CGPoint(x: rect.minX, y: y))
+            path.addLine(to: CGPoint(x: rect.maxX, y: y))
+            y += spacing
+        }
+        return path
+    }
 }
 
 struct ComposerRoomPreview: View {

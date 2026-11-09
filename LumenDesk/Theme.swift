@@ -672,14 +672,20 @@ enum PlatformOpener {
     }
 }
 enum FixtureColorSwatches {
+    /// Polar paint palette: clean whites and saturated, luminous tones that
+    /// read on the dark stage (no browns or muddy mid-tones).
     static let values: [(label: String, color: Color)] = [
-        ("Warm White", Color(red: 1.0, green: 0.64, blue: 0.25)),
-        ("Neutral", Color(red: 1.0, green: 0.87, blue: 0.67)),
-        ("Daylight", Color(red: 0.93, green: 0.95, blue: 1.0)),
-        ("Red", Color(hue: 0, saturation: 1, brightness: 1)),
-        ("Orange", Color(hue: 0.08, saturation: 1, brightness: 1)),
-        ("Green", Color(hue: 0.35, saturation: 1, brightness: 1)),
-        ("Blue", Color(hue: 0.62, saturation: 1, brightness: 1)),
-        ("Purple", Color(hue: 0.77, saturation: 1, brightness: 1))
+        ("Warm White", Color(hex: 0xFFC27A)),
+        ("Neutral", Color(hex: 0xFFE7C2)),
+        ("Daylight", Color(hex: 0xEEF3FF)),
+        ("Amber", Color(hex: 0xF5B84B)),
+        ("Coral", Color(hex: 0xFF6B5A)),
+        ("Red", Color(hex: 0xFF3B4E)),
+        ("Magenta", Color(hex: 0xFF4FA3)),
+        ("Violet", Color(hex: 0x9B7BFF)),
+        ("Blue", Color(hex: 0x4F8CFF)),
+        ("Cyan", Color(hex: 0x3FD0FF)),
+        ("Mint", Color(hex: 0x2EE6A6)),
+        ("Lime", Color(hex: 0xB7F25A))
     ]
 }

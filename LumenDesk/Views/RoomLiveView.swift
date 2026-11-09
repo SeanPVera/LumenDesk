@@ -60,154 +60,39 @@ struct RoomLiveView: View {
     private var topology: FixtureTopology { manager.fixtureTopology(for: scope) }
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("LIVE")
-                            .font(LumenType.instrumentLabel(size: 10))
-                            .tracking(1.4)
-                            .foregroundStyle(Lumen.ember)
-                        Text(room.name)
-                            .font(LumenType.display(size: 31, weight: .bold))
-                        Text("Choose an audio or clock input and a room response. Stop always restores the room to its opening state.")
-                            .font(LumenType.body(size: 13))
-                            .foregroundStyle(Lumen.meter)
+        VStack(spacing: 0) {
+            topBar
+            GeometryReader { geometry in
+                if geometry.size.width >= 760 {
+                    HStack(spacing: 0) {
+                        stage.padding(12)
+                        Rectangle().fill(Polar.ruleSoft).frame(width: 1)
+                        ScrollView { responseColumn }
+                            .frame(width: 290)
+                            .background(Polar.deck)
                     }
-
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Input").font(LumenType.display(size: 19, weight: .bold))
-                        Picker("Input", selection: $input) {
-                            ForEach(RoomLiveInput.allCases) { item in
-                                Text(inputTitle(item)).tag(item)
-                            }
-                        }
-                        .pickerStyle(.segmented)
-                        .disabled(isRunning)
-                        if input == .file {
-                            HStack {
-                                Text(audioFile?.lastPathComponent ?? "No audio file selected")
-                                    .font(LumenType.body(size: 12))
-                                    .foregroundStyle(Lumen.meter)
-                                    .lineLimit(1)
-                                Spacer()
-                                Button("Choose file") { choosingFile = true }
-                                    .buttonStyle(.bordered)
-                                    .disabled(isRunning)
-                            }
-                        } else if input == .midiClock {
-                            Text("Locks room choreography to incoming CoreMIDI beat clock (24 PPQN) from DAWs or hardware sequencers.")
-                                .font(LumenType.body(size: 12))
-                                .foregroundStyle(Lumen.meter)
-                        } else {
-                            Text(platformInputDetail)
-                                .font(LumenType.body(size: 12))
-                                .foregroundStyle(Lumen.meter)
-                            if manager.isDemoMode {
-                                HStack {
-                                    Text("Demo groove")
-                                        .font(LumenType.body(size: 12, weight: .semibold))
-                                    Spacer()
-                                    Picker("Demo groove", selection: Binding(
-                                        get: { manager.musicModeController.selectedGrooveID },
-                                        set: { manager.musicModeController.setGroove($0) }
-                                    )) {
-                                        ForEach(MusicGroove.all) { groove in
-                                            Text("\(groove.name) · \(Int(groove.bpm)) BPM (\(groove.metre)/4)")
-                                                .tag(groove.id)
-                                        }
-                                    }
-                                    .labelsHidden()
-                                    .frame(maxWidth: 260)
-                                }
-                            }
+                } else {
+                    ScrollView {
+                        VStack(spacing: 0) {
+                            stage.frame(height: 320).padding(12)
+                            responseColumn
                         }
                     }
-                    .padding(16)
-                    .background(Lumen.floor, in: RoundedRectangle(cornerRadius: 12))
-
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Response").font(LumenType.display(size: 19, weight: .bold))
-                        HStack(alignment: .top, spacing: 10) {
-                            ForEach(RoomLiveResponse.allCases) { item in
-                                Button {
-                                    response = item
-                                    studioPreset = item.preset
-                                    if isRunning {
-                                        manager.applyMusicModePreset(item.preset)
-                                    }
-                                } label: {
-                                    VStack(alignment: .leading, spacing: 8) {
-                                        Image(systemName: item.symbol)
-                                            .font(.system(size: 20, weight: .semibold))
-                                        Text(item.rawValue)
-                                            .font(LumenType.display(size: 18, weight: .bold))
-                                        Text(item.summary)
-                                            .font(LumenType.body(size: 11))
-                                            .foregroundStyle(Lumen.meter)
-                                            .fixedSize(horizontal: false, vertical: true)
-                                    }
-                                    .frame(maxWidth: .infinity, minHeight: 116, alignment: .topLeading)
-                                    .padding(14)
-                                    .background(Lumen.floor, in: RoundedRectangle(cornerRadius: 11))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 11)
-                                            .stroke(studioPreset == item.preset ? Lumen.ember : Lumen.rule,
-                                                    lineWidth: studioPreset == item.preset ? 2 : 1)
-                                    )
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
-
-                    LiveInputStatus(controller: manager.musicModeController)
-
-                    studioChoreographyDrawer
-
-                    Button {
-                        if isRunning {
-                            stop()
-                        } else if manager.isDemoMode || input == .midiClock || audioAcknowledged {
-                            start()
-                        } else {
-                            confirmingLocalAudio = true
-                        }
-                    } label: {
-                        Label(isRunning ? "Stop and restore" : "Start live response",
-                              systemImage: isRunning ? "stop.fill" : "play.fill")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(isRunning ? Lumen.graphite : Lumen.ember)
-                    .controlSize(.large)
-                    .disabled(input == .file && audioFile == nil && !isRunning)
-
-                    Text("Live is immediate and foreground-only. Stop always restores the room's previous lighting state.")
-                        .font(LumenType.body(size: 11))
-                        .foregroundStyle(Lumen.meter)
-                }
-                .padding(22)
-            }
-            .background(Lumen.canvas)
-            .navigationTitle("Live")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") { dismiss() }
-                }
-            }
-            .onAppear {
-                studioPreset = manager.musicModeConfiguration.preset == .custom
-                    ? response.preset
-                    : manager.musicModeConfiguration.preset
-                if let matched = RoomLiveResponse.allCases.first(where: { $0.preset == studioPreset }) {
-                    response = matched
                 }
             }
         }
-        .font(LumenType.body())
-        .foregroundStyle(Lumen.graphite)
-        .sheetFrame(minWidth: 620, idealWidth: 780, minHeight: 580, idealHeight: 740)
+        .background(Polar.stage)
+        .font(.polarUI(13))
+        .foregroundStyle(Polar.chalk)
+        .sheetFrame(minWidth: 620, idealWidth: 960, minHeight: 560, idealHeight: 640)
+        .onAppear {
+            studioPreset = manager.musicModeConfiguration.preset == .custom
+                ? response.preset
+                : manager.musicModeConfiguration.preset
+            if let matched = RoomLiveResponse.allCases.first(where: { $0.preset == studioPreset }) {
+                response = matched
+            }
+        }
         .fileImporter(isPresented: $choosingFile, allowedContentTypes: [.audio]) { result in
             if case .success(let url) = result { audioFile = url }
         }
@@ -220,6 +105,178 @@ struct RoomLiveView: View {
         } message: {
             Text("LumenDesk analyzes audio on this device to drive the selected room. It does not retain recordings.")
         }
+    }
+
+    // MARK: Polar layout
+
+    private var topBar: some View {
+        HStack(spacing: 8) {
+            Text("Input")
+                .font(.polarUI(12))
+                .foregroundStyle(Polar.meter)
+            ForEach(RoomLiveInput.allCases) { item in
+                Button(inputTitle(item)) { input = item }
+                    .buttonStyle(PolarButtonStyle(kind: input == item ? .prominent : .quiet, compact: true))
+                    .disabled(isRunning && input != item)
+                    .accessibilityAddTraits(input == item ? .isSelected : [])
+            }
+            if input == .file {
+                Text(audioFile?.lastPathComponent ?? "No file chosen")
+                    .font(.polarUI(11))
+                    .foregroundStyle(Polar.meter)
+                    .lineLimit(1)
+                Button("Choose\u{2026}") { choosingFile = true }
+                    .buttonStyle(PolarButtonStyle(kind: .quiet, compact: true))
+                    .disabled(isRunning)
+            }
+            Spacer()
+            if isRunning {
+                Button {
+                    stop()
+                } label: {
+                    HStack(spacing: 6) {
+                        Text("\u{2318}.")
+                            .font(.polarMono(10, weight: .semibold))
+                            .padding(.horizontal, 4)
+                            .background(RoundedRectangle(cornerRadius: 4).fill(Polar.raised))
+                        Text("Stop")
+                    }
+                }
+                .buttonStyle(PolarButtonStyle(kind: .danger, compact: true))
+                .keyboardShortcut(".", modifiers: .command)
+            }
+            Button("Done") { dismiss() }
+                .buttonStyle(PolarButtonStyle(kind: .quiet, compact: true))
+                .keyboardShortcut(.cancelAction)
+        }
+        .padding(.horizontal, PolarSpacing.md)
+        .padding(.vertical, 10)
+        .background(Polar.desk)
+        .overlay(alignment: .bottom) { Rectangle().fill(Polar.ruleSoft).frame(height: 1) }
+    }
+
+    /// The room as light: each fixture's glow at its place on the plan,
+    /// with the session state in the middle.
+    private var stage: some View {
+        GeometryReader { geometry in
+            ZStack {
+                RoundedRectangle(cornerRadius: Polar.radiusStage, style: .continuous)
+                    .fill(Polar.stage)
+                PolarStageGrid(spacing: 40)
+                    .stroke(Polar.wall.opacity(0.55), lineWidth: 0.5)
+                ForEach(roomLights) { light in
+                    let anchor = manager.planAnchor(for: light.id, in: room)
+                    LiveStageGlow(light: light, size: min(geometry.size.width, geometry.size.height) * 0.55)
+                        .position(x: geometry.size.width * (0.1 + 0.8 * anchor.x),
+                                  y: geometry.size.height * (0.1 + 0.8 * anchor.y))
+                }
+                VStack(spacing: 6) {
+                    Text("\(isRunning ? "Listening" : "Ready") \u{00B7} \(response.rawValue)")
+                        .font(.polarDisplay(22, weight: .bold))
+                    Text(roomLights.isEmpty ? "No lights in \(room.name) yet"
+                                            : roomLights.prefix(6).map(\.label).joined(separator: " \u{00B7} "))
+                        .font(.polarUI(12))
+                        .foregroundStyle(Polar.meter)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: geometry.size.width * 0.7)
+                    Text(input == .midiClock
+                         ? "Follows CoreMIDI beat clock (24 PPQN) from a DAW or sequencer."
+                         : platformInputDetail)
+                        .font(.polarUI(11))
+                        .foregroundStyle(Polar.meter.opacity(0.8))
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: geometry.size.width * 0.6)
+                        .opacity(isRunning ? 0 : 1)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: Polar.radiusStage, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Polar.radiusStage, style: .continuous)
+                .stroke(Polar.ruleSoft, lineWidth: 1))
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var responseColumn: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            PolarSectionLabel("Response")
+            ForEach(RoomLiveResponse.allCases) { item in
+                let chosen = studioPreset == item.preset
+                Button {
+                    response = item
+                    studioPreset = item.preset
+                    if isRunning { manager.applyMusicModePreset(item.preset) }
+                } label: {
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: item.symbol)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(chosen ? Polar.select : Polar.meter)
+                            .frame(width: 20)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(item.rawValue).font(.polarUI(14, weight: .semibold))
+                            Text(item.summary)
+                                .font(.polarUI(11))
+                                .foregroundStyle(Polar.meter)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(chosen ? Polar.accent.opacity(0.14) : Polar.raised.opacity(0.7)))
+                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(chosen ? Polar.accent : Polar.ruleSoft, lineWidth: 1))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(chosen ? .isSelected : [])
+            }
+
+            if manager.isDemoMode && input == .platform {
+                HStack {
+                    Text("Demo groove").font(.polarUI(12))
+                    Spacer()
+                    Picker("Demo groove", selection: Binding(
+                        get: { manager.musicModeController.selectedGrooveID },
+                        set: { manager.musicModeController.setGroove($0) }
+                    )) {
+                        ForEach(MusicGroove.all) { groove in
+                            Text("\(groove.name) \u{00B7} \(Int(groove.bpm)) BPM").tag(groove.id)
+                        }
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                }
+            }
+
+            LiveInputStatus(controller: manager.musicModeController)
+
+            studioChoreographyDrawer
+
+            Button {
+                if isRunning {
+                    stop()
+                } else if manager.isDemoMode || input == .midiClock || audioAcknowledged {
+                    start()
+                } else {
+                    confirmingLocalAudio = true
+                }
+            } label: {
+                Text(isRunning ? "Stop and restore" : "Start Live").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(PolarButtonStyle(kind: isRunning ? .danger : .prominent))
+            .disabled(input == .file && audioFile == nil && !isRunning)
+            .padding(.top, 6)
+
+            Text(input == .platform && !manager.isDemoMode
+                 ? "Screen & System Audio Recording may be required. Nothing is recorded. Stop always restores the room."
+                 : "Live is foreground-only. Stop always restores the room\u{2019}s previous lighting.")
+                .font(.polarUI(11))
+                .foregroundStyle(Polar.meter)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(PolarSpacing.md)
     }
 
     private var studioChoreographyDrawer: some View {
@@ -422,8 +479,8 @@ struct RoomLiveView: View {
         } label: {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Studio Sync & Choreography")
-                        .font(LumenType.display(size: 16, weight: .bold))
+                    Text("Studio sync & choreography")
+                        .font(.polarUI(13, weight: .semibold))
                     Text("Beat-map sync, latency calibration, fixture roles & sweep direction")
                         .font(LumenType.body(size: 11))
                         .foregroundStyle(Lumen.meter)
@@ -434,8 +491,9 @@ struct RoomLiveView: View {
                     .foregroundStyle(Lumen.ember)
             }
         }
-        .padding(16)
-        .background(Lumen.floor, in: RoundedRectangle(cornerRadius: 12))
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Polar.desk))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Polar.ruleSoft, lineWidth: 1))
     }
 
     private func inputTitle(_ input: RoomLiveInput) -> String {
@@ -585,5 +643,26 @@ private struct LiveInputStatus: View {
         case .idle: return Lumen.graphite
         default: return Lumen.verdigris
         }
+    }
+}
+
+/// One fixture's glow on the Live stage. Observes the light so the glow
+/// follows what a running session is doing to it.
+private struct LiveStageGlow: View {
+    @ObservedObject var light: LightDevice
+    let size: CGFloat
+
+    var body: some View {
+        let lit = light.isOn && !light.isStale
+        ZStack {
+            Circle()
+                .fill(RadialGradient(colors: [light.color.opacity(lit ? 0.30 * (0.4 + light.brightness * 0.6) : 0), .clear],
+                                     center: .center, startRadius: 4, endRadius: size / 2))
+                .frame(width: size, height: size)
+            GlowingOrb(color: light.color, level: light.brightness, isOn: light.isOn,
+                       silhouette: LightPageModel.resolve(light).silhouette, size: 14, stale: light.isStale)
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }

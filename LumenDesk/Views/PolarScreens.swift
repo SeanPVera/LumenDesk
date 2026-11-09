@@ -71,6 +71,8 @@ struct LooksLibraryView: View {
     @Environment(\.dismiss) private var dismiss
     let room: Room
     let compose: () -> Void
+    /// Opens a saved Look in the composer.
+    var edit: ((LightingScene) -> Void)? = nil
 
     private var ids: Set<String> { Set(room.lightIDs) }
     private var roomLooks: [LightingScene] {
@@ -113,6 +115,13 @@ struct LooksLibraryView: View {
                                          detail: "\(look.snapshots.keys.filter(ids.contains).count) lights in \(room.name)",
                                          colors: colors(of: look)) {
                                     manager.applyLook(look, deviceIDs: ids)
+                                }
+                                .contextMenu {
+                                    if let edit {
+                                        Button("Edit in Composer\u{2026}") { edit(look) }
+                                    }
+                                    Button("Duplicate Look") { manager.duplicateLook(look.id) }
+                                    Button("Delete Look", role: .destructive) { manager.deleteScene(look.id) }
                                 }
                             }
                         }

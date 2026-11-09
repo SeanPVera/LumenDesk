@@ -16,6 +16,9 @@ final class RoomCanvasSessionStore: ObservableObject {
     @Published var showingAddOrRepair = false
     @Published var showingLive = false
     @Published var showingSettings = false
+    @Published var showingLooks = false
+    /// The light whose page is open in the detail column, replacing the
+    /// Room Stage until the person goes back.
     @Published var editorDeviceID: String?
     private var selectionRoomID: UUID?
 
@@ -87,7 +90,7 @@ enum RoomCanvasStatus: Int, CaseIterable, Equatable {
         switch self {
         case .confirmed: return Lumen.verdigris
         case .pending: return Lumen.warn
-        case .changedElsewhere: return Lumen.graphite
+        case .changedElsewhere: return Polar.changed
         case .needsAttention: return Lumen.fail
         }
     }
@@ -166,7 +169,14 @@ struct RoomCanvasShellView: View {
                     #endif
             } detail: {
                 NavigationStack {
-                    if let selectedRoom {
+                    if let editorDevice {
+                        LightPageView(
+                            device: editorDevice,
+                            navigate: { session.editorDeviceID = $0 },
+                            close: { session.editorDeviceID = nil }
+                        )
+                        .id(editorDevice.id)
+                    } else if let selectedRoom {
                         RoomCanvasWorkspace(room: selectedRoom, session: session)
                     } else {
                         RoomCanvasEmptyState(openSetup: { session.showingAddOrRepair = true })
@@ -179,6 +189,10 @@ struct RoomCanvasShellView: View {
         .foregroundStyle(Lumen.graphite)
         .tint(Lumen.ember)
         .background(Lumen.canvas)
+        .onReceive(NotificationCenter.default.publisher(for: .lumenCommand)) { notification in
+            guard let command = LumenCommandBus.command(from: notification) else { return }
+            handle(command)
+        }
         .overlay(alignment: .bottom) { statusOverlays }
         .onAppear {
             session.reconcile(rooms: manager.rooms, devices: manager.devices)
@@ -226,14 +240,46 @@ struct RoomCanvasShellView: View {
             NavigationStack { RoomCanvasSettingsView() }
                 .environmentObject(manager)
         }
-        .sheet(isPresented: Binding(
-            get: { session.editorDeviceID != nil },
-            set: { if !$0 { session.editorDeviceID = nil } }
-        )) {
-            if let editorDevice {
-                ContextualFixtureEditor(device: editorDevice)
-                    .environmentObject(manager)
+        .sheet(isPresented: $session.showingLooks) {
+            if let selectedRoom {
+                LooksLibraryView(
+                    room: selectedRoom,
+                    compose: {
+                        session.showingLooks = false
+                        session.showingComposer = true
+                    }
+                )
+                .environmentObject(manager)
             }
+        }
+    }
+
+    /// Menu-bar commands that act on what this window is showing.
+    private func handle(_ command: LumenCommand) {
+        switch command {
+        case .newLook:
+            guard selectedRoom != nil else { return }
+            session.showingComposer = true
+        case .addLights:
+            session.showingAddOrRepair = true
+        case .openLooks:
+            guard selectedRoom != nil else { return }
+            session.showingLooks = true
+        case .openLive:
+            guard selectedRoom != nil else { return }
+            session.showingLive = true
+        case .identifySelected:
+            if let editorDevice {
+                manager.identify(editorDevice)
+            } else {
+                for device in manager.devices where session.selectedFixtureIDs.contains(device.id) {
+                    manager.identify(device)
+                }
+            }
+        case .openLightPage:
+            guard let room = selectedRoom else { return }
+            let ordered = room.lightIDs.filter { session.selectedFixtureIDs.contains($0) }
+            if let first = ordered.first { session.editorDeviceID = first }
         }
     }
 
@@ -313,49 +359,74 @@ private struct RoomCanvasSidebar: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("LUMENDESK")
-                    .font(LumenType.instrumentLabel(size: 11))
-                    .tracking(1.6)
-                    .foregroundStyle(Lumen.ember)
-                Text("Room Canvas")
-                    .font(LumenType.display(size: 25, weight: .bold))
+            HStack(spacing: 10) {
+                LumenHexMark(size: 26)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("LumenDesk")
+                        .font(.polarDisplay(17, weight: .bold))
+                    Text("Lighting instrument")
+                        .font(.polarUI(12))
+                        .foregroundStyle(Polar.meter)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 18)
-            .padding(.top, 20)
+            .padding(.horizontal, 16)
+            .padding(.top, 18)
             .padding(.bottom, 14)
 
-            HStack {
-                Text("Rooms")
-                    .font(LumenType.body(size: 12, weight: .semibold))
-                    .foregroundStyle(Lumen.meter)
-                Spacer()
-                Text("\(manager.rooms.count)")
-                    .font(LumenType.readout(size: 12))
-                    .foregroundStyle(Lumen.meter)
-            }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 8)
-
             ScrollView {
-                LazyVStack(spacing: 6) {
-                    ForEach(manager.rooms) { room in
-                        roomButton(room)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        PolarSectionLabel("Rooms")
+                        Spacer()
+                        Text("\(manager.rooms.count)")
+                            .font(.polarMono(12))
+                            .foregroundStyle(Polar.meter)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.bottom, 4)
+                    ForEach(Array(manager.rooms.enumerated()), id: \.element.id) { index, room in
+                        roomButton(room, index: index)
+                    }
+
+                    if !manager.scenes.isEmpty {
+                        PolarSectionLabel("Looks")
+                            .padding(.horizontal, 8)
+                            .padding(.top, 18)
+                            .padding(.bottom, 4)
+                        ForEach(manager.scenes.prefix(8)) { look in
+                            Button {
+                                session.showingLooks = true
+                            } label: {
+                                HStack(spacing: 8) {
+                                    LookSwatchDots(look: look)
+                                    Text(look.name)
+                                        .font(.polarUI(13))
+                                        .foregroundStyle(Polar.chalk.opacity(0.86))
+                                        .lineLimit(1)
+                                    Spacer()
+                                }
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 6)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .help("Open Looks (⌘L)")
+                        }
                     }
                 }
-                .padding(.horizontal, 10)
+                .padding(.horizontal, 8)
             }
 
             VStack(spacing: 8) {
                 Button {
                     session.showingAddOrRepair = true
                 } label: {
-                    Label("Add or repair room", systemImage: "plus.circle")
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Label("Add lights", systemImage: "plus")
+                        .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(Lumen.ember)
+                .buttonStyle(PolarButtonStyle(kind: .prominent))
+                .help("Add or repair lights (⌘N)")
 
                 Button {
                     session.showingSettings = true
@@ -363,15 +434,19 @@ private struct RoomCanvasSidebar: View {
                     Label("Settings", systemImage: "gearshape")
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.plain)
+                .font(.polarUI(13))
+                .foregroundStyle(Polar.meter)
+                .padding(.horizontal, 4)
 
-                Label("Foreground local control", systemImage: "network")
-                    .font(LumenType.body(size: 11))
-                    .foregroundStyle(Lumen.meter)
+                Text("Select a light to open its page. ⌘, Settings")
+                    .font(.polarUI(12))
+                    .foregroundStyle(Polar.meter.opacity(0.85))
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 4)
             }
             .padding(14)
-            .background(Lumen.floor.opacity(0.7))
+            .overlay(alignment: .top) { Rectangle().fill(Polar.ruleSoft).frame(height: 1) }
         }
         .background(Lumen.deck)
         .navigationTitle("LumenDesk")
@@ -393,38 +468,45 @@ private struct RoomCanvasSidebar: View {
         }
     }
 
-    private func roomButton(_ room: Room) -> some View {
+    private func roomButton(_ room: Room, index: Int) -> some View {
         let lights = manager.devices(in: room)
         let selected = room.id == session.selectedRoomID
         let status = RoomCanvasStatus.resolve(lights, manager: manager)
+        let litCount = lights.filter { $0.isOn && !$0.isStale }.count
         return HStack(spacing: 4) {
             Button {
                 session.select(room, devices: lights)
             } label: {
                 HStack(spacing: 10) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 5, style: .continuous)
-                            .fill(selected ? Lumen.ember : Lumen.graphite.opacity(0.08))
-                            .frame(width: 34, height: 34)
-                        Image(systemName: "square.split.2x2")
-                            .foregroundStyle(selected ? Lumen.canvas : Lumen.graphite)
-                    }
-                    VStack(alignment: .leading, spacing: 3) {
+                    Circle()
+                        .fill(Polar.roomTint(index))
+                        .frame(width: 8, height: 8)
+                        .shadow(color: Polar.roomTint(index).opacity(litCount > 0 ? 0.9 : 0), radius: 4)
+                    VStack(alignment: .leading, spacing: 2) {
                         Text(room.name)
-                            .font(LumenType.display(size: 16, weight: .semibold))
-                            .lineLimit(2)
-                            .minimumScaleFactor(0.88)
+                            .font(.polarUI(13, weight: selected ? .semibold : .regular))
+                            .foregroundStyle(Polar.chalk)
+                            .lineLimit(1)
                         HStack(spacing: 5) {
-                            Text("\(lights.count) fixture\(lights.count == 1 ? "" : "s")")
-                            Image(systemName: status.symbol)
-                                .accessibilityLabel(status.title)
+                            Text("\(litCount)/\(lights.count) on")
+                                .font(.polarMono(12))
+                            if status != .confirmed {
+                                Image(systemName: status.symbol)
+                                    .accessibilityLabel(status.title)
+                            }
                         }
-                        .font(LumenType.body(size: 11))
-                        .foregroundStyle(status == .confirmed ? Lumen.meter : status.color)
+                        .foregroundStyle(status == .confirmed ? Polar.meter : status.color)
                     }
                     .layoutPriority(1)
+                    Spacer(minLength: 0)
+                    if index < 9 {
+                        Text("⌘\(index + 1)")
+                            .font(.polarMono(12))
+                            .foregroundStyle(Polar.meter.opacity(0.7))
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -436,7 +518,7 @@ private struct RoomCanvasSidebar: View {
                 Button("Delete Room", role: .destructive) { manager.deleteRoom(room.id) }
             } label: {
                 Image(systemName: "ellipsis")
-                    .frame(width: 24, height: 34)
+                    .frame(width: 22, height: 30)
                     .contentShape(Rectangle())
             }
             .accessibilityLabel("Actions for \(room.name)")
@@ -444,14 +526,15 @@ private struct RoomCanvasSidebar: View {
             .menuIndicator(.hidden)
             .fixedSize()
         }
-        .padding(9)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 7)
         .background(
             RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(selected ? Lumen.floor : Color.clear)
+                .fill(selected ? Polar.raisedHi : Color.clear)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .stroke(selected ? Lumen.ember.opacity(0.38) : Color.clear, lineWidth: 1)
+                .stroke(selected ? Polar.accent.opacity(0.45) : Color.clear, lineWidth: 1)
         )
         .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
     }
@@ -565,17 +648,17 @@ private struct RoomCanvasWorkspace: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 14)
-        .background(Lumen.floor.opacity(0.76))
-        .overlay(alignment: .bottom) { Rectangle().fill(Lumen.ruleSoft).frame(height: 1) }
+        .background(Polar.desk)
+        .overlay(alignment: .bottom) { Rectangle().fill(Polar.ruleSoft).frame(height: 1) }
     }
 
     private func roomHeading(showsInstruction: Bool) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(currentRoom.name)
-                .font(LumenType.display(size: 28, weight: .bold))
+                .font(.polarDisplay(28, weight: .bold))
                 .lineLimit(1)
             if showsInstruction {
-                Text("Touch a fixture to select it. Drag it to keep the canvas familiar.")
+                Text("Click a light to select it, double-click to open its page. Drag to arrange.")
                     .font(LumenType.body(size: 12))
                     .foregroundStyle(Lumen.meter)
                     .lineLimit(1)
@@ -593,11 +676,19 @@ private struct RoomCanvasWorkspace: View {
     private var headerActions: some View {
         HStack(spacing: 8) {
             Button {
+                session.showingLooks = true
+            } label: {
+                Label("Looks", systemImage: "swatchpalette")
+            }
+            .buttonStyle(PolarButtonStyle(kind: .quiet, compact: true))
+            .help("Looks (⌘L)")
+            Button {
                 session.showingLive = true
             } label: {
                 Label("Live", systemImage: "waveform")
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(PolarButtonStyle(kind: .quiet, compact: true))
+            .help("Live (⇧⌘L)")
             Button {
                 manager.scan()
             } label: {
@@ -607,9 +698,9 @@ private struct RoomCanvasWorkspace: View {
                     Label("Find", systemImage: "arrow.clockwise")
                 }
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(PolarButtonStyle(kind: .quiet, compact: true))
             .disabled(manager.isScanning)
-            .help(manager.isScanning ? manager.scanPhase : "Find fixtures on the local network")
+            .help(manager.isScanning ? manager.scanPhase : "Find fixtures on the local network (⌘R)")
         }
     }
 
@@ -630,16 +721,30 @@ private struct RoomCanvasWorkspace: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding(30)
             } else {
+                if isOffline {
+                    OfflineBanner(roomName: currentRoom.name)
+                        .padding([.horizontal, .top], 18)
+                } else {
+                    NeedsAttentionStrip(lights: lights, openSetup: { session.showingAddOrRepair = true })
+                        .padding([.horizontal, .top], 18)
+                }
                 DirectionARoomField(
                     room: currentRoom,
                     lights: lights,
-                    selection: selection
+                    selection: selection,
+                    openLight: { session.editorDeviceID = $0 }
                 )
                 .padding(18)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Lumen.canvas)
+    }
+
+    /// Every light in the room has stopped answering, which on a LAN-only
+    /// app means the network is gone rather than one fixture.
+    private var isOffline: Bool {
+        !manager.isDemoMode && lights.count > 1 && lights.allSatisfy(\.isStale)
     }
 
     private var selectionInspector: some View {
@@ -671,6 +776,9 @@ struct DirectionARoomField: View {
     let room: Room
     let lights: [LightDevice]
     @Binding var selection: Set<String>
+    /// Opens a light's page (double-click on its orb). Nil where the field
+    /// is only a picker, as in Add lights.
+    var openLight: ((String) -> Void)? = nil
     @State private var dragOffsets: [String: CGSize] = [:]
 
     var body: some View {
@@ -680,14 +788,14 @@ struct DirectionARoomField: View {
             let horizontalInset: CGFloat = compactWidth ? 34 : 54
             let verticalInset: CGFloat = condensed ? 42 : 46
             ZStack {
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .fill(Lumen.floor)
-                spatialFieldWash(in: geometry.size, horizontalInset: horizontalInset, verticalInset: verticalInset)
-                    .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                RoundedRectangle(cornerRadius: Polar.radiusStage, style: .continuous)
+                    .fill(Polar.stage)
                 roomGrid
-                    .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .stroke(Lumen.graphite, lineWidth: 3)
+                    .clipShape(RoundedRectangle(cornerRadius: Polar.radiusStage, style: .continuous))
+                spatialFieldWash(in: geometry.size, horizontalInset: horizontalInset, verticalInset: verticalInset)
+                    .clipShape(RoundedRectangle(cornerRadius: Polar.radiusStage, style: .continuous))
+                RoundedRectangle(cornerRadius: Polar.radiusStage, style: .continuous)
+                    .stroke(Polar.wall, lineWidth: 1)
                 roomDetails
 
                 ForEach(lights.indices, id: \.self) { index in
@@ -702,10 +810,12 @@ struct DirectionARoomField: View {
                         status: RoomCanvasStatus.resolve([light], manager: manager),
                         compact: compactWidth,
                         condensed: condensed,
-                        select: { toggle(light.id) }
+                        silhouette: LightPageModel.resolve(light).silhouette,
+                        select: { toggle(light.id) },
+                        open: openLight.map { handler -> () -> Void in { handler(light.id) } }
                     )
                     .frame(width: nodeWidth(for: light, compact: compactWidth),
-                           height: condensed ? 68 : 86)
+                           height: condensed ? 92 : 118)
                     .position(
                         x: horizontalInset
                             + (geometry.size.width - horizontalInset * 2) * anchor.x
@@ -766,8 +876,8 @@ struct DirectionARoomField: View {
                         .fill(
                             RadialGradient(
                                 colors: [
-                                    primaryColor.opacity(0.24 * max(0.2, light.brightness)),
-                                    secondaryColor.opacity(0.10 * max(0.2, light.brightness)),
+                                    primaryColor.opacity(0.30 * max(0.25, light.brightness)),
+                                    secondaryColor.opacity(0.12 * max(0.25, light.brightness)),
                                     Color.clear
                                 ],
                                 center: .center,
@@ -800,7 +910,7 @@ struct DirectionARoomField: View {
                     y += 32
                 }
             }
-            .stroke(Lumen.graphite.opacity(0.055), lineWidth: 1)
+            .stroke(Polar.wall.opacity(0.55), lineWidth: 0.5)
         }
         .accessibilityHidden(true)
     }
@@ -811,9 +921,9 @@ struct DirectionARoomField: View {
         return VStack {
             HStack {
                 Text(room.name.uppercased())
-                    .font(LumenType.instrumentLabel(size: 10))
+                    .font(.polarCaption)
                     .tracking(1.2)
-                    .foregroundStyle(Lumen.graphite.opacity(0.48))
+                    .foregroundStyle(Polar.meter.opacity(0.7))
                 Spacer()
                 if isLiveMusic {
                     HStack(spacing: 6) {
@@ -834,11 +944,6 @@ struct DirectionARoomField: View {
                 }
             }
             Spacer()
-            HStack {
-                Capsule().fill(Lumen.graphite.opacity(0.22)).frame(width: 68, height: 8)
-                Spacer()
-                RoundedRectangle(cornerRadius: 2).fill(Lumen.graphite.opacity(0.16)).frame(width: 42, height: 28)
-            }
         }
         .padding(18)
         .accessibilityHidden(true)
@@ -847,14 +952,14 @@ struct DirectionARoomField: View {
     private func nodeWidth(for light: LightDevice, compact: Bool) -> CGFloat {
         if compact {
             switch manager.themeCapability(for: light) {
-            case .segments, .matrix, .panels: return 68
-            case .solid: return 64
+            case .segments, .matrix, .panels: return 84
+            case .solid: return 72
             }
         }
         switch manager.themeCapability(for: light) {
-        case .segments: return 126
-        case .matrix, .panels: return 104
-        case .solid: return 94
+        case .segments: return 132
+        case .matrix, .panels: return 112
+        case .solid: return 104
         }
     }
 
@@ -884,60 +989,63 @@ private struct FixtureCanvasNode: View {
     let status: RoomCanvasStatus
     let compact: Bool
     let condensed: Bool
+    var silhouette: OrbSilhouette = .bulb
     let select: () -> Void
+    var open: (() -> Void)? = nil
+
+    private var orbSize: CGFloat {
+        let base: CGFloat = compact ? 30 : (condensed ? 34 : 44)
+        switch silhouette {
+        case .strip, .bars: return base * 0.62
+        case .curtain: return base * 0.86
+        default: return base
+        }
+    }
 
     var body: some View {
-        Button(action: select) {
-            VStack(spacing: 4) {
-                ZStack {
-                    if light.isOn && !light.isStale {
-                        Circle()
-                            .fill(
-                                RadialGradient(
-                                    colors: [primaryGlowColor.opacity(0.55 * light.brightness), primaryGlowColor.opacity(0)],
-                                    center: .center,
-                                    startRadius: 2,
-                                    endRadius: 34
-                                )
-                            )
-                            .frame(width: compact ? 54 : 74, height: condensed ? 42 : 60)
-                    }
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(Lumen.graphite)
-                        .frame(width: compact ? 32 : 38, height: condensed ? 26 : 30)
-                    Image(systemName: fixtureSymbol)
-                        .font(.system(size: compact ? 12 : (condensed ? 13 : 14), weight: .semibold))
-                        .foregroundStyle(light.isOn ? primaryGlowColor : Lumen.canvas.opacity(0.66))
+        VStack(spacing: 4) {
+            ZStack(alignment: .topTrailing) {
+                GlowingOrb(color: primaryGlowColor, level: light.brightness, isOn: light.isOn,
+                           silhouette: silhouette, size: orbSize, selected: selected,
+                           stale: light.isStale)
+                if status != .confirmed {
                     Image(systemName: status.symbol)
-                        .font(.system(size: condensed ? 8 : 10, weight: .bold))
+                        .font(.system(size: condensed ? 9 : 11, weight: .bold))
                         .foregroundStyle(status.color)
-                        .padding(condensed ? 2 : 3)
-                        .background(Lumen.floor, in: Circle())
-                        .offset(x: compact ? 17 : 20, y: condensed ? -14 : -17)
+                        .padding(3)
+                        .background(Polar.desk, in: Circle())
+                        .offset(x: 4, y: -4)
                 }
-                .frame(width: compact ? 54 : 74, height: condensed ? 42 : 58)
-                segmentBadge
-                Text(light.label)
-                    .font(LumenType.body(size: compact ? 9 : 11, weight: .semibold))
-                    .foregroundStyle(Lumen.graphite)
-                    .lineLimit(compact ? 2 : 1)
-                    .multilineTextAlignment(.center)
-                    .minimumScaleFactor(0.82)
             }
-            .frame(maxWidth: .infinity)
-            .padding(.horizontal, compact ? 4 : 7)
-            .padding(.vertical, condensed ? 2 : 5)
-            .background(Lumen.floor.opacity(selected ? 0.98 : 0.78), in: RoundedRectangle(cornerRadius: 10))
-            .overlay(
-                RoundedRectangle(cornerRadius: 10)
-                    .stroke(selected ? Lumen.ember : Lumen.graphite.opacity(0.18), lineWidth: selected ? 2 : 1)
-            )
+            .frame(height: (condensed ? 34 : 44) + 14)
+            segmentBadge
+            Text(light.label)
+                .font(.polarUI(compact ? 12 : 13, weight: .semibold))
+                .foregroundStyle(Polar.chalk)
+                .lineLimit(compact ? 2 : 1)
+                .multilineTextAlignment(.center)
+                .minimumScaleFactor(0.82)
+                .shadow(color: Polar.stage, radius: 3)
+            Text(light.isOn ? status.title : "Off · \(status.title)")
+                .font(.polarMono(12, weight: .medium))
+                .foregroundStyle(light.isOn ? status.color : Polar.meter)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
         }
-        .buttonStyle(.plain)
-        .help(light.label)
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 4)
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) { open?() }
+        .onTapGesture(count: 1, perform: select)
+        .help(open == nil ? light.label : "\(light.label) — double-click to open its page")
+        .accessibilityElement(children: .ignore)
+        .accessibilityAddTraits(.isButton)
         .accessibilityLabel(light.label)
         .accessibilityValue("\(selected ? "Selected, " : "")\(status.title), \(light.isOn ? "on" : "off"), \(Int(light.brightness * 100)) percent")
         .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityAction(.default, select)
+        .accessibilityAction(named: "Open light page") { open?() }
     }
 
     private var primaryGlowColor: Color {
@@ -963,23 +1071,12 @@ private struct FixtureCanvasNode: View {
                 }
                 .accessibilityHidden(true)
             } else {
-                SegmentMiniStripView(colors: state.colors.map { $0.isOn ? $0.litColor : Lumen.graphite.opacity(0.22) })
+                SegmentMiniStripView(colors: state.colors.map { $0.isOn ? $0.litColor : Polar.raised })
                     .frame(width: compact ? 44 : 64, height: 4)
             }
         }
     }
 
-    private var fixtureSymbol: String {
-        if light.isLIFXLuna { return "circle.grid.3x3.fill" }
-        if light.brand == .govee, let profile = segmentProfile, profile.recognized {
-            return profile.layout.icon
-        }
-        switch light.brand {
-        case .nanoleaf: return "hexagon.fill"
-        case .govee: return "lightswitch.on"
-        case .lifx: return "lightbulb.fill"
-        }
-    }
 }
 
 private struct RoomSelectionInspector: View {
@@ -1081,6 +1178,16 @@ private struct RoomSelectionInspector: View {
                         }
                         .padding(12)
                         .background(Lumen.graphite.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
+                    }
+
+                    if targets.count == 1, let device = targets.first {
+                        Button { edit(device.id) } label: {
+                            Label(hasSpatialEditor(device) ? "Open light page · \(capabilityObject(device))" : "Open light page",
+                                  systemImage: "arrow.up.right.square")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(PolarButtonStyle(kind: .prominent))
+                        .help("Open this light's own page (⌘↩)")
                     }
 
                     uplighterZoneControls
@@ -1303,10 +1410,7 @@ private struct RoomSelectionInspector: View {
                         renamingFixtureID = device.id
                     }
                     .buttonStyle(.bordered)
-                    if hasSpatialEditor(device) {
-                        Button("Edit \(capabilityObject(device))") { edit(device.id) }
-                            .buttonStyle(.bordered)
-                    }
+
                 }
             }
             .padding(12)

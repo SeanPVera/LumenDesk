@@ -543,6 +543,32 @@ final class RoomWorkspaceTests: XCTestCase {
         let originalMatrix = manager.activeLIFXMatrixState(for: luna.id)
         let originalPower = Dictionary(uniqueKeysWithValues: targets.map { ($0.id, $0.isOn) })
         let originalBrightness = Dictionary(uniqueKeysWithValues: targets.map { ($0.id, $0.brightness) })
+        // Polar light pages: demo fixtures where the Sample Room has the
+        // model, stand-alone devices (never added to the manager, so nothing
+        // can be sent) for the rest of the owned set.
+        for device in manager.devices where LightPageModel.resolve(device).isDedicatedPage {
+            try await capture("light-page-\(device.sku ?? "lifx-\(device.productID ?? 0)")",
+                              LightPageView(device: device), manager, width: 1280, height: 900)
+        }
+        let standalone: [(String, LightDevice)] = [
+            ("light-page-H70B1", LightDevice(id: "govee:render-curtain", brand: .govee, backendID: "render-curtain",
+                                             name: "Bedroom Curtain", address: "0.0.0.0", sku: "H70B1", isOn: true,
+                                             brightness: 0.68, color: Color(hex: 0x2EE6A6))),
+            ("light-page-H612B", LightDevice(id: "govee:render-strip", brand: .govee, backendID: "render-strip",
+                                             name: "H612B 551F", address: "0.0.0.0", sku: "H612B", isOn: true,
+                                             brightness: 0.55, color: Color(hex: 0x4F8CFF))),
+            ("light-page-H608B", LightDevice(id: "govee:render-pods", brand: .govee, backendID: "render-pods",
+                                             name: "H608B 4D21", address: "0.0.0.0", sku: "H608B", isOn: true,
+                                             brightness: 0.7, color: Color(hex: 0xF5B84B))),
+            ("light-page-lifx-129", LightDevice(id: "lifx:render-bulb", brand: .lifx, backendID: "render-bulb",
+                                                name: "Overhead 2", address: "0.0.0.0", productID: 129, isOn: true,
+                                                brightness: 0.55, color: Color(hex: 0xFFB765)))
+        ]
+        for (name, device) in standalone {
+            try await capture(name, LightPageView(device: device), manager, width: 1280, height: 900)
+        }
+        try await capture("looks-library", LooksLibraryView(room: room, compose: {}), manager, width: 860, height: 620)
+
         let theme = try XCTUnwrap(LightingCatalog.theme(withID: "aurora"))
 
         let previewID = try XCTUnwrap(manager.startLookPreview(
@@ -1005,6 +1031,7 @@ final class RoomCanvasRenderTests: XCTestCase {
 
         try await capture("room-canvas-620", RoomCanvasShellView(), manager, width: 620, height: 850)
         try await capture("room-canvas-1100", RoomCanvasShellView(), manager, width: 1100, height: 900)
+        try await capture("room-canvas-1280", RoomCanvasShellView(), manager, width: 1280, height: 800)
         try await capture("room-canvas-1440", RoomCanvasShellView(), manager, width: 1440, height: 1000)
         try await capture("room-canvas-settings", NavigationStack { RoomCanvasSettingsView() },
                           manager, width: 760, height: 760)
@@ -1015,6 +1042,32 @@ final class RoomCanvasRenderTests: XCTestCase {
         try await capture("look-composer-1040", LookComposerView(
             room: room, initialSelection: []
         ), manager, width: 1040, height: 1000)
+        // Polar light pages: demo fixtures where the Sample Room has the
+        // model, stand-alone devices (never added to the manager, so nothing
+        // can be sent) for the rest of the owned set.
+        for device in manager.devices where LightPageModel.resolve(device).isDedicatedPage {
+            try await capture("light-page-\(device.sku ?? "lifx-\(device.productID ?? 0)")",
+                              LightPageView(device: device), manager, width: 1280, height: 900)
+        }
+        let standalone: [(String, LightDevice)] = [
+            ("light-page-H70B1", LightDevice(id: "govee:render-curtain", brand: .govee, backendID: "render-curtain",
+                                             name: "Bedroom Curtain", address: "0.0.0.0", sku: "H70B1", isOn: true,
+                                             brightness: 0.68, color: Color(hex: 0x2EE6A6))),
+            ("light-page-H612B", LightDevice(id: "govee:render-strip", brand: .govee, backendID: "render-strip",
+                                             name: "H612B 551F", address: "0.0.0.0", sku: "H612B", isOn: true,
+                                             brightness: 0.55, color: Color(hex: 0x4F8CFF))),
+            ("light-page-H608B", LightDevice(id: "govee:render-pods", brand: .govee, backendID: "render-pods",
+                                             name: "H608B 4D21", address: "0.0.0.0", sku: "H608B", isOn: true,
+                                             brightness: 0.7, color: Color(hex: 0xF5B84B))),
+            ("light-page-lifx-129", LightDevice(id: "lifx:render-bulb", brand: .lifx, backendID: "render-bulb",
+                                                name: "Overhead 2", address: "0.0.0.0", productID: 129, isOn: true,
+                                                brightness: 0.55, color: Color(hex: 0xFFB765)))
+        ]
+        for (name, device) in standalone {
+            try await capture(name, LightPageView(device: device), manager, width: 1280, height: 900)
+        }
+        try await capture("looks-library", LooksLibraryView(room: room, compose: {}), manager, width: 860, height: 620)
+
         let theme = try XCTUnwrap(LightingCatalog.theme(withID: "aurora"))
         for brush in [LookBrush.spatialWash, .gradient] {
             try await capture("look-preview-\(brush.id)", ComposerRoomPreview(
@@ -1028,7 +1081,7 @@ final class RoomCanvasRenderTests: XCTestCase {
     @MainActor
     private func capture<Content: View>(_ name: String, _ content: Content, _ manager: LightManager,
                                        width: CGFloat, height: CGFloat) async throws {
-        let root = content.environmentObject(manager).preferredColorScheme(.light)
+        let root = content.environmentObject(manager).preferredColorScheme(.dark)
             .frame(width: width, height: height).background(Lumen.canvas)
         let host = NSHostingView(rootView: root)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: height),

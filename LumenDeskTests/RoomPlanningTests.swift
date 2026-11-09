@@ -1020,7 +1020,7 @@ final class RoomCanvasRenderTests: XCTestCase {
         // model, stand-alone devices (never added to the manager, so nothing
         // can be sent) for the rest of the owned set.
         for device in manager.devices where LightPageModel.resolve(device).isDedicatedPage {
-            try await capture("light-page-\(device.sku ?? "lifx-\(device.productID ?? 0)")",
+            try await capture("light-page-\((device.sku ?? "lifx-\(device.productID ?? 0)").replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: " ", with: "-"))",
                               LightPageView(device: device), manager, width: 1280, height: 900)
         }
         let standalone: [(String, LightDevice)] = [

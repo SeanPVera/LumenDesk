@@ -51,7 +51,7 @@ struct MenuBarPopoverView: View {
 
     private var header: some View {
         HStack(spacing: 9) {
-            LumenMark(size: 19)
+            LumenHexMark(size: 22)
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 6) {
                     Text("LumenDesk")
@@ -118,6 +118,19 @@ struct MenuBarPopoverView: View {
                 .toggleStyle(.switch)
                 .disabled(lights.isEmpty)
                 .accessibilityLabel("Power for \(room.name)")
+            }
+
+            if !lights.isEmpty {
+                HStack(spacing: 2) {
+                    ForEach(lights.prefix(10)) { light in
+                        GlowingOrb(color: light.color, level: light.brightness, isOn: light.isOn,
+                                   silhouette: LightPageModel.resolve(light).silhouette,
+                                   size: 14, stale: light.isStale)
+                            .help(light.label)
+                    }
+                }
+                .frame(height: 30)
+                .accessibilityHidden(true)
             }
 
             VStack(alignment: .leading, spacing: 8) {

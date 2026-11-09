@@ -660,84 +660,18 @@ struct ContextualFixtureEditor: View {
 
     var body: some View {
         NavigationStack {
-            Group {
-                if device.brand == .nanoleaf {
-                    NanoleafShapesStudio(device: device, shapes: manager.shapes, presentation: .sheet)
-                } else if device.isLIFXLuna {
-                    LIFXLunaEditorView(device: device)
-                } else if manager.segmentStudioProfile(for: device) != nil {
-                    GoveeSegmentEditorView(device: device)
-                } else {
-                    BasicFixtureEditor(device: device)
+            // Every light now opens its own Polar light page, which picks
+            // the controls for the exact model (see `LightPageModel`).
+            LightPageView(device: device, close: { dismiss() })
+                .sheetFrame(minWidth: 760, idealWidth: 1040, minHeight: 600, idealHeight: 800)
+                .navigationTitle(device.label)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Done") { dismiss() }
+                    }
                 }
-            }
-            .navigationTitle(device.label)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") { dismiss() }
-                }
-            }
         }
         .font(LumenType.body())
         .foregroundStyle(Lumen.graphite)
-    }
-}
-
-private struct BasicFixtureEditor: View {
-    @EnvironmentObject private var manager: LightManager
-    @ObservedObject var device: LightDevice
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                HStack(spacing: 12) {
-                    Circle()
-                        .fill(device.isOn ? device.color : Lumen.rule)
-                        .frame(width: 38, height: 38)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(device.brand.displayName)
-                            .font(LumenType.body(size: 13, weight: .semibold))
-                        RoomCanvasStatusBadge(
-                            status: RoomCanvasStatus.resolve([device], manager: manager),
-                            compact: true
-                        )
-                    }
-                    Spacer()
-                    Toggle("Power", isOn: Binding(
-                        get: { device.isOn },
-                        set: { manager.setPower(device, on: $0) }
-                    ))
-                    .toggleStyle(.switch)
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text("Brightness")
-                        Spacer()
-                        Text("\(Int(device.brightness * 100))%")
-                            .font(LumenType.readout(size: 12))
-                    }
-                    Slider(value: Binding(
-                        get: { device.brightness },
-                        set: { manager.setBrightness(deviceIDs: [device.id], value: $0) }
-                    ), in: 0.01...1)
-                }
-
-                ColorPicker("Output colour", selection: Binding(
-                    get: { device.color },
-                    set: { manager.setColor(device, color: $0) }
-                ), supportsOpacity: false)
-
-                HStack {
-                    Button("Identify") { manager.identify(device) }
-                    if device.isStale || manager.commandState(for: device.id).phase == .failed {
-                        Button("Retry") { manager.retry(device) }
-                    }
-                }
-                .buttonStyle(.bordered)
-            }
-            .padding(22)
-        }
-        .background(Lumen.canvas)
     }
 }

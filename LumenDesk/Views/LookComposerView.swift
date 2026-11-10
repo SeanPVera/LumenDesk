@@ -114,12 +114,13 @@ struct LookComposerView: View {
 
     private var currentRoom: Room { manager.rooms.first(where: { $0.id == room.id }) ?? room }
 
-    /// Lights in table order: the open room first, then (with All rooms)
-    /// every other room in sidebar order.
+    /// Every light in a room, in table order: the open room first, then
+    /// every other room in sidebar order. Rows exist for all of them for
+    /// the whole session; `allRooms` only filters what the table shows.
     private var tableLights: [LightDevice] {
         var seen = Set<String>()
         var result: [LightDevice] = []
-        let rooms = allRooms ? [currentRoom] + manager.rooms.filter { $0.id != currentRoom.id } : [currentRoom]
+        let rooms = [currentRoom] + manager.rooms.filter { $0.id != currentRoom.id }
         for room in rooms {
             for light in manager.devices(in: room) where seen.insert(light.id).inserted {
                 result.append(light)
@@ -129,6 +130,13 @@ struct LookComposerView: View {
     }
 
     private var includedCount: Int { rows.filter(\.included).count }
+    private var roomLightIDs: Set<String> { Set(currentRoom.lightIDs) }
+    private var visibleRowCount: Int {
+        rows.filter { LookDraftBuilder.isVisible($0, allRooms: allRooms, roomLightIDs: roomLightIDs) }.count
+    }
+    private var hiddenIncluded: Int {
+        LookDraftBuilder.hiddenIncludedCount(rows, allRooms: allRooms, roomLightIDs: roomLightIDs)
+    }
     private var hasChanges: Bool { rows != openingRows || lookName != openingName }
     private var canSave: Bool {
         includedCount > 0 && !lookName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -175,7 +183,6 @@ struct LookComposerView: View {
         .onDisappear {
             if previewOn { endPreview(restore: true) }
         }
-        .onChange(of: allRooms) { _ in mergeRowsForScope() }
         .task(id: rows) {
             // Only a running preview follows edits; with Preview off the
             // draft stays on screen and nothing is sent.
@@ -261,6 +268,11 @@ struct LookComposerView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: PolarSpacing.sm) {
                 PolarSectionLabel("Per-fixture color & level \u{00B7} \(includedCount) of \(rows.count) included")
+                if hiddenIncluded > 0 {
+                    Button("+\(hiddenIncluded) in other rooms") { allRooms = true }
+                        .buttonStyle(PolarButtonStyle(kind: .quiet, compact: true))
+                        .help("These fixtures are in the Look and will be saved. Show all rooms to edit them.")
+                }
                 Spacer(minLength: 8)
                 Picker("Scope", selection: $allRooms) {
                     Text("This room").tag(false)
@@ -273,11 +285,12 @@ struct LookComposerView: View {
             paletteStrip
             columnHeader
             ForEach($rows) { $row in
-                if let device = light(row.id) {
+                if LookDraftBuilder.isVisible(row, allRooms: allRooms, roomLightIDs: roomLightIDs),
+                   let device = light(row.id) {
                     LookComposerRow(row: $row, device: device, roomName: roomOf(row.id)?.name ?? "No room")
                 }
             }
-            if rows.isEmpty {
+            if visibleRowCount == 0 {
                 Text("This room has no fixtures yet. Add lights first, then compose a Look.")
                     .font(.polarUI(13))
                     .foregroundStyle(Polar.meter)
@@ -371,7 +384,7 @@ struct LookComposerView: View {
                 .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .stroke(previewOn ? Polar.mint.opacity(0.45) : Polar.ruleSoft, lineWidth: 1))
 
-            ComposerStage(rows: rows.filter(\.included), lit: previewOn, anchor: { id in
+            ComposerStage(rows: rows.filter { $0.included && LookDraftBuilder.isVisible($0, allRooms: allRooms, roomLightIDs: roomLightIDs) }, lit: previewOn, anchor: { id in
                 guard let room = roomOf(id) else { return PlanAnchor(x: 0.5, y: 0.5) }
                 return manager.planAnchor(for: id, in: room)
             }, silhouette: { id in
@@ -421,40 +434,27 @@ struct LookComposerView: View {
             // A Look reaching beyond this room opens with every room shown.
             if !Set(editing.snapshots.keys).isSubset(of: Set(currentRoom.lightIDs)) {
                 allRooms = true
-                rows = LookDraftBuilder.rows(editing: editing, lights: tableLights)
             }
         } else {
             let palette = ComposerPalette.choices.first
             paletteID = palette?.id
-            rows = LookDraftBuilder.rows(
+            rows = LookDraftBuilder.limitIncluded(LookDraftBuilder.rows(
                 palette: palette?.theme.colors.map { UInt32($0.hex & 0xFFFFFF) } ?? [],
                 level: palette?.theme.brightness ?? 0.62,
                 lights: lights,
                 selection: RoomWorkspaceSelection.targets(selected: initialSelection, available: currentRoom.lightIDs)
                     == Set(currentRoom.lightIDs) ? [] : initialSelection
-            )
+            ), to: roomLightIDs)
             lookName = palette?.name ?? "New Look"
         }
         openingRows = rows
         openingName = lookName
     }
 
-    /// Switching the scope keeps every edited row and adds the newcomers,
-    /// excluded, at their live colour.
-    private func mergeRowsForScope() {
-        let existing = Dictionary(rows.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        rows = tableLights.map { light in
-            if let row = existing[light.id] { return row }
-            let c = light.color.rgbComponents
-            return LookDraftRow(id: light.id, included: false,
-                                rgb: LookDraftBuilder.rgb(red: c.r, green: c.g, blue: c.b),
-                                level: max(LookDraftBuilder.minimumLevel, light.brightness))
-        }
-    }
-
+    /// Rows are never added or dropped after load, so Revert is simply the
+    /// opening draft, whichever scope is showing.
     private func revert() {
-        let opening = Dictionary(openingRows.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        rows = rows.compactMap { opening[$0.id] } + openingRows.filter { row in !rows.contains { $0.id == row.id } }
+        rows = openingRows
         lookName = openingName
     }
 
@@ -474,6 +474,13 @@ struct LookComposerView: View {
     private func save() {
         guard canSave else { return }
         let snapshots = draftSnapshots
+        // Flush the debounced preview first, so the lights left on show
+        // exactly what was saved (including fixtures just unchecked).
+        if previewOn, let id = previewID,
+           manager.previewComposedLook(snapshots, updating: id) == nil {
+            previewOn = false
+            previewID = nil
+        }
         guard manager.saveComposedLook(name: lookName, snapshots: snapshots, replacing: editing?.id) != nil else { return }
         // A running preview already shows the saved Look, so keep it on the
         // lights rather than snapping back; with Preview off nothing moved.

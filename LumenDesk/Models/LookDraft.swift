@@ -111,18 +111,34 @@ enum LookDraftBuilder {
         }
     }
 
-    /// Snapshots for the included rows. When editing, a row left exactly as
-    /// it was keeps the original snapshot, so a segment, matrix or panel
-    /// layout the Look carried is not flattened to one colour.
+    /// Snapshots for the included rows.
+    ///
+    /// When editing an existing Look:
+    /// - a row left exactly as it was keeps its original snapshot, so a
+    ///   segment, matrix or panel layout is not flattened to one colour;
+    /// - a row whose colour is unchanged but whose level changed keeps the
+    ///   original spatial payload and Kelvin, with the new level applied;
+    /// - fixtures the Look covers that have no row at all (not discovered,
+    ///   or no longer in a room) keep their saved snapshot untouched.
+    /// A row the user explicitly excluded is dropped.
     static func snapshots(_ rows: [LookDraftRow], kelvins: [String: Int],
                           original: LightingScene? = nil,
                           originalRows: [LookDraftRow] = []) -> [String: DeviceSnapshot] {
         let before = Dictionary(originalRows.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         var result: [String: DeviceSnapshot] = [:]
         for row in rows where row.included {
-            if let original, let kept = original.snapshots[row.id], before[row.id] == row {
-                result[row.id] = kept
-                continue
+            if let original, let kept = original.snapshots[row.id], let opening = before[row.id] {
+                if opening == row {
+                    result[row.id] = kept
+                    continue
+                }
+                if opening.rgb == row.rgb {
+                    var adjusted = kept
+                    adjusted.isOn = true
+                    adjusted.brightness = max(minimumLevel, min(1, row.level))
+                    result[row.id] = adjusted
+                    continue
+                }
             }
             let hs = hueSaturation(row.rgb)
             result[row.id] = DeviceSnapshot(isOn: true,
@@ -130,7 +146,37 @@ enum LookDraftBuilder {
                                             hue: hs.hue, saturation: hs.saturation,
                                             kelvin: kelvins[row.id] ?? 3500)
         }
+        if let original {
+            let rowIDs = Set(rows.map(\.id))
+            for (id, snap) in original.snapshots where !rowIDs.contains(id) {
+                result[id] = snap
+            }
+        }
         return result
+    }
+
+    // MARK: Scope
+
+    /// The composer keeps one row per light in every room for the whole
+    /// session; the This room / All rooms switch only filters what the
+    /// table shows, so switching never drops or resets a row.
+    static func isVisible(_ row: LookDraftRow, allRooms: Bool, roomLightIDs: Set<String>) -> Bool {
+        allRooms || roomLightIDs.contains(row.id)
+    }
+
+    /// Included rows the This room view is hiding (they still save).
+    static func hiddenIncludedCount(_ rows: [LookDraftRow], allRooms: Bool, roomLightIDs: Set<String>) -> Int {
+        rows.filter { $0.included && !isVisible($0, allRooms: allRooms, roomLightIDs: roomLightIDs) }.count
+    }
+
+    /// A new Look starts with only the open room's lights included (or the
+    /// selection within it); other rooms' rows exist but start excluded.
+    static func limitIncluded(_ rows: [LookDraftRow], to ids: Set<String>) -> [LookDraftRow] {
+        rows.map { row in
+            var copy = row
+            if !ids.contains(row.id) { copy.included = false }
+            return copy
+        }
     }
 
     /// "Evening copy", "Evening copy 2", … never colliding with `existing`.
@@ -141,5 +187,25 @@ enum LookDraftBuilder {
         var n = 2
         while taken.contains("\(base) \(n)".lowercased()) { n += 1 }
         return "\(base) \(n)"
+    }
+
+    // MARK: Sidebar Looks
+
+    /// The room a sidebar Look applies to: the open room when the Look
+    /// covers any of its fixtures, otherwise the room holding most of the
+    /// Look's fixtures (sidebar order breaks ties). Nil when no room has
+    /// one of its fixtures.
+    static func room(for look: LightingScene, rooms: [Room], preferring currentID: UUID?) -> Room? {
+        let lookIDs = Set(look.snapshots.keys)
+        if let current = rooms.first(where: { $0.id == currentID }),
+           !lookIDs.isDisjoint(with: current.lightIDs) {
+            return current
+        }
+        var best: (room: Room, count: Int)? = nil
+        for room in rooms {
+            let count = lookIDs.intersection(room.lightIDs).count
+            if count > 0, count > (best?.count ?? 0) { best = (room, count) }
+        }
+        return best?.room
     }
 }

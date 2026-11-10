@@ -71,7 +71,11 @@ struct GoveeSegmentEditorView: View {
             }
             footer
         }
-        .padding(embedded ? 0 : 20)
+        // Embedded in a Light Page panel: inset like the Luna and Shapes
+        // painters (the panel's section label already supplies the top).
+        .padding(.horizontal, embedded ? PolarSpacing.md : 20)
+        .padding(.bottom, embedded ? PolarSpacing.md : 20)
+        .padding(.top, embedded ? 0 : 20)
         .sheetFrame(minWidth: embedded ? nil : 620, idealWidth: embedded ? nil : 1000,
                     minHeight: embedded ? nil : 560, idealHeight: embedded ? nil : 740)
         .background(embedded ? AnyView(Color.clear) : AnyView(Polar.stage))

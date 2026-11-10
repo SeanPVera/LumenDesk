@@ -9,8 +9,8 @@ import SwiftUI
 //
 // Painting reuses the studios that already speak each protocol (Govee
 // segment stream, LIFX matrix, Nanoleaf Shapes), so a page never invents a
-// command. Controls the protocol cannot drive yet are gated by
-// `LightPageFeatureFlags` and render as labelled previews.
+// command. Where a model's LAN interface stops short of a designed control
+// (curtain beads), the page says what it really paints instead.
 
 struct LightPageView: View {
     @EnvironmentObject private var manager: LightManager

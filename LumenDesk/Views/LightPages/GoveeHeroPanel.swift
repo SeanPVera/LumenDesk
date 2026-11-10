@@ -62,7 +62,7 @@ struct GoveeHeroPanel: View {
         case .goveeStringPods:
             pods
         case .goveeGlideBars:
-            SegmentStrip(cells: cells, unitName: "zone", rowLength: 14, labelEvery: 1, cellHeight: 18)
+            GlideChainPanel(device: device, state: state)
         case .goveeStripS:
             SegmentStrip(cells: cells, unitName: "segment", rowLength: 15, labelEvery: 5, cellHeight: 20)
         case .goveeCOBStrip:
@@ -110,15 +110,24 @@ struct GoveeHeroPanel: View {
                         Text("\(index + 1)")
                             .font(.polarMono(12))
                             .foregroundStyle(Polar.meter)
+                        if let kelvin = podKelvin(index) {
+                            Text("\(kelvin)K")
+                                .font(.polarMono(9))
+                                .foregroundStyle(Polar.amber)
+                        }
                     }
                     .frame(maxWidth: .infinity)
                     .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("Pod \(index + 1)")
+                    .accessibilityLabel("Pod \(index + 1)\(podKelvin(index).map { ", white \($0) kelvin" } ?? "")")
                     .accessibilityValue(cells[index].isOn ? "On" : "Off")
                 }
             }
         }
         .frame(minHeight: 120)
+    }
+
+    private func podKelvin(_ index: Int) -> Int? {
+        state.colors.indices.contains(index) ? state.colors[index].kelvin : nil
     }
 
     /// H60B0: three stacked lamps on a pole, named by the profile.
@@ -164,29 +173,20 @@ struct GoveeHeroPanel: View {
     private var notes: some View {
         switch model {
         case .goveeCurtain, .goveeCurtainString:
-            if !LightPageFeatureFlags.curtainBeadCanvas {
-                FeaturePreviewNote(
-                    title: "Bead painting",
-                    detail: "Each column is one LAN zone. Painting single beads needs protocol support LumenDesk doesn't have yet."
-                )
-            }
+            CapabilityNote(
+                symbol: "rectangle.split.3x1",
+                text: "Paints by column. Govee's LAN interface addresses the curtain's 20 columns; single beads are only reachable over Bluetooth, which LumenDesk doesn't use."
+            )
             if model == .goveeCurtainString {
                 Text("Model H70BC matched by elimination. If this light hangs as a string rather than a curtain, rename it in the room.")
                     .font(.polarUI(12))
                     .foregroundStyle(Polar.meter)
             }
-        case .goveeGlideBars:
-            if !LightPageFeatureFlags.glideChainGeometry {
-                FeaturePreviewNote(
-                    title: "Bar layout",
-                    detail: "The controller reports 28 zones but not how the bars are arranged, so they're drawn as one straight chain."
-                )
-            }
         case .goveeStringPods:
-            if !LightPageFeatureFlags.stringPodKelvin {
-                FeaturePreviewNote(
-                    title: "Per-pod white",
-                    detail: "Pods take colour over LAN. A white point for each pod needs a command LumenDesk doesn't send yet."
+            if profile.segmentWhiteRange != nil {
+                CapabilityNote(
+                    symbol: "thermometer.sun",
+                    text: "Each pod can hold its own white point (2700–6500 K). The pods are RGB only, so whites are mixed from colour. Set them in the painter below."
                 )
             }
         default:
@@ -195,31 +195,20 @@ struct GoveeHeroPanel: View {
     }
 }
 
-/// A clearly labelled placeholder for a designed control whose protocol is
-/// not implemented. It never sends anything.
-struct FeaturePreviewNote: View {
-    let title: String
-    let detail: String
+/// A one-line statement of what a page's controls really drive.
+struct CapabilityNote: View {
+    let symbol: String
+    let text: String
 
     var body: some View {
-        HStack(alignment: .top, spacing: PolarSpacing.sm) {
-            Image(systemName: "hammer")
-                .foregroundStyle(Polar.pending)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("\(title) · Coming later")
-                    .font(.polarUI(12, weight: .semibold))
-                    .foregroundStyle(Polar.chalk)
-                Text(detail)
-                    .font(.polarUI(12))
-                    .foregroundStyle(Polar.meter)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+        Label {
+            Text(text)
+                .fixedSize(horizontal: false, vertical: true)
+        } icon: {
+            Image(systemName: symbol).foregroundStyle(Polar.select)
         }
-        .padding(PolarSpacing.sm)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Polar.pending.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
-            .stroke(Polar.pending.opacity(0.3), style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
+        .font(.polarUI(12))
+        .foregroundStyle(Polar.meter)
         .accessibilityElement(children: .combine)
     }
 }

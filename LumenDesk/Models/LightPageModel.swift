@@ -194,22 +194,3 @@ enum LightPageModel: Equatable {
         }
     }
 }
-
-// MARK: - Feature flags for controls the LAN protocol cannot drive yet
-
-/// Light-page controls designed in the Polar artboards whose wire protocol
-/// LumenDesk does not implement. They render as clearly labelled previews
-/// and never send anything. Flip a flag only once the transport exists.
-enum LightPageFeatureFlags {
-    /// Per-bead painting inside a curtain column. The H70B1/H70BC LAN API
-    /// addresses 20 columns; individual beads are not addressable.
-    /// TODO(protocol): needs a documented per-bead LAN or stream frame.
-    static let curtainBeadCanvas = false
-    /// Physical chain geometry for H6062 bars (which bar is a corner). The
-    /// controller reports 28 zones but not how the pieces are arranged.
-    /// TODO(protocol): needs a layout query; today the hero assumes a straight chain.
-    static let glideChainGeometry = false
-    /// Per-pod white temperature on the H608B. Pods take RGB only over LAN.
-    /// TODO(protocol): needs a per-segment Kelvin command.
-    static let stringPodKelvin = false
-}

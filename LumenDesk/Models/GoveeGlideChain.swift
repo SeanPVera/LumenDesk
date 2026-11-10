@@ -154,4 +154,23 @@ enum KelvinRGB {
             : (temperature <= 19 ? 0 : 138.5177312231 * log(temperature - 10) - 305.0447927307)
         return (clamp(red), clamp(green), clamp(blue))
     }
+
+    /// The white point in `range` whose mixed RGB is closest to the given
+    /// colour (chromaticity only, so a dim white still reads as its Kelvin).
+    /// Used where a fixture takes Kelvin only, such as the H60B0 down light.
+    static func nearestKelvin(red: Double, green: Double, blue: Double,
+                              in range: ClosedRange<Int> = 2_700...6_500) -> Int {
+        let peak = max(red, green, blue, 0.0001)
+        let target = (red / peak, green / peak, blue / peak)
+        var best = range.lowerBound
+        var bestDistance = Double.greatestFiniteMagnitude
+        for kelvin in stride(from: range.lowerBound, through: range.upperBound, by: 100) {
+            let c = components(kelvin)
+            let cPeak = max(c.red, c.green, c.blue, 0.0001)
+            let d = pow(c.red / cPeak - target.0, 2) + pow(c.green / cPeak - target.1, 2)
+                + pow(c.blue / cPeak - target.2, 2)
+            if d < bestDistance { bestDistance = d; best = kelvin }
+        }
+        return best
+    }
 }

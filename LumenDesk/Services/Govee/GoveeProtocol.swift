@@ -214,6 +214,69 @@ enum GoveeProtocol {
         return blePacket(payload)
     }
 
+    // MARK: H60B0 Uplighter sections
+
+    /// The H60B0 Uplighter's three sections, as its firmware numbers them.
+    ///
+    /// Evidence: SamWiIIiams/govee-lan-bridge (README "Protocol notes",
+    /// `bridge.py`, byte-for-byte `test_bridge.py`), frames derived from the
+    /// Govee Home app's Bluetooth traffic and verified on an H60B0 over LAN
+    /// `ptReal`; the same table is posted in lasswellt/govee-homeassistant
+    /// #211. Govee's Developer API names the same three parts
+    /// `rippleLightToggle`, `sideLightToggle` and `bottomLightToggle` (#83).
+    enum UplighterSection: UInt8, CaseIterable {
+        case ripple = 1
+        case side = 2
+        case down = 3
+    }
+
+    /// The H60B0's side ring has 8 segments; `FF` addresses all of them.
+    static let uplighterSideMaskAll: UInt8 = 0xFF
+    static let uplighterKelvinRange = 2_700...6_500
+
+    /// Section on/off: `33 30 <section> 01|00`. The lamp runs at most two.
+    static func uplighterSectionPowerPacket(_ section: UplighterSection, on: Bool) -> [UInt8] {
+        blePacket([0x33, 0x30, section.rawValue, on ? 0x01 : 0x00])
+    }
+
+    /// Ripple or side colour: `33 05 2c <sec> 01 RR GG BB KK KK` (Kelvin
+    /// `00 00` for a plain colour); the side ring takes its segment mask
+    /// after the Kelvin bytes. The down light has no colour (see
+    /// `uplighterDownKelvinPacket`), so asking for one returns nil.
+    static func uplighterColorPacket(_ section: UplighterSection,
+                                     rgb: (r: Int, g: Int, b: Int), kelvin: Int? = nil) -> [UInt8]? {
+        guard section != .down else { return nil }
+        let k = kelvin.map { max(uplighterKelvinRange.lowerBound, min(uplighterKelvinRange.upperBound, $0)) } ?? 0
+        var payload: [UInt8] = [0x33, 0x05, 0x2C, section.rawValue, 0x01,
+                                UInt8(max(0, min(255, rgb.r))), UInt8(max(0, min(255, rgb.g))),
+                                UInt8(max(0, min(255, rgb.b))),
+                                UInt8((k >> 8) & 0xFF), UInt8(k & 0xFF)]
+        if section == .side { payload.append(uplighterSideMaskAll) }
+        return blePacket(payload)
+    }
+
+    /// Section brightness 1…100: `33 05 2c <sec> 02 <pct>`; the side ring
+    /// needs its segment mask after the value or the lamp ignores it.
+    static func uplighterBrightnessPacket(_ section: UplighterSection, percent: Int) -> [UInt8] {
+        var payload: [UInt8] = [0x33, 0x05, 0x2C, section.rawValue, 0x02, UInt8(max(1, min(100, percent)))]
+        if section == .side { payload.append(uplighterSideMaskAll) }
+        return blePacket(payload)
+    }
+
+    /// Down-light white point: `33 05 2c 03 01 KK KK`, no RGB bytes. Colour
+    /// bytes or a Kelvin outside 2700–6500 black the lamp out, so the value
+    /// is always clamped.
+    static func uplighterDownKelvinPacket(_ kelvin: Int) -> [UInt8] {
+        let k = max(uplighterKelvinRange.lowerBound, min(uplighterKelvinRange.upperBound, kelvin))
+        return blePacket([0x33, 0x05, 0x2C, 0x03, 0x01, UInt8((k >> 8) & 0xFF), UInt8(k & 0xFF)])
+    }
+
+    /// Ripple flow (the rotating lens's speed) 0…100: `33 05 2c 01 03 <v>`.
+    /// 0 effectively stops the ripple.
+    static func uplighterFlowPacket(_ value: Int) -> [UInt8] {
+        blePacket([0x33, 0x05, 0x2C, 0x01, 0x03, UInt8(max(0, min(100, value)))])
+    }
+
     /// Per-segment brightness (1…100 percent):
     /// `33 05 15 02 <percent> <14-byte segment mask>`.
     static func segmentBrightnessPacket(percent: Int, segments: [Int]) -> [UInt8] {

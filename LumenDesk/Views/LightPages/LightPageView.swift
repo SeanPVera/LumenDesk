@@ -106,7 +106,12 @@ struct LightPageView: View {
                 NanoleafShapesStudio(device: device, shapes: manager.shapes,
                                      presentation: .inline, wide: width >= 900)
             }
-        case .goveeUplighter, .goveeCurtain, .goveeCurtainString, .goveeCOBStrip, .goveeGlideBars,
+        case .goveeUplighter:
+            GoveeHeroPanel(device: device, model: model)
+            painterPanel {
+                UplighterSectionsPanel(device: device, width: width)
+            }
+        case .goveeCurtain, .goveeCurtainString, .goveeCOBStrip, .goveeGlideBars,
              .goveeStringPods, .goveeStripS, .fallback(.goveeSegments):
             GoveeHeroPanel(device: device, model: model)
             painterPanel {

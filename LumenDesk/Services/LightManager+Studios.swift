@@ -116,8 +116,14 @@ extension LightManager {
     /// is editing. The overlay is volatile, so ending the preview without
     /// applying is a true cancel: the light falls back to its last static
     /// state (or, on stream-hold families, snaps back to the applied layout).
-    func previewSegments(_ device: LightDevice, state: GoveeSegmentState) {
+    ///
+    /// The H60B0 Uplighter is skipped unless `realtime` (Music Mode): its
+    /// sections are written with section commands, and the razer frame's
+    /// colour order doesn't follow them, so a studio preview would light the
+    /// wrong part of the lamp. Its studio applies on Apply instead.
+    func previewSegments(_ device: LightDevice, state: GoveeSegmentState, realtime: Bool = false) {
         guard device.brand == .govee, demoWorkspaceController.allowsLiveNetworking else { return }
+        if !realtime, segmentStudioProfile(for: device)?.usesUplighterSections == true { return }
         segmentPreviewIDs.insert(device.id)
         if !razerActiveIDs.contains(device.id) {
             razerActiveIDs.insert(device.id)
@@ -311,6 +317,11 @@ extension LightManager {
 
     /// Sends the durable packet batch for a layout.
     func sendSegmentPackets(_ device: LightDevice, state: GoveeSegmentState) {
+        if segmentStudioProfile(for: device)?.usesUplighterSections == true {
+            // One datagram: the lamp drops ptReal packets sent back to back.
+            govee?.applySegments(deviceID: device.backendID, packets: state.uplighterSectionPackets(), chunkSize: 12)
+            return
+        }
         let packets = state.durableSegmentPackets(
             supportsGradient: segmentStudioProfile(for: device)?.supportsGradient == true
         )

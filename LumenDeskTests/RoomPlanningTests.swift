@@ -1024,6 +1024,12 @@ final class RoomCanvasRenderTests: XCTestCase {
             try await capture("light-page-\((device.sku ?? "lifx-\(device.productID ?? 0)").replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: " ", with: "-"))",
                               LightPageView(device: device), manager, width: 1280, height: 900)
         }
+        // The Uplighter's section cards run below the default frame; show
+        // them whole, ripple flow included.
+        if let uplighter = manager.devices.first(where: { $0.sku == "H60B0" }) {
+            try await capture("light-page-H60B0-sections", LightPageView(device: uplighter), manager,
+                              width: 1280, height: 1320)
+        }
         let standalone: [(String, LightDevice)] = [
             ("light-page-H70B1", LightDevice(id: "govee:render-curtain", brand: .govee, backendID: "render-curtain",
                                              name: "Bedroom Curtain", address: "0.0.0.0", sku: "H70B1", isOn: true,

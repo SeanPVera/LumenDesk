@@ -585,6 +585,16 @@ struct FixtureTopology: Codable, Equatable {
         }
     }
 
+    /// Fast, allocation-free check for whether any target would be produced for `fixtures`.
+    ///
+    /// Avoids sorting, dictionary creation, and allocating an array of `MusicSpatialTarget`
+    /// when callers (like tap calibration UI bindings) only need to know if any active target exists.
+    func hasActiveTargets(for fixtures: [MusicFixtureDescriptor]) -> Bool {
+        fixtures.contains { fixture in
+            !excludedFixtureIDs.contains(fixture.id) && fixture.resolvedRole != .off
+        }
+    }
+
     func expandedTargets(for fixtures: [MusicFixtureDescriptor]) -> [MusicSpatialTarget] {
         let ordered = includedFixtures(fixtures)
         let count = ordered.reduce(0) { $0 + max(1, $1.segmentCount) }

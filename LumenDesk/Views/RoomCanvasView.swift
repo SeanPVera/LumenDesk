@@ -22,7 +22,73 @@ final class RoomCanvasSessionStore: ObservableObject {
     /// The light whose page is open in the detail column, replacing the
     /// Room Stage until the person goes back.
     @Published var editorDeviceID: String?
+    /// "Save current as a Look" prompt, owned by the shell so ⌘S works
+    /// whether the Room Stage or a Light Page is showing.
+    @Published var namingCurrentLook = false
+    /// A sheet waiting for a sibling sheet to finish dismissing.
+    private(set) var pendingSheet: RoomCanvasSheet?
     private var selectionRoomID: UUID?
+
+    /// The sheet on screen, if any. The shell hangs five sibling sheets
+    /// off one view; only one can be presented at a time.
+    var presentedSheet: RoomCanvasSheet? {
+        if showingComposer { return .composer }
+        if showingAddOrRepair { return .addLights }
+        if showingLive { return .live }
+        if showingSettings { return .settings }
+        if showingLooks { return .looks }
+        return nil
+    }
+
+    func isShowing(_ sheet: RoomCanvasSheet) -> Bool {
+        switch sheet {
+        case .composer: return showingComposer
+        case .addLights: return showingAddOrRepair
+        case .live: return showingLive
+        case .settings: return showingSettings
+        case .looks: return showingLooks
+        }
+    }
+
+    func setShowing(_ sheet: RoomCanvasSheet, _ value: Bool) {
+        switch sheet {
+        case .composer: showingComposer = value
+        case .addLights: showingAddOrRepair = value
+        case .live: showingLive = value
+        case .settings: showingSettings = value
+        case .looks: showingLooks = value
+        }
+    }
+
+    /// Presents `sheet`, dismissing any sibling first. With a sibling up,
+    /// the new sheet follows once the dismissal has had time to finish;
+    /// presenting both in one transaction is dropped by SwiftUI on macOS 13.
+    func present(_ sheet: RoomCanvasSheet, editingLook lookID: UUID? = nil,
+                 handoffDelay: TimeInterval = 0.35) {
+        let current = presentedSheet
+        if current == sheet { return }
+        if sheet == .composer { editingLookID = lookID }
+        for other in RoomCanvasSheet.allCases where other != sheet { setShowing(other, false) }
+        guard current != nil else {
+            pendingSheet = nil
+            setShowing(sheet, true)
+            return
+        }
+        pendingSheet = sheet
+        DispatchQueue.main.asyncAfter(deadline: .now() + handoffDelay) { [weak self] in
+            guard let self, self.pendingSheet == sheet else { return }
+            self.pendingSheet = nil
+            if sheet == .composer { self.editingLookID = lookID }
+            self.setShowing(sheet, true)
+        }
+    }
+
+    /// Opens a light's page and keeps the stage selection on that light,
+    /// so the composer and Identify follow Prev / Next.
+    func openLightPage(_ id: String) {
+        editorDeviceID = id
+        selectedFixtureIDs = [id]
+    }
 
     func select(_ room: Room, devices: [LightDevice]) {
         selectedRoomID = room.id
@@ -62,6 +128,10 @@ final class RoomCanvasSessionStore: ObservableObject {
             self.editorDeviceID = nil
         }
     }
+}
+
+enum RoomCanvasSheet: CaseIterable, Equatable {
+    case composer, addLights, live, settings, looks
 }
 
 enum RoomCanvasStatus: Int, CaseIterable, Equatable {
@@ -146,6 +216,7 @@ struct RoomCanvasShellView: View {
     let startInSetup: Bool
     let onPrepared: () -> Void
     @State private var handledInitialSetup: Bool = false
+    @State private var currentLookName: String = ""
 
     init(startInSetup: Bool = false, onPrepared: @escaping () -> Void = {}) {
         self.startInSetup = startInSetup
@@ -174,7 +245,7 @@ struct RoomCanvasShellView: View {
                     if let editorDevice {
                         LightPageView(
                             device: editorDevice,
-                            navigate: { session.editorDeviceID = $0 },
+                            navigate: { session.openLightPage($0) },
                             close: { session.editorDeviceID = nil }
                         )
                         .id(editorDevice.id)
@@ -210,6 +281,20 @@ struct RoomCanvasShellView: View {
         }
         .onReceive(manager.$devices) { devices in
             session.reconcile(rooms: manager.rooms, devices: devices)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .lumenSaveCurrentLook)) { _ in
+            beginSaveCurrentLook()
+        }
+        .alert("Save current as a Look", isPresented: $session.namingCurrentLook) {
+            TextField("Look name", text: $currentLookName)
+            Button("Cancel", role: .cancel) {}
+            Button("Save") {
+                guard let selectedRoom else { return }
+                _ = manager.captureLook(name: currentLookName, deviceIDs: Set(selectedRoom.lightIDs))
+            }
+            .disabled(currentLookName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        } message: {
+            Text("Captures the power, colour, brightness, and supported spatial output in \(selectedRoom?.name ?? "this room").")
         }
         .onChange(of: openRoomRequest) { request in
             consumeOpenRoomRequest(request)
@@ -249,16 +334,8 @@ struct RoomCanvasShellView: View {
             if let selectedRoom {
                 LooksLibraryView(
                     room: selectedRoom,
-                    compose: {
-                        session.editingLookID = nil
-                        session.showingLooks = false
-                        session.showingComposer = true
-                    },
-                    edit: { look in
-                        session.editingLookID = look.id
-                        session.showingLooks = false
-                        session.showingComposer = true
-                    }
+                    compose: { session.present(.composer) },
+                    edit: { look in session.present(.composer, editingLook: look.id) }
                 )
                 .environmentObject(manager)
             }
@@ -270,15 +347,15 @@ struct RoomCanvasShellView: View {
         switch command {
         case .newLook:
             guard selectedRoom != nil else { return }
-            session.showingComposer = true
+            session.present(.composer)
         case .addLights:
-            session.showingAddOrRepair = true
+            session.present(.addLights)
         case .openLooks:
             guard selectedRoom != nil else { return }
-            session.showingLooks = true
+            session.present(.looks)
         case .openLive:
             guard selectedRoom != nil else { return }
-            session.showingLive = true
+            session.present(.live)
         case .identifySelected:
             if let editorDevice {
                 manager.identify(editorDevice)
@@ -290,12 +367,12 @@ struct RoomCanvasShellView: View {
         case .openLightPage:
             guard let room = selectedRoom else { return }
             let ordered = room.lightIDs.filter { session.selectedFixtureIDs.contains($0) }
-            if let first = ordered.first { session.editorDeviceID = first }
+            if let first = ordered.first { session.openLightPage(first) }
         case .saveLook:
-            // The composer saves its own draft; otherwise the room's Looks
-            // bar opens its "Save current as a Look" prompt.
+            // The composer saves its own draft; otherwise the shell asks
+            // for a name, from the Room Stage or a Light Page alike.
             guard !session.showingComposer, selectedRoom != nil else { return }
-            NotificationCenter.default.post(name: .lumenSaveCurrentLook, object: nil)
+            beginSaveCurrentLook()
         case .duplicateLook:
             // The composer duplicates its draft itself.
             guard !session.showingComposer else { return }
@@ -306,6 +383,14 @@ struct RoomCanvasShellView: View {
                 manager.publishError("Apply a Look first, then press \u{2318}D to duplicate it. You can also right-click any Look.")
             }
         }
+    }
+
+    private func beginSaveCurrentLook() {
+        guard selectedRoom != nil else { return }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEE h:mm a"
+        currentLookName = formatter.string(from: Date())
+        session.namingCurrentLook = true
     }
 
     private func consumeOpenRoomRequest(_ request: String) {
@@ -421,7 +506,7 @@ private struct RoomCanvasSidebar: View {
                             .padding(.bottom, 4)
                         ForEach(manager.scenes.prefix(8)) { look in
                             Button {
-                                session.showingLooks = true
+                                applyFromSidebar(look)
                             } label: {
                                 HStack(spacing: 8) {
                                     LookSwatchDots(look: look)
@@ -436,7 +521,21 @@ private struct RoomCanvasSidebar: View {
                                 .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
-                            .help("Open Looks (⌘L)")
+                            .help("Apply \u{201C}\(look.name)\u{201D} (switches to its room if needed)")
+                            .contextMenu {
+                                Button("Apply") { applyFromSidebar(look) }
+                                Button("Edit in Composer\u{2026}") {
+                                    guard let room = LookDraftBuilder.room(for: look, rooms: manager.rooms,
+                                                                           preferring: session.selectedRoomID) else { return }
+                                    if room.id != session.selectedRoomID {
+                                        session.select(room, devices: manager.devices(in: room))
+                                    }
+                                    session.present(.composer, editingLook: look.id)
+                                }
+                                Button("Duplicate Look") { manager.duplicateLook(look.id) }
+                                Divider()
+                                Button("Open Looks Library") { session.present(.looks) }
+                            }
                         }
                     }
                 }
@@ -491,6 +590,22 @@ private struct RoomCanvasSidebar: View {
         } message: {
             Text("The new name appears anywhere this room can be opened or controlled.")
         }
+    }
+
+    /// A sidebar Look applies to the room it belongs to: the open room
+    /// when it covers any of its fixtures, otherwise the sidebar switches
+    /// to the room holding most of them first. Same apply path as the
+    /// room's Looks bar.
+    private func applyFromSidebar(_ look: LightingScene) {
+        guard let room = LookDraftBuilder.room(for: look, rooms: manager.rooms,
+                                               preferring: session.selectedRoomID) else {
+            manager.publishError("\u{201C}\(look.name)\u{201D} has no fixtures in any room yet.")
+            return
+        }
+        if room.id != session.selectedRoomID {
+            session.select(room, devices: manager.devices(in: room))
+        }
+        manager.applyLook(look, deviceIDs: Set(room.lightIDs))
     }
 
     private func roomButton(_ room: Room, index: Int) -> some View {
@@ -1509,8 +1624,6 @@ private struct LookShelf: View {
     @EnvironmentObject private var manager: LightManager
     let room: Room
     let compose: () -> Void
-    @State private var namingCurrent: Bool = false
-    @State private var currentName: String = ""
     @State private var renamingLookID: UUID? = nil
     @State private var renamedLookName: String = ""
 
@@ -1580,8 +1693,7 @@ private struct LookShelf: View {
                     }
 
                     Button {
-                        currentName = suggestedName
-                        namingCurrent = true
+                        NotificationCenter.default.post(name: .lumenSaveCurrentLook, object: nil)
                     } label: {
                         Label("Save current", systemImage: "plus")
                     }
@@ -1593,20 +1705,6 @@ private struct LookShelf: View {
         .padding(.vertical, 12)
         .background(Lumen.deck)
         .overlay(alignment: .top) { Rectangle().fill(Lumen.rule).frame(height: 1) }
-        .onReceive(NotificationCenter.default.publisher(for: .lumenSaveCurrentLook)) { _ in
-            currentName = suggestedName
-            namingCurrent = true
-        }
-        .alert("Save current as a Look", isPresented: $namingCurrent) {
-            TextField("Look name", text: $currentName)
-            Button("Cancel", role: .cancel) {}
-            Button("Save") {
-                _ = manager.captureLook(name: currentName, deviceIDs: ids)
-            }
-            .disabled(currentName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-        } message: {
-            Text("Captures the power, colour, brightness, and supported spatial output in \(room.name).")
-        }
         .alert("Rename Look", isPresented: Binding(
             get: { renamingLookID != nil },
             set: { if !$0 { renamingLookID = nil } }
@@ -1622,12 +1720,6 @@ private struct LookShelf: View {
         } message: {
             Text("The new name appears on every room shelf where this Look is available.")
         }
-    }
-
-    private var suggestedName: String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "EEE h:mm a"
-        return formatter.string(from: Date())
     }
 }
 

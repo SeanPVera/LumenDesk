@@ -1083,10 +1083,10 @@ final class RoomCanvasRenderTests: XCTestCase {
         try await capture("live", RoomLiveView(room: room), manager, width: 960, height: 640)
         try await capture("empty-room", RoomCanvasEmptyState(openSetup: {}), manager, width: 1000, height: 640)
         #if os(macOS)
-        try await capture("menu-bar-extra", MenuBarPopoverView(), manager, width: 340, height: 640)
+        try await capture("menu-bar-extra", MenuBarPopoverView(), manager, width: 340, height: 500)
         // A second room shows the room switcher; Sample Room stays offline.
         _ = manager.addRoom(named: "Hall")
-        try await capture("menu-bar-extra-rooms", MenuBarPopoverView(), manager, width: 340, height: 680)
+        try await capture("menu-bar-extra-rooms", MenuBarPopoverView(), manager, width: 340, height: 540)
         #endif
 
         let theme = try XCTUnwrap(LightingCatalog.theme(withID: "aurora"))

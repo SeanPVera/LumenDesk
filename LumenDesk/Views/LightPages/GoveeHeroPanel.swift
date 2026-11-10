@@ -111,7 +111,7 @@ struct GoveeHeroPanel: View {
                             .font(.polarMono(12))
                             .foregroundStyle(Polar.meter)
                         if let kelvin = podKelvin(index) {
-                            Text("\(kelvin)K")
+                            Text(verbatim: "\(kelvin)K")
                                 .font(.polarMono(9))
                                 .foregroundStyle(Polar.amber)
                         }

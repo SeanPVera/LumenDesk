@@ -24,7 +24,7 @@ struct GlideChainPanel: View {
         VStack(alignment: .leading, spacing: PolarSpacing.sm) {
             if let chain {
                 GlideChainDrawing(chain: chain, colors: litColors, ranges: ranges, selected: selectedPiece)
-                    .frame(height: 190)
+                    .frame(height: 250)
                 pieceChips(chain)
                 editRow(chain)
                 if let selectedPiece, chain.pieces.indices.contains(selectedPiece) {
@@ -204,25 +204,56 @@ struct GlideChainDrawing: View {
             let offsetX = (size.width - spanX * scale) / 2 - minX * scale
             let offsetY = (size.height - spanY * scale) / 2 - minY * scale
             func map(_ p: CGPoint) -> CGPoint { CGPoint(x: p.x * scale + offsetX, y: p.y * scale + offsetY) }
-            let width = max(8, min(16, scale * 0.1))
+            let width = max(8, min(14, scale * 0.09))
 
+            var heading = CGVector(dx: 1, dy: 0)
             for (index, piece) in pieces.enumerated() {
                 let a = map(piece.start), b = map(piece.end)
                 let range = ranges.indices.contains(index) ? ranges[index] : 0..<0
                 let pieceColors = range.compactMap { colors.indices.contains($0) ? colors[$0] : nil }
-                let parts = max(1, pieceColors.count)
+                // A small gap at each joint so every piece reads on its own.
+                let length = hypot(b.x - a.x, b.y - a.y)
+                guard length > 0 else { continue }
+                let gap = min(width / 2 + 3, length * 0.2)
+                let ux = (b.x - a.x) / length, uy = (b.y - a.y) / length
+                var legs: [(CGPoint, CGPoint)]
+                if chain.pieces[index].isCorner {
+                    // Corners bend 90°: first along the old heading, then the new.
+                    let leg = length / 2.squareRoot()
+                    let bend = CGPoint(x: a.x + heading.dx * leg, y: a.y + heading.dy * leg)
+                    let start = CGPoint(x: a.x + heading.dx * gap, y: a.y + heading.dy * gap)
+                    let nx = (b.x - bend.x) / max(leg, 0.001), ny = (b.y - bend.y) / max(leg, 0.001)
+                    let end = CGPoint(x: b.x - nx * gap, y: b.y - ny * gap)
+                    legs = [(start, bend), (bend, end)]
+                    heading = CGVector(dx: nx, dy: ny)
+                } else {
+                    let start = CGPoint(x: a.x + ux * gap, y: a.y + uy * gap)
+                    let end = CGPoint(x: b.x - ux * gap, y: b.y - uy * gap)
+                    let parts = max(1, pieceColors.count)
+                    legs = (0..<parts).map { part in
+                        let t0 = CGFloat(part) / CGFloat(parts), t1 = CGFloat(part + 1) / CGFloat(parts)
+                        return (CGPoint(x: start.x + (end.x - start.x) * t0, y: start.y + (end.y - start.y) * t0),
+                                CGPoint(x: start.x + (end.x - start.x) * t1, y: start.y + (end.y - start.y) * t1))
+                    }
+                    heading = CGVector(dx: ux, dy: uy)
+                }
                 if selected == index {
                     var outline = Path()
-                    outline.move(to: a); outline.addLine(to: b)
+                    outline.move(to: legs[0].0)
+                    for leg in legs { outline.addLine(to: leg.1) }
                     context.stroke(outline, with: .color(Polar.select),
-                                   style: StrokeStyle(lineWidth: width + 7, lineCap: .round))
+                                   style: StrokeStyle(lineWidth: width + 7, lineCap: .round, lineJoin: .round))
                 }
-                for part in 0..<parts {
-                    let t0 = CGFloat(part) / CGFloat(parts), t1 = CGFloat(part + 1) / CGFloat(parts)
+                for (part, leg) in legs.enumerated() {
                     var path = Path()
-                    path.move(to: CGPoint(x: a.x + (b.x - a.x) * t0, y: a.y + (b.y - a.y) * t0))
-                    path.addLine(to: CGPoint(x: a.x + (b.x - a.x) * t1, y: a.y + (b.y - a.y) * t1))
-                    let color = pieceColors.isEmpty ? Polar.raised : pieceColors[part]
+                    path.move(to: leg.0)
+                    path.addLine(to: leg.1)
+                    let color: Color
+                    if pieceColors.isEmpty {
+                        color = Polar.raised
+                    } else {
+                        color = pieceColors[min(pieceColors.count - 1, part * pieceColors.count / legs.count)]
+                    }
                     var glow = context
                     glow.addFilter(.blur(radius: 7))
                     glow.stroke(path, with: .color(color.opacity(0.55)), style: StrokeStyle(lineWidth: width + 6, lineCap: .round))

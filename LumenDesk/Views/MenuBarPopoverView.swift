@@ -159,8 +159,8 @@ struct MenuBarPopoverView: View {
                         .foregroundStyle(litCount > 0 ? Polar.mint : Polar.meter)
                 }
                 Spacer()
-                Toggle("All on", isOn: Binding(
-                    get: { !lights.isEmpty && lights.allSatisfy(\.isOn) },
+                Toggle("Room power", isOn: Binding(
+                    get: { litCount > 0 },
                     set: { manager.setPower(in: room, on: $0) }
                 ))
                 .labelsHidden()
@@ -193,7 +193,7 @@ struct MenuBarPopoverView: View {
                 range: 2_000...6_500,
                 step: 100,
                 fill: [Polar.amber, Color(hex: 0xFFF1DC), Color(hex: 0xDDE8FF)],
-                readout: { "\(Int($0.rounded())) K" }
+                readout: { "\(Int(($0 / 100).rounded()) * 100) K" }
             )
             .disabled(lights.isEmpty)
         }

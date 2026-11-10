@@ -735,7 +735,7 @@ struct GoveeSegmentEditorView: View {
                                 .fill(white.color)
                                 .overlay(Circle().stroke(Color.white.opacity(0.22), lineWidth: 1))
                                 .frame(width: 22, height: 22)
-                            Text("\(kelvin)")
+                            Text(verbatim: "\(kelvin)")
                                 .font(.polarMono(9))
                                 .foregroundStyle(Polar.meter)
                         }

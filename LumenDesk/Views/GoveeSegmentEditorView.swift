@@ -693,6 +693,9 @@ struct GoveeSegmentEditorView: View {
                     .font(.polarUI(11))
                     .foregroundStyle(Polar.meter)
             }
+            if let whites = profile.segmentWhiteRange {
+                whitePointRow(whites)
+            }
             HStack(spacing: 10) {
                 Button("Blend across selection", action: blendAcrossSelection)
                     .buttonStyle(PolarButtonStyle(kind: .quiet, compact: true))
@@ -711,6 +714,49 @@ struct GoveeSegmentEditorView: View {
                     .foregroundStyle(Polar.pending)
                     .fixedSize(horizontal: false, vertical: true)
             }
+        }
+    }
+
+    /// Per-pod white point (H608x pods). The pods are RGB only, so
+    /// each white is mixed from RGB and streamed like any colour; the
+    /// segment remembers its Kelvin so the page and Looks can show it.
+    private func whitePointRow(_ range: ClosedRange<Int>) -> some View {
+        let steps = GoveeSegmentEditorView.whitePoints(in: range)
+        return VStack(alignment: .leading, spacing: 6) {
+            PolarSectionLabel("White point per \(unitName)")
+            HStack(spacing: 6) {
+                ForEach(steps, id: \.self) { kelvin in
+                    let white = GoveeSegmentColor.white(kelvin: kelvin)
+                    Button {
+                        paintTargets(white: kelvin)
+                    } label: {
+                        VStack(spacing: 3) {
+                            Circle()
+                                .fill(white.color)
+                                .overlay(Circle().stroke(Color.white.opacity(0.22), lineWidth: 1))
+                                .frame(width: 22, height: 22)
+                            Text("\(kelvin)")
+                                .font(.polarMono(9))
+                                .foregroundStyle(Polar.meter)
+                        }
+                        .frame(width: 38)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(PolarSwatchButtonStyle())
+                    .help("\(kelvin) K on the selected \(unitName)s")
+                    .accessibilityLabel("White \(kelvin) kelvin")
+                }
+            }
+        }
+    }
+
+    /// Five evenly spaced whites across the fixture's range, on 100 K steps.
+    static func whitePoints(in range: ClosedRange<Int>) -> [Int] {
+        let lower = range.lowerBound, upper = range.upperBound
+        guard upper > lower else { return [lower] }
+        return (0..<5).map { step in
+            let raw = Double(lower) + Double(upper - lower) * Double(step) / 4
+            return Int((raw / 100).rounded()) * 100
         }
     }
 
@@ -1045,6 +1091,16 @@ struct GoveeSegmentEditorView: View {
                 state.colors[index] = GoveeSegmentColor(color: color,
                                                         brightness: existing.brightness,
                                                         isOn: existing.isOn)
+            }
+        }
+    }
+
+    private func paintTargets(white kelvin: Int) {
+        guard !targetIndexes.isEmpty else { return }
+        updateDraft { state in
+            for index in targetIndexes where state.colors.indices.contains(index) {
+                let existing = state.colors[index]
+                state.colors[index] = .white(kelvin: kelvin, brightness: existing.brightness, isOn: existing.isOn)
             }
         }
     }

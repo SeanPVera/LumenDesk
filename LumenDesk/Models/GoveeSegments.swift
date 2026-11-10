@@ -97,6 +97,9 @@ struct GoveeSegmentProfile {
     var simultaneousZoneLimit: Int? = nil
     /// Physical presentation for string lights. Nil for every other layout.
     var stringLightStyle: GoveeStringLightStyle?
+    /// White points the studio offers per segment (H608x string downlights,
+    /// 2700–6500 K in Govee's spec). Nil where segments are colour only.
+    var segmentWhiteRange: ClosedRange<Int>? = nil
 
     var editorUnitName: String {
         if let stringLightStyle { return stringLightStyle.unitName }
@@ -151,7 +154,7 @@ struct GoveeSegmentProfile {
         func add(_ sku: String, _ layout: GoveeSegmentLayout, _ count: Int, _ gradient: Bool,
                  stream: Bool = false, fixed: Bool = false, zoneNames: [String] = [],
                  zoneShortNames: [String] = [], zoneLimit: Int? = nil,
-                 stringStyle: GoveeStringLightStyle? = nil) {
+                 stringStyle: GoveeStringLightStyle? = nil, whiteRange: ClosedRange<Int>? = nil) {
             rows[sku] = GoveeSegmentProfile(
                 layout: layout,
                 defaultSegmentCount: count,
@@ -162,7 +165,8 @@ struct GoveeSegmentProfile {
                 zoneNames: zoneNames,
                 zoneShortNames: zoneShortNames,
                 simultaneousZoneLimit: zoneLimit,
-                stringLightStyle: stringStyle
+                stringLightStyle: stringStyle,
+                segmentWhiteRange: whiteRange
             )
         }
         // Flexible RGBIC / RGBICW interior strips
@@ -219,10 +223,13 @@ struct GoveeSegmentProfile {
         // Indoor RGBIC string downlights (5 pods per meter: 2 m = 10, 3 m = 15,
         // 5 m = 25, 10 m = 50). Count stays adjustable for cut or extended runs,
         // and stream hold keeps per-pod colors live over LAN.
-        add("H608A", .stringLights, 25, true, stream: true, stringStyle: .bulb)
-        add("H608B", .stringLights, 15, true, stream: true, stringStyle: .bulb)
-        add("H608C", .stringLights, 10, true, stream: true, stringStyle: .bulb)
-        add("H608D", .stringLights, 50, true, stream: true, stringStyle: .bulb)
+        // Govee lists 2700–6500 K for these RGBIC pods. They have no separate
+        // white LEDs, so a pod's white point is mixed from its RGB and goes
+        // out in the same stream frame as a colour would.
+        add("H608A", .stringLights, 25, true, stream: true, stringStyle: .bulb, whiteRange: 2_700...6_500)
+        add("H608B", .stringLights, 15, true, stream: true, stringStyle: .bulb, whiteRange: 2_700...6_500)
+        add("H608C", .stringLights, 10, true, stream: true, stringStyle: .bulb, whiteRange: 2_700...6_500)
+        add("H608D", .stringLights, 50, true, stream: true, stringStyle: .bulb, whiteRange: 2_700...6_500)
         // H70B1 is a 20-column curtain, not a one-dimensional string. The LAN
         // stream addresses columns; the 520-bead pixel canvas remains a Govee
         // Home feature.
@@ -280,6 +287,10 @@ struct GoveeSegmentColor: Equatable {
     /// like the H60B0 uplighter, which can only run some of their zones at
     /// once, express which zones are in use.
     var isOn: Bool
+    /// The white point this segment holds, when it was set as a white
+    /// rather than a colour. `red/green/blue` then hold the same white mixed
+    /// from RGB, which is what RGB-only pods and the razer stream show.
+    var kelvin: Int? = nil
 
     init(red: Double, green: Double, blue: Double, brightness: Double = 1.0, isOn: Bool = true) {
         self.red = red.isFinite ? max(0, min(1, red)) : 0
@@ -302,6 +313,16 @@ struct GoveeSegmentColor: Equatable {
                   isOn: isOn)
     }
 
+    /// A white point, mixed from RGB for display and for RGB-only output.
+    static func white(kelvin: Int, brightness: Double = 1.0, isOn: Bool = true) -> GoveeSegmentColor {
+        let clamped = min(9_000, max(1_000, kelvin))
+        let rgb = KelvinRGB.components(clamped)
+        var color = GoveeSegmentColor(red: rgb.red, green: rgb.green, blue: rgb.blue,
+                                      brightness: brightness, isOn: isOn)
+        color.kelvin = clamped
+        return color
+    }
+
     var color: Color { Color(red: red, green: green, blue: blue) }
     /// Color with the segment's own brightness folded in, for previews. A
     /// switched-off segment reads as unlit.
@@ -321,6 +342,7 @@ struct GoveeSegmentColor: Equatable {
     /// segments group together whatever colors they are holding.
     var packetKey: String {
         let c = renderedRGB255
+        if isOn, let kelvin { return "k\(kelvin)" }
         return "\(c.r):\(c.g):\(c.b)"
     }
     var brightnessPercent: Int { max(1, min(100, Int((brightness * 100).rounded()))) }
@@ -335,6 +357,12 @@ struct GoveeSegmentColor: Equatable {
 
     static func interpolate(_ from: GoveeSegmentColor, _ to: GoveeSegmentColor, fraction: Double) -> GoveeSegmentColor {
         let t = max(0, min(1, fraction))
+        if let a = from.kelvin, let b = to.kelvin {
+            // Two whites blend along the white-point line, not through RGB.
+            return .white(kelvin: Int((Double(a) + Double(b - a) * t).rounded()),
+                          brightness: from.brightness + (to.brightness - from.brightness) * t,
+                          isOn: t < 0.5 ? from.isOn : to.isOn)
+        }
         return GoveeSegmentColor(red: from.red + (to.red - from.red) * t,
                                  green: from.green + (to.green - from.green) * t,
                                  blue: from.blue + (to.blue - from.blue) * t,
@@ -344,7 +372,7 @@ struct GoveeSegmentColor: Equatable {
 }
 
 extension GoveeSegmentColor: Codable {
-    enum CodingKeys: String, CodingKey { case red, green, blue, brightness, isOn }
+    enum CodingKeys: String, CodingKey { case red, green, blue, brightness, isOn, kelvin }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -354,6 +382,7 @@ extension GoveeSegmentColor: Codable {
         let brightness = (try? c.decode(Double.self, forKey: .brightness)) ?? 1.0
         let isOn = (try? c.decode(Bool.self, forKey: .isOn)) ?? true
         self.init(red: red, green: green, blue: blue, brightness: brightness, isOn: isOn)
+        self.kelvin = try? c.decodeIfPresent(Int.self, forKey: .kelvin)
     }
 }
 
@@ -481,8 +510,13 @@ extension GoveeSegmentState {
         }
         for group in colorGroups {
             let rgb = group.color.renderedRGB255
-            packets.append(GoveeProtocol.segmentColorPacket(r: rgb.r, g: rgb.g, b: rgb.b,
-                                                            segments: group.segments))
+            if group.color.isOn, let kelvin = group.color.kelvin {
+                packets.append(GoveeProtocol.segmentWhitePacket(kelvin: kelvin, white: rgb,
+                                                                segments: group.segments))
+            } else {
+                packets.append(GoveeProtocol.segmentColorPacket(r: rgb.r, g: rgb.g, b: rgb.b,
+                                                                segments: group.segments))
+            }
         }
         for group in brightnessGroups {
             packets.append(GoveeProtocol.segmentBrightnessPacket(percent: group.percent,

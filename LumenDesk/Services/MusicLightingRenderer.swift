@@ -52,24 +52,64 @@ final class MusicLightingRenderer {
     ) -> [MusicRenderCommand] {
         diagnostics.generatedFrames += 1
         updateFixtures(fixtures)
-        let grouped = Dictionary(grouping: frame.states, by: \.fixtureID)
-        for (fixtureID, states) in grouped {
-            guard let transport = transportsByFixture[fixtureID] else { continue }
-            guard timestamp - frame.timestamp <= Self.maximumFrameAge,
-                  latestSequence[fixtureID].map({ frame.sequenceNumber > $0 }) ?? true else {
-                diagnostics.rejectedStates += 1
-                continue
-            }
-            latestSequence[fixtureID] = frame.sequenceNumber
-            if pendingByFixture[fixtureID] != nil { diagnostics.coalescedStates += 1 }
-            pendingByFixture[fixtureID] = PendingFrame(
-                transport: transport,
-                states: Self.orderedStates(states),
-                sequenceNumber: frame.sequenceNumber,
-                timestamp: frame.timestamp
-            )
-        }
+
+        // Hot render path (called at 20-30 Hz): group states by fixtureID without
+        // allocating an intermediate Dictionary(grouping:by:) and dynamic sub-arrays.
+        // In standard choreography output, states for each fixture are already emitted
+        // consecutively, allowing zero-allocation slice extraction. For disjoint states,
+        // group into reusable or contiguous runs.
+        ingestStates(from: frame, at: timestamp)
         return flush(at: timestamp)
+    }
+
+    private func ingestStates(from frame: MusicLightingFrame, at timestamp: TimeInterval) {
+        guard !frame.states.isEmpty else { return }
+
+        var index = 0
+        let count = frame.states.count
+
+        while index < count {
+            let fixtureID = frame.states[index].fixtureID
+            let start = index
+            index += 1
+            while index < count && frame.states[index].fixtureID == fixtureID {
+                index += 1
+            }
+
+            guard let transport = transportsByFixture[fixtureID] else { continue }
+
+            let slice = frame.states[start..<index]
+
+            // Check if this fixture was already processed for the current frame.
+            if let existing = pendingByFixture[fixtureID], existing.timestamp == frame.timestamp, existing.sequenceNumber == frame.sequenceNumber {
+                // Non-contiguous disjoint states for the same fixture within the same frame:
+                // append to existing pending states and re-order.
+                var merged = existing.states
+                merged.append(contentsOf: slice)
+                pendingByFixture[fixtureID] = PendingFrame(
+                    transport: transport,
+                    states: Self.orderedStates(merged),
+                    sequenceNumber: frame.sequenceNumber,
+                    timestamp: frame.timestamp
+                )
+            } else {
+                // For a new frame occurrence, ensure frame age is within bounds and sequence increases.
+                guard timestamp - frame.timestamp <= Self.maximumFrameAge,
+                      latestSequence[fixtureID].map({ frame.sequenceNumber > $0 }) ?? true else {
+                    diagnostics.rejectedStates += 1
+                    continue
+                }
+
+                latestSequence[fixtureID] = frame.sequenceNumber
+                if pendingByFixture[fixtureID] != nil { diagnostics.coalescedStates += 1 }
+                pendingByFixture[fixtureID] = PendingFrame(
+                    transport: transport,
+                    states: Self.orderedStates(Array(slice)),
+                    sequenceNumber: frame.sequenceNumber,
+                    timestamp: frame.timestamp
+                )
+            }
+        }
     }
 
     func flush(fixtures: [MusicFixtureDescriptor], at timestamp: TimeInterval) -> [MusicRenderCommand] {

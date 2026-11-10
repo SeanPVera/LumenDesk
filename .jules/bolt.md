@@ -13,3 +13,7 @@
 ## 2026-10-24 - Zero-Allocation Metre Tracking in Audio Loop
 **Learning:** In Swift real-time audio and beat tracking routines invoked on every beat/frame, candidate scoring routines that allocate local dynamic arrays (`[Double]`, `[Int]`) or dictionaries (`[Int: Double]`) and use $O(N)$ array shifting (`removeFirst`) cause repeated heap allocations. Pre-allocating instance scratch storage, using fixed-capacity ring buffers, and consolidating reduction passes (`max`, `sum`, `firstIndex`) eliminates all allocations and memory shifts on the hot path.
 **Action:** In DSP and real-time audio components, use instance scratch storage and ring buffers instead of local heap arrays/dictionaries or array element shifting.
+
+## 2026-11-05 - Direct Span Grouping in Real-Time Frame Render Loops
+**Learning:** Calling `Dictionary(grouping:by:)` in real-time per-frame render routines (such as `MusicLightingRenderer.enqueue` at 20-30 Hz) allocates a new hash table and multiple sub-arrays on every frame tick. Because upstream lighting choreography naturally generates states grouped by fixture, a linear contiguous span scan extracts fixture batches directly, completely bypassing intermediate grouping dictionary allocations.
+**Action:** In high-frequency frame ingestion pipelines, scan contiguous state spans directly rather than grouping via generic heap-allocated dictionaries.

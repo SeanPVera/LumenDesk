@@ -105,6 +105,8 @@
 		B400000000000000000012 /* Models/GoveeGlideChain.swift in Sources */ = {isa = PBXBuildFile; fileRef = A400000000000000000012 /* Models/GoveeGlideChain.swift */; };
 		B400000000000000000013 /* Views/LightPages/GlideChainPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A400000000000000000013 /* Views/LightPages/GlideChainPanel.swift */; };
 		B400000000000000000014 /* GoveeLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A400000000000000000014 /* GoveeLayoutTests.swift */; };
+		B400000000000000000015 /* Views/LightPages/UplighterSectionsPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A400000000000000000015 /* Views/LightPages/UplighterSectionsPanel.swift */; };
+		B400000000000000000016 /* UplighterSectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A400000000000000000016 /* UplighterSectionTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -220,6 +222,8 @@
 		A400000000000000000012 /* Models/GoveeGlideChain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/GoveeGlideChain.swift; sourceTree = "<group>"; };
 		A400000000000000000013 /* Views/LightPages/GlideChainPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/LightPages/GlideChainPanel.swift; sourceTree = "<group>"; };
 		A400000000000000000014 /* GoveeLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoveeLayoutTests.swift; sourceTree = "<group>"; };
+		A400000000000000000015 /* Views/LightPages/UplighterSectionsPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/LightPages/UplighterSectionsPanel.swift; sourceTree = "<group>"; };
+		A400000000000000000016 /* UplighterSectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UplighterSectionTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -270,6 +274,7 @@
 				A30000000000000000000D /* Views/NanoleafShapesCanvas.swift */,
 				A100000000000000000001 /* LumenDeskApp.swift */,
 				A100000000000000000018 /* Theme.swift */,
+				A400000000000000000015 /* Views/LightPages/UplighterSectionsPanel.swift */,
 				A400000000000000000013 /* Views/LightPages/GlideChainPanel.swift */,
 				A400000000000000000012 /* Models/GoveeGlideChain.swift */,
 				A400000000000000000010 /* Services/LightManager+LookDrafts.swift */,
@@ -401,6 +406,7 @@
 				A300000000000000000010 /* NanoleafShapesControllerTests.swift */,
 				A200000000000000000001 /* ProtocolTests.swift */,
 				A200000000000000000002 /* DomainTests.swift */,
+				A400000000000000000016 /* UplighterSectionTests.swift */,
 				A400000000000000000014 /* GoveeLayoutTests.swift */,
 				A400000000000000000011 /* PolarComposerTests.swift */,
 				A400000000000000000008 /* LightPageModelTests.swift */,
@@ -546,6 +552,7 @@
 				B100000000000000000015 /* ScheduleEntry.swift in Sources */,
 				B100000000000000000016 /* MenuBarPopoverView.swift in Sources */,
 				B100000000000000000018 /* Theme.swift in Sources */,
+				B400000000000000000015 /* Views/LightPages/UplighterSectionsPanel.swift in Sources */,
 				B400000000000000000013 /* Views/LightPages/GlideChainPanel.swift in Sources */,
 				B400000000000000000012 /* Models/GoveeGlideChain.swift in Sources */,
 				B400000000000000000010 /* Services/LightManager+LookDrafts.swift in Sources */,
@@ -600,6 +607,7 @@
 				B300000000000000000010 /* NanoleafShapesControllerTests.swift in Sources */,
 				B200000000000000000001 /* ProtocolTests.swift in Sources */,
 				B200000000000000000002 /* DomainTests.swift in Sources */,
+				B400000000000000000016 /* UplighterSectionTests.swift in Sources */,
 				B400000000000000000014 /* GoveeLayoutTests.swift in Sources */,
 				B400000000000000000011 /* PolarComposerTests.swift in Sources */,
 				B400000000000000000008 /* LightPageModelTests.swift in Sources */,

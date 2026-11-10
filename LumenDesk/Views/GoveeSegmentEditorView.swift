@@ -502,7 +502,7 @@ struct GoveeSegmentEditorView: View {
         "This lamp lights \(zoneLimit) of its \(draft.segmentCount) \(unitName)s at once. Switching on another turns off whichever has been lit longest."
     }
 
-    /// "Upper Ripple", "Upper Ripple and Middle Ambient", "A, B and C".
+    /// "Ripple", "Ripple and Side ring", "A, B and C".
     private func zoneNameList(_ zones: [Int]) -> String {
         let names = zones.map { profile.zoneName($0) }
         guard let last = names.last else { return "no \(unitName)s" }
@@ -913,7 +913,7 @@ struct GoveeSegmentEditorView: View {
             }
             Toggle("Live preview on the light while editing", isOn: $livePreview)
                 .toggleStyle(LumenRockerStyle())
-                .disabled(manager.isDemoMode)
+                .disabled(manager.isDemoMode || profile.usesUplighterSections)
                 .onChange(of: livePreview) { enabled in
                     if enabled {
                         manager.previewSegments(device, state: draft)
@@ -940,7 +940,7 @@ struct GoveeSegmentEditorView: View {
         case .lamp where limitsZones:
             return "\(zoneNameList(Array(0..<profile.zoneNames.count))) match the fixture's physical lamps, and it powers \(zoneLimit) of them at a time."
         case .lamp:
-            return "Upper Ripple, Middle Ambient, and Lower Daily Illumination match the physical H60B0 lamps."
+            return "Ripple, Side ring and Down light match the physical H60B0 lamps."
         case .stringLights:
             return "Each numbered \(unitName) maps to its physical position along the strand, starting at the controller."
         case .curtain:
@@ -956,7 +956,9 @@ struct GoveeSegmentEditorView: View {
         VStack(alignment: .leading, spacing: 8) {
             Divider()
             VStack(alignment: .leading, spacing: 12) {
-                Text(profile.appliesViaStream
+                Text(profile.usesUplighterSections
+                     ? "Apply writes each zone with the lamp's own section command (ripple, side ring, down light). There's no live preview for this lamp, and the down light takes white only."
+                     : profile.appliesViaStream
                      ? "This light family can't store the edited layout in its own firmware, so Apply holds it from LumenDesk and restores it automatically while LumenDesk is running."
                      : "Live preview is temporary. Apply pauses the preview and writes the layout to the light so it survives power cycles; editing again resumes the preview.")
                     .font(.polarUI(11))

@@ -3,16 +3,17 @@ import XCTest
 @testable import LumenDesk
 
 final class DomainTests: XCTestCase {
-    func testH60B0UsesThreeStreamedLampSegments() throws {
+    func testH60B0UsesThreeSectionCommandZones() throws {
         let profile = try XCTUnwrap(GoveeSegmentProfile.detect(sku: "h60b0"))
 
         XCTAssertEqual(profile.layout, .lamp)
         XCTAssertEqual(profile.defaultSegmentCount, 3)
         XCTAssertFalse(profile.supportsGradient)
         XCTAssertTrue(profile.recognized)
-        XCTAssertTrue(profile.appliesViaStream)
+        XCTAssertFalse(profile.appliesViaStream, "the razer stream's colour order doesn't follow the sections")
+        XCTAssertTrue(profile.usesUplighterSections)
         XCTAssertTrue(profile.hasFixedSegmentCount)
-        XCTAssertEqual(profile.zoneNames, ["Upper Ripple", "Middle Ambient", "Lower Daily Illumination"])
+        XCTAssertEqual(profile.zoneNames, ["Ripple", "Side ring", "Down light"])
     }
 
     func testH60B0LightsOnlyTwoOfItsThreeZonesAtOnce() throws {
@@ -20,9 +21,9 @@ final class DomainTests: XCTestCase {
 
         XCTAssertEqual(profile.simultaneousZoneLimit, 2)
         XCTAssertTrue(profile.limitsSimultaneousZones)
-        XCTAssertEqual(profile.zoneShortNames, ["Upper", "Middle", "Lower"])
-        XCTAssertEqual(profile.zoneName(2), "Lower Daily Illumination")
-        XCTAssertEqual(profile.zoneShortName(2), "Lower")
+        XCTAssertEqual(profile.zoneShortNames, ["Ripple", "Side", "Down"])
+        XCTAssertEqual(profile.zoneName(2), "Down light")
+        XCTAssertEqual(profile.zoneShortName(2), "Down")
         XCTAssertEqual(profile.zoneCombinations, [[0, 1], [0, 2], [1, 2]])
     }
 
@@ -259,7 +260,7 @@ final class DomainTests: XCTestCase {
     }
 
     @MainActor
-    func testH60B0DraftDoesNotReplaceAppliedStreamHoldLayout() throws {
+    func testH60B0DraftIsKeptButNotTreatedAsApplied() throws {
         let manager = LightManager(
             defaults: isolatedDefaults(),
             persistenceStore: temporaryPersistenceStore()
@@ -274,7 +275,6 @@ final class DomainTests: XCTestCase {
             address: "192.0.2.10",
             sku: "H60B0"
         )
-        // Two lit zones and one dark one: what the lamp can actually show.
         let applied = GoveeSegmentState(colors: [
             .init(hex: 0xFF6600),
             .init(hex: 0x6633FF),
@@ -287,12 +287,12 @@ final class DomainTests: XCTestCase {
         ])
 
         manager.applySegments(device, state: applied)
+        // Section writes are stored on the lamp itself, so an unapplied
+        // draft is simply kept as a draft, never reported as what's showing.
         manager.storeSegmentState(draft, for: device)
 
-        var expected = applied
-        expected.isActive = true
-        XCTAssertEqual(manager.segmentState(for: device), expected)
-        XCTAssertEqual(manager.activeSegmentState(for: device.id), expected)
+        XCTAssertEqual(manager.segmentState(for: device).colors, draft.colors)
+        XCTAssertNil(manager.activeSegmentState(for: device.id))
     }
 
     @MainActor

@@ -1623,7 +1623,11 @@ final class LightManager: ObservableObject {
             device.color = active.blendedColor
             noteSegmentCommand(device, summary: "Changing lamp zone color")
             if demoWorkspaceController.allowsLiveNetworking {
-                assertStreamHold(device, state: active)
+                if profile.usesUplighterSections {
+                    sendSegmentPackets(device, state: active)
+                } else {
+                    assertStreamHold(device, state: active)
+                }
             }
             return
         }

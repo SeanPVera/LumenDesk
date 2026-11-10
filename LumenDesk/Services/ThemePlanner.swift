@@ -169,31 +169,52 @@ struct ThemePlan: Equatable {
     let themeID: String
     let fixtures: [ThemeFixturePlan]
 
-    var spatialCount: Int { fixtures.filter { $0.adaptation == .spatial }.count }
-    var solidCount: Int { fixtures.filter { $0.adaptation == .solidOnly }.count }
-    var zoneLimitedCount: Int {
-        fixtures.filter {
-            if case .zoneLimited = $0.adaptation { return true }
-            return false
-        }.count
-    }
+    // Pre-calculate adaptation counts and summary in a single O(N) pass to avoid
+    // multiple array allocations from repeated `.filter` calls.
+    let spatialCount: Int
+    let solidCount: Int
+    let zoneLimitedCount: Int
 
     /// One sentence naming any capability the room could not fully carry, or
     /// `nil` when everything showed the theme as designed. Deliberately not a
     /// warning: a room of plain bulbs is a normal room.
-    var adaptationSummary: String? {
-        var parts: [String] = []
-        if spatialCount > 0 && solidCount > 0 {
-            parts.append("\(solidCount) single-colour light\(solidCount == 1 ? "" : "s") hold one palette colour each")
-        }
+    let adaptationSummary: String?
+
+    init(themeID: String, fixtures: [ThemeFixturePlan]) {
+        self.themeID = themeID
+        self.fixtures = fixtures
+
+        var spatial = 0
+        var solid = 0
+        var zoneLimited = 0
+        var firstLimitedDetail: (lit: Int, total: Int)?
+
         for plan in fixtures {
-            if case .zoneLimited(let lit, let total) = plan.adaptation {
-                parts.append("one fixture lights \(lit) of its \(total) zones")
-                break
+            switch plan.adaptation {
+            case .spatial:
+                spatial += 1
+            case .solidOnly:
+                solid += 1
+            case .zoneLimited(let lit, let total):
+                zoneLimited += 1
+                if firstLimitedDetail == nil {
+                    firstLimitedDetail = (lit, total)
+                }
             }
         }
-        guard !parts.isEmpty else { return nil }
-        return parts.joined(separator: "; ") + "."
+
+        self.spatialCount = spatial
+        self.solidCount = solid
+        self.zoneLimitedCount = zoneLimited
+
+        var parts: [String] = []
+        if spatial > 0 && solid > 0 {
+            parts.append("\(solid) single-colour light\(solid == 1 ? "" : "s") hold one palette colour each")
+        }
+        if let (lit, total) = firstLimitedDetail {
+            parts.append("one fixture lights \(lit) of its \(total) zones")
+        }
+        self.adaptationSummary = parts.isEmpty ? nil : parts.joined(separator: "; ") + "."
     }
 }
 
@@ -562,18 +583,20 @@ enum ThemePlanner {
     /// Which zones a limited fixture lights. The user's current choice wins;
     /// otherwise transport order does, which is the same tiebreak
     /// `GoveeSegmentProfile.enforcingZoneLimit` uses.
+    /// Uses a companion Set to achieve O(1) membership checks instead of O(N) linear scans.
     private static func litZones(preferred: [Int], limit: Int, count: Int) -> Set<Int> {
-        var chosen: [Int] = []
+        var chosen: Set<Int> = []
+        chosen.reserveCapacity(limit)
         for zone in preferred where zone >= 0 && zone < count && !chosen.contains(zone) {
-            chosen.append(zone)
-            if chosen.count == limit { break }
+            chosen.insert(zone)
+            if chosen.count == limit { return chosen }
         }
         var zone = 0
         while chosen.count < limit && zone < count {
-            if !chosen.contains(zone) { chosen.append(zone) }
+            if !chosen.contains(zone) { chosen.insert(zone) }
             zone += 1
         }
-        return Set(chosen)
+        return chosen
     }
 
     /// White point for a palette entry. Saturated colours ignore it, so this

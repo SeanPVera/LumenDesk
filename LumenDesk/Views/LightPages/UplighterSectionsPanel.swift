@@ -43,6 +43,8 @@ struct UplighterSectionsPanel: View {
                 text: "Over the network this lamp takes section on/off, colour or white, brightness and the ripple's flow speed, and LumenDesk sends exactly those. Govee's ripple scenes, music effects and DIY scenes for this lamp have no verified LAN command, so they stay in the Govee app. The side ring's 8 segments are painted as one, and the head's tilt is set by hand."
             )
         }
+        .padding(.horizontal, PolarSpacing.md)
+        .padding(.bottom, PolarSpacing.md)
         .onAppear(perform: sync)
         .onChange(of: manager.segmentState(for: device)) { _ in sync() }
     }
@@ -60,7 +62,6 @@ struct UplighterSectionsPanel: View {
 
     private var modeRow: some View {
         VStack(alignment: .leading, spacing: 8) {
-            PolarSectionLabel("Lit sections · up to \(profile.simultaneousZoneLimit ?? 2)")
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
                     ForEach(Self.modes, id: \.self) { mode in

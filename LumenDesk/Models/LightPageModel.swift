@@ -150,7 +150,7 @@ enum LightPageModel: Equatable {
         case .goveeCurtain, .goveeCurtainString: return "Column painter · 20"
         case .goveeCOBStrip: return "Zone painter · 15"
         case .goveeGlideBars: return "Wall-chain zones · 28"
-        case .goveeUplighter: return "Sections · 2 lit at a time"
+        case .goveeUplighter: return "Sections · up to 2 lit"
         case .goveeStringPods: return "Pod painter · 15"
         case .goveeStripS: return "Segment painter · 75"
         case .fallback: return "Controls"

@@ -136,6 +136,12 @@ enum LookDraftBuilder {
                     var adjusted = kept
                     adjusted.isOn = true
                     adjusted.brightness = max(minimumLevel, min(1, row.level))
+                    // Per-zone LIFX layouts carry brightness in every zone and
+                    // are applied without a master level, so the new level is
+                    // scaled into the zones, keeping their relative levels.
+                    if let matrix = kept.matrix {
+                        adjusted.matrix = scaledMatrix(matrix, from: opening.level, to: adjusted.brightness)
+                    }
                     result[row.id] = adjusted
                     continue
                 }
@@ -153,6 +159,33 @@ enum LookDraftBuilder {
             }
         }
         return result
+    }
+
+    // MARK: Per-zone level
+
+    /// Scales every used zone of a LIFX matrix (Luna's 26 zones, Tiles,
+    /// Candles) by `newLevel / oldLevel`, so a level-only edit changes how
+    /// bright the layout is without changing its shape:
+    /// - zones at zero stay at zero (they are dark by design);
+    /// - the factor is capped so the brightest zone reaches at most 100 %,
+    ///   which keeps every zone's level relative to the others;
+    /// - Set64 always carries 64 values, but only the first `width × height`
+    ///   are the fixture's; the rest belong to the firmware and are kept.
+    static func scaledMatrix(_ matrix: LIFXMatrixState, from oldLevel: Double, to newLevel: Double) -> LIFXMatrixState {
+        let used = min(matrix.colors.count, max(0, matrix.width * matrix.height))
+        guard used > 0, oldLevel.isFinite, newLevel.isFinite else { return matrix }
+        var factor = max(0, newLevel) / max(minimumLevel, oldLevel)
+        let brightest = matrix.colors.prefix(used).map(\.brightness).max() ?? 0
+        guard brightest > 0 else { return matrix }
+        factor = min(factor, 65_535 / Double(brightest))
+        var scaled = matrix
+        for index in 0..<used {
+            let current = Double(matrix.colors[index].brightness)
+            guard current > 0 else { continue }
+            let next = max(1, min(65_535, (current * factor).rounded()))
+            scaled.colors[index].brightness = UInt16(next)
+        }
+        return scaled
     }
 
     // MARK: Scope

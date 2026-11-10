@@ -21,6 +21,14 @@ enum NanoleafPairingSchedule {
         error == .pairingWindowClosed && elapsedSeconds + retryInterval < windowSeconds
     }
 
+    /// The address the countdown will pair with, checked before the user is
+    /// asked to hold the button. Nil for a bad port or a host
+    /// `NanoleafEndpoint` refuses (URL, credentials, loopback, non-LAN).
+    static func endpoint(host: String, port: String) -> NanoleafEndpoint? {
+        guard let portNumber = Int(port.trimmingCharacters(in: .whitespacesAndNewlines)) else { return nil }
+        return try? NanoleafEndpoint(host: host, port: portNumber)
+    }
+
     /// "0:04"
     static func clock(_ seconds: Int) -> String {
         let s = max(0, seconds)
@@ -58,6 +66,9 @@ struct NanoleafPairingView: View {
     var preferredRoomID: UUID? = nil
     /// Called with the new light's id after a successful pairing.
     var onPaired: ((String) -> Void)? = nil
+    /// Address to pre-fill when there is no mDNS candidate (a known light
+    /// whose controller needs pairing again).
+    var initialHost: String = ""
     /// Starts in a given phase; used by the render review only.
     var initialPhase: NanoleafPairingPhase = .ready
 
@@ -342,7 +353,11 @@ struct NanoleafPairingView: View {
     private func configure() {
         guard !configured else { return }
         configured = true
-        if let candidate { pick(candidate) }
+        if let candidate {
+            pick(candidate)
+        } else if !initialHost.isEmpty {
+            host = initialHost
+        }
         roomID = preferredRoomID ?? manager.rooms.first?.id
         phase = initialPhase
         if !manager.isDemoMode { manager.scan() }
@@ -363,11 +378,14 @@ struct NanoleafPairingView: View {
 
     private func start() {
         guard canStart else { return }
-        guard let portNumber = Int(port) else {
+        // Validate before the countdown, so a typo fails now rather than
+        // after seven seconds of holding the button.
+        guard let endpoint = NanoleafPairingSchedule.endpoint(host: host, port: port) else {
             phase = .failed(NanoleafError.invalidAddress.localizedDescription)
             return
         }
-        let targetHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        let targetHost = endpoint.host
+        let portNumber = endpoint.port
         let service = serviceID
         attempt?.cancel()
         attempt = Task { @MainActor in

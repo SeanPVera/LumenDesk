@@ -392,6 +392,10 @@ struct AddOrRepairRoomView: View {
     @State private var newRoomName: String = ""
     @State private var pairingCandidate: NanoleafCandidate? = nil
     @State private var showingManualPairing: Bool = false
+    @State private var manualPairingHost: String = ""
+    /// Step 2 canvas selection. Kept apart from `selectedIDs` (the lights
+    /// being added), so clicking an orb never drops it from the add list.
+    @State private var placementSelection: Set<String> = []
     @State private var fixtureNameDrafts: [String: String] = [:]
     @State private var started = false
 
@@ -441,9 +445,9 @@ struct AddOrRepairRoomView: View {
             .environmentObject(manager)
         }
         .sheet(isPresented: $showingManualPairing) {
-            NanoleafPairingView(preferredRoomID: selectedRoomID) { id in
+            NanoleafPairingView(preferredRoomID: selectedRoomID, onPaired: { id in
                 selectedIDs.insert(id)
-            }
+            }, initialHost: manualPairingHost)
             .environmentObject(manager)
         }
         .onAppear {
@@ -529,7 +533,10 @@ struct AddOrRepairRoomView: View {
                 }
                 .buttonStyle(PolarButtonStyle(kind: .quiet, compact: true))
                 .disabled(manager.isScanning)
-                Button("Pair Nanoleaf by address\u{2026}") { showingManualPairing = true }
+                Button("Pair Nanoleaf by address\u{2026}") {
+                    manualPairingHost = ""
+                    showingManualPairing = true
+                }
                     .buttonStyle(PolarButtonStyle(kind: .quiet, compact: true))
             }
 
@@ -602,7 +609,10 @@ struct AddOrRepairRoomView: View {
             if device.needsNanoleafPairing {
                 Button("Pair\u{2026}") {
                     pairingCandidate = manager.nanoleafCandidates.first { $0.endpoint.host == device.address }
-                    if pairingCandidate == nil { showingManualPairing = true }
+                    if pairingCandidate == nil {
+                        manualPairingHost = device.address
+                        showingManualPairing = true
+                    }
                 }
                 .buttonStyle(PolarButtonStyle(kind: .quiet, compact: true))
             } else {
@@ -687,7 +697,7 @@ struct AddOrRepairRoomView: View {
                 DirectionARoomField(
                     room: targetRoom,
                     lights: placementLights,
-                    selection: $selectedIDs
+                    selection: $placementSelection
                 )
                 .frame(height: 320)
             } else {

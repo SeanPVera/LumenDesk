@@ -71,10 +71,14 @@ struct GoveeSegmentEditorView: View {
             }
             footer
         }
-        .padding(20)
+        // Embedded in a Light Page panel: inset like the Luna and Shapes
+        // painters (the panel's section label already supplies the top).
+        .padding(.horizontal, embedded ? PolarSpacing.md : 20)
+        .padding(.bottom, embedded ? PolarSpacing.md : 20)
+        .padding(.top, embedded ? 0 : 20)
         .sheetFrame(minWidth: embedded ? nil : 620, idealWidth: embedded ? nil : 1000,
                     minHeight: embedded ? nil : 560, idealHeight: embedded ? nil : 740)
-        .background(LumenBackground(glow: false))
+        .background(embedded ? AnyView(Color.clear) : AnyView(Polar.stage))
         .onAppear(perform: load)
         .onDisappear {
             // A workspace switch may already have replaced the device objects.
@@ -110,7 +114,7 @@ struct GoveeSegmentEditorView: View {
 
     private var spatialTools: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Controller → segment order").font(.headline)
+            PolarSectionLabel("Controller \u{2192} \(unitName) order")
             stripSection
             if limitsZones { zonePowerSection }
             selectionToolbar
@@ -121,9 +125,9 @@ struct GoveeSegmentEditorView: View {
 
     private var paintToolsColumn: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text(selection.isEmpty ? "Select regions to paint" : "Paint \(selection.count) selected")
-                .font(.headline)
-            paintSection.disabled(targetIndexes.isEmpty)
+            PolarSectionLabel(selection.isEmpty ? "Select \(unitName)s to paint" : "Paint \(selection.count) selected",
+                              color: selection.isEmpty ? Polar.meter : Polar.select)
+            paintSection
             brightnessSection.disabled(targetIndexes.isEmpty)
             if profile.supportsGradient { gradientSection.disabled(targetIndexes.isEmpty) }
             DisclosureGroup("Presets") { presetSection.padding(.top, 12) }
@@ -133,13 +137,13 @@ struct GoveeSegmentEditorView: View {
     private var exactSegmentValues: some View {
         let indices = selection.sorted().filter { draft.colors.indices.contains($0) }
         return VStack(alignment: .leading, spacing: 8) {
-            Text("Selected \(unitName)s · \(indices.count)").font(.headline)
+            PolarSectionLabel("Selected \(unitName)s · \(indices.count)")
             if indices.isEmpty {
                 Text("Select \(unitName)s to inspect their exact values.").font(.caption).foregroundStyle(Lumen.meter)
             } else {
                 Text("RGB is the held color. Intensity is 1–100%; power applies separately.")
                     .font(.caption).foregroundStyle(Lumen.meter)
-                ScrollView([.horizontal, .vertical]) {
+                ScrollView(.vertical) {
                     VStack(spacing: 0) {
                         ForEach(indices, id: \.self) { index in
                             SpectrumValueRow(name: "\(unitName.capitalized) \(index + 1)", color: draft.colors[index].color,
@@ -152,7 +156,7 @@ struct GoveeSegmentEditorView: View {
                                 }
                             }
                         }
-                    }.frame(minWidth: 460)
+                    }
                 }.frame(height: min(250, CGFloat(indices.count) * 54))
             }
         }
@@ -162,8 +166,9 @@ struct GoveeSegmentEditorView: View {
 
     private var header: some View {
         HStack {
-            Label("\(studioName) — \(device.label)", systemImage: layout.icon)
-                .font(LumenType.display(size: 19, weight: .bold))
+            Label(embedded ? studioName : "\(studioName) — \(device.label)", systemImage: layout.icon)
+                .font(.polarDisplay(embedded ? 16 : 19))
+                .foregroundStyle(Polar.chalk)
             Spacer()
             if !embedded { Button("Close preview") { dismiss() }.keyboardShortcut(.cancelAction) }
         }
@@ -179,8 +184,8 @@ struct GoveeSegmentEditorView: View {
     private var subtitle: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(subtitleLine)
-                .font(.callout)
-                .foregroundStyle(.secondary)
+                .font(.polarMono(12))
+                .foregroundStyle(Polar.meter)
             if !profile.recognized {
                 Label("This model isn't in the segment catalog. Set the segment count below to match what the Govee Home app shows; non-RGBIC devices ignore segment commands.",
                       systemImage: "questionmark.circle")
@@ -223,9 +228,9 @@ struct GoveeSegmentEditorView: View {
         } else if isCurtain {
             curtainColumnView
         } else {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 44), spacing: 4)], spacing: 4) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 38), spacing: 4)], spacing: 4) {
                 ForEach(0..<max(1, draft.segmentCount), id: \.self) { index in
-                    segmentCell(index: index, width: 44)
+                    segmentCell(index: index, width: 0)
                 }
             }
             .overlay {
@@ -254,50 +259,59 @@ struct GoveeSegmentEditorView: View {
     }
 
     private var stringLightView: some View {
-        ScrollView(.horizontal) {
-            VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 12) {
                 ForEach(Array(stringLightRows.enumerated()), id: \.offset) { row, indexes in
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(row.isMultiple(of: 2) ? "Order →" : "← Order")
-                            .font(.caption).foregroundStyle(Lumen.meter)
+                        Text(row.isMultiple(of: 2) ? "Order \u{2192}" : "\u{2190} Order")
+                            .font(.polarMono(11)).foregroundStyle(Polar.meter)
                         HStack(spacing: 4) {
                             ForEach(indexes, id: \.self) { index in
-                                segmentCell(index: index, width: 44)
+                                segmentCell(index: index, width: 0)
                             }
                         }
                     }
                 }
-            }
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("String light with \(draft.segmentCount) \(unitName)s in alternating rows")
     }
 
+    /// Every column fits the width: no sideways scrolling, whatever the count.
     private var curtainColumnView: some View {
-        ScrollView(.horizontal) {
-            HStack(alignment: .top, spacing: 6) {
-                ForEach(0..<draft.segmentCount, id: \.self) { index in
-                    let isSelected = selection.contains(index)
-                    Button { toggleSelection(index) } label: {
-                        VStack(spacing: 4) {
-                            Rectangle().fill(color(at: index)).frame(width: 20, height: 90)
-                            Text("\(index + 1)").font(.caption.monospacedDigit())
-                            Image(systemName: isSelected ? "checkmark.square.fill" : "square")
-                        }
-                        .foregroundStyle(Lumen.chalk)
-                        .frame(width: 44, height: 142)
-                        .overlay(RoundedRectangle(cornerRadius: 6)
-                            .stroke(isSelected ? Lumen.lit : Lumen.rule, lineWidth: isSelected ? 2 : 1)
-                            .allowsHitTesting(false))
-                        .contentShape(RoundedRectangle(cornerRadius: 6))
+        HStack(alignment: .top, spacing: 4) {
+            ForEach(0..<draft.segmentCount, id: \.self) { index in
+                let isSelected = selection.contains(index)
+                Button { toggleSelection(index) } label: {
+                    VStack(spacing: 6) {
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(LinearGradient(colors: [color(at: index).mixed(with: .white, amount: 0.18),
+                                                          color(at: index)],
+                                                 startPoint: .top, endPoint: .bottom))
+                            .frame(height: 96)
+                            .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .stroke(Color.white.opacity(0.10), lineWidth: 1))
+                        Text("\(index + 1)")
+                            .font(.polarMono(11, weight: isSelected ? .bold : .medium))
+                            .foregroundStyle(isSelected ? Polar.select : Polar.meter)
+                        Circle()
+                            .fill(isSelected ? Polar.select : Color.clear)
+                            .overlay(Circle().stroke(isSelected ? Polar.select : Polar.rule, lineWidth: 1.5))
+                            .frame(width: 9, height: 9)
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Curtain column \(index + 1)")
-                    .accessibilityValue(isSelected ? "Selected" : "Not selected")
-                    .accessibilityAddTraits(isSelected ? .isSelected : [])
+                    .padding(4)
+                    .frame(maxWidth: .infinity)
+                    .background(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(isSelected ? Polar.select.opacity(0.12) : Color.clear))
+                    .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .stroke(isSelected ? Polar.select : Color.clear, lineWidth: 1.5)
+                        .allowsHitTesting(false))
+                    .contentShape(RoundedRectangle(cornerRadius: 9))
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Curtain column \(index + 1)")
+                .accessibilityValue(isSelected ? "Selected" : "Not selected")
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
             }
-            .padding(2)
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Curtain with \(draft.segmentCount) editable columns")
@@ -373,7 +387,7 @@ struct GoveeSegmentEditorView: View {
                 Toggle("", isOn: zonePowerBinding(index))
                     .toggleStyle(.switch)
                     .labelsHidden()
-                    .tint(Lumen.pink)
+                    .tint(Polar.mint)
                     .accessibilityLabel("\(profile.zoneNames[index]) power")
             }
 
@@ -540,18 +554,20 @@ struct GoveeSegmentEditorView: View {
     private func segmentCell(index: Int, width: CGFloat) -> some View {
         let isSelected = selection.contains(index)
         Button { toggleSelection(index) } label: {
-            VStack(spacing: 3) {
-                Rectangle().fill(cellFill(index)).frame(height: 24)
-                HStack(spacing: 2) {
-                    Text("\(index + 1)").font(.caption.monospacedDigit())
-                    if isSelected { Image(systemName: "checkmark").font(.caption2) }
-                }
-                .foregroundStyle(Lumen.lit)
+            VStack(spacing: 4) {
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .fill(cellFill(index))
+                    .frame(height: 22)
+                Text("\(index + 1)")
+                    .font(.polarMono(10, weight: isSelected ? .bold : .medium))
+                    .foregroundStyle(isSelected ? Polar.select : Polar.meter)
             }
-            .frame(minWidth: 44, minHeight: 44)
             .padding(3)
-            .background(Lumen.deck)
-            .overlay(RoundedRectangle(cornerRadius: 4).stroke(isSelected ? Lumen.lit : Lumen.rule, lineWidth: isSelected ? 2 : 1)
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .background(RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(isSelected ? Polar.select.opacity(0.12) : Polar.raised.opacity(0.6)))
+            .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .stroke(isSelected ? Polar.select : Polar.ruleSoft, lineWidth: isSelected ? 1.5 : 1)
                 .allowsHitTesting(false))
             .contentShape(Rectangle())
         }
@@ -622,12 +638,15 @@ struct GoveeSegmentEditorView: View {
                     .font(.caption2)
                     .foregroundStyle(Lumen.meter)
             }
-            Button("All") { selection = Set(0..<draft.segmentCount) }
-            Button("None") { selection = [] }
-            Button("Invert") { selection = Set((0..<draft.segmentCount).filter { !selection.contains($0) }) }
-            if !isUplighter {
-                Button("Every Other") { selection = Set(stride(from: 0, to: draft.segmentCount, by: 2)) }
+            Group {
+                Button("All") { selection = Set(0..<draft.segmentCount) }
+                Button("None") { selection = [] }
+                Button("Invert") { selection = Set((0..<draft.segmentCount).filter { !selection.contains($0) }) }
+                if !isUplighter {
+                    Button("Every Other") { selection = Set(stride(from: 0, to: draft.segmentCount, by: 2)) }
+                }
             }
+            .buttonStyle(PolarButtonStyle(kind: .quiet, compact: true))
             Spacer()
             if !isUplighter {
                 Button {
@@ -635,6 +654,7 @@ struct GoveeSegmentEditorView: View {
                 } label: {
                     Image(systemName: "arrow.left")
                 }
+                .buttonStyle(PolarButtonStyle(kind: .quiet, compact: true))
                 .help("Shift all colors one segment left")
                 .accessibilityLabel("Shift colors left")
                 Button {
@@ -642,6 +662,7 @@ struct GoveeSegmentEditorView: View {
                 } label: {
                     Image(systemName: "arrow.right")
                 }
+                .buttonStyle(PolarButtonStyle(kind: .quiet, compact: true))
                 .help("Shift all colors one segment right")
                 .accessibilityLabel("Shift colors right")
             }
@@ -652,67 +673,111 @@ struct GoveeSegmentEditorView: View {
     // MARK: - Paint tools
 
     private var paintSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Paint").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 44), spacing: 6)], spacing: 6) {
+        VStack(alignment: .leading, spacing: 10) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 34), spacing: 8)], spacing: 8) {
                 ForEach(FixtureColorSwatches.values, id: \.label) { swatch in
-                    Button {
-                        paintColor = swatch.color
-                        paintTargets(with: swatch.color)
-                    } label: {
-                        Circle()
-                            .fill(swatch.color)
-                            .frame(width: 36, height: 36)
-                            .frame(width: 44, height: 44)
-                            .overlay(Circle().stroke(Color.primary.opacity(0.25), lineWidth: 0.5)
-                                .allowsHitTesting(false))
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .help(swatch.label)
-                    .accessibilityLabel("Paint \(swatch.label)")
+                    paintSwatch(swatch.color, help: swatch.label, label: "Paint \(swatch.label)")
                 }
                 ForEach(manager.recentColors) { recent in
-                    Button {
-                        paintColor = recent.color
-                        paintTargets(with: recent.color)
-                    } label: {
-                        Circle()
-                            .fill(recent.color)
-                            .frame(width: 36, height: 36)
-                            .frame(width: 44, height: 44)
-                            .overlay(Circle().stroke(Lumen.hairlineStrong, lineWidth: 0.5)
-                                .allowsHitTesting(false))
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .help("\(recent.name) · \(recent.hex)")
-                    .accessibilityLabel("Paint recent color \(recent.name)")
+                    paintSwatch(recent.color, help: "\(recent.name) · \(recent.hex)",
+                                label: "Paint recent color \(recent.name)")
                 }
                 ColorPicker("", selection: $paintColor, supportsOpacity: false)
-                    .labelsHidden()
+                    .polarColorWell(paintColor, width: 30, height: 30)
                     .onChange(of: paintColor) { newValue in paintTargets(with: newValue) }
                     .accessibilityLabel("Paint color")
+                    .disabled(targetIndexes.isEmpty)
             }
-            VStack(alignment: .leading, spacing: 10) {
-                Button("Blend Across Selection", action: blendAcrossSelection)
-                    .buttonStyle(LumenSecondaryButtonStyle(compact: true))
+            if targetIndexes.isEmpty {
+                Text("Pick \(unitName)s on the left first, or press All.")
+                    .font(.polarUI(11))
+                    .foregroundStyle(Polar.meter)
+            }
+            if let whites = profile.segmentWhiteRange {
+                whitePointRow(whites)
+            }
+            HStack(spacing: 10) {
+                Button("Blend across selection", action: blendAcrossSelection)
+                    .buttonStyle(PolarButtonStyle(kind: .quiet, compact: true))
                     .disabled(targetIndexes.count < 2)
                     .help("Fades from the paint color to the end color across the selected \(unitName)s")
                 ColorPicker("", selection: $blendEndColor, supportsOpacity: false)
-                    .labelsHidden()
+                    .polarColorWell(blendEndColor)
                     .accessibilityLabel("Blend end color")
-                Text("→ end color").font(.caption2).foregroundStyle(Lumen.meter)
-                Spacer()
+                Text("\u{2192} end color").font(.polarUI(11)).foregroundStyle(Polar.meter)
+                Spacer(minLength: 0)
             }
             if paintingOnlyDarkZones {
                 Label("Everything you're painting is switched off, so the light won't change until you switch a \(unitName) on.",
                       systemImage: "moon.zzz")
-                    .font(.caption2)
-                    .foregroundStyle(Lumen.warning)
+                    .font(.polarUI(11))
+                    .foregroundStyle(Polar.pending)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+    }
+
+    /// Per-pod white point (H608x pods). The pods are RGB only, so
+    /// each white is mixed from RGB and streamed like any colour; the
+    /// segment remembers its Kelvin so the page and Looks can show it.
+    private func whitePointRow(_ range: ClosedRange<Int>) -> some View {
+        let steps = GoveeSegmentEditorView.whitePoints(in: range)
+        return VStack(alignment: .leading, spacing: 6) {
+            PolarSectionLabel("White point per \(unitName)")
+            HStack(spacing: 6) {
+                ForEach(steps, id: \.self) { kelvin in
+                    let white = GoveeSegmentColor.white(kelvin: kelvin)
+                    Button {
+                        paintTargets(white: kelvin)
+                    } label: {
+                        VStack(spacing: 3) {
+                            Circle()
+                                .fill(white.color)
+                                .overlay(Circle().stroke(Color.white.opacity(0.22), lineWidth: 1))
+                                .frame(width: 22, height: 22)
+                            Text(verbatim: "\(kelvin)")
+                                .font(.polarMono(9))
+                                .foregroundStyle(Polar.meter)
+                        }
+                        .frame(width: 38)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(PolarSwatchButtonStyle())
+                    .help("\(kelvin) K on the selected \(unitName)s")
+                    .accessibilityLabel("White \(kelvin) kelvin")
+                }
+            }
+        }
+    }
+
+    /// Five evenly spaced whites across the fixture's range, on 100 K steps.
+    static func whitePoints(in range: ClosedRange<Int>) -> [Int] {
+        let lower = range.lowerBound, upper = range.upperBound
+        guard upper > lower else { return [lower] }
+        return (0..<5).map { step in
+            let raw = Double(lower) + Double(upper - lower) * Double(step) / 4
+            return Int((raw / 100).rounded()) * 100
+        }
+    }
+
+    /// A vivid paint chip. It never dims: with nothing selected a tap is a
+    /// no-op and the caption under the palette says what to do.
+    private func paintSwatch(_ color: Color, help: String, label: String) -> some View {
+        Button {
+            paintColor = color
+            paintTargets(with: color)
+        } label: {
+            Circle()
+                .fill(color)
+                .overlay(Circle().stroke(Color.white.opacity(0.22), lineWidth: 1))
+                .overlay(Circle().stroke(paintColor == color ? Polar.select : Color.clear, lineWidth: 2).padding(-4))
+                .frame(width: 26, height: 26)
+                .frame(width: 34, height: 34)
+                .contentShape(Circle())
+        }
+        .buttonStyle(PolarSwatchButtonStyle())
+        .help(help)
+        .accessibilityLabel(label)
     }
 
     /// True when every segment a paint action would touch is switched off —
@@ -894,15 +959,16 @@ struct GoveeSegmentEditorView: View {
                 Text(profile.appliesViaStream
                      ? "This light family can't store the edited layout in its own firmware, so Apply holds it from LumenDesk and restores it automatically while LumenDesk is running."
                      : "Live preview is temporary. Apply pauses the preview and writes the layout to the light so it survives power cycles; editing again resumes the preview.")
-                    .font(.caption2)
-                    .foregroundStyle(Lumen.meter)
+                    .font(.polarUI(11))
+                    .foregroundStyle(Polar.meter)
                     .fixedSize(horizontal: false, vertical: true)
                 HStack {
                 Spacer()
                 Button("Revert") { revert() }
+                    .buttonStyle(PolarButtonStyle(kind: .quiet))
                     .disabled(openingState == nil || openingState == draft)
-                Button("Apply to Light") { applyToLight() }
-                    .buttonStyle(LumenPrimaryButtonStyle())
+                Button("Apply to light") { applyToLight() }
+                    .buttonStyle(PolarButtonStyle(kind: .prominent))
                 }
             }
         }
@@ -1025,6 +1091,16 @@ struct GoveeSegmentEditorView: View {
                 state.colors[index] = GoveeSegmentColor(color: color,
                                                         brightness: existing.brightness,
                                                         isOn: existing.isOn)
+            }
+        }
+    }
+
+    private func paintTargets(white kelvin: Int) {
+        guard !targetIndexes.isEmpty else { return }
+        updateDraft { state in
+            for index in targetIndexes where state.colors.indices.contains(index) {
+                let existing = state.colors[index]
+                state.colors[index] = .white(kelvin: kelvin, brightness: existing.brightness, isOn: existing.isOn)
             }
         }
     }

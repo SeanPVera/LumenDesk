@@ -196,6 +196,24 @@ enum GoveeProtocol {
         return blePacket(payload)
     }
 
+    /// White point for a set of segments, in the same frame as a colour:
+    /// `33 05 15 01 FF FF FF <K hi> <K lo> <white r g b> <7-byte segment mask>`.
+    /// The five bytes after the colour carry the Kelvin (big-endian) and its
+    /// RGB white, with the colour set to FF FF FF. Verified on hardware by
+    /// lasswellt/govee-homeassistant issue #223 (H1252: 2700 K = 0A 8C,
+    /// 6500 K = 19 64) and listed as "segment temperature" for H6088/H61E0
+    /// in SamWiIIiams/govee-lan-bridge. Only used for durable (non-stream)
+    /// segment writes; stream frames are RGB and carry the mixed white.
+    static func segmentWhitePacket(kelvin: Int, white: (r: Int, g: Int, b: Int), segments: [Int]) -> [UInt8] {
+        let k = max(1_000, min(9_000, kelvin))
+        var payload: [UInt8] = [0x33, 0x05, 0x15, 0x01, 0xFF, 0xFF, 0xFF,
+                                UInt8((k >> 8) & 0xFF), UInt8(k & 0xFF),
+                                UInt8(max(0, min(255, white.r))), UInt8(max(0, min(255, white.g))),
+                                UInt8(max(0, min(255, white.b)))]
+        payload.append(contentsOf: segmentMask(segments, byteCount: 7))
+        return blePacket(payload)
+    }
+
     /// Per-segment brightness (1…100 percent):
     /// `33 05 15 02 <percent> <14-byte segment mask>`.
     static func segmentBrightnessPacket(percent: Int, segments: [Int]) -> [UInt8] {

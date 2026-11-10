@@ -1,10 +1,38 @@
-#if os(macOS)
 import SwiftUI
+#if os(macOS)
 import AppKit
+#endif
 
-/// Live Room Companion in the macOS menu bar: choose a room, adjust master
-/// brightness and white point, start or stop Live Music Mode with real-time
-/// tempo/spectral telemetry, or recall built-in and saved Looks.
+/// Pure rules for the menu bar companion, kept outside the view so they are
+/// unit-tested without a window.
+enum MenuBarCompanion {
+    /// Looks that reach this room, most relevant first: the Look applied
+    /// last (if it is one of them), then newest first.
+    static func recentLooks(_ scenes: [LightingScene], roomLightIDs: Set<String>,
+                            lastAppliedID: UUID?, limit: Int = 4) -> [LightingScene] {
+        let reaching = scenes.filter { !Set($0.snapshots.keys).isDisjoint(with: roomLightIDs) }
+        let ordered = reaching.sorted { a, b in
+            if a.id == lastAppliedID { return b.id != lastAppliedID }
+            if b.id == lastAppliedID { return false }
+            return a.createdAt > b.createdAt
+        }
+        return Array(ordered.prefix(max(0, limit)))
+    }
+
+    /// "3 of 5 on", "All 5 on", "All off", "No lights yet".
+    static func powerSummary(on: Int, total: Int) -> String {
+        guard total > 0 else { return "No lights yet" }
+        if on == 0 { return "All off" }
+        if on == total { return total == 1 ? "On" : "All \(total) on" }
+        return "\(on) of \(total) on"
+    }
+}
+
+#if os(macOS)
+/// Polar menu bar companion: switch rooms, turn a room on or off, set its
+/// brightness and white point, start or stop Live, recall recent Looks and
+/// open the app. Everything here calls the same `LightManager` actions as
+/// the main window; Sample Room never reaches the network.
 struct MenuBarPopoverView: View {
     @EnvironmentObject private var manager: LightManager
     @AppStorage("LumenDesk.menuBarRoom.v2") private var selectedRoomValue = ""
@@ -23,197 +51,193 @@ struct MenuBarPopoverView: View {
         return manager.devices(in: room)
     }
 
-    private var lightIDs: Set<String> {
-        Set(lights.map(\.id))
-    }
+    private var lightIDs: Set<String> { Set(lights.map(\.id)) }
+    private var litCount: Int { lights.filter(\.isOn).count }
 
-    private var roomLooks: [LightingScene] {
-        manager.scenes.filter { !Set($0.snapshots.keys).isDisjoint(with: lightIDs) }
+    private var recentLooks: [LightingScene] {
+        MenuBarCompanion.recentLooks(manager.scenes, roomLightIDs: lightIDs,
+                                     lastAppliedID: manager.lastSceneResult?.scene.id)
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
-            Divider().overlay(Lumen.rule)
+            Rectangle().fill(Polar.ruleSoft).frame(height: 1)
             if let room {
-                roomControl(room)
+                VStack(alignment: .leading, spacing: PolarSpacing.sm) {
+                    if manager.rooms.count > 1 { roomSwitcher(selected: room) }
+                    roomCard(room)
+                    liveBar(for: room)
+                    looksSection(room)
+                }
+                .padding(PolarSpacing.md)
             } else {
                 emptyState
             }
+            Rectangle().fill(Polar.ruleSoft).frame(height: 1)
+            footer
         }
-        .frame(width: 320)
-        .font(LumenType.body())
-        .foregroundStyle(Lumen.graphite)
-        .background(Lumen.canvas)
+        .frame(width: 340)
+        .font(.polarUI(13))
+        .foregroundStyle(Polar.chalk)
+        .background(Polar.deck)
         .onAppear { selectFirstRoomIfNeeded() }
         .managedActionConfirmations(manager)
     }
 
+    // MARK: Header
+
     private var header: some View {
-        HStack(spacing: 9) {
-            LumenMark(size: 19)
+        HStack(spacing: 10) {
+            LumenHexMark(size: 24)
             VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 6) {
-                    Text("LumenDesk")
-                        .font(LumenType.display(size: 16, weight: .bold))
-                    if manager.isDemoMode {
-                        Text("SAMPLE")
-                            .font(LumenType.instrumentLabel(size: 8))
-                            .tracking(0.8)
-                            .foregroundStyle(Lumen.verdigris)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 2)
-                            .background(Lumen.verdigris.opacity(0.14), in: Capsule(style: .continuous))
-                    }
-                }
+                Text("LumenDesk")
+                    .font(.polarDisplay(15, weight: .bold))
                 Text("Live room companion")
-                    .font(LumenType.body(size: 10))
-                    .foregroundStyle(Lumen.meter)
+                    .font(.polarUI(11))
+                    .foregroundStyle(Polar.meter)
             }
-            Spacer()
-            if manager.isScanning {
-                ProgressView().controlSize(.small)
-            } else {
-                Button { manager.scan() } label: { Image(systemName: "arrow.clockwise") }
-                    .buttonStyle(.borderless)
-                    .help("Find fixtures")
-                    .accessibilityLabel("Find fixtures")
+            if manager.isDemoMode {
+                Text("SAMPLE")
+                    .font(.polarMono(10, weight: .bold))
+                    .tracking(0.8)
+                    .foregroundStyle(Polar.amber)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .overlay(Capsule().stroke(Polar.amber.opacity(0.7), lineWidth: 1))
+                    .accessibilityLabel("Sample Room")
             }
-            Button(action: openMainWindow) {
-                Image(systemName: "macwindow")
+            Spacer(minLength: 4)
+            Group {
+                if manager.isScanning {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Button { manager.scan() } label: { Image(systemName: "arrow.clockwise") }
+                        .help("Refresh network")
+                        .accessibilityLabel("Refresh network")
+                }
             }
-            .buttonStyle(.borderless)
-            .help("Open Room Canvas")
-            .accessibilityLabel("Open Room Canvas")
+            .buttonStyle(PolarButtonStyle(kind: .quiet, compact: true))
         }
-        .padding(14)
-        .background(Lumen.floor)
+        .padding(.horizontal, PolarSpacing.md)
+        .padding(.vertical, PolarSpacing.sm)
+        .background(Polar.desk)
     }
 
-    private func roomControl(_ room: Room) -> some View {
-        VStack(alignment: .leading, spacing: 13) {
-            if manager.rooms.count > 1 {
-                Picker("Room", selection: $selectedRoomValue) {
-                    ForEach(manager.rooms) { item in
-                        Text(item.name).tag(item.id.uuidString)
-                    }
-                }
-                .pickerStyle(.menu)
-            }
+    // MARK: Rooms
 
-            HStack {
+    private func roomSwitcher(selected: Room) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(Array(manager.rooms.enumerated()), id: \.element.id) { index, item in
+                    let chosen = item.id == selected.id
+                    Button {
+                        selectedRoomValue = item.id.uuidString
+                    } label: {
+                        HStack(spacing: 6) {
+                            Circle().fill(Polar.roomTint(index)).frame(width: 7, height: 7)
+                            Text(item.name).lineLimit(1)
+                        }
+                    }
+                    .buttonStyle(PolarButtonStyle(kind: chosen ? .selected : .quiet, compact: true))
+                    .accessibilityAddTraits(chosen ? .isSelected : [])
+                }
+            }
+        }
+        .accessibilityLabel("Rooms")
+    }
+
+    private func roomCard(_ room: Room) -> some View {
+        VStack(alignment: .leading, spacing: PolarSpacing.sm) {
+            HStack(alignment: .center) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(room.name)
-                        .font(LumenType.display(size: 22, weight: .bold))
-                    Text("\(lights.filter(\.isOn).count) of \(lights.count) on")
-                        .font(LumenType.body(size: 11))
-                        .foregroundStyle(Lumen.meter)
+                        .font(.polarDisplay(20, weight: .bold))
+                        .lineLimit(1)
+                    Text(MenuBarCompanion.powerSummary(on: litCount, total: lights.count))
+                        .font(.polarMono(11))
+                        .foregroundStyle(litCount > 0 ? Polar.mint : Polar.meter)
                 }
                 Spacer()
-                Toggle("", isOn: Binding(
-                    get: { !lights.isEmpty && lights.allSatisfy(\.isOn) },
+                Toggle("Room power", isOn: Binding(
+                    get: { litCount > 0 },
                     set: { manager.setPower(in: room, on: $0) }
                 ))
                 .labelsHidden()
                 .toggleStyle(.switch)
+                .tint(Polar.accent)
                 .disabled(lights.isEmpty)
                 .accessibilityLabel("Power for \(room.name)")
             }
 
-            VStack(alignment: .leading, spacing: 8) {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text("Brightness")
-                            .font(LumenType.body(size: 12, weight: .semibold))
-                        Spacer()
-                        Text("\(Int((averageBrightness * 100).rounded()))%")
-                            .font(LumenType.readout(size: 11))
-                            .foregroundStyle(Lumen.meter)
-                    }
-                    Slider(value: Binding(
-                        get: { averageBrightness },
-                        set: { manager.setBrightness(in: room, value: $0) }
-                    ), in: 0.01...1)
-                    .disabled(lights.isEmpty)
-                    .accessibilityLabel("Room brightness")
-                }
-
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text("White point")
-                            .font(LumenType.body(size: 12, weight: .semibold))
-                        Spacer()
-                        Text("\(averageKelvin) K")
-                            .font(LumenType.readout(size: 11))
-                            .foregroundStyle(Lumen.meter)
-                    }
-                    Slider(value: Binding(
-                        get: { Double(averageKelvin) },
-                        set: { manager.setKelvin(deviceIDs: lightIDs, kelvin: Int($0.rounded())) }
-                    ), in: 2_000...6_500)
-                    .disabled(lights.isEmpty)
-                    .accessibilityLabel("Room white point")
-                }
+            if !lights.isEmpty {
+                orbRow
             }
 
-            liveCompanionBar(for: room)
+            InstrumentSlider(
+                title: "Brightness",
+                value: Binding(
+                    get: { averageBrightness },
+                    set: { manager.setBrightness(in: room, value: $0) }
+                ),
+                range: 0.01...1
+            )
+            .disabled(lights.isEmpty)
 
-            VStack(alignment: .leading, spacing: 7) {
-                Text("QUICK LOOKS")
-                    .font(LumenType.instrumentLabel(size: 9))
-                    .tracking(1.1)
-                    .foregroundStyle(Lumen.meter)
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        ForEach(RoomLookTemplate.everyday) { template in
-                            Button {
-                                guard let theme = LightingCatalog.theme(withID: template.themeID) else { return }
-                                manager.applyTheme(theme, deviceIDs: lightIDs, in: .room(room.id))
-                            } label: {
-                                Label(template.name, systemImage: template.symbol)
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                        }
-                        ForEach(roomLooks) { look in
-                            Button {
-                                manager.applyLook(look, deviceIDs: lightIDs)
-                            } label: {
-                                HStack(spacing: 5) {
-                                    menuBarLookPalette(look)
-                                    Text(look.name).lineLimit(1)
-                                }
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                        }
-                    }
-                }
-            }
-
-            Button("Open \(room.name) in Room Canvas", action: openMainWindow)
-                .buttonStyle(.borderedProminent)
-                .tint(Lumen.ember)
-                .frame(maxWidth: .infinity)
+            InstrumentSlider(
+                title: "White point",
+                value: Binding(
+                    get: { Double(averageKelvin) },
+                    set: { manager.setKelvin(deviceIDs: lightIDs, kelvin: Int($0.rounded())) }
+                ),
+                range: 2_000...6_500,
+                step: 100,
+                fill: [Polar.amber, Color(hex: 0xFFF1DC), Color(hex: 0xDDE8FF)],
+                readout: { "\(Int(($0 / 100).rounded()) * 100) K" }
+            )
+            .disabled(lights.isEmpty)
         }
-        .padding(14)
+        .polarPanel(fill: Polar.desk, glow: litCount > 0 ? glowColor : nil, padding: PolarSpacing.md)
     }
 
+    /// Up to eight orbs in the lights' current colours; the rest are counted.
+    private var orbRow: some View {
+        HStack(spacing: 10) {
+            ForEach(lights.prefix(8)) { light in
+                GlowingOrb(color: light.color, level: light.brightness, isOn: light.isOn,
+                           silhouette: LightPageModel.resolve(light).silhouette,
+                           size: 20, stale: light.isStale)
+                    .frame(width: 26, height: 30)
+                    .help(light.label)
+            }
+            if lights.count > 8 {
+                Text("+\(lights.count - 8)")
+                    .font(.polarMono(11))
+                    .foregroundStyle(Polar.meter)
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(height: 34)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(litCount) of \(lights.count) lights on")
+    }
+
+    // MARK: Live
+
     @ViewBuilder
-    private func liveCompanionBar(for room: Room) -> some View {
+    private func liveBar(for room: Room) -> some View {
         let roomScope = LightScope.room(room.id)
         if let activeEffectID = manager.activeEffects[roomScope] ?? manager.activeEffects[.all] {
             let isMusic = activeEffectID == "music-pulse"
             let snap = manager.musicModeController.latestSnapshot
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
-                    Circle()
-                        .fill(Lumen.ember)
-                        .frame(width: 7, height: 7)
+                    Circle().fill(Polar.mint).frame(width: 8, height: 8)
+                        .shadow(color: Polar.mint.opacity(0.8), radius: 4)
                     Text(isMusic
-                         ? "LIVE · \(Int(snap.tempo.rounded())) BPM · \(max(1, snap.metre))/4"
+                         ? "LIVE · \(Int(snap.tempo.rounded())) BPM"
                          : (LightingCatalog.effects.first(where: { $0.id == activeEffectID })?.name ?? "Ambient effect"))
-                        .font(LumenType.readout(size: 11, weight: .semibold))
+                        .font(.polarMono(12, weight: .semibold))
                         .lineLimit(1)
                     Spacer()
                     Button("Stop") {
@@ -223,59 +247,44 @@ struct MenuBarPopoverView: View {
                             manager.stopEffect(scope: .all)
                         }
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.mini)
+                    .buttonStyle(PolarButtonStyle(kind: .danger, compact: true))
                 }
                 if isMusic {
                     HStack(spacing: 8) {
-                        menuBandBar("LOW", value: snap.bass, color: Lumen.ember)
-                        menuBandBar("MID", value: snap.mids, color: Lumen.ochre)
-                        menuBandBar("HIGH", value: snap.highs, color: Lumen.verdigris)
+                        bandBar("LOW", value: snap.bass, color: Polar.coral)
+                        bandBar("MID", value: snap.mids, color: Polar.amber)
+                        bandBar("HIGH", value: snap.highs, color: Polar.mint)
                     }
                 }
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .background(Lumen.floor, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .stroke(Lumen.ember.opacity(0.35), lineWidth: 1)
-            )
+            .padding(PolarSpacing.sm)
+            .background(Polar.mint.opacity(0.08), in: RoundedRectangle(cornerRadius: Polar.radiusCard, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Polar.radiusCard, style: .continuous)
+                .stroke(Polar.mint.opacity(0.4), lineWidth: 1))
         } else {
-            HStack(spacing: 8) {
-                Image(systemName: "waveform")
-                    .foregroundStyle(Lumen.meter)
-                Text("Live audio-reactive show")
-                    .font(LumenType.body(size: 11, weight: .semibold))
-                Spacer()
-                Button("Start Live") {
-                    var config = manager.musicModeConfiguration
-                    config.restorePreviousState = true
-                    config.usesSyntheticDemoPattern = manager.isDemoMode
-                    manager.startMusicMode(configuration: config, scope: roomScope)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.mini)
-                .disabled(lights.isEmpty)
+            Button {
+                var config = manager.musicModeConfiguration
+                config.restorePreviousState = true
+                config.usesSyntheticDemoPattern = manager.isDemoMode
+                manager.startMusicMode(configuration: config, scope: roomScope)
+            } label: {
+                Label("Start Live", systemImage: "waveform")
+                    .frame(maxWidth: .infinity)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(Lumen.floor, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .stroke(Lumen.ruleSoft, lineWidth: 1)
-            )
+            .buttonStyle(PolarButtonStyle(kind: .prominent))
+            .disabled(lights.isEmpty)
+            .help("Audio-reactive show in \(room.name). Stop restores the room.")
         }
     }
 
-    private func menuBandBar(_ label: String, value: Double, color: Color) -> some View {
+    private func bandBar(_ label: String, value: Double, color: Color) -> some View {
         HStack(spacing: 4) {
             Text(label)
-                .font(LumenType.instrumentLabel(size: 8))
-                .foregroundStyle(Lumen.meter)
+                .font(.polarMono(9))
+                .foregroundStyle(Polar.meter)
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
-                    Capsule().fill(Lumen.ruleSoft)
+                    Capsule().fill(Polar.ruleSoft)
                     Capsule()
                         .fill(color)
                         .frame(width: max(2, geo.size.width * min(1, max(0, value))))
@@ -285,33 +294,107 @@ struct MenuBarPopoverView: View {
         }
     }
 
-    private func menuBarLookPalette(_ look: LightingScene) -> some View {
-        let snapshots = Array(look.snapshots.values).prefix(3)
-        return HStack(spacing: 2) {
-            ForEach(snapshots.indices, id: \.self) { idx in
-                let snap = snapshots[idx]
-                Circle()
-                    .fill(snap.isOn
-                          ? Color(hue: snap.hue, saturation: snap.saturation, brightness: max(0.15, snap.brightness))
-                          : Lumen.graphite.opacity(0.2))
-                    .frame(width: 7, height: 7)
+    // MARK: Looks
+
+    private func looksSection(_ room: Room) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            PolarSectionLabel(recentLooks.isEmpty ? "Quick looks" : "Recent looks")
+            if recentLooks.isEmpty {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 92), spacing: 6)], alignment: .leading, spacing: 6) {
+                    ForEach(RoomLookTemplate.everyday) { template in
+                        Button {
+                            guard let theme = LightingCatalog.theme(withID: template.themeID) else { return }
+                            manager.applyTheme(theme, deviceIDs: lightIDs, in: .room(room.id))
+                        } label: {
+                            Label(template.name, systemImage: template.symbol)
+                                .lineLimit(1)
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(PolarButtonStyle(kind: .quiet, compact: true))
+                        .disabled(lights.isEmpty)
+                    }
+                }
+            } else {
+                VStack(spacing: 4) {
+                    ForEach(recentLooks) { look in
+                        Button {
+                            manager.applyLook(look, deviceIDs: lightIDs)
+                        } label: {
+                            HStack(spacing: 10) {
+                                LookSwatchDots(look: look)
+                                    .frame(width: 34, alignment: .leading)
+                                Text(look.name)
+                                    .font(.polarUI(13, weight: .medium))
+                                    .lineLimit(1)
+                                Spacer()
+                                if look.id == manager.lastSceneResult?.scene.id {
+                                    Text("LAST")
+                                        .font(.polarMono(9, weight: .bold))
+                                        .foregroundStyle(Polar.mint)
+                                }
+                                Image(systemName: "play.fill")
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(Polar.meter)
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 7)
+                            .background(Polar.raised.opacity(0.55),
+                                        in: RoundedRectangle(cornerRadius: Polar.radiusSmall, style: .continuous))
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help("Apply \u{201C}\(look.name)\u{201D} to \(room.name)")
+                        .accessibilityLabel("Apply \(look.name)")
+                    }
+                }
             }
         }
-        .accessibilityHidden(true)
+    }
+
+    // MARK: Footer
+
+    private var footer: some View {
+        HStack(spacing: 8) {
+            Button {
+                manager.setAllPower(on: false)
+            } label: {
+                Label("All off", systemImage: "power")
+            }
+            .buttonStyle(PolarButtonStyle(kind: .quiet, compact: true))
+            .disabled(manager.devices.isEmpty)
+            .help("Turn every light off (⇧⌘O)")
+            Spacer()
+            Button(action: openMainWindow) {
+                Label("Open LumenDesk", systemImage: "macwindow")
+            }
+            .buttonStyle(PolarButtonStyle(kind: .quiet, compact: true))
+            .foregroundStyle(Polar.select)
+        }
+        .padding(.horizontal, PolarSpacing.md)
+        .padding(.vertical, PolarSpacing.sm)
+        .background(Polar.desk)
     }
 
     private var emptyState: some View {
         VStack(spacing: 10) {
             Image(systemName: "square.dashed")
                 .font(.system(size: 28, weight: .light))
+                .foregroundStyle(Polar.meter)
             Text("No room yet")
-                .font(LumenType.display(size: 19, weight: .bold))
-            Button("Open Room Canvas", action: openMainWindow)
-                .buttonStyle(.borderedProminent)
-                .tint(Lumen.ember)
+                .font(.polarDisplay(18, weight: .bold))
+            Text("Add lights in LumenDesk to control them from here.")
+                .font(.polarUI(12))
+                .foregroundStyle(Polar.meter)
+                .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
         .padding(28)
+    }
+
+    // MARK: Helpers
+
+    private var glowColor: Color {
+        lights.first(where: \.isOn)?.color ?? Polar.accent
     }
 
     private var averageBrightness: Double {

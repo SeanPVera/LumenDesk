@@ -66,10 +66,10 @@ final class LightPageModelTests: XCTestCase {
         XCTAssertFalse(LightPageModel.fallback(.basic).isDedicatedPage)
     }
 
-    func testUnprotocoledControlsStayBehindFlags() {
-        XCTAssertFalse(LightPageFeatureFlags.curtainBeadCanvas)
-        XCTAssertFalse(LightPageFeatureFlags.glideChainGeometry)
-        XCTAssertFalse(LightPageFeatureFlags.stringPodKelvin)
+    func testPodWhitePointOnlyOnStringDownlights() {
+        XCTAssertEqual(GoveeSegmentProfile.detect(sku: "H608B")?.segmentWhiteRange, 2_700...6_500)
+        XCTAssertNil(GoveeSegmentProfile.detect(sku: "H70B1")?.segmentWhiteRange)
+        XCTAssertNil(GoveeSegmentProfile.detect(sku: "H6062")?.segmentWhiteRange)
     }
 
     func testCommandBusRoundTrips() {

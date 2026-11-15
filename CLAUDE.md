@@ -31,13 +31,38 @@ CI additionally runs, before the build steps:
 - `plutil -lint LumenDesk/Info.plist LumenDesk/LumenDesk.entitlements`.
 - `xcrun actool` validation of both asset catalogs.
 
+On Linux, where there is no Xcode, these checks still run locally:
+
+```sh
+# Whitespace errors (CI checks the pushed range)
+git diff --check
+
+# Theme catalog audit, then confirm the committed THEME_CATALOG.md is current
+python3 scripts/audit_lighting_themes.py
+python3 scripts/audit_lighting_themes.py --write
+git diff --exit-code -- THEME_CATALOG.md
+
+# Brand assets (needs Pillow; checked with Pillow 12.3). The output is
+# byte-identical to what is committed, so the status below must print nothing.
+python3 scripts/generate_brand_assets.py
+git status --porcelain -- LumenDesk/Assets.xcassets/AppIcon.appiconset BrandAssets
+
+# Stand-in for plutil -lint
+python3 -c 'import plistlib, sys; [plistlib.load(open(p, "rb")) for p in sys.argv[1:]]' \
+  LumenDesk/Info.plist LumenDesk/LumenDesk.entitlements
+
+# Swift syntax only, where a Swift toolchain is installed
+git ls-files -z '*.swift' | xargs -0 swiftc -parse
+```
+
+`swiftc -parse` catches syntax errors and nothing more. Full type-checking is not possible on Linux because the code imports SwiftUI and AppKit, so type errors, the XCTest suite, `xcrun actool` and the iOS build only surface in CI.
+
 Other tooling:
 
 - **Release packaging**: `scripts/package_macos.sh` archives Release, signs, notarizes, and writes `dist/LumenDesk-<version>.dmg` using only Xcode/macOS tooling (macOS required). It picks a mode from whatever credentials are in the environment: ad-hoc (arm64 will not run a wholly unsigned binary), self-signed (any non-Developer-ID identity, signed during the archive so `exportArchive` and notarization are skipped, which keeps the Screen Recording and Local Network TCC grants stable across rebuilds), Developer ID, or notarized, and `.github/workflows/release.yml` runs it on `v*` tags. The release body is the `## <version>` section of `CHANGELOG.md` followed by generated install steps, and a tag with no matching section fails the workflow before it builds. `Info.plist` takes its version from `$(MARKETING_VERSION)`/`$(CURRENT_PROJECT_VERSION)`, which are declared in `project.yml` — **drop them from `project.yml` and a regenerated project ships an empty version string**. `DISTRIBUTION.md` documents credentials and CI secrets.
 - **Brand assets**: `python scripts/generate_brand_assets.py` (needs Pillow) regenerates the app icons **and** the SVGs in `BrandAssets/Logo/`, all from the script's `MASTER`/`MICRO`/`COLORS` constants — so a logo redesign means editing those constants, and hand-editing an SVG is pointless because the next run overwrites it. A separate workflow (triggered by changes to the logo files, the script, or the appiconset) reruns the script on PRs and fails if the committed outputs under `LumenDesk/Assets.xcassets/AppIcon.appiconset`, `BrandAssets/AppIcons`, `BrandAssets/Repository`, or `BrandAssets/Logo` don't match what it generates. The mark is the Plan drawing: an exterior envelope, one dominant room against two smaller ones, and a warm and a cool pool of light on the floors of the two that are lit. `MICRO` carries hand-tuned line weights for 16–64 px, where the master's proportional weights fall under a pixel; 16 and 24 px drop the second partition entirely.
-- **Design prototype** (`design-prototype/`): standalone React/TypeScript/Vite UX mockup with no backend and no real lighting commands. `npm install && npm run dev` (port 4173); `npm run build` type-checks and builds. It is not part of the app build. Published to GitHub Pages under `/prototype/`.
-- **Web app and bridge** (`web/`): a real browser client for LumenDesk, described in `web/README.md`. `web/bridge/` is a dependency-free Node service (Node 20+) that owns the UDP sockets and exposes a loopback HTTP API; `web/app/` is the Vite/React client, published at the Pages site root and also served by the bridge itself (`npm run app`) so the page and API share one origin — that same-origin route is the supported one, because browsers gate a remote site's access to the local network behind a user permission prompt. Browsers cannot send raw UDP, so the bridge is the only thing that talks to lights — keep protocol logic there, never in the client. `web/bridge/src/lifx.js` and `govee.js` are ports of the Swift encoders and are tested byte-for-byte against the same vectors as `LumenDeskTests/ProtocolTests.swift`; **change the two in lockstep or the bridge and the native app diverge on the wire**. `web/bridge/src/net.js` is the same lockstep pairing for discovery targets: it mirrors `LocalSubnet`/`probeSubnets`, and its tests mirror `NetworkUtilityTests.swift`. `web/bridge/src/nanoleaf.js` is the lockstep port of the Shapes and Aurora layout parser, product families, geometry, panel numbering and encoders, v1 stream packet included (its tests mirror `NanoleafShapesTests.swift`), and `web/app/src/shapes/geometry.ts` mirrors the wall transform and numbering for the page, which draws from outlines the bridge sends. The Shapes token lives only in `~/.lumendesk/nanoleaf-pairings.json` (mode 0600) and must never reach a response, log line or error message. Client constructors take `sweep: false` so the test harness can point discovery at loopback without spraying the machine running the suite. `npm test` in `web/bridge` runs those plus fake-device integration tests over real UDP on loopback. Rooms, scenes, schedules, favourites and device names persist in `~/.lumendesk/bridge-state.json` via `store.js`; **schedules are evaluated in the bridge** (`schedules.js`, pure and clock-injected like the native `ScheduleEngine`) so they fire with no browser open, and `actions.js` is the single place a vendor-neutral intent becomes real commands for direct control, scene apply and the scheduler alike.
-- **Pages deployment** (`.github/workflows/deploy-pages.yml`): builds `web/app` to the site root and `design-prototype` to `/prototype/`, and runs the bridge tests; pushes to `main` deploy, pull requests build without deploying. Because a project site is served from a subpath, both Vite configs take `base` from the `BASE_PATH` environment variable (supplied by `actions/configure-pages`) and default to `/` when unset — keep asset references relative or bundler-resolved so both layouts work.
+
+There is no browser client, Node bridge, design prototype or GitHub Pages site: commit 140ee57 deleted `web/`, `design-prototype/` and `.github/workflows/deploy-pages.yml`, so the Swift encoders have no JavaScript ports to keep in lockstep. Mentions of them in `NANOLEAF_SHAPES_PARITY.md` and `docs/direction-a-implementation.md` are historical records.
 
 ## Adding, renaming, or deleting Swift files
 
@@ -104,10 +129,10 @@ Import/export (macOS app menu) does **not** reuse `PersistedApplicationState`: i
 
 ### Music Mode
 
-Documented in `MUSIC_MODE_ARCHITECTURE.md`; read it before touching the pipeline. Flow: `AudioCaptureService` (ScreenCaptureKit system audio on macOS, AVAudioEngine microphone on iOS) → `MusicFeatureAnalyzer` (FFT features) → `AudioReactiveSessionController` (one render clock, non-overlapping scope sessions) → `MusicChoreographyEngine` (features + `MusicModeConfiguration` + `FixtureTopology` → vendor-neutral `MusicLightingFrame`) → `MusicLightingRenderer` (latest-frame-per-fixture coalescing, independent per-transport rate ceilings) → LightManager (existing scope/conflict/undo/restore rules). Invariants:
+Flow: `AudioCaptureService` (ScreenCaptureKit system audio on macOS, AVAudioEngine microphone on iOS) → `MusicFeatureAnalyzer` (FFT features) → `AudioReactiveSessionController` (one render clock, non-overlapping scope sessions) → `MusicChoreographyEngine` (features + `MusicModeConfiguration` + `FixtureTopology` → vendor-neutral `MusicLightingFrame`) → `MusicLightingRenderer` (latest-frame-per-fixture coalescing, independent per-transport rate ceilings) → LightManager (existing scope/conflict/undo/restore rules). Invariants:
 
 - The catalog identifier remains `music-pulse` for saved-state compatibility.
-- Live frames never emit persistent `ptReal` writes — RGBIC devices get the volatile razer stream only. The web client posts `/music/frame` as a single colour per fixture and must not invent a razer encoder without lockstep `ProtocolTests`.
+- Live frames never emit persistent `ptReal` writes — RGBIC devices get the volatile razer stream only.
 - Photosensitivity-safe mode is on by default; `FlashSafetyLimiter` enforces a non-configurable hard ceiling of 3 flashes/second that no code path may bypass. Reduced Motion also disables flashes.
 - `BeatTracker.beatsPerBar` stays 4. Metre detection is an overlay (`MetreTracker` in the same file) so existing downbeat tests keep passing. Do not add new Swift files without sequential pbxproj A1/B1 IDs.
 
@@ -126,14 +151,13 @@ organization. `ContentView` remains legacy with shared diagnostic components.
 The native visual system is **Spectrum Studio**: graphite surfaces, restrained
 amber actions and actual device color. `Theme.swift` owns tokens;
 `DesignControls.swift` owns faders, buttons and validated exact-value rows. Use
-native menus, fields, sheets and color pickers. Read `DESIGN_SYSTEM.md` and
-`SPECTRUM_STUDIO.md` for hierarchy and validation boundaries.
+native menus, fields, sheets and color pickers.
 
 
 ## Conventions and invariants
 
-- **Scope guard for UI work** (from `SWIFTUI_HANDOFF.md`): visual refactors must not change LAN protocols, discovery, scheduling semantics, scene persistence, held-segment-layout behavior, or command transport. Keep behavioral changes separately testable from presentation changes.
+- **Scope guard for UI work**: visual refactors must not change LAN protocols, discovery, scheduling semantics, scene persistence, held-segment-layout behavior, or command transport. Keep behavioral changes separately testable from presentation changes.
 - **Volatile vs. durable segment state**: live preview (razer) is intentionally volatile — closing Segment Studio without applying is a true cancel. Only Apply writes durable state. Devices whose firmware has no segment storage (H60B0 lamps, string/curtain/outdoor lights) get their layouts *held* by LumenDesk and re-applied every 30 s, on reconnect, on power-on, and at launch — don't "fix" that re-apply loop away.
-- **Tests** (XCTest, `@testable import LumenDesk`): mirror the existing style — inject `now`/`sleep`/`calendar` instead of sleeping, generate PCM buffers or deterministic feature snapshots for audio paths, and test protocol encoders byte-for-byte (`ProtocolTests`). Coordinator-level behavior (command lifecycle, confirmation, schedules, persistence migration, demo isolation) is where coverage lives; there is no XCUITest target. Opt-in AppKit-hosted production view captures live in RoomPlanningTests; browser interaction/axe review lives in web/app/scripts/visual-review.mjs.
+- **Tests** (XCTest, `@testable import LumenDesk`): mirror the existing style — inject `now`/`sleep`/`calendar` instead of sleeping, generate PCM buffers or deterministic feature snapshots for audio paths, and test protocol encoders byte-for-byte (`ProtocolTests`). Coordinator-level behavior (command lifecycle, confirmation, schedules, persistence migration, demo isolation) is where coverage lives; there is no XCUITest target. Opt-in AppKit-hosted production view captures live in RoomPlanningTests.
 - Debug builds set `REGISTER_WITH_LAUNCH_SERVICES=NO` on macOS so temporary DerivedData builds don't become candidates for the Screen Recording permission relaunch; Music Mode re-registers the running bundle before requesting access. Keep this when touching `project.yml`.
 - `README.md` is the detailed user-facing feature reference — update it when behavior, shortcuts, or supported devices change.

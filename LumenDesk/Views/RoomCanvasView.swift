@@ -178,7 +178,7 @@ enum RoomCanvasStatus: Int, CaseIterable, Equatable {
         }) {
             return .pending
         }
-        if lights.contains(where: { manager.externallyChangedDeviceIDs.contains($0.id) }) {
+        if lights.contains(where: { manager.externalChanges[$0.id] != nil }) {
             return .changedElsewhere
         }
         return .confirmed
@@ -204,6 +204,112 @@ struct RoomCanvasStatusBadge: View {
                     .stroke(status.color.opacity(0.42), lineWidth: 1)
             )
             .accessibilityLabel("Status: \(status.title)")
+    }
+}
+
+// MARK: - Changed elsewhere
+
+/// What changed outside LumenDesk on these fixtures, and the two answers to
+/// it: put the lights back, or keep what they now show. It names the light,
+/// shows each value before and after, says when the difference was read, and
+/// states what is known about the cause without naming an app the light
+/// never reported.
+struct ExternalChangeNotice: View {
+    @EnvironmentObject private var manager: LightManager
+    let deviceIDs: Set<String>
+    /// How many fixtures are spelled out before the rest are only counted.
+    var limit = 3
+
+    var body: some View {
+        let changes = manager.externalChanges(in: deviceIDs)
+        if !changes.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                ForEach(Array(changes.prefix(limit))) { change in
+                    ExternalChangeRow(
+                        change: change,
+                        name: manager.device(withID: change.deviceID)?.label ?? "A fixture"
+                    )
+                }
+                if changes.count > limit {
+                    Text("And \(changes.count - limit) more in this selection.")
+                        .font(.polarUI(12))
+                        .foregroundStyle(Polar.meter)
+                }
+                HStack(spacing: 8) {
+                    Button(changes.count == 1 ? "Put it back" : "Put \(changes.count) back") {
+                        manager.overrideExternalChange(deviceIDs: deviceIDs)
+                    }
+                    .buttonStyle(PolarButtonStyle(kind: .prominent, compact: true))
+                    .help("Send what these lights showed before the change. Undo returns to the change.")
+                    Button("Keep this") {
+                        manager.acknowledgeExternalChange(deviceIDs: deviceIDs)
+                    }
+                    .buttonStyle(PolarButtonStyle(kind: .quiet, compact: true))
+                    .help("Accept what these lights show now as the current state.")
+                }
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Polar.changed.opacity(0.08),
+                        in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Polar.changed.opacity(0.42), lineWidth: 1))
+        }
+    }
+}
+
+private struct ExternalChangeRow: View {
+    let change: ExternalChange
+    let name: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("\(name) changed outside LumenDesk",
+                  systemImage: RoomCanvasStatus.changedElsewhere.symbol)
+                .font(.polarUI(12, weight: .semibold))
+                .foregroundStyle(Polar.chalk)
+            ForEach(change.differences) { difference in
+                line(difference)
+                    .font(.polarMono(12))
+                    .foregroundStyle(Polar.chalk)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel(difference.summary)
+            }
+            Text(change.timingStatement { $0.formatted(date: .omitted, time: .shortened) })
+                .font(.polarUI(12))
+                .foregroundStyle(Polar.meter)
+                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(change.originTitle)
+                    .font(.polarUI(12, weight: .semibold))
+                    .foregroundStyle(Polar.chalk)
+                Text(change.originStatement)
+                    .font(.polarUI(12))
+                    .foregroundStyle(Polar.meter)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    /// One wrapped line per value: "Brightness  40% → 80%". Colours carry a
+    /// swatch beside the hex, so the change reads without decoding it. Built
+    /// in typed steps: one long `+` chain is slow for the type checker.
+    private func line(_ difference: ExternalChange.Difference) -> Text {
+        let title: Text = Text(verbatim: "\(difference.field.title)  ").foregroundColor(Polar.meter)
+        let before: Text = swatch(difference.before, field: difference.field)
+            + Text(verbatim: difference.before)
+        let arrow: Text = Text(verbatim: "  \u{2192}  ").foregroundColor(Polar.meter)
+        let after: Text = swatch(difference.after, field: difference.field)
+            + Text(verbatim: difference.after)
+        return title + before + arrow + after
+    }
+
+    private func swatch(_ value: String, field: ExternalChange.Field) -> Text {
+        guard field == .colour, let rgb = ExternalChange.rgbValue(hex: value) else {
+            return Text(verbatim: "")
+        }
+        let dot: Text = Text(Image(systemName: "circle.fill")).foregroundColor(Color(hex: rgb))
+        return dot + Text(verbatim: " ")
     }
 }
 
@@ -811,11 +917,25 @@ private struct RoomCanvasWorkspace: View {
         }
     }
 
+    /// The room's status. When it reads Changed elsewhere it is also the way
+    /// to the answer: it selects the lights that changed, and the selection
+    /// panel then says what changed and offers to put them back.
+    @ViewBuilder
     private var roomStatus: some View {
-        RoomCanvasStatusBadge(
-            status: RoomCanvasStatus.resolve(lights, manager: manager),
-            compact: true
-        )
+        let status = RoomCanvasStatus.resolve(lights, manager: manager)
+        if status == .changedElsewhere {
+            Button {
+                let changed = lights.map(\.id).filter { manager.externalChanges[$0] != nil }
+                if !changed.isEmpty { session.selectedFixtureIDs = Set(changed) }
+            } label: {
+                RoomCanvasStatusBadge(status: status, compact: true)
+            }
+            .buttonStyle(.plain)
+            .help("Select the lights that changed to see what changed and put them back")
+            .accessibilityHint("Selects the lights that changed")
+        } else {
+            RoomCanvasStatusBadge(status: status, compact: true)
+        }
     }
 
     private var headerActions: some View {
@@ -953,6 +1073,7 @@ struct DirectionARoomField: View {
                         activeSegmentState: manager.activeSegmentState(for: light.id),
                         selected: selection.contains(light.id),
                         status: RoomCanvasStatus.resolve([light], manager: manager),
+                        statusDetail: manager.externalChanges[light.id]?.differenceSummary,
                         compact: compactWidth,
                         condensed: condensed,
                         silhouette: LightPageModel.resolve(light).silhouette,
@@ -1132,6 +1253,8 @@ private struct FixtureCanvasNode: View {
     let activeSegmentState: GoveeSegmentState?
     let selected: Bool
     let status: RoomCanvasStatus
+    /// What an outside change altered, when the status is Changed elsewhere.
+    var statusDetail: String? = nil
     let compact: Bool
     let condensed: Bool
     var silhouette: OrbSilhouette = .bulb
@@ -1176,14 +1299,26 @@ private struct FixtureCanvasNode: View {
         .contentShape(Rectangle())
         .onTapGesture(count: 2) { open?() }
         .onTapGesture(count: 1, perform: select)
-        .help(open == nil ? light.label : "\(light.label) — double-click to open its page")
+        .help(helpText)
         .accessibilityElement(children: .ignore)
         .accessibilityAddTraits(.isButton)
         .accessibilityLabel(light.label)
-        .accessibilityValue("\(selected ? "Selected, " : "")\(status.title), \(light.isOn ? "on" : "off"), \(Int(light.brightness * 100)) percent")
+        .accessibilityValue("\(selected ? "Selected, " : "")\(statusText), \(light.isOn ? "on" : "off"), \(Int(light.brightness * 100)) percent")
         .accessibilityAddTraits(selected ? .isSelected : [])
         .accessibilityAction(.default, select)
         .accessibilityAction(named: "Open light page") { open?() }
+    }
+
+    /// The status as VoiceOver reads it, with what changed when it applies.
+    private var statusText: String {
+        guard let statusDetail else { return status.title }
+        return "\(status.title): \(statusDetail)"
+    }
+
+    private var helpText: String {
+        let base = open == nil ? light.label : "\(light.label) — double-click to open its page"
+        guard let statusDetail else { return base }
+        return "\(base)\n\(status.title): \(statusDetail)"
     }
 
     private var primaryGlowColor: Color {
@@ -1269,6 +1404,8 @@ private struct RoomSelectionInspector: View {
                         .font(LumenType.body(size: 13))
                         .foregroundStyle(Lumen.meter)
                 } else {
+                    ExternalChangeNotice(deviceIDs: ids)
+
                     HStack(spacing: 9) {
                         Button("On") { manager.setPower(deviceIDs: ids, on: true) }
                             .buttonStyle(.borderedProminent)
@@ -1308,20 +1445,6 @@ private struct RoomSelectionInspector: View {
                         ), supportsOpacity: false)
                         .polarColorWell(targets.first?.color ?? .white, width: 44, height: 24)
                         .accessibilityLabel("Output colour")
-                    }
-
-                    if manager.externallyChangedDeviceIDs.isDisjoint(with: ids) == false {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Label("A fixture changed outside LumenDesk. The canvas now shows what the room reported.",
-                                  systemImage: RoomCanvasStatus.changedElsewhere.symbol)
-                                .font(LumenType.body(size: 12, weight: .semibold))
-                            Button("Use this as current") {
-                                manager.acknowledgeExternalChange(deviceIDs: ids)
-                            }
-                            .buttonStyle(.bordered)
-                        }
-                        .padding(12)
-                        .background(Lumen.graphite.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
                     }
 
                     if targets.count == 1, let device = targets.first {

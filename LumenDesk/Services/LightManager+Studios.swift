@@ -51,6 +51,7 @@ extension LightManager {
             sendPower(device, on: true)
         }
 
+        noteUnconfirmedSend(device)
         commandCoordinator.recordUnconfirmedSend(
             deviceID: device.id,
             summary: "Applying \(next.zoneCount)-zone Luna layout"
@@ -333,6 +334,7 @@ extension LightManager {
     /// apply with a false "did not confirm" error. Show a lightweight
     /// sending → applied badge instead.
     func noteSegmentCommand(_ device: LightDevice, summary: String) {
+        noteUnconfirmedSend(device)
         commandCoordinator.recordUnconfirmedSend(deviceID: device.id, summary: summary)
     }
 

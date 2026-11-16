@@ -70,6 +70,9 @@ extension LightManager {
                                name: info.name, address: pairing.endpoint.host, sku: info.model))
         }
         guard let device = device(withID: id) else { return }
+        // Taken before the reading is folded in, and before it can release
+        // LumenDesk's claim on the wall's design.
+        let prior = snapshot(device)
         device.address = pairing.endpoint.host
         device.name = info.name
         device.needsNanoleafPairing = false
@@ -101,7 +104,7 @@ extension LightManager {
             else { whiteModeDeviceIDs.remove(id) }
         }
         if isScanning { scanResponseCount += 1 }
-        markSeen(device, confirmsPendingCommand: matches)
+        markSeen(device, confirmsPendingCommand: matches, prior: prior)
     }
 
     func expectNanoleafAppearance(_ device: LightDevice, appearance: NanoleafAppearance) {

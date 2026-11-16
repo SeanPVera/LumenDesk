@@ -86,6 +86,8 @@ If you change build settings, change them in `project.yml` as well so regenerati
 - `PersistenceStore` (`ApplicationPersistence` protocol) — structured state persistence, injectable as a test spy.
 - `AudioReactiveSessionController` (exposed as `manager.musicModeController`) — Music Mode session ownership (see below).
 
+A reading that differs from the last confirmed one with no LumenDesk command in flight becomes an `ExternalChange` (`Models/ExternalChange.swift`, Foundation-only) in `manager.externalChanges`: what the light reported before and after, when, and the evidence about the cause. Rules easy to break: the LAN protocols carry no sender, so nothing may name an app the light did not report; `before` and the restore point are fixed by the **first** differing reading, so `overrideExternalChange` ("Put it back") always returns to what LumenDesk last held; every transport handler takes `snapshot(device)` **before** folding a reading into the model and passes it to `markSeen(prior:)`; and a send no reading confirms (segment and matrix layouts, timed-out commands) goes through `noteUnconfirmedSend`, or the next poll reports LumenDesk's own command as changed elsewhere.
+
 Effects are managed inside LightManager as `EffectRun`s: one animated effect per scope, several allowed concurrently as long as device sets don't overlap, each holding a snapshot for restore-on-stop.
 
 ### Vendor transport

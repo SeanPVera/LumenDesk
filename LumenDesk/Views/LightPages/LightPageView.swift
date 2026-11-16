@@ -185,6 +185,8 @@ struct LightPageHeader: View {
                         .buttonStyle(PolarButtonStyle(kind: .quiet, compact: true))
                 }
             }
+
+            ExternalChangeNotice(deviceIDs: [device.id])
         }
         .polarPanel(padding: PolarSpacing.lg)
     }

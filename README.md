@@ -20,6 +20,13 @@ is active.
   capability.
 - Status is explicit: **Confirmed**, **Pending**, **Changed elsewhere**, or
   **Needs attention**. Every state uses wording, geometry, and colour.
+- **Changed elsewhere** names the light, shows each value it reported before
+  and after, and says when the difference was read. Select the light, or click
+  the room's status, to see it. **Put it back** re-sends what the light showed
+  before the change (Undo returns to the change); **Keep this** accepts the new
+  state. LIFX and Govee lights do not report who changed them, so LumenDesk
+  names a cause only where the light gives one: a Nanoleaf scene, a tapped
+  panel, or a light that had stopped answering.
 - **Add or repair room** is one Prepare → Find/identify → Place → Verify flow.
 
 ## Looks

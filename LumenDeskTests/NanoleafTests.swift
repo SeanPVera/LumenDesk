@@ -278,8 +278,38 @@ final class NanoleafTests: XCTestCase {
         }
 
         XCTAssertTrue(manager.externallyChangedDeviceIDs.contains(device.id))
+        XCTAssertEqual(manager.externalChanges[device.id]?.differences.map(\.field), [.mode])
         manager.acknowledgeExternalChange(deviceIDs: [device.id])
         XCTAssertFalse(manager.externallyChangedDeviceIDs.contains(device.id))
+    }
+
+    @MainActor
+    func testASceneChosenElsewhereIsNamedAndCanBePutBack() async throws {
+        let fixture = NanoleafFixture()
+        let client = makeClient(fixture)
+        defer { client.pause() }
+        let manager = makeManager(client)
+        try await manager.pairNanoleaf(host: fixture.endpoint.host)
+        let device = try XCTUnwrap(manager.devices.first)
+        manager.setPower(device, on: true)
+        try await waitUntil { manager.commandPendingIDs.isEmpty }
+
+        fixture.setAppearance("effect", effect: "Northern Lights")
+        client.refresh("SHAPES123")
+        try await waitUntil { manager.externalChanges[device.id] != nil }
+
+        let change = try XCTUnwrap(manager.externalChanges[device.id])
+        XCTAssertEqual(change.vendor, "Nanoleaf")
+        XCTAssertEqual(change.evidence, .controllerScene(name: "Northern Lights"),
+                       "The controller names its scene; it never names who started it")
+        XCTAssertEqual(change.differences.first { $0.field == .mode }?.after,
+                       "Scene \u{201C}Northern Lights\u{201D}")
+
+        manager.overrideExternalChange(deviceIDs: [device.id])
+        XCTAssertNil(manager.externalChanges[device.id])
+        XCTAssertEqual(device.nanoleafAppearance, .init(colorMode: "hs"),
+                       "Put back to the single colour the wall showed before the scene")
+        XCTAssertTrue(manager.commandPendingIDs.contains(device.id))
     }
 
     @MainActor

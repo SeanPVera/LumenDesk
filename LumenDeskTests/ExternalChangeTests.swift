@@ -430,4 +430,151 @@ final class ExternalChangeTests: XCTestCase {
         XCTAssertEqual(manager.lifxMatrixStates[device.id]?.colors, held.map(LIFXMatrixColor.init))
         XCTAssertNil(manager.matrixBeforeReading[device.id])
     }
+
+    // MARK: - Review follow-ups
+
+    @MainActor
+    func testADiscoveryReplyKeepsTheLastReadingTimeAndTheSilenceEvidence() async throws {
+        let manager = makeManager()
+        let device = try await lifxLight(manager, first: readingA)
+        let lastReading = try XCTUnwrap(manager.lastStateReadingAt[device.id])
+        device.isStale = true
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        // A rescan reaches the light before its state reply does.
+        manager.lifxDiscovered(macHex: mac, address: "192.0.2.10")
+        try await settle()
+        XCTAssertFalse(device.isStale, "A discovery reply still proves the light is reachable")
+        XCTAssertNil(manager.externalChanges[device.id], "A reply with no state raises nothing")
+
+        try await report(readingB, to: manager)
+        let noticed = try XCTUnwrap(manager.externalChanges[device.id])
+        XCTAssertEqual(noticed.evidence, .returnedAfterSilence,
+                       "The state reading after discovery is still the light coming back")
+        XCTAssertEqual(noticed.before.confirmedAt, lastReading)
+        XCTAssertEqual(noticed.window.lowerBound, lastReading,
+                       "The window starts at the last real reading, not at the rescan")
+        XCTAssertTrue(manager.silentUntilStateReading.isEmpty)
+    }
+
+    @MainActor
+    func testAnUnconfirmedLayoutOnlyExcusesTheChannelsItCanMove() async throws {
+        let manager = makeManager()
+        manager.goveeDiscovered(deviceID: goveeID, address: "192.0.2.20", sku: nil)
+        try await settle()
+        let device = try XCTUnwrap(manager.devices.first)
+        manager.goveeDidUpdate(deviceID: goveeID, isOn: true, brightness: 50, r: 255, g: 0, b: 0, kelvin: 0)
+        try await settle()
+
+        manager.noteSegmentCommand(device, summary: "Applying 15-segment layout")
+        XCTAssertEqual(manager.unconfirmedSendChannels[device.id], ExternalChange.layoutChannels)
+        manager.unconfirmedSends[device.id] = Date().addingTimeInterval(-10)
+
+        // A layout cannot switch the light off, so this is reported.
+        manager.goveeDidUpdate(deviceID: goveeID, isOn: false, brightness: 50, r: 255, g: 0, b: 0, kelvin: 0)
+        try await settle()
+        XCTAssertEqual(manager.externalChanges[device.id]?.differences.map(\.field), [.power])
+    }
+
+    @MainActor
+    func testATimedOutCommandExcusesOnlyWhatItCouldHaveChanged() async throws {
+        let coordinator = CommandCoordinator(timing: .init(
+            defaultDebounceNanoseconds: 2_000_000,
+            confirmationRefreshNanoseconds: 15_000_000,
+            commandTimeoutNanoseconds: 45_000_000,
+            appliedDisplayNanoseconds: 8_000_000,
+            simulatedResultNanoseconds: 2_000_000,
+            unconfirmedAppliedNanoseconds: 2_000_000
+        ))
+        let manager = LightManager(defaults: UserDefaults(suiteName: UUID().uuidString)!,
+                                   persistenceStore: temporaryPersistenceStore(),
+                                   commandCoordinator: coordinator)
+        let device = try await lifxLight(manager, first: readingA)
+
+        manager.setBrightness(device, value: 0.9)
+        for _ in 0..<300 where manager.unconfirmedSendChannels[device.id] == nil {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertFalse(manager.commandPendingIDs.contains(device.id), "The command timed out")
+        XCTAssertEqual(manager.unconfirmedSendChannels[device.id], [.brightness])
+        XCTAssertNotNil(manager.unconfirmedSends[device.id])
+
+        // The late command lands: only brightness moved, so it is LumenDesk's.
+        let landed = LIFXHSBK(hue: 0, saturation: 0, brightness: 58_982, kelvin: 3_500)
+        try await report(landed, to: manager)
+        XCTAssertNil(manager.externalChanges[device.id], "The timed-out command arriving is not a change made elsewhere")
+
+        // A colour change in the same window is not something it could do.
+        let recoloured = LIFXHSBK(hue: 30_000, saturation: 50_000, brightness: 58_982, kelvin: 3_500)
+        try await report(recoloured, to: manager)
+        XCTAssertEqual(manager.externalChanges[device.id]?.differences.map(\.field), [.colour])
+    }
+
+    @MainActor
+    func testHeldLunaZonesAreDroppedWhenTheNextReadingRaisesNothing() async throws {
+        let manager = makeManager()
+        let device = try await lifxLight(manager, first: readingA)
+        let held = (0..<64).map { LIFXHSBK(hue: UInt16($0 * 1_000), saturation: 65_535, brightness: 20_000, kelvin: 3_500) }
+        manager.lifxDidUpdateMatrix(macHex: mac, productID: 219, width: 8, height: 8, colors: held)
+        try await settle()
+        manager.lifxDidUpdateMatrix(macHex: mac, productID: 219, width: 8, height: 8,
+                                    colors: Array(repeating: readingB, count: 64))
+        try await settle()
+        XCTAssertNotNil(manager.matrixBeforeReading[device.id])
+
+        // The colour reading agrees with LumenDesk: nothing changed elsewhere,
+        // so the old zones must not linger for a later change to restore.
+        try await report(readingA, to: manager)
+        XCTAssertNil(manager.externalChanges[device.id])
+        XCTAssertNil(manager.matrixBeforeReading[device.id])
+    }
+
+    @MainActor
+    func testPutItBackWithNothingSavedSaysSoAndKeepsTheFlag() async throws {
+        let manager = makeManager()
+        let device = try await lifxLight(manager, first: readingA)
+        try await report(readingB, to: manager)
+        manager.externalChangeRestorePoints[device.id] = nil
+
+        manager.overrideExternalChange(deviceIDs: [device.id])
+        XCTAssertNotNil(manager.externalChanges[device.id], "Not quietly kept")
+        XCTAssertFalse(manager.commandPendingIDs.contains(device.id), "Nothing was sent")
+        XCTAssertTrue(manager.commandError?.contains("cannot put it back") == true)
+    }
+
+    @MainActor
+    func testColourHexRoundsInsteadOfTruncating() {
+        for value in [0, 1, 17, 128, 136, 200, 254, 255] {
+            let channel = Double(value) / 255
+            let expected = String(format: "#%02X%02X%02X", value, value, 255 - value)
+            XCTAssertEqual(LightManager.hexString(Color(red: channel, green: channel, blue: 1 - channel)), expected)
+        }
+        XCTAssertEqual(LightManager.hexString(Color(hex: 0xFF8800)), "#FF8800")
+        XCTAssertEqual(LightManager.hexString(Color(hex: 0x3366FF)), "#3366FF")
+    }
+
+    func testControllerModeIsNotPutDownToAnApp() {
+        let moved = change(before: reading(appearance: .init(colorMode: "hs")),
+                           after: reading(appearance: .init(colorMode: "effect"), after: 5),
+                           vendor: "Nanoleaf", evidence: .foreignMode(detail: "The panels are streaming"))
+        XCTAssertEqual(moved.originTitle, "Another controller or app")
+        XCTAssertTrue(moved.originStatement.contains("does not say what set it"))
+        XCTAssertFalse(moved.originIsInference)
+    }
+
+    func testPinpointedMeansOneRefreshIntervalWithSlack() {
+        XCTAssertEqual(ExternalChange.pinpointWindow, ExternalChange.refreshInterval * 1.5)
+        XCTAssertEqual(ExternalChange.ownSendWindow, ExternalChange.refreshInterval * 2)
+        XCTAssertTrue(change(before: reading(), after: reading(brightness: 0.8, after: 45)).isPinpointed)
+        XCTAssertFalse(change(before: reading(), after: reading(brightness: 0.8, after: 46)).isPinpointed)
+    }
+
+    func testCommandKindsMapToTheChannelsTheyCanMove() {
+        XCTAssertEqual(ExternalChange.channels(forCoalescingKey: "power"), [.power])
+        XCTAssertEqual(ExternalChange.channels(forCoalescingKey: "brightness"), [.brightness])
+        XCTAssertFalse(ExternalChange.channels(forCoalescingKey: "color").contains(.power))
+        XCTAssertFalse(ExternalChange.channels(forCoalescingKey: "kelvin").contains(.power))
+        XCTAssertEqual(ExternalChange.channels(forCoalescingKey: "something-new"), Set(ExternalChange.Field.allCases))
+        XCTAssertEqual(ExternalChange.differingFields(reading(), reading(on: false, hex: "#000000")), [.power, .colour])
+    }
 }

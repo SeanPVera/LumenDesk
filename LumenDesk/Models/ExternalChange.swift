@@ -47,11 +47,17 @@ struct ExternalChange: Equatable, Identifiable {
         case unreported
     }
 
+    /// How often LumenDesk polls every light for its state.
+    static let refreshInterval: TimeInterval = 30
     /// How long after LumenDesk sends something no reading confirms (a
     /// segment or matrix layout, a command that timed out) a differing
-    /// reading is still that send arriving, and so not an outside change:
-    /// two refresh intervals.
-    static let ownSendWindow: TimeInterval = 60
+    /// reading may still be that send arriving: two refresh intervals. Only
+    /// the channels that send could move are excused (see
+    /// `channels(forCoalescingKey:)`), so a change to anything else in that
+    /// window is still reported.
+    static let ownSendWindow: TimeInterval = 2 * refreshInterval
+    /// The channels a segment or matrix layout can move in a status reply.
+    static let layoutChannels: Set<Field> = [.colour, .brightness]
     /// How long after a panel tap a differing reading is put down to it.
     static let touchWindow: TimeInterval = 10
 
@@ -91,31 +97,51 @@ struct ExternalChange: Equatable, Identifiable {
     /// Same thresholds the manager uses to decide a reading differs at all,
     /// so a flagged light always has at least one difference to show.
     static func materiallyDiffers(_ lhs: ConfirmedDeviceState, _ rhs: ConfirmedDeviceState) -> Bool {
-        lhs.isOn != rhs.isOn
-            || abs(lhs.brightness - rhs.brightness) > 0.03
-            || lhs.colorHex != rhs.colorHex
-            || abs(lhs.kelvin - rhs.kelvin) > 100
-            || lhs.nanoleafAppearance != rhs.nanoleafAppearance
+        !differingFields(lhs, rhs).isEmpty
+    }
+
+    /// Every channel on which two readings differ beyond the tolerances.
+    static func differingFields(_ lhs: ConfirmedDeviceState, _ rhs: ConfirmedDeviceState) -> Set<Field> {
+        var fields: Set<Field> = []
+        if lhs.isOn != rhs.isOn { fields.insert(.power) }
+        if lhs.nanoleafAppearance != rhs.nanoleafAppearance { fields.insert(.mode) }
+        if abs(lhs.brightness - rhs.brightness) > 0.03 { fields.insert(.brightness) }
+        if lhs.colorHex != rhs.colorHex { fields.insert(.colour) }
+        if abs(lhs.kelvin - rhs.kelvin) > 100 { fields.insert(.whitePoint) }
+        return fields
+    }
+
+    /// The channels a LumenDesk command with this coalescing key can move,
+    /// so a timed-out command only excuses differences it could explain.
+    static func channels(forCoalescingKey key: String) -> Set<Field> {
+        switch key {
+        case "power": return [.power]
+        case "brightness": return [.brightness]
+        case "color": return [.colour, .brightness, .mode, .whitePoint]
+        case "kelvin": return [.whitePoint, .colour, .mode]
+        default: return Set(Field.allCases)
+        }
     }
 
     var differences: [Difference] {
+        let fields = Self.differingFields(before, after)
         var found: [Difference] = []
-        if before.isOn != after.isOn {
+        if fields.contains(.power) {
             found.append(Difference(field: .power, before: before.isOn ? "On" : "Off",
                                     after: after.isOn ? "On" : "Off"))
         }
-        if before.nanoleafAppearance != after.nanoleafAppearance {
+        if fields.contains(.mode) {
             found.append(Difference(field: .mode, before: Self.modeName(before.nanoleafAppearance),
                                     after: Self.modeName(after.nanoleafAppearance)))
         }
-        if abs(before.brightness - after.brightness) > 0.03 {
+        if fields.contains(.brightness) {
             found.append(Difference(field: .brightness, before: Self.percent(before.brightness),
                                     after: Self.percent(after.brightness)))
         }
-        if before.colorHex != after.colorHex {
+        if fields.contains(.colour) {
             found.append(Difference(field: .colour, before: before.colorHex, after: after.colorHex))
         }
-        if abs(before.kelvin - after.kelvin) > 100 {
+        if fields.contains(.whitePoint) {
             found.append(Difference(field: .whitePoint, before: "\(before.kelvin) K",
                                     after: "\(after.kelvin) K"))
         }
@@ -158,9 +184,13 @@ struct ExternalChange: Equatable, Identifiable {
         min(before.confirmedAt, noticedAt)...noticedAt
     }
 
-    /// A window this short is one refresh interval, so "about then" is fair.
+    /// A window no longer than one refresh interval (plus slack for a reply
+    /// arriving late) brackets the change closely enough that "about then"
+    /// is fair. Anything longer means readings were missed in between.
+    static let pinpointWindow: TimeInterval = refreshInterval * 1.5
+
     var isPinpointed: Bool {
-        window.upperBound.timeIntervalSince(window.lowerBound) <= 90
+        window.upperBound.timeIntervalSince(window.lowerBound) <= Self.pinpointWindow
     }
 
     func timingStatement(format: (Date) -> String) -> String {
@@ -186,7 +216,7 @@ struct ExternalChange: Equatable, Identifiable {
         switch evidence {
         case .panelTouched: return "Probably a tap on the panels"
         case .controllerScene(let name): return "Scene \u{201C}\(name)\u{201D} on the controller"
-        case .foreignMode: return "Another app"
+        case .foreignMode: return "Another controller or app"
         case .returnedAfterSilence: return "Probably lost power"
         case .unreported: return "Sender not reported"
         }
@@ -200,7 +230,7 @@ struct ExternalChange: Equatable, Identifiable {
         case .controllerScene(let name):
             return "The controller is running its stored scene \u{201C}\(name)\u{201D}. A scene starts from the controller\u{2019}s button, the Nanoleaf app, HomeKit or a voice assistant; the controller does not say which."
         case .foreignMode(let detail):
-            return "\(detail). The controller does not name the app."
+            return "\(detail). The controller does not say what set it: another app, HomeKit, a schedule or its own button."
         case .returnedAfterSilence:
             return "This light had stopped answering before this reading. A light that loses power at a wall switch or socket comes back in its power-on state, so that is the likely cause."
         case .unreported:

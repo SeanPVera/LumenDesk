@@ -286,13 +286,7 @@ final class DemoWorkspaceController {
         workspace.commandErrorUndo = nil
 
         for device in workspace.devices where !device.isStale {
-            let rgb = device.color.rgbComponents
-            let hex = String(
-                format: "#%02X%02X%02X",
-                Int(rgb.r * 255),
-                Int(rgb.g * 255),
-                Int(rgb.b * 255)
-            )
+            let hex = LightManager.hexString(device.color)
             workspace.commandState.confirmedStates[device.id] = ConfirmedDeviceState(
                 isOn: device.isOn,
                 brightness: device.brightness,

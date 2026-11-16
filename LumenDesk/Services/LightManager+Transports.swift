@@ -174,7 +174,8 @@ extension LightManager: GoveeClientDelegate {
             let id = "govee:\(deviceID)"
             guard let device = self.device(withID: id) else { return }
             if self.isScanning { self.scanResponseCount += 1 }
-            let prior = self.snapshot(device)
+            var prior = self.snapshot(device)
+            if self.goveeWhiteReadingIDs.contains(id) { prior.whiteKelvin = device.kelvin }
             let wasOn = device.isOn
             let normalizedBrightness = Double(min(100, max(0, brightness))) / 100.0
             let red = Double(min(255, max(0, r))) / 255.0
@@ -198,6 +199,9 @@ extension LightManager: GoveeClientDelegate {
                 if kelvin > 0, device.kelvin != kelvin { device.kelvin = kelvin }
                 let reportedColor = Color(red: red, green: green, blue: blue)
                 if device.color.rgbDistance(to: reportedColor) > 0.005 { device.color = reportedColor }
+                // A reply carries a colour temperature only while the light
+                // shows white; in colour it reports zero.
+                if kelvin > 0 { self.goveeWhiteReadingIDs.insert(id) } else { self.goveeWhiteReadingIDs.remove(id) }
             }
             if !isOn {
                 // A physical or externally initiated power-off clears razer mode.

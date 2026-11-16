@@ -15,6 +15,10 @@ struct LightRuntimeSnapshot {
     var nanoleafAppearance: NanoleafAppearance? = nil
     /// The Shapes design the wall was showing, when LumenDesk owned it.
     var nanoleafDesign: NanoleafPanelDesign? = nil
+    /// The white point of a Govee light that was reporting a colour
+    /// temperature. Set only on the restore point of a change made
+    /// elsewhere, where the colour command alone would bring back RGB.
+    var whiteKelvin: Int? = nil
 }
 
 /// Owns the isolated demo workspace and the live workspace held while Demo

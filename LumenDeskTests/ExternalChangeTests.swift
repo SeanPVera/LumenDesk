@@ -243,6 +243,103 @@ final class ExternalChangeTests: XCTestCase {
     }
 
     @MainActor
+    func testALightFadingBackInSmallStepsIsFollowedAndThenCleared() async throws {
+        let manager = makeManager()
+        let device = try await lifxLight(manager, first: readingA)
+        func level(_ brightness: UInt16) async throws {
+            try await report(LIFXHSBK(hue: 0, saturation: 0, brightness: brightness, kelvin: 3_500), to: manager)
+        }
+        try await level(30_000)
+        XCTAssertEqual(manager.externalChanges[device.id]?.differences.first?.after, "46%")
+
+        // Each step is too small to count as a change from the reading
+        // before it. The notice still follows the light.
+        try await level(28_500)
+        XCTAssertEqual(manager.externalChanges[device.id]?.differences.first?.after, "43%")
+        XCTAssertEqual(manager.externalChanges[device.id]?.before.brightness ?? 0,
+                       20_000.0 / 65_535.0, accuracy: 0.001)
+        for brightness: UInt16 in [27_000, 25_500, 24_000, 22_500] {
+            try await level(brightness)
+            XCTAssertNotNil(manager.externalChanges[device.id])
+        }
+
+        // Back within tolerance of what LumenDesk held: nothing left to answer.
+        try await level(21_000)
+        XCTAssertNil(manager.externalChanges[device.id])
+    }
+
+    @MainActor
+    func testADiscoveryReplyIsNeitherABaselineNorATimestamp() async throws {
+        let manager = makeManager()
+        manager.lifxDiscovered(macHex: mac, address: "192.0.2.10")
+        try await settle()
+        // Seen twice before it ever reports its state: the model still holds
+        // placeholder values, and the first real reading is not a change.
+        manager.lifxDiscovered(macHex: mac, address: "192.0.2.10")
+        try await settle()
+        try await report(readingA, to: manager)
+        let device = try XCTUnwrap(manager.devices.first)
+        XCTAssertNil(manager.externalChanges[device.id])
+
+        // A rescan marks the light seen without reading its state, so the
+        // change is still dated from the last reading that carried one.
+        let lastRead = try XCTUnwrap(manager.lastStateReadingAt[device.id])
+        try await Task.sleep(nanoseconds: 60_000_000)
+        manager.lifxDiscovered(macHex: mac, address: "192.0.2.10")
+        try await settle()
+        try await report(readingB, to: manager)
+        let noticed = try XCTUnwrap(manager.externalChanges[device.id])
+        XCTAssertEqual(noticed.before.confirmedAt, lastRead)
+        XCTAssertEqual(noticed.window.lowerBound, lastRead)
+    }
+
+    @MainActor
+    func testAGoveeLightThatWasWhiteIsPutBackThroughTheTemperatureCommand() async throws {
+        let manager = makeManager()
+        manager.goveeDiscovered(deviceID: goveeID, address: "192.0.2.20", sku: nil)
+        try await settle()
+        let device = try XCTUnwrap(manager.devices.first)
+        func report(r: Int, g: Int, b: Int, kelvin: Int) async throws {
+            manager.goveeDidUpdate(deviceID: goveeID, isOn: true, brightness: 50, r: r, g: g, b: b, kelvin: kelvin)
+            try await settle()
+        }
+        try await report(r: 255, g: 255, b: 255, kelvin: 2_700)
+        // Another app switches it to red: colour mode, no temperature.
+        try await report(r: 255, g: 0, b: 0, kelvin: 0)
+        XCTAssertEqual(manager.externalChanges[device.id]?.differences.map(\.field), [.colour])
+        XCTAssertEqual(manager.externalChangeRestorePoints[device.id]?.whiteKelvin, 2_700)
+
+        manager.overrideExternalChange(deviceIDs: [device.id])
+        XCTAssertEqual(device.kelvin, 2_700)
+        XCTAssertEqual(manager.commandState(for: device.id).summary, "Color temperature 2700 kelvin",
+                       "The colour command alone would bring the light back in RGB")
+
+        // White at that temperature confirms it.
+        try await report(r: 255, g: 255, b: 255, kelvin: 2_700)
+        XCTAssertFalse(manager.commandPendingIDs.contains(device.id))
+        XCTAssertNil(manager.externalChanges[device.id])
+    }
+
+    @MainActor
+    func testAGoveeLightThatWasInColourIsNotPutBackAsWhite() async throws {
+        let manager = makeManager()
+        manager.goveeDiscovered(deviceID: goveeID, address: "192.0.2.20", sku: nil)
+        try await settle()
+        let device = try XCTUnwrap(manager.devices.first)
+        manager.goveeDidUpdate(deviceID: goveeID, isOn: true, brightness: 50, r: 255, g: 0, b: 0, kelvin: 0)
+        try await settle()
+        manager.goveeDidUpdate(deviceID: goveeID, isOn: true, brightness: 50, r: 0, g: 0, b: 255, kelvin: 0)
+        try await settle()
+        XCTAssertNotNil(manager.externalChangeRestorePoints[device.id])
+        XCTAssertNil(manager.externalChangeRestorePoints[device.id]?.whiteKelvin)
+
+        manager.overrideExternalChange(deviceIDs: [device.id])
+        XCTAssertNotEqual(manager.commandState(for: device.id).summary, "Color temperature 3500 kelvin")
+        XCTAssertEqual(LightManager.hexString(device.color),
+                       LightManager.hexString(Color(red: 1, green: 0, blue: 0)))
+    }
+
+    @MainActor
     func testALightTurnedOffElsewhereIsTurnedBackOn() async throws {
         let manager = makeManager()
         let device = try await lifxLight(manager, first: readingA)

@@ -68,6 +68,13 @@ final class LightManager: ObservableObject {
     /// commands that timed out. The reading that follows one is that send
     /// arriving, so it must not be reported as a change made elsewhere.
     var unconfirmedSends: [String: Date] = [:]
+    /// When each light last sent a real state reply. Discovery replies and
+    /// zone readings mark a light seen without carrying its state, so they
+    /// are neither a baseline to differ from nor the moment it was last known.
+    var lastStateReadingAt: [String: Date] = [:]
+    /// Govee lights whose last status reply carried a colour temperature:
+    /// they were showing white, which only the temperature command restores.
+    var goveeWhiteReadingIDs: Set<String> = []
     /// A Luna's zones as LumenDesk held them before a reading replaced them.
     /// Matrix and colour replies arrive separately, so by the time a colour
     /// reading reveals an outside change the zones may already be the new ones.
@@ -562,14 +569,24 @@ final class LightManager: ObservableObject {
             confirmedAt: Date()
         )
         let isPending = commandPendingIDs.contains(device.id)
-        if !confirmsPendingCommand,
-           !isPending,
-           !isEffectAnimating(device.id),
-           !unconfirmedSendExplains(device.id, readingAt: observed.confirmedAt),
-           let previous = confirmedStates[device.id],
-           Self.materiallyDiffers(previous, observed) {
-            noteExternalChange(device, previous: previous, observed: observed,
-                               prior: prior, wasStale: wasStale)
+        let lastReading = lastStateReadingAt[device.id]
+        if prior != nil { lastStateReadingAt[device.id] = observed.confirmedAt }
+        if !confirmsPendingCommand, !isPending, !isEffectAnimating(device.id) {
+            if externalChanges[device.id] != nil {
+                if prior != nil {
+                    reconcileExternalChange(device, observed: observed, wasStale: wasStale)
+                }
+            } else if let lastReading,
+                      !unconfirmedSendExplains(device.id, readingAt: observed.confirmedAt),
+                      var previous = confirmedStates[device.id],
+                      Self.materiallyDiffers(previous, observed) {
+                // Without an earlier state reply there is nothing to have
+                // changed from, and the change is dated from that reply, not
+                // from a discovery reply that only marked the light seen.
+                previous.confirmedAt = lastReading
+                noteExternalChange(device, previous: previous, observed: observed,
+                                   prior: prior, wasStale: wasStale)
+            }
         }
         // An unconfirmed send explains the first settled state reading after
         // it and no later one. Discovery replies carry no state (no `prior`),
@@ -606,28 +623,15 @@ final class LightManager: ObservableObject {
 
     // MARK: - Changes made elsewhere
 
-    /// Folds a reading LumenDesk did not ask for into the record of what
-    /// changed. The first differing reading fixes `before` and the restore
-    /// point; later ones only move `after`, so "Put it back" still means the
-    /// light as LumenDesk last held it however many times it changes.
+    /// Opens the record of a change LumenDesk did not make. This first
+    /// differing reading fixes `before` and the restore point, so "Put it
+    /// back" means the light as LumenDesk last held it however many times it
+    /// changes afterwards.
     func noteExternalChange(_ device: LightDevice, previous: ConfirmedDeviceState,
                             observed: ConfirmedDeviceState,
                             prior: LightRuntimeSnapshot?, wasStale: Bool) {
         let evidence = externalChangeEvidence(for: device, previous: previous,
                                               observed: observed, wasStale: wasStale)
-        if var change = externalChanges[device.id] {
-            guard ExternalChange.materiallyDiffers(change.before, observed) else {
-                // Whatever changed the light has put it back, so there is
-                // nothing left to keep or override.
-                clearExternalChange(device.id)
-                logActivity(.command, title: "Outside change reverted",
-                            detail: "\(device.label) is back to what LumenDesk last confirmed.")
-                return
-            }
-            change.update(after: observed, evidence: evidence)
-            externalChanges[device.id] = change
-            return
-        }
         let change = ExternalChange(deviceID: device.id, vendor: device.brand.displayName,
                                     before: previous, after: observed,
                                     noticedAt: observed.confirmedAt, evidence: evidence)
@@ -636,6 +640,36 @@ final class LightManager: ObservableObject {
             for: device, previous: previous, prior: prior)
         logActivity(.command, title: "Changed elsewhere",
                     detail: "\(device.label): \(change.differenceSummary). \(change.originTitle).")
+    }
+
+    /// Measures an open change against what LumenDesk held, on every state
+    /// reading and not only when two readings in a row differ. A light that
+    /// fades back in small steps never trips that comparison, and would
+    /// leave the notice showing a state the light left long ago.
+    func reconcileExternalChange(_ device: LightDevice, observed: ConfirmedDeviceState,
+                                 wasStale: Bool) {
+        guard var change = externalChanges[device.id] else { return }
+        guard ExternalChange.materiallyDiffers(change.before, observed) else {
+            // Whatever changed the light has put it back, so there is
+            // nothing left to keep or override.
+            clearExternalChange(device.id)
+            logActivity(.command, title: "Outside change reverted",
+                        detail: "\(device.label) is back to what LumenDesk last confirmed.")
+            return
+        }
+        let shown = change.differences
+        let cause = change.evidence
+        // Only a reading that moved again can say anything new about why.
+        let moved = ExternalChange.materiallyDiffers(change.after, observed)
+        let evidence = moved
+            ? externalChangeEvidence(for: device, previous: change.after,
+                                     observed: observed, wasStale: wasStale)
+            : ExternalChange.Evidence.unreported
+        change.update(after: observed, evidence: evidence)
+        // Republish only when what the notice shows has changed.
+        if change.differences != shown || change.evidence != cause {
+            externalChanges[device.id] = change
+        }
     }
 
     /// What LumenDesk saw around a differing reading, most specific first.
@@ -685,7 +719,8 @@ final class LightManager: ObservableObject {
             segments: held.segments,
             matrix: matrixBeforeReading[device.id] ?? held.matrix,
             nanoleafAppearance: previous.nanoleafAppearance ?? held.nanoleafAppearance,
-            nanoleafDesign: held.nanoleafDesign
+            nanoleafDesign: held.nanoleafDesign,
+            whiteKelvin: held.whiteKelvin == nil ? nil : previous.kelvin
         )
     }
 
@@ -743,6 +778,14 @@ final class LightManager: ObservableObject {
         }
         recordChange(lights)
         apply(points)
+        // `apply` restores a plain Govee light through the colour command,
+        // which selects RGB. One that was showing white follows it with the
+        // temperature command, so white is what the light ends on.
+        for point in points {
+            guard let kelvin = point.whiteKelvin, point.segments == nil,
+                  let light = device(withID: point.deviceID), light.brand == .govee else { continue }
+            sendColorTemperature(light, kelvin: kelvin)
+        }
         for light in lights { clearExternalChange(light.id) }
         announceAction("Put back", lights: lights)
         logActivity(.command, title: "Outside change overridden",

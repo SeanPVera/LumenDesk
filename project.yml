@@ -68,6 +68,13 @@ targets:
         # Set explicitly so xcodegen does not inject the legacy
         # "iPhone Developer" identity into the application target.
         CODE_SIGN_IDENTITY: "Apple Development"
+        # Settings the hand-maintained project carried that xcodegen does not
+        # emit by default; kept so regeneration does not regress them.
+        DEAD_CODE_STRIPPING: YES
+        ENABLE_USER_SCRIPT_SANDBOXING: YES
+        "LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]":
+          - "$(inherited)"
+          - "@executable_path/../Frameworks"
         PRODUCT_BUNDLE_IDENTIFIER: com.lumendesk.LumenDesk
         # Info.plist reads both through $(...), so a release build can
         # override them on the xcodebuild command line without editing
@@ -147,7 +154,9 @@ schemes:
     build:
       targets:
         LumenDesk: all
-        LumenDeskTests: test
+        # Only the test action, so Run/Profile/Archive/Analyze of this scheme
+        # do not try to build the macOS-only test target.
+        LumenDeskTests: [test]
     run:
       config: Debug
     test:

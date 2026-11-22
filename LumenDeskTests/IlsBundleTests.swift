@@ -265,7 +265,7 @@ final class IlsBundleTests: XCTestCase {
     private static func samplePayload() -> [UInt8] {
         var text = ""
         for i in 0..<400 {
-            text += "{\"frame\":\(i),\"beat\":\(i % 8 == 0),\"energy\":\(Double(i) / 400.0),\"label\":\"sample-payload-#{i}\"}\n"
+            text += "{\"frame\":\(i),\"beat\":\(i % 8 == 0),\"energy\":\(Double(i) / 400.0),\"label\":\"sample-payload-\(i)\"}\n"
         }
         return Array(text.utf8)
     }

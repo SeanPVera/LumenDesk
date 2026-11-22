@@ -55,6 +55,8 @@ targets:
           - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
+    dependencies:
+      - target: Brotli
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.lumendesk.LumenDesk
@@ -76,12 +78,40 @@ targets:
         DEVELOPMENT_ASSET_PATHS: '"Preview Content"'
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        SWIFT_OBJC_BRIDGING_HEADER: LumenDesk/BrotliBridge.h
+        HEADER_SEARCH_PATHS:
+          - "$(SRCROOT)/Vendor/brotli/c/include"
       configs:
         Debug:
           # Test builds should not become candidates for macOS permission-
           # driven relaunches. Music Mode registers the currently running
           # bundle immediately before requesting Screen Recording access.
           REGISTER_WITH_LAUNCH_SERVICES[sdk=macosx*]: NO
+  Brotli:
+    # The official Brotli 1.2.0 C library (Apache-2.0), vendored for the
+    # iLightShow bundle decoder — see Vendor/brotli/LICENSE.
+    type: library.static
+    supportedDestinations: [macOS, iOS]
+    sources:
+      - path: Vendor/brotli/c/common
+        excludes:
+          - dictionary.bin
+          - dictionary.bin.br
+      - path: Vendor/brotli/c/dec
+      - path: Vendor/brotli/c/enc
+        excludes:
+          # C++ lazy-init variant; the default (BROTLI_STATIC_INIT_NONE)
+          # uses enc_static_init.c alone.
+          - static_init_lazy.cc
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.lumendesk.brotli
+        HEADER_SEARCH_PATHS:
+          - "$(SRCROOT)/Vendor/brotli/c"
+          - "$(SRCROOT)/Vendor/brotli/c/include"
+        CLANG_C_LANGUAGE_STANDARD: c11
+        SKIP_INSTALL: YES
+        GCC_TREAT_WARNINGS_AS_ERRORS: NO
   LumenDeskTests:
     type: bundle.unit-test
     platform: macOS
@@ -95,3 +125,28 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.lumendesk.LumenDeskTests
         GENERATE_INFOPLIST_FILE: YES
         CODE_SIGNING_ALLOWED: NO
+        # xcodegen's default TEST_HOST is the iOS bundle layout; macOS apps
+        # keep the binary under Contents/MacOS. Set it explicitly or the
+        # test target fails with "Could not find test host".
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/LumenDesk.app/Contents/MacOS/LumenDesk"
+        SWIFT_OBJC_BRIDGING_HEADER: LumenDeskTests/BrotliBridge.h
+        HEADER_SEARCH_PATHS:
+          - "$(SRCROOT)/Vendor/brotli/c/include"
+schemes:
+  LumenDesk:
+    build:
+      targets:
+        LumenDesk: all
+        LumenDeskTests: test
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - LumenDeskTests
+    analyze:
+      config: Debug
+    profile:
+      config: Release
+    archive:
+      config: Release

@@ -5,91 +5,79 @@ import AppKit
 import UIKit
 #endif
 
-// MARK: - LumenDesk design system — Direction A / Room Canvas
+// MARK: - LumenDesk design system — Polar Instrument
 //
-// The room is the instrument: a warm drawing surface carries literal fixture
-// colour while a compact four-colour system carries product meaning. Status
-// always pairs colour with wording and geometry. See
-// `docs/direction-a-implementation.md` for the source-to-code contract.
+// Cool ink surfaces carry literal fixture colour; electric blue marks action
+// and focus, mint marks a confirmed network fact. Status always pairs colour
+// with wording and a symbol. The raw palette lives in `PolarTokens.swift`
+// (`Polar`, `Color.polar*`, `Font.polar*`, `PolarSpacing`); this enum keeps
+// the semantic names the ~400 existing call sites already use and rebinds
+// them onto Polar values, so the whole app re-skins without touching each
+// view. See `docs/redesign/polar-instrument.md` for the source-to-code map.
 
 enum Lumen {
 
-    // MARK: Direction A anchors
-
-    static let graphite = Color(hex: 0x20272B)
-    static let canvas = Color(hex: 0xF4EADF)
-    static let ember = Color(hex: 0xB83A2A)
-    static let verdigris = Color(hex: 0x1E6F56)
-
-    // MARK: The sheet — cold neutrals
+    // MARK: Polar anchors
     //
-    // A plan looks down at a room from outside it, at night. The ground is
-    // cold so that a fixture's own colour, pooled on a floor, is unmistakably
-    // its own and not a property of the surface it lands on.
+    // `graphite` was the dark foreground of the old warm sheet and `canvas`
+    // its light ground. Polar Instrument is a dark desk, so the two swap
+    // roles: graphite is now ice-chalk text and canvas is the stage.
+
+    static let graphite = Polar.chalk
+    static let canvas = Polar.stage
+    static let ember = Polar.accent
+    static let verdigris = Polar.mint
+
+    // MARK: Surfaces
 
     /// Ground beneath everything, and the well a control recesses into.
     static let stage        = canvas
-    /// Large working areas: the inspector, sheets, secondary panels.
-    static let deck         = Color(hex: 0xE8DDD0)
-    /// A room's floor, and the standard panel fill everywhere else.
-    ///
-    /// The whole cool ramp from here up was lifted one step after the first
-    /// build rendered: at the original values a room read as a hole in the
-    /// page and the walls barely separated from the floor they enclosed. A
-    /// drawing needs its sheet to be visibly lighter than the dark around it.
-    static let floor        = Color(hex: 0xFFF9F1)
-    /// The selected room's floor, and any hovered or raised surface.
-    static let floorRaised  = Color(hex: 0xF7DCD4)
+    /// Large working areas: the sidebar, inspector, sheets.
+    static let deck         = Polar.deck
+    /// The standard panel fill.
+    static let floor        = Polar.desk
+    /// Selected, hovered or raised surfaces.
+    static let floorRaised  = Polar.raisedHi
     /// The loudest surface in the system, used for grouped controls.
-    static let stripLoud    = Color(hex: 0xDDD0C2)
+    static let stripLoud    = Polar.raised
 
     // MARK: Walls
-    //
-    // Line weight is how a drawing states hierarchy, and the eye reads it
-    // before it reads a word. Both weights sit on a wider poché band so a wall
-    // reads as having thickness rather than as a hairline.
 
-    /// The filled band a wall line sits on.
-    static let poche      = Color(hex: 0xD3C6B8)
-    /// Interior partitions.
-    static let wall       = Color(hex: 0x8A8982)
-    /// The exterior envelope, and any structural edge.
-    static let wallOuter  = graphite
+    static let poche      = Polar.wall
+    static let wall       = Color(hex: 0x3A4A64)
+    static let wallOuter  = Color(hex: 0x52647F)
 
     // MARK: Separators
-    //
-    // Used sparingly. Plan separates surfaces by value and by wall; a rule only
-    // appears where two areas share a value and still need a boundary.
 
-    static let ruleSoft = Color(hex: 0xD3C6B8)
-    static let rule     = Color(hex: 0xA89F94)
+    static let ruleSoft = Polar.ruleSoft
+    static let rule     = Polar.rule
 
     // MARK: Text
 
     static let chalk = graphite
-    static let meter = Color(hex: 0x434A4E)
-    static let muted = Color(hex: 0x52595D)
+    static let meter = Polar.meter
+    static let muted = Color(hex: 0x93A7C1)
     static let ash   = muted
-    static let faint = Color(hex: 0x636663)
+    static let faint = Color(hex: 0x8094AE)
 
     /// Illumination. A lit key face, a fader cap, a powered legend.
     static let lit = graphite
 
-    /// Selection and annotations share the neutral foreground.
-    static let mark = graphite
-    /// Studio actions use warm amber; output colors remain device content.
+    /// Selection and annotations.
+    static let mark = Polar.select
+    /// Studio actions use the electric accent; output colours remain device content.
     static let studioAccent = ember
 
     // MARK: Network and status
 
     static let link    = verdigris
-    static let linkDim = Color(hex: 0x20765E)
+    static let linkDim = Color(hex: 0x22B886)
 
     /// Status. Both are rare and both always ship with an icon, because hue
     /// alone cannot carry meaning on a screen full of coloured fixtures.
-    static let warn  = Color(hex: 0xB16B19)
+    static let warn  = Polar.pending
     static let ochre = warn
-    static let fail  = Color(hex: 0xB83B31)
+    static let fail  = Polar.attention
 
     // MARK: Row wash
     //
@@ -171,7 +159,7 @@ enum Lumen {
 
     static let hairline       = ruleSoft
     static let hairlineStrong = rule
-    static let edgeHighlight  = Color(hex: 0xFFFFFF, alpha: 0.42)
+    static let edgeHighlight  = Color(hex: 0xFFFFFF, alpha: 0.08)
 
     static let beam       = chalk
     static let beamBright = lit
@@ -198,17 +186,17 @@ enum Lumen {
     static let strip        = floor
     static let stripRaised  = floorRaised
 
-    static let violet       = graphite
-    static let violetBright = graphite
+    static let violet       = Polar.violet
+    static let violetBright = Polar.violet
     static let copper       = ember
     static let copperBright = ember
-    static let coral        = ember
-    static let magenta      = ember
+    static let coral        = Polar.coral
+    static let magenta      = Polar.coral
 
     /// Motion and music are states of the desk rather than of the network, so
     /// they read as illumination.
-    static let pink       = ember
-    static let pinkBright = ember
+    static let pink       = Polar.coral
+    static let pinkBright = Polar.coral
     static let acid       = verdigris
     static let gold       = warn
     static let goldBright = warn
@@ -221,7 +209,7 @@ enum Lumen {
     /// The bench backdrop is flat now. Elevation comes from value, so a
     /// gradient behind everything only muddies the strips sitting on it.
     static let backdropGradient = LinearGradient(
-        colors: [canvas, canvas],
+        colors: [Polar.deck, canvas],
         startPoint: .top,
         endPoint: .bottom
     )
@@ -232,73 +220,35 @@ enum Lumen {
     static let chamfer: CGFloat = 0
     static let iconBubble: CGFloat = 34
 }
-/// Direction A's two bundled type families. DejaVu Sans Condensed gives the
-/// room and Look names their editorial voice; Open Sans carries controls and
-/// measurements. The font files and licenses ship in `Resources/Fonts`.
+/// Polar Instrument type: SF Pro Rounded for names and titles, SF Pro Text
+/// for controls and body copy, SF Mono for every measured value (%, K, zone
+/// numbers). All three are system faces, so nothing is bundled or fetched.
+/// The values themselves live in `Font.polarDisplay/polarUI/polarMono`.
 enum LumenType {
     /// The smallest size anything in the product renders at.
     ///
     /// Sizes of 9 and 9.5 are all over the call sites, left from when labels
-    /// were meant to read as engraving on an instrument rather than as text.
-    /// On an obsidian ground they do not read at all, so the floor is applied
-    /// here instead of at forty call sites, and it holds for the next one
-    /// somebody writes.
+    /// were meant to read as engraving on an instrument. The floor is applied
+    /// here instead of at forty call sites, and it holds for the next one.
     static let minimumSize: CGFloat = 12
-
-    /// Match existing point-size tiers to iOS Dynamic Type styles. macOS
-    /// keeps the existing point sizes and minimum below.
-    #if !os(macOS)
-    private static func textStyle(for size: CGFloat) -> Font.TextStyle {
-        switch max(size, minimumSize) {
-        case ...12: return .caption
-        case ...13: return .footnote
-        case ...15: return .subheadline
-        case ...17: return .body
-        case ...18: return .headline
-        case ...20: return .title3
-        case ...25: return .title2
-        case ...31: return .title
-        default: return .largeTitle
-        }
-    }
-    #endif
 
     /// Names and titles.
     static func display(size: CGFloat, weight: Font.Weight = .semibold) -> Font {
-        #if os(macOS)
-        return .custom("DejaVuSansCondensed", size: max(size, minimumSize)).weight(weight)
-        #else
-        return .custom("DejaVuSansCondensed", size: max(size, minimumSize), relativeTo: textStyle(for: size)).weight(weight)
-        #endif
+        .polarDisplay(max(size, minimumSize), weight: weight)
     }
 
-    /// Measured values use system text with tabular digits. Technical identifiers
-    /// opt into a monospace face at their call site.
+    /// Measured values: SF Mono, so digits never jitter while a fader moves.
     static func readout(size: CGFloat, weight: Font.Weight = .medium) -> Font {
-        #if os(macOS)
-        return .custom("OpenSans", size: max(size, minimumSize)).weight(weight).monospacedDigit()
-        #else
-        return .custom("OpenSans", size: max(size, minimumSize), relativeTo: textStyle(for: size)).weight(weight).monospacedDigit()
-        #endif
+        .polarMono(max(size, minimumSize), weight: weight)
     }
 
     static func body(size: CGFloat = 15, weight: Font.Weight = .regular) -> Font {
-        #if os(macOS)
-        return .custom("OpenSans", size: max(size, minimumSize)).weight(weight)
-        #else
-        return .custom("OpenSans", size: max(size, minimumSize), relativeTo: textStyle(for: size)).weight(weight)
-        #endif
+        .polarUI(max(size, minimumSize), weight: weight)
     }
 
-    /// Control labels. Sentence case in new code; the face is sans so that
-    /// legacy call sites still uppercasing their text read as small caps
-    /// rather than as engraving.
+    /// Control labels and small section captions.
     static func instrumentLabel(size: CGFloat = 10) -> Font {
-        #if os(macOS)
-        return .custom("OpenSans-Semibold", size: max(size + 1, minimumSize))
-        #else
-        return .custom("OpenSans-Semibold", size: max(size + 1, minimumSize), relativeTo: textStyle(for: size + 1))
-        #endif
+        .polarUI(max(size + 1, minimumSize), weight: .semibold)
     }
 }
 
@@ -722,14 +672,20 @@ enum PlatformOpener {
     }
 }
 enum FixtureColorSwatches {
+    /// Polar paint palette: clean whites and saturated, luminous tones that
+    /// read on the dark stage (no browns or muddy mid-tones).
     static let values: [(label: String, color: Color)] = [
-        ("Warm White", Color(red: 1.0, green: 0.64, blue: 0.25)),
-        ("Neutral", Color(red: 1.0, green: 0.87, blue: 0.67)),
-        ("Daylight", Color(red: 0.93, green: 0.95, blue: 1.0)),
-        ("Red", Color(hue: 0, saturation: 1, brightness: 1)),
-        ("Orange", Color(hue: 0.08, saturation: 1, brightness: 1)),
-        ("Green", Color(hue: 0.35, saturation: 1, brightness: 1)),
-        ("Blue", Color(hue: 0.62, saturation: 1, brightness: 1)),
-        ("Purple", Color(hue: 0.77, saturation: 1, brightness: 1))
+        ("Warm White", Color(hex: 0xFFC27A)),
+        ("Neutral", Color(hex: 0xFFE7C2)),
+        ("Daylight", Color(hex: 0xEEF3FF)),
+        ("Amber", Color(hex: 0xF5B84B)),
+        ("Coral", Color(hex: 0xFF6B5A)),
+        ("Red", Color(hex: 0xFF3B4E)),
+        ("Magenta", Color(hex: 0xFF4FA3)),
+        ("Violet", Color(hex: 0x9B7BFF)),
+        ("Blue", Color(hex: 0x4F8CFF)),
+        ("Cyan", Color(hex: 0x3FD0FF)),
+        ("Mint", Color(hex: 0x2EE6A6)),
+        ("Lime", Color(hex: 0xB7F25A))
     ]
 }

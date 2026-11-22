@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from shutil import copyfile as copy
 
 from PIL import Image, ImageDraw, ImageFilter
 
@@ -35,6 +36,7 @@ BRAND = ROOT / "BrandAssets"
 REPO = BRAND / "Repository"
 OPTIONAL = BRAND / "AppIcons" / "OptionalAppearances"
 LOGO = BRAND / "Logo"
+POLAR = BRAND / "AppIcons" / "Polar"
 
 COLORS = {
     # The tile the mark sits on, and the floor of a room. The floor is a step
@@ -343,15 +345,20 @@ def main() -> None:
 
     write_svgs()
 
-    app_icon(1024, "ios").convert("RGB").save(CATALOG / "AppIcon-iOS-1024.png", optimize=True)
-    app_icon(1024, "ios", "dark").convert("RGB").save(OPTIONAL / "AppIcon-iOS-Dark-1024.png", optimize=True)
-    app_icon(1024, "ios", "tinted").convert("RGB").save(OPTIONAL / "AppIcon-iOS-Tinted-1024.png", optimize=True)
+    # The app icon is the Polar Instrument hexagon cluster: seven frosted
+    # panels lit from within on a dark squircle, with hand-tuned 16-64 px
+    # masters. Those masters are committed under BrandAssets/AppIcons/Polar
+    # and copied byte for byte, so this check stays deterministic across
+    # Pillow versions. The Plan drawing below still generates the logo SVGs.
+    copy(POLAR / "AppIcon-iOS-1024.png", CATALOG / "AppIcon-iOS-1024.png")
+    copy(POLAR / "AppIcon-iOS-1024.png", OPTIONAL / "AppIcon-iOS-Dark-1024.png")
+    copy(POLAR / "AppIcon-iOS-Tinted-1024.png", OPTIONAL / "AppIcon-iOS-Tinted-1024.png")
 
     for size in (16, 32, 64, 128, 256, 512, 1024):
-        app_icon(size, "mac").save(CATALOG / f"AppIcon-macOS-{size}.png", optimize=True)
-    app_icon(1024, "mac", "dark").save(OPTIONAL / "AppIcon-macOS-Dark-1024.png", optimize=True)
-    app_icon(1024, "mac", "tinted").save(OPTIONAL / "AppIcon-macOS-Tinted-1024.png", optimize=True)
-    app_icon(512, "mac").save(REPO / "LumenDesk-Repository-Avatar-512.png", optimize=True)
+        copy(POLAR / f"AppIcon-macOS-{size}.png", CATALOG / f"AppIcon-macOS-{size}.png")
+    copy(POLAR / "AppIcon-macOS-1024.png", OPTIONAL / "AppIcon-macOS-Dark-1024.png")
+    copy(POLAR / "AppIcon-macOS-Tinted-1024.png", OPTIONAL / "AppIcon-macOS-Tinted-1024.png")
+    copy(POLAR / "AppIcon-macOS-512.png", REPO / "LumenDesk-Repository-Avatar-512.png")
 
     contents = {
         "images": [

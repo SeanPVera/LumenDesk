@@ -704,11 +704,12 @@ final class BeatTracker {
     /// period that happens to land on one would otherwise win on bin alignment
     /// alone rather than on the music.
     private func smooth(into table: inout [Double], from source: [Double], firstLag: Int, limit: Int) {
-        for lag in firstLag...limit {
-            let previous = lag > 1 ? source[lag - 1] : source[lag]
-            let next = lag < limit ? source[lag + 1] : source[lag]
-            table[lag] = 0.25 * previous + 0.5 * source[lag] + 0.25 * next
+        // Hoist boundary checks out of the inner loop since firstLag >= 2.
+        guard firstLag <= limit else { return }
+        for lag in firstLag..<limit {
+            table[lag] = 0.25 * source[lag - 1] + 0.5 * source[lag] + 0.25 * source[lag + 1]
         }
+        table[limit] = 0.25 * source[limit - 1] + 0.5 * source[limit] + 0.25 * source[limit]
     }
 
     /// True when `candidate` is within a few percent of a simple musical
@@ -744,8 +745,17 @@ final class BeatTracker {
 /// needs no new pbxproj file ID.
 final class MetreTracker {
     private static let candidates = [3, 4, 5, 6, 7]
+    private static let maxHistoryCount = 64
 
-    private var kickHistory: [Double] = []
+    // Fixed-capacity ring buffer avoids heap re-allocations and O(N) element shifting.
+    private var kickHistory = [Double](repeating: 0, count: maxHistoryCount)
+    private var kickCount = 0
+    private var writeIndex = 0
+
+    // Pre-allocated scratch storage to avoid dynamic array allocations in scoreMetre.
+    private var scratchBins = [Double](repeating: 0, count: 8)
+    private var scratchCounts = [Int](repeating: 0, count: 8)
+
     private var evenEnergy: Double = 0
     private var oddEnergy: Double = 0
     private var metre = 4
@@ -754,7 +764,9 @@ final class MetreTracker {
     private var lastBeat = -1
 
     func reset() {
-        kickHistory.removeAll(keepingCapacity: true)
+        for i in 0..<Self.maxHistoryCount { kickHistory[i] = 0 }
+        kickCount = 0
+        writeIndex = 0
         evenEnergy = 0
         oddEnergy = 0
         metre = 4
@@ -766,8 +778,9 @@ final class MetreTracker {
     func observe(beatCount: Int, kick: Double, tempo: Double, locked: Bool) {
         guard beatCount != lastBeat else { return }
         lastBeat = beatCount
-        kickHistory.append(max(0, kick))
-        if kickHistory.count > 64 { kickHistory.removeFirst(kickHistory.count - 64) }
+        kickHistory[writeIndex] = max(0, kick)
+        writeIndex = (writeIndex + 1) % Self.maxHistoryCount
+        if kickCount < Self.maxHistoryCount { kickCount += 1 }
 
         let decay = 0.92
         if beatCount.isMultiple(of: 2) {
@@ -776,23 +789,21 @@ final class MetreTracker {
             oddEnergy = oddEnergy * decay + kick
         }
 
-        guard locked, kickHistory.count >= 12 else { return }
+        guard locked, kickCount >= 12 else { return }
 
         // Score four first so a tied prominence (four-on-the-floor, every beat
         // equally loud) cannot be stolen by 3 just because it is listed first.
         var best = 4
-        var bestScore = scoreMetre(4)
-        var scores: [Int: Double] = [4: bestScore]
+        let fourScore = scoreMetre(4)
+        var bestScore = fourScore
         for n in Self.candidates where n != 4 {
             let score = scoreMetre(n)
-            scores[n] = score
             if score > bestScore {
                 bestScore = score
                 best = n
             }
         }
 
-        let fourScore = scores[4] ?? 0
         let adopt = best == metre || bestScore > fourScore * 1.12
         let next = adopt ? best : metre
         if next != metre {
@@ -820,33 +831,55 @@ final class MetreTracker {
     }
 
     private func scoreMetre(_ n: Int) -> Double {
-        var bins = [Double](repeating: 0, count: n)
-        var counts = [Int](repeating: 0, count: n)
-        let oldest = lastBeat - kickHistory.count + 1
-        for (index, value) in kickHistory.enumerated() {
-            let beat = oldest + index
-            let slot = ((beat % n) + n) % n
-            bins[slot] += value
-            counts[slot] += 1
+        // Zero pre-allocated scratch slots for 0..<n.
+        for i in 0..<n {
+            scratchBins[i] = 0
+            scratchCounts[i] = 0
         }
+
+        // Walk ring buffer from oldest to newest sample without allocations or array shifts.
+        let oldestBeat = lastBeat - kickCount + 1
+        var ringIndex = (writeIndex - kickCount + Self.maxHistoryCount) % Self.maxHistoryCount
+        for i in 0..<kickCount {
+            let beat = oldestBeat + i
+            let slot = ((beat % n) + n) % n
+            scratchBins[slot] += kickHistory[ringIndex]
+            scratchCounts[slot] += 1
+            ringIndex += 1
+            if ringIndex == Self.maxHistoryCount { ringIndex = 0 }
+        }
+
         // Average per slot so a leftover sample cannot fake a downbeat.
         // 40 equal kicks would otherwise make 3 look more periodic than 4
         // because 40 % 3 leaves an extra hit in bin 0.
-        for i in 0..<n where counts[i] > 0 {
-            bins[i] /= Double(counts[i])
+        // Compute maxBin, downbeatIndex, and sum in a single pass.
+        var maxBin = 0.0
+        var downbeatIndex = 0
+        var sum = 0.0
+        for i in 0..<n {
+            if scratchCounts[i] > 0 {
+                scratchBins[i] /= Double(scratchCounts[i])
+            }
+            let val = scratchBins[i]
+            sum += val
+            if val > maxBin {
+                maxBin = val
+                downbeatIndex = i
+            }
         }
-        guard let maxBin = bins.max(), maxBin > 1e-6 else { return 0 }
-        let mean = bins.reduce(0, +) / Double(n)
+
+        guard maxBin > 1e-6 else { return 0 }
+        let mean = sum / Double(n)
         let prominence = (maxBin - mean) / maxBin
-        let downbeatIndex = bins.firstIndex(of: maxBin) ?? 0
+
         var grouped = 0.0
         if n == 6 {
-            let a = bins[0] + bins[3]
-            let b = bins[1] + bins[4]
-            let c = bins[2] + bins[5]
+            let a = scratchBins[0] + scratchBins[3]
+            let b = scratchBins[1] + scratchBins[4]
+            let c = scratchBins[2] + scratchBins[5]
             // Waltz (equal weight on 1 and 4 of a 6-count) must not outscore 3/4.
             // True 6/8 has a heavier downbeat than the secondary grouping.
-            if a > b, a > c, bins[0] > bins[3] * 1.15 {
+            if a > b, a > c, scratchBins[0] > scratchBins[3] * 1.15 {
                 grouped = 0.18
             }
         }

@@ -52,6 +52,7 @@ extension LightManager: LIFXClientDelegate {
                 device.name = label
                 self.sortDevices()
             }
+            let prior = self.snapshot(device)
             let h = Double(color.hue) / 65535.0
             let s = Double(color.saturation) / 65535.0
             let reportedColor = Color(hue: h, saturation: s, brightness: 1.0)
@@ -72,7 +73,7 @@ extension LightManager: LIFXClientDelegate {
                 if device.kelvin != Int(color.kelvin) { device.kelvin = Int(color.kelvin) }
                 if device.color.rgbDistance(to: reportedColor) > 0.005 { device.color = reportedColor }
             }
-            self.markSeen(device, confirmsPendingCommand: matches)
+            self.markSeen(device, confirmsPendingCommand: matches, prior: prior)
         }
     }
 
@@ -95,6 +96,13 @@ extension LightManager: LIFXClientDelegate {
                 colors: colors.map(LIFXMatrixColor.init),
                 isActive: true
             )
+            if let previous, previous.isActive, previous.colors != matrix.colors,
+               self.matrixBeforeReading[device.id] == nil {
+                // Zones and colour arrive in separate replies. Keep the zones
+                // LumenDesk held, so an outside change can be put back to
+                // them whichever reply reveals it first.
+                self.matrixBeforeReading[device.id] = previous
+            }
             self.lifxMatrixStates[device.id] = matrix
             if previous?.productID != matrix.productID || previous?.width != matrix.width || previous?.height != matrix.height {
                 self.musicFixtureCache.removeAll()
@@ -166,6 +174,8 @@ extension LightManager: GoveeClientDelegate {
             let id = "govee:\(deviceID)"
             guard let device = self.device(withID: id) else { return }
             if self.isScanning { self.scanResponseCount += 1 }
+            var prior = self.snapshot(device)
+            if self.goveeWhiteReadingIDs.contains(id) { prior.whiteKelvin = device.kelvin }
             let wasOn = device.isOn
             let normalizedBrightness = Double(min(100, max(0, brightness))) / 100.0
             let red = Double(min(255, max(0, r))) / 255.0
@@ -189,6 +199,9 @@ extension LightManager: GoveeClientDelegate {
                 if kelvin > 0, device.kelvin != kelvin { device.kelvin = kelvin }
                 let reportedColor = Color(red: red, green: green, blue: blue)
                 if device.color.rgbDistance(to: reportedColor) > 0.005 { device.color = reportedColor }
+                // A reply carries a colour temperature only while the light
+                // shows white; in colour it reports zero.
+                if kelvin > 0 { self.goveeWhiteReadingIDs.insert(id) } else { self.goveeWhiteReadingIDs.remove(id) }
             }
             if !isOn {
                 // A physical or externally initiated power-off clears razer mode.
@@ -196,7 +209,7 @@ extension LightManager: GoveeClientDelegate {
             } else if !wasOn {
                 self.reassertStreamHoldIfNeeded(device)
             }
-            self.markSeen(device, confirmsPendingCommand: matches)
+            self.markSeen(device, confirmsPendingCommand: matches, prior: prior)
         }
     }
 

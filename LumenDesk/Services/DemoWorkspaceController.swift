@@ -15,6 +15,10 @@ struct LightRuntimeSnapshot {
     var nanoleafAppearance: NanoleafAppearance? = nil
     /// The Shapes design the wall was showing, when LumenDesk owned it.
     var nanoleafDesign: NanoleafPanelDesign? = nil
+    /// The white point of a Govee light that was reporting a colour
+    /// temperature. Set only on the restore point of a change made
+    /// elsewhere, where the colour command alone would bring back RGB.
+    var whiteKelvin: Int? = nil
 }
 
 /// Owns the isolated demo workspace and the live workspace held while Demo
@@ -282,13 +286,7 @@ final class DemoWorkspaceController {
         workspace.commandErrorUndo = nil
 
         for device in workspace.devices where !device.isStale {
-            let rgb = device.color.rgbComponents
-            let hex = String(
-                format: "#%02X%02X%02X",
-                Int(rgb.r * 255),
-                Int(rgb.g * 255),
-                Int(rgb.b * 255)
-            )
+            let hex = LightManager.hexString(device.color)
             workspace.commandState.confirmedStates[device.id] = ConfirmedDeviceState(
                 isOn: device.isOn,
                 brightness: device.brightness,

@@ -15,7 +15,7 @@ struct LumenDeskApp: App {
         WindowGroup {
             RootView()
                 .environmentObject(manager)
-                .preferredColorScheme(.light)
+                .preferredColorScheme(.dark)
         }
         #endif
     }
@@ -25,22 +25,12 @@ struct LumenDeskApp: App {
         WindowGroup {
             RootView()
                 .environmentObject(manager)
-                .frame(minWidth: 620, minHeight: 540)
-                .preferredColorScheme(.light)
+                .frame(minWidth: 760, minHeight: 560)
+                .preferredColorScheme(.dark)
         }
         .windowResizability(.automatic)
         .commands {
-            CommandGroup(after: .newItem) {
-                Button("Scan for Lights") {
-                    manager.start(discover: false)
-                    manager.scan()
-                }
-                    .keyboardShortcut("r", modifiers: .command)
-                Divider()
-                Button("Cancel Queued Light Commands") { manager.cancelQueuedCommands() }
-                    .keyboardShortcut(".", modifiers: .command)
-                    .disabled(manager.commandPendingIDs.isEmpty)
-            }
+            LumenDeskCommands(manager: manager)
             CommandGroup(after: .importExport) {
                 Button("Back Up Rooms & Looks\u{2026}") { exportConfiguration() }
                 Button("Restore Rooms & Looks\u{2026}") { importConfiguration() }
@@ -56,16 +46,16 @@ struct LumenDeskApp: App {
         }
 
         Settings {
-            NavigationStack { RoomCanvasSettingsView() }
+            RoomCanvasSettingsView(style: .toolbarTabs)
                 .environmentObject(manager)
-                .preferredColorScheme(.light)
+                .preferredColorScheme(.dark)
                 .managedActionConfirmations(manager)
         }
 
         MenuBarExtra {
             MenuBarPopoverView()
                 .environmentObject(manager)
-                .preferredColorScheme(.light)
+                .preferredColorScheme(.dark)
         } label: {
             LumenMark(size: 16, monochrome: true)
                 .foregroundStyle(moodColor)

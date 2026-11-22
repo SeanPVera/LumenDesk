@@ -276,7 +276,7 @@ extension LightManager {
                 let states = musicCapabilityStates(command.states, fixtureID: command.fixtureID)
                 let segments = states.map { GoveeSegmentColor(color: Color(hue: $0.hue, saturation: $0.saturation, brightness: 1), brightness: $0.brightness, isOn: $0.brightness > 0) }
                 guard !segments.isEmpty else { continue }
-                previewSegments(device, state: GoveeSegmentState(colors: segments, gradient: false, isActive: false))
+                previewSegments(device, state: GoveeSegmentState(colors: segments, gradient: false, isActive: false), realtime: true)
             }
         }
     }

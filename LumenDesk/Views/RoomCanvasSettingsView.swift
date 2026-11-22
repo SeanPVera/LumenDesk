@@ -23,7 +23,32 @@ struct RoomLookBackupDocument: FileDocument {
     }
 }
 
+/// The Settings tabs, in the artboard's order.
+enum SettingsTab: String, CaseIterable, Identifiable {
+    case general = "General"
+    case livePrivacy = "Live privacy"
+    case backup = "Backup"
+    case sampleRoom = "Sample Room"
+    case network = "Network"
+    var id: String { rawValue }
+
+    var symbol: String {
+        switch self {
+        case .general: return "gearshape"
+        case .livePrivacy: return "hand.raised"
+        case .backup: return "externaldrive"
+        case .sampleRoom: return "testtube.2"
+        case .network: return "network"
+        }
+    }
+}
+
+/// Polar Settings. In the macOS Settings scene (⌘,) it uses the system's
+/// toolbar tabs; shown as a sheet or on iOS it draws the same tabs as a
+/// pill bar, as on the artboard.
 struct RoomCanvasSettingsView: View {
+    enum Style { case toolbarTabs, pillTabs }
+
     @EnvironmentObject private var manager: LightManager
     @AppStorage(AppPreferenceKey.quietInterface) private var quietInterface = false
     @AppStorage(AppPreferenceKey.confirmationPolicy) private var confirmationPolicy = ConfirmationPolicy.balanced.rawValue
@@ -32,91 +57,43 @@ struct RoomCanvasSettingsView: View {
     @State private var exportingBackup: Bool = false
     @State private var importingBackup: Bool = false
     @State private var backupStatus: String? = nil
+    @State private var tab: SettingsTab
+    @State private var pairingNanoleaf = false
+    @Environment(\.dismiss) private var dismiss
+    let style: Style
+    let showsDone: Bool
+
+    init(style: Style = .pillTabs, initialTab: SettingsTab = .general, showsDone: Bool = false) {
+        self.style = style
+        self.showsDone = showsDone
+        _tab = State(initialValue: initialTab)
+    }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("SETTINGS")
-                        .font(LumenType.instrumentLabel(size: 10))
-                        .tracking(1.4)
-                        .foregroundStyle(Lumen.ember)
-                    Text("Room Canvas")
-                        .font(LumenType.display(size: 30, weight: .bold))
-                    Text("A small set of preferences for immediate, local room control.")
-                        .font(LumenType.body(size: 13))
-                        .foregroundStyle(Lumen.meter)
-                }
-
-                settingsSection("Interaction", symbol: "hand.tap") {
-                    Picker("Confirmation", selection: $confirmationPolicy) {
-                        ForEach(ConfirmationPolicy.allCases) { policy in
-                            Text(policy.title).tag(policy.rawValue)
-                        }
-                    }
-                    Toggle("Quiet interface", isOn: $quietInterface)
-                    Text("Quiet interface reduces decorative motion. System accessibility settings remain authoritative.")
-                        .font(LumenType.body(size: 11))
-                        .foregroundStyle(Lumen.meter)
-                }
-
-                settingsSection("Live privacy", symbol: "hand.raised") {
-                    Toggle("I understand local audio analysis", isOn: $audioAcknowledged)
-                    Text("Live analyzes audio on this device and does not retain recordings. macOS may request Screen & System Audio Recording access; iPhone and iPad may request microphone access.")
-                        .font(LumenType.body(size: 11))
-                        .foregroundStyle(Lumen.meter)
-                    Button("Open Privacy Settings") {
-                        PlatformOpener.openSettings(macPane: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
+        Group {
+            if style == .toolbarTabs {
+                TabView(selection: $tab) {
+                    ForEach(SettingsTab.allCases) { item in
+                        page(item)
+                            .tabItem { Label(item.rawValue, systemImage: item.symbol) }
+                            .tag(item)
                     }
                 }
-
-                settingsSection("Rooms & Looks backup", symbol: "externaldrive") {
-                    HStack(spacing: 10) {
-                        Button("Back Up…") { prepareBackup() }
-                            .buttonStyle(.borderedProminent)
-                            .tint(Lumen.ember)
-                        Button("Restore…") { importingBackup = true }
-                            .buttonStyle(.bordered)
-                    }
-                    Text("Exports a portable JSON backup of rooms, Looks, fixture names, favorites, and supported spatial layouts. Restoring asks before replacing the current configuration.")
-                        .font(LumenType.body(size: 11))
-                        .foregroundStyle(Lumen.meter)
-                    if let backupStatus {
-                        Label(backupStatus, systemImage: "checkmark.circle")
-                            .font(LumenType.body(size: 11, weight: .semibold))
-                            .foregroundStyle(Lumen.verdigris)
-                    }
+                .frame(width: 560, height: 440)
+            } else {
+                VStack(spacing: 0) {
+                    pillBar
+                    page(tab)
                 }
-
-                settingsSection("Sample Room", symbol: "testtube.2") {
-                    if manager.isDemoMode {
-                        Label("No physical fixtures are being controlled", systemImage: "checkmark.shield")
-                            .foregroundStyle(Lumen.verdigris)
-                        HStack {
-                            Button("Reset Sample Room") { manager.resetDemoMode() }
-                            Button("Return to live rooms") { manager.exitDemoMode() }
-                                .buttonStyle(.borderedProminent)
-                                .tint(Lumen.ember)
-                        }
-                    } else {
-                        Button("Open Sample Room") { manager.enterDemoMode() }
-                            .buttonStyle(.borderedProminent)
-                            .tint(Lumen.ember)
-                        Text("The sample workspace is isolated from discovered fixtures and saved rooms.")
-                            .font(LumenType.body(size: 11))
-                            .foregroundStyle(Lumen.meter)
-                    }
-                }
-
             }
-            .frame(maxWidth: 720)
-            .padding(24)
-            .frame(maxWidth: .infinity)
         }
-        .background(Lumen.canvas)
-        .foregroundStyle(Lumen.graphite)
-        .font(LumenType.body())
+        .background(Polar.stage)
+        .foregroundStyle(Polar.chalk)
+        .font(.polarUI(13))
         .navigationTitle("Settings")
+        .sheet(isPresented: $pairingNanoleaf) {
+            NanoleafPairingView().environmentObject(manager)
+        }
         .fileExporter(
             isPresented: $exportingBackup,
             document: backupDocument,
@@ -140,19 +117,209 @@ struct RoomCanvasSettingsView: View {
         }
     }
 
-    private func settingsSection<Content: View>(_ title: String, symbol: String,
-                                                @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 13) {
-            HStack(spacing: 8) {
-                Image(systemName: symbol).foregroundStyle(Lumen.ember)
-                Text(title).font(LumenType.display(size: 19, weight: .bold))
-                Rectangle().fill(Lumen.rule).frame(height: 1)
+    private var pillBar: some View {
+        HStack(spacing: 6) {
+            ForEach(SettingsTab.allCases) { item in
+                Button(item.rawValue) { tab = item }
+                    .buttonStyle(PolarButtonStyle(kind: tab == item ? .prominent : .quiet, compact: true))
+                    .accessibilityAddTraits(tab == item ? .isSelected : [])
             }
-            content()
         }
-        .padding(17)
-        .background(Lumen.floor, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Lumen.rule, lineWidth: 1))
+        .frame(maxWidth: .infinity)
+        .overlay(alignment: .trailing) {
+            if showsDone {
+                Button("Done") { dismiss() }
+                    .buttonStyle(PolarButtonStyle(kind: .quiet, compact: true))
+                    .keyboardShortcut(.cancelAction)
+                    .padding(.trailing, 12)
+            }
+        }
+        .padding(.vertical, 10)
+        .background(Polar.desk)
+        .overlay(alignment: .bottom) { Rectangle().fill(Polar.ruleSoft).frame(height: 1) }
+    }
+
+    private func page(_ item: SettingsTab) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: PolarSpacing.md) {
+                Text(item.rawValue)
+                    .font(.polarDisplay(22, weight: .bold))
+                switch item {
+                case .general: generalPage
+                case .livePrivacy: livePrivacyPage
+                case .backup: backupPage
+                case .sampleRoom: sampleRoomPage
+                case .network: networkPage
+                }
+            }
+            .frame(maxWidth: 520, alignment: .leading)
+            .padding(.horizontal, PolarSpacing.lg)
+            .padding(.vertical, PolarSpacing.lg)
+            .frame(maxWidth: .infinity)
+        }
+        .background(Polar.stage)
+    }
+
+    private func card<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 12) { content() }
+            .polarPanel(fill: Polar.desk, radius: Polar.radiusCard, padding: 14)
+    }
+
+    private func footnote(_ text: String) -> some View {
+        Text(text)
+            .font(.polarUI(11))
+            .foregroundStyle(Polar.meter)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    // MARK: Pages
+
+    private var generalPage: some View {
+        VStack(alignment: .leading, spacing: PolarSpacing.sm) {
+            card {
+                HStack {
+                    Text("Confirmation policy")
+                    Spacer()
+                    Picker("Confirmation policy", selection: $confirmationPolicy) {
+                        ForEach(ConfirmationPolicy.allCases) { policy in
+                            Text(policy.title).tag(policy.rawValue)
+                        }
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                }
+                HStack {
+                    Text("Quiet interface")
+                    Spacer()
+                    Toggle("Quiet interface", isOn: $quietInterface)
+                        .toggleStyle(.switch)
+                        .labelsHidden()
+                        .tint(Polar.accent)
+                }
+                footnote("Reduces decorative motion. System accessibility settings remain authoritative.")
+            }
+            HStack(spacing: 4) {
+                footnote("Local-first \u{00B7} no vendor cloud accounts. Keyboard:")
+                Text("\u{2318},")
+                    .font(.polarMono(10, weight: .semibold))
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(RoundedRectangle(cornerRadius: 4).fill(Polar.raised))
+            }
+        }
+    }
+
+    private var livePrivacyPage: some View {
+        VStack(alignment: .leading, spacing: PolarSpacing.sm) {
+            card {
+                HStack {
+                    Text("I understand local audio analysis")
+                    Spacer()
+                    Toggle("I understand local audio analysis", isOn: $audioAcknowledged)
+                        .toggleStyle(.switch)
+                        .labelsHidden()
+                        .tint(Polar.accent)
+                }
+                footnote("Live analyzes audio on this device and does not keep recordings. macOS may ask for Screen & System Audio Recording access; iPhone and iPad may ask for the microphone.")
+                Button("Open Privacy Settings") {
+                    PlatformOpener.openSettings(macPane: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
+                }
+                .buttonStyle(PolarButtonStyle(kind: .quiet, compact: true))
+            }
+        }
+    }
+
+    private var backupPage: some View {
+        VStack(alignment: .leading, spacing: PolarSpacing.sm) {
+            card {
+                HStack(spacing: 10) {
+                    Button("Back Up\u{2026}") { prepareBackup() }
+                        .buttonStyle(PolarButtonStyle(kind: .prominent, compact: true))
+                    Button("Restore\u{2026}") { importingBackup = true }
+                        .buttonStyle(PolarButtonStyle(kind: .quiet, compact: true))
+                }
+                footnote("Exports a portable JSON backup of rooms, Looks, light names, favorites and spatial layouts. Restoring asks before replacing anything.")
+                if let backupStatus {
+                    Label(backupStatus, systemImage: "checkmark.circle")
+                        .font(.polarUI(11, weight: .semibold))
+                        .foregroundStyle(Polar.mint)
+                }
+            }
+        }
+    }
+
+    private var sampleRoomPage: some View {
+        VStack(alignment: .leading, spacing: PolarSpacing.sm) {
+            card {
+                if manager.isDemoMode {
+                    Label("No physical lights are being controlled", systemImage: "checkmark.shield")
+                        .foregroundStyle(Polar.mint)
+                    HStack(spacing: 10) {
+                        Button("Reset Sample Room") { manager.resetDemoMode() }
+                            .buttonStyle(PolarButtonStyle(kind: .quiet, compact: true))
+                        Button("Return to live rooms") { manager.exitDemoMode() }
+                            .buttonStyle(PolarButtonStyle(kind: .prominent, compact: true))
+                    }
+                } else {
+                    Button("Open Sample Room") { manager.enterDemoMode() }
+                        .buttonStyle(PolarButtonStyle(kind: .prominent, compact: true))
+                    footnote("The Sample Room is isolated from discovered lights and saved rooms.")
+                }
+            }
+        }
+    }
+
+    private var networkPage: some View {
+        VStack(alignment: .leading, spacing: PolarSpacing.sm) {
+            card {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(manager.isScanning ? manager.scanPhase : "\(manager.devices.count) lights answering")
+                        Text(brandSummary)
+                            .font(.polarMono(11))
+                            .foregroundStyle(Polar.meter)
+                    }
+                    Spacer()
+                    Button("Refresh network") { manager.scan() }
+                        .buttonStyle(PolarButtonStyle(kind: .quiet, compact: true))
+                        .disabled(manager.isScanning || manager.isDemoMode)
+                }
+                HStack {
+                    Text("Nanoleaf controllers")
+                    Spacer()
+                    Button("Pair Nanoleaf\u{2026}") { pairingNanoleaf = true }
+                        .buttonStyle(PolarButtonStyle(kind: .quiet, compact: true))
+                        .disabled(manager.isDemoMode)
+                }
+                if manager.isDemoMode {
+                    footnote("Sample Room is open, so LumenDesk isn't talking to the network.")
+                }
+            }
+            if !manager.devices.isEmpty {
+                card {
+                    ForEach(manager.devices) { device in
+                        HStack(spacing: 10) {
+                            Circle()
+                                .fill(device.isStale ? Polar.attention : Polar.mint)
+                                .frame(width: 7, height: 7)
+                            Text(device.label).lineLimit(1)
+                            Spacer()
+                            Text(device.address)
+                                .font(.polarMono(11))
+                                .foregroundStyle(Polar.meter)
+                        }
+                    }
+                }
+            }
+            footnote("LumenDesk talks to LIFX, Govee and Nanoleaf directly on your local network. There's no bridge or cloud account.")
+        }
+    }
+
+    private var brandSummary: String {
+        let counts = Dictionary(grouping: manager.devices, by: \.brand).mapValues(\.count)
+        return [LightDevice.Brand.lifx, .govee, .nanoleaf]
+            .map { "\($0.displayName) \(counts[$0] ?? 0)" }
+            .joined(separator: " \u{00B7} ")
     }
 
     private func prepareBackup() {
@@ -184,23 +351,25 @@ struct RoomCanvasSettingsView: View {
     }
 }
 
-// MARK: - Add or repair
+// MARK: - Add lights
 
-private enum AddRepairStep: Int, CaseIterable, Identifiable {
-    case prepare
-    case find
+/// The three steps of Polar "Add lights".
+enum AddLightsStep: Int, CaseIterable, Identifiable {
+    case discover
     case place
     case verify
     var id: Int { rawValue }
 
     var title: String {
         switch self {
-        case .prepare: return "Prepare"
-        case .find: return "Find"
-        case .place: return "Place"
+        case .discover: return "Scan LAN"
+        case .place: return "Place in a room"
         case .verify: return "Verify"
         }
     }
+
+    /// "Step 1 of 3 · Scan LAN"
+    var caption: String { "Step \(rawValue + 1) of \(Self.allCases.count) \u{00B7} \(title)" }
 }
 
 enum RoomCommissioningProgress {
@@ -209,17 +378,26 @@ enum RoomCommissioningProgress {
     }
 }
 
+/// Polar Add lights: 1 scan the LAN and pick lights (Nanoleaf controllers
+/// pair from here), 2 place them in a room, 3 verify each one answers.
 struct AddOrRepairRoomView: View {
     @EnvironmentObject private var manager: LightManager
     @Environment(\.dismiss) private var dismiss
     @Binding var selectedRoomID: UUID?
     let onFinish: () -> Void
-    @State private var step: AddRepairStep = .prepare
+    var initialStep: AddLightsStep = .discover
+    @State private var step: AddLightsStep = .discover
     @State private var selectedIDs: Set<String> = []
     @State private var targetRoomID: UUID? = nil
     @State private var newRoomName: String = ""
+    @State private var pairingCandidate: NanoleafCandidate? = nil
     @State private var showingManualPairing: Bool = false
+    @State private var manualPairingHost: String = ""
+    /// Step 2 canvas selection. Kept apart from `selectedIDs` (the lights
+    /// being added), so clicking an orb never drops it from the add list.
+    @State private var placementSelection: Set<String> = []
     @State private var fixtureNameDrafts: [String: String] = [:]
+    @State private var started = false
 
     private var targetRoom: Room? {
         manager.rooms.first { $0.id == targetRoomID }
@@ -234,304 +412,367 @@ struct AddOrRepairRoomView: View {
         }
     }
 
+    /// Nanoleaf controllers seen on the network that no light stands for yet.
+    private var unpairedControllers: [NanoleafCandidate] {
+        let known = Set(manager.devices.filter { $0.brand == .nanoleaf }.map(\.address))
+        return manager.nanoleafCandidates.filter { !known.contains($0.endpoint.host) }
+    }
+
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                stepRail
-                Divider().overlay(Lumen.rule)
-                ScrollView {
-                    Group {
-                        switch step {
-                        case .prepare: prepareStep
-                        case .find: findStep
-                        case .place: placeStep
-                        case .verify: verifyStep
-                        }
+        VStack(spacing: 0) {
+            topBar
+            ScrollView {
+                Group {
+                    switch step {
+                    case .discover: discoverStep
+                    case .place: placeStep
+                    case .verify: verifyStep
                     }
-                    .padding(24)
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
                 }
-                Divider().overlay(Lumen.rule)
-                footer
+                .padding(PolarSpacing.lg)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
             }
-            .background(Lumen.canvas)
-            .navigationTitle("Add or repair room")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") { dismiss() }
-                }
-            }
+            footer
         }
-        .font(LumenType.body())
-        .foregroundStyle(Lumen.graphite)
-        .sheetFrame(minWidth: 680, idealWidth: 920, minHeight: 590, idealHeight: 720)
+        .background(Polar.stage)
+        .foregroundStyle(Polar.chalk)
+        .font(.polarUI(13))
+        .sheetFrame(minWidth: 680, idealWidth: 820, minHeight: 520, idealHeight: 640)
+        .sheet(item: $pairingCandidate) { candidate in
+            NanoleafPairingView(candidate: candidate, preferredRoomID: selectedRoomID) { id in
+                selectedIDs.insert(id)
+            }
+            .environmentObject(manager)
+        }
         .sheet(isPresented: $showingManualPairing) {
-            NanoleafPairingView().environmentObject(manager)
+            NanoleafPairingView(preferredRoomID: selectedRoomID, onPaired: { id in
+                selectedIDs.insert(id)
+            }, initialHost: manualPairingHost)
+            .environmentObject(manager)
+        }
+        .onAppear {
+            guard !started else { return }
+            started = true
+            step = initialStep
+            if targetRoomID == nil { targetRoomID = selectedRoomID ?? manager.rooms.first?.id }
+            if step == .discover { manager.scan() }
         }
         .onDisappear { manager.endSustainedIdentify() }
     }
 
-    private var stepRail: some View {
-        HStack(spacing: 0) {
-            ForEach(AddRepairStep.allCases) { item in
-                HStack(spacing: 7) {
-                    ZStack {
-                        Circle()
-                            .fill(item.rawValue <= step.rawValue ? Lumen.ember : Lumen.graphite.opacity(0.11))
-                            .frame(width: 24, height: 24)
-                        if item.rawValue < step.rawValue {
-                            Image(systemName: "checkmark")
-                                .font(.system(size: 10, weight: .bold))
-                                .foregroundStyle(Lumen.canvas)
-                        } else {
-                            Text("\(item.rawValue + 1)")
-                                .font(LumenType.readout(size: 10, weight: .semibold))
-                                .foregroundStyle(item == step ? Lumen.canvas : Lumen.graphite)
-                        }
-                    }
-                    Text(item.title)
-                        .font(LumenType.body(size: 12, weight: item == step ? .semibold : .regular))
-                    if item != .verify {
-                        Rectangle().fill(Lumen.rule).frame(height: 1)
-                    }
+    // MARK: Chrome
+
+    private var topBar: some View {
+        HStack(spacing: PolarSpacing.sm) {
+            Text(step.caption)
+                .font(.polarUI(12, weight: .semibold))
+                .foregroundStyle(Polar.meter)
+            HStack(spacing: 4) {
+                ForEach(AddLightsStep.allCases) { item in
+                    Capsule()
+                        .fill(item.rawValue <= step.rawValue ? Polar.accent : Polar.raised)
+                        .frame(width: 22, height: 4)
                 }
-                .frame(maxWidth: .infinity)
             }
+            .accessibilityHidden(true)
+            Spacer()
+            Button {
+                dismiss()
+            } label: {
+                Label("Close", systemImage: "xmark")
+            }
+            .buttonStyle(PolarButtonStyle(kind: .quiet, compact: true))
+            .keyboardShortcut(.cancelAction)
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 14)
-        .background(Lumen.floor)
+        .padding(.horizontal, PolarSpacing.lg)
+        .padding(.vertical, 12)
+        .background(Polar.desk)
+        .overlay(alignment: .bottom) { Rectangle().fill(Polar.ruleSoft).frame(height: 1) }
     }
 
-    private var prepareStep: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            stepHeading(
-                "Make the fixtures visible",
-                "Turn the lights on at the wall and keep this device on the same local network. LumenDesk talks directly to each fixture; there is no bridge service to configure."
-            )
-            HStack(alignment: .top, spacing: 14) {
-                instructionCard(number: "1", title: "Power", text: "Switch on every fixture you want to place.")
-                instructionCard(number: "2", title: "Network", text: "Join the Wi‑Fi network the fixtures use.")
-                instructionCard(number: "3", title: "Permission", text: "Allow Local Network access when iOS asks.")
+    private var footer: some View {
+        HStack(spacing: PolarSpacing.sm) {
+            if step != .discover {
+                Button("Back") {
+                    manager.endSustainedIdentify()
+                    step = AddLightsStep(rawValue: step.rawValue - 1) ?? .discover
+                }
+                .buttonStyle(PolarButtonStyle(kind: .quiet))
             }
-            VStack(alignment: .leading, spacing: 8) {
-                Label("iPhone and iPad discovery limit", systemImage: "iphone.and.arrow.forward")
-                    .font(LumenType.body(size: 13, weight: .semibold))
-                Text("iOS can withhold multicast discovery until Local Network permission is granted, and some managed networks block broadcast replies entirely. A missing result does not prove the fixture is offline. Rescan, pair a Nanoleaf by address, or use the vendor app to repair Wi‑Fi before trying again.")
-                    .font(LumenType.body(size: 12))
-                    .foregroundStyle(Lumen.meter)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(14)
-            .background(Lumen.warn.opacity(0.11), in: RoundedRectangle(cornerRadius: 11))
+            Text(footerNote)
+                .font(.polarUI(12))
+                .foregroundStyle(Polar.meter)
+            Spacer()
+            Button("Cancel") { dismiss() }
+                .buttonStyle(PolarButtonStyle(kind: .quiet))
+            Button(primaryButtonTitle) { advance() }
+                .buttonStyle(PolarButtonStyle(kind: .prominent))
+                .keyboardShortcut(.defaultAction)
+                .disabled(!canAdvance)
         }
+        .padding(PolarSpacing.md)
+        .background(Polar.desk)
+        .overlay(alignment: .top) { Rectangle().fill(Polar.ruleSoft).frame(height: 1) }
     }
 
-    private var findStep: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            stepHeading(
-                "Find and identify",
-                "Select the fixtures that belong together. Identify flashes one fixture and restores its exact opening state."
-            )
-            HStack {
+    // MARK: Step 1 · Scan LAN
+
+    private var discoverStep: some View {
+        VStack(alignment: .leading, spacing: PolarSpacing.md) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(manager.isDemoMode
+                     ? "LIFX \u{00B7} Govee \u{00B7} Nanoleaf in the Sample Room. Nothing here reaches a real light."
+                     : "LIFX \u{00B7} Govee \u{00B7} Nanoleaf on this Mac\u{2019}s network.")
+                    .font(.polarUI(13))
+                    .foregroundStyle(Polar.meter)
+                Spacer()
                 Button {
                     manager.scan()
                 } label: {
                     Label(manager.isScanning ? manager.scanPhase : "Scan again", systemImage: "arrow.clockwise")
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(Lumen.ember)
+                .buttonStyle(PolarButtonStyle(kind: .quiet, compact: true))
                 .disabled(manager.isScanning)
-                Button("Pair Nanoleaf by address") { showingManualPairing = true }
-                    .buttonStyle(.bordered)
-                Spacer()
-                Text("\(selectedIDs.count) selected")
-                    .font(LumenType.readout(size: 12))
-                    .foregroundStyle(Lumen.meter)
+                Button("Pair Nanoleaf by address\u{2026}") {
+                    manualPairingHost = ""
+                    showingManualPairing = true
+                }
+                    .buttonStyle(PolarButtonStyle(kind: .quiet, compact: true))
             }
 
-            if manager.devices.isEmpty {
-                VStack(spacing: 10) {
-                    Image(systemName: "antenna.radiowaves.left.and.right.slash")
-                        .font(.system(size: 30, weight: .light))
-                    Text("No fixtures have answered yet")
-                        .font(LumenType.display(size: 20, weight: .bold))
-                    Text("Keep the scan open for five seconds. If discovery stays unavailable, continue with an empty room or explore the isolated Sample Room; you can add fixtures later.")
-                        .font(LumenType.body(size: 12))
-                        .foregroundStyle(Lumen.meter)
-                        .multilineTextAlignment(.center)
-                    HStack(spacing: 10) {
-                        Button("Scan again") { manager.scan() }
-                            .buttonStyle(.bordered)
-                            .disabled(manager.isScanning)
-                        Button("Open Sample Room") { openSampleRoom() }
-                            .buttonStyle(.borderedProminent)
-                            .tint(Lumen.ember)
-                    }
-                }
-                .frame(maxWidth: .infinity)
-                .padding(32)
-                .background(Lumen.floor, in: RoundedRectangle(cornerRadius: 12))
+            if manager.devices.isEmpty && unpairedControllers.isEmpty {
+                emptyDiscovery
             } else {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 12)], spacing: 12) {
-                    ForEach(manager.devices) { device in
-                        discoveryCard(device)
+                VStack(spacing: 0) {
+                    ForEach(Array(manager.devices.enumerated()), id: \.element.id) { index, device in
+                        if index > 0 { Rectangle().fill(Polar.ruleSoft).frame(height: 1) }
+                        discoveryRow(device)
+                    }
+                    ForEach(unpairedControllers) { candidate in
+                        Rectangle().fill(Polar.ruleSoft).frame(height: 1)
+                        controllerRow(candidate)
                     }
                 }
+                .background(RoundedRectangle(cornerRadius: Polar.radiusCard, style: .continuous).fill(Polar.desk))
+                .overlay(RoundedRectangle(cornerRadius: Polar.radiusCard, style: .continuous)
+                    .stroke(Polar.ruleSoft, lineWidth: 1))
             }
+
+            Text("Lights not showing? Switch them on at the wall and keep this Mac on the same Wi\u{2011}Fi. Some managed networks block discovery replies; a missing light isn\u{2019}t proof it\u{2019}s offline.")
+                .font(.polarUI(11))
+                .foregroundStyle(Polar.meter)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
-    private func discoveryCard(_ device: LightDevice) -> some View {
+    private func roomName(for device: LightDevice) -> String? {
+        manager.rooms.first { $0.lightIDs.contains(device.id) }?.name
+    }
+
+    private func modelLine(_ device: LightDevice) -> String {
+        let line = LightPageModel.resolve(device).modelLine
+        let model = line.isEmpty
+            ? [device.brand.displayName, device.sku].compactMap { $0 }.joined(separator: " ")
+            : line.components(separatedBy: " \u{00B7} ").prefix(2).joined(separator: " \u{00B7} ")
+        if device.needsNanoleafPairing { return "\(model) \u{00B7} needs pair" }
+        if let room = roomName(for: device) { return "\(model) \u{00B7} \(room)" }
+        return model
+    }
+
+    private func discoveryRow(_ device: LightDevice) -> some View {
         let selected = selectedIDs.contains(device.id)
-        return VStack(alignment: .leading, spacing: 10) {
+        return HStack(spacing: 12) {
+            GlowingOrb(color: device.color, level: device.brightness, isOn: device.isOn,
+                       silhouette: LightPageModel.resolve(device).silhouette, size: 26, stale: device.isStale)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(device.label).font(.polarUI(13, weight: .semibold))
+                Text(modelLine(device))
+                    .font(.polarUI(11))
+                    .foregroundStyle(Polar.meter)
+                    .lineLimit(1)
+            }
+            Spacer()
+            if device.isStale {
+                Label("No reply", systemImage: "wifi.slash")
+                    .font(.polarMono(11))
+                    .foregroundStyle(Polar.attention)
+            }
             Button {
-                if selected { selectedIDs.remove(device.id) }
-                else { selectedIDs.insert(device.id) }
+                manager.identify(device)
             } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: selected ? "checkmark.square.fill" : "square")
-                        .foregroundStyle(selected ? Lumen.ember : Lumen.graphite)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(device.label)
-                            .font(LumenType.body(size: 13, weight: .semibold))
-                        Text("\(device.brand.displayName) · \(device.address)")
-                            .font(LumenType.body(size: 10))
-                            .foregroundStyle(Lumen.meter)
-                            .lineLimit(1)
+                Image(systemName: "wand.and.rays")
+            }
+            .buttonStyle(PolarButtonStyle(kind: .quiet, compact: true))
+            .help("Identify \u{2014} flash this light, then restore it")
+            .accessibilityLabel("Identify \(device.label)")
+            .disabled(device.isStale)
+            if device.needsNanoleafPairing {
+                Button("Pair\u{2026}") {
+                    pairingCandidate = manager.nanoleafCandidates.first { $0.endpoint.host == device.address }
+                    if pairingCandidate == nil {
+                        manualPairingHost = device.address
+                        showingManualPairing = true
                     }
-                    Spacer()
-                    Image(systemName: device.isStale ? "wifi.slash" : "wifi")
-                        .foregroundStyle(device.isStale ? Lumen.fail : Lumen.verdigris)
                 }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            Button("Identify") { manager.identify(device) }
-                .buttonStyle(.bordered)
-                .disabled(device.isStale)
-
-            HStack(spacing: 8) {
-                TextField("Fixture name", text: fixtureNameBinding(device))
-                    .textFieldStyle(.roundedBorder)
-                    .onSubmit { saveFixtureName(device) }
-                Button("Save name") { saveFixtureName(device) }
-                    .buttonStyle(.bordered)
-                    .disabled(!fixtureNameHasChanges(device))
-            }
-            if let warning = manager.duplicateNameMessage(
-                fixtureNameDrafts[device.id] ?? device.label,
-                excludingDeviceID: device.id
-            ) {
-                Text(warning)
-                    .font(LumenType.body(size: 10))
-                    .foregroundStyle(Lumen.warn)
+                .buttonStyle(PolarButtonStyle(kind: .quiet, compact: true))
+            } else {
+                Button(selected ? "Added" : "Add") {
+                    if selected { selectedIDs.remove(device.id) } else { selectedIDs.insert(device.id) }
+                }
+                .buttonStyle(PolarButtonStyle(kind: selected ? .selected : .prominent, compact: true))
+                .frame(minWidth: 64)
+                .accessibilityValue(selected ? "Added" : "Not added")
             }
         }
-        .padding(13)
-        .background(Lumen.floor, in: RoundedRectangle(cornerRadius: 11))
-        .overlay(
-            RoundedRectangle(cornerRadius: 11)
-                .stroke(selected ? Lumen.ember : Lumen.rule, lineWidth: selected ? 2 : 1)
-        )
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
     }
+
+    private func controllerRow(_ candidate: NanoleafCandidate) -> some View {
+        HStack(spacing: 12) {
+            GlowingOrb(color: Polar.chalk, level: 0.5, isOn: false, silhouette: .panels, size: 26)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(candidate.name).font(.polarUI(13, weight: .semibold))
+                Text("Nanoleaf\(candidate.model.map { " \($0)" } ?? "") \u{00B7} needs pair")
+                    .font(.polarUI(11))
+                    .foregroundStyle(Polar.meter)
+            }
+            Spacer()
+            Button("Pair\u{2026}") { pairingCandidate = candidate }
+                .buttonStyle(PolarButtonStyle(kind: .quiet, compact: true))
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+
+    private var emptyDiscovery: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "antenna.radiowaves.left.and.right.slash")
+                .font(.system(size: 28, weight: .light))
+                .foregroundStyle(Polar.meter)
+            Text("No lights have answered yet")
+                .font(.polarDisplay(18, weight: .bold))
+            Text("Keep this open for a few seconds. You can continue with an empty room, or explore the isolated Sample Room.")
+                .font(.polarUI(12))
+                .foregroundStyle(Polar.meter)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 420)
+            HStack(spacing: 10) {
+                Button("Scan again") { manager.scan() }
+                    .buttonStyle(PolarButtonStyle(kind: .quiet))
+                    .disabled(manager.isScanning)
+                Button("Open Sample Room") { openSampleRoom() }
+                    .buttonStyle(PolarButtonStyle(kind: .prominent))
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(32)
+        .polarPanel(padding: 0)
+    }
+
+    // MARK: Step 2 · Place
 
     private var placeStep: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            stepHeading(
-                "Place on the canvas",
-                "Choose a room, then drag the selected fixtures toward where they sit. Placement is a memory aid, not a calibrated floor plan."
-            )
-
-            HStack(spacing: 10) {
-                Picker("Room", selection: $targetRoomID) {
-                    Text("Choose a room").tag(Optional<UUID>.none)
-                    ForEach(manager.rooms) { room in
-                        Text(room.name).tag(Optional(room.id))
-                    }
-                }
-                .frame(maxWidth: 260)
+        VStack(alignment: .leading, spacing: PolarSpacing.md) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Which room are they in?")
+                    .font(.polarDisplay(20, weight: .bold))
+                Text("Pick a room, then drag each orb roughly to where the light sits. Placement is a memory aid, not a floor plan.")
+                    .font(.polarUI(12))
+                    .foregroundStyle(Polar.meter)
+            }
+            FlowChips(items: manager.rooms.map { ($0.id, $0.name) }, selected: targetRoomID) { id in
+                targetRoomID = id
+            }
+            HStack(spacing: 8) {
                 TextField("New room name", text: $newRoomName)
                     .textFieldStyle(.roundedBorder)
-                Button("Create") { createRoom() }
-                    .buttonStyle(.bordered)
+                    .frame(maxWidth: 260)
+                    .onSubmit(createRoom)
+                Button("Create room") { createRoom() }
+                    .buttonStyle(PolarButtonStyle(kind: .quiet, compact: true))
                     .disabled(newRoomName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
-
             if let targetRoom {
                 DirectionARoomField(
                     room: targetRoom,
                     lights: placementLights,
-                    selection: $selectedIDs
+                    selection: $placementSelection
                 )
-                .frame(height: 360)
+                .frame(height: 320)
             } else {
-                Text("Choose or create the room that contains these fixtures.")
-                    .font(LumenType.body(size: 13))
-                    .foregroundStyle(Lumen.meter)
-                    .frame(maxWidth: .infinity, minHeight: 260)
-                    .background(Lumen.floor, in: RoundedRectangle(cornerRadius: 12))
+                Text("Choose or create the room these lights belong to.")
+                    .font(.polarUI(13))
+                    .foregroundStyle(Polar.meter)
+                    .frame(maxWidth: .infinity, minHeight: 220)
+                    .polarPanel()
             }
         }
     }
+
+    // MARK: Step 3 · Verify
 
     private var verifyStep: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            stepHeading(
-                "Verify the room",
-                "The room is ready when every fixture answers and appears where you expect it. Failures stay beside the fixture so repair remains local."
-            )
+        VStack(alignment: .leading, spacing: PolarSpacing.md) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Check each light answers")
+                    .font(.polarDisplay(20, weight: .bold))
+                Text("Identify flashes a light and puts it back. Rename anything whose name won\u{2019}t make sense in the room.")
+                    .font(.polarUI(12))
+                    .foregroundStyle(Polar.meter)
+            }
             if let targetRoom {
-                ForEach(manager.devices(in: targetRoom)) { device in
-                    HStack(spacing: 12) {
-                        Image(systemName: RoomCanvasStatus.resolve([device], manager: manager).symbol)
-                            .foregroundStyle(RoomCanvasStatus.resolve([device], manager: manager).color)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(device.label).font(LumenType.body(size: 13, weight: .semibold))
-                            Text(device.isStale ? "No reply · check power and Wi‑Fi" : "Responded at \(device.address)")
-                                .font(LumenType.body(size: 11))
-                                .foregroundStyle(Lumen.meter)
-                        }
-                        Spacer()
-                        if device.isStale {
-                            Button("Retry") { manager.scan() }.buttonStyle(.bordered)
-                        } else {
-                            Button("Identify") { manager.identify(device) }.buttonStyle(.bordered)
-                        }
+                VStack(spacing: 8) {
+                    ForEach(manager.devices(in: targetRoom)) { device in
+                        verifyRow(device)
                     }
-                    .padding(13)
-                    .background(Lumen.floor, in: RoundedRectangle(cornerRadius: 10))
                 }
             }
         }
     }
 
-    private var footer: some View {
-        HStack {
-            if step != .prepare {
-                Button("Back") {
-                    manager.endSustainedIdentify()
-                    step = AddRepairStep(rawValue: step.rawValue - 1) ?? .prepare
+    private func verifyRow(_ device: LightDevice) -> some View {
+        let status = RoomCanvasStatus.resolve([device], manager: manager)
+        return HStack(spacing: 12) {
+            GlowingOrb(color: device.color, level: device.brightness, isOn: device.isOn,
+                       silhouette: LightPageModel.resolve(device).silhouette, size: 24, stale: device.isStale)
+            VStack(alignment: .leading, spacing: 4) {
+                TextField("Light name", text: fixtureNameBinding(device))
+                    .textFieldStyle(.plain)
+                    .font(.polarUI(13, weight: .semibold))
+                    .onSubmit { saveFixtureName(device) }
+                Text(device.isStale ? "No reply \u{00B7} check power and Wi\u{2011}Fi" : "\(status.title) \u{00B7} \(device.address)")
+                    .font(.polarMono(11))
+                    .foregroundStyle(device.isStale ? Polar.attention : status.color)
+                if let warning = manager.duplicateNameMessage(fixtureNameDrafts[device.id] ?? device.label,
+                                                              excludingDeviceID: device.id) {
+                    Text(warning).font(.polarUI(11)).foregroundStyle(Polar.pending)
                 }
-                .buttonStyle(.bordered)
             }
             Spacer()
-            Text(footerNote)
-                .font(LumenType.body(size: 11))
-                .foregroundStyle(Lumen.meter)
-            Button(primaryButtonTitle) { advance() }
-                .buttonStyle(.borderedProminent)
-                .tint(Lumen.ember)
-                .disabled(!canAdvance)
+            if fixtureNameHasChanges(device) {
+                Button("Save name") { saveFixtureName(device) }
+                    .buttonStyle(PolarButtonStyle(kind: .quiet, compact: true))
+            }
+            if device.isStale {
+                Button("Retry") { manager.scan() }
+                    .buttonStyle(PolarButtonStyle(kind: .quiet, compact: true))
+            } else {
+                Button("Identify") { manager.identify(device) }
+                    .buttonStyle(PolarButtonStyle(kind: .quiet, compact: true))
+            }
         }
-        .padding(16)
-        .background(Lumen.floor)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Polar.desk))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Polar.ruleSoft, lineWidth: 1))
     }
+
+    // MARK: Flow
 
     private var canAdvance: Bool {
         switch step {
-        case .prepare: return true
-        case .find:
+        case .discover:
             return RoomCommissioningProgress.canContinueFromFind(
                 selectedCount: selectedIDs.count,
                 discoveredCount: manager.devices.count
@@ -542,29 +783,27 @@ struct AddOrRepairRoomView: View {
     }
 
     private var primaryButtonTitle: String {
-        if step == .verify { return "Open room" }
-        if step == .find, manager.devices.isEmpty { return "Continue without fixtures" }
-        return "Continue"
+        switch step {
+        case .discover: return manager.devices.isEmpty ? "Continue without lights" : "Continue"
+        case .place: return "Continue"
+        case .verify: return "Open room"
+        }
     }
 
     private var footerNote: String {
         switch step {
-        case .prepare: return "Discovery begins in the foreground"
-        case .find:
+        case .discover:
             return manager.devices.isEmpty
-                ? "Fixtures can be added later"
-                : "\(selectedIDs.count) fixture\(selectedIDs.count == 1 ? "" : "s") to place"
+                ? "Lights can be added later"
+                : "\(selectedIDs.count) light\(selectedIDs.count == 1 ? "" : "s") to add"
         case .place: return targetRoom?.name ?? "Choose a room"
-        case .verify: return "Best-effort confirmation from physical fixtures"
+        case .verify: return "Best-effort confirmation from the lights themselves"
         }
     }
 
     private func advance() {
         switch step {
-        case .prepare:
-            manager.scan()
-            step = .find
-        case .find:
+        case .discover:
             manager.endSustainedIdentify()
             if targetRoomID == nil { targetRoomID = selectedRoomID ?? manager.rooms.first?.id }
             step = .place
@@ -619,36 +858,6 @@ struct AddOrRepairRoomView: View {
         manager.setCustomName(device.id, name: draft)
         fixtureNameDrafts[device.id] = device.label
     }
-
-    private func stepHeading(_ title: String, _ subtitle: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(LumenType.display(size: 28, weight: .bold))
-            Text(subtitle)
-                .font(LumenType.body(size: 13))
-                .foregroundStyle(Lumen.meter)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: 680, alignment: .leading)
-        }
-    }
-
-    private func instructionCard(number: String, title: String, text: String) -> some View {
-        VStack(alignment: .leading, spacing: 9) {
-            Text(number)
-                .font(LumenType.readout(size: 11, weight: .semibold))
-                .foregroundStyle(Lumen.canvas)
-                .frame(width: 25, height: 25)
-                .background(Lumen.graphite, in: Circle())
-            Text(title).font(LumenType.display(size: 18, weight: .bold))
-            Text(text)
-                .font(LumenType.body(size: 12))
-                .foregroundStyle(Lumen.meter)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(15)
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-        .background(Lumen.floor, in: RoundedRectangle(cornerRadius: 11))
-        .overlay(RoundedRectangle(cornerRadius: 11).stroke(Lumen.rule, lineWidth: 1))
-    }
 }
 
 // MARK: - Contextual capability editor
@@ -660,84 +869,18 @@ struct ContextualFixtureEditor: View {
 
     var body: some View {
         NavigationStack {
-            Group {
-                if device.brand == .nanoleaf {
-                    NanoleafShapesStudio(device: device, shapes: manager.shapes, presentation: .sheet)
-                } else if device.isLIFXLuna {
-                    LIFXLunaEditorView(device: device)
-                } else if manager.segmentStudioProfile(for: device) != nil {
-                    GoveeSegmentEditorView(device: device)
-                } else {
-                    BasicFixtureEditor(device: device)
+            // Every light now opens its own Polar light page, which picks
+            // the controls for the exact model (see `LightPageModel`).
+            LightPageView(device: device, close: { dismiss() })
+                .sheetFrame(minWidth: 760, idealWidth: 1040, minHeight: 600, idealHeight: 800)
+                .navigationTitle(device.label)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Done") { dismiss() }
+                    }
                 }
-            }
-            .navigationTitle(device.label)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") { dismiss() }
-                }
-            }
         }
         .font(LumenType.body())
         .foregroundStyle(Lumen.graphite)
-    }
-}
-
-private struct BasicFixtureEditor: View {
-    @EnvironmentObject private var manager: LightManager
-    @ObservedObject var device: LightDevice
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                HStack(spacing: 12) {
-                    Circle()
-                        .fill(device.isOn ? device.color : Lumen.rule)
-                        .frame(width: 38, height: 38)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(device.brand.displayName)
-                            .font(LumenType.body(size: 13, weight: .semibold))
-                        RoomCanvasStatusBadge(
-                            status: RoomCanvasStatus.resolve([device], manager: manager),
-                            compact: true
-                        )
-                    }
-                    Spacer()
-                    Toggle("Power", isOn: Binding(
-                        get: { device.isOn },
-                        set: { manager.setPower(device, on: $0) }
-                    ))
-                    .toggleStyle(.switch)
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text("Brightness")
-                        Spacer()
-                        Text("\(Int(device.brightness * 100))%")
-                            .font(LumenType.readout(size: 12))
-                    }
-                    Slider(value: Binding(
-                        get: { device.brightness },
-                        set: { manager.setBrightness(deviceIDs: [device.id], value: $0) }
-                    ), in: 0.01...1)
-                }
-
-                ColorPicker("Output colour", selection: Binding(
-                    get: { device.color },
-                    set: { manager.setColor(device, color: $0) }
-                ), supportsOpacity: false)
-
-                HStack {
-                    Button("Identify") { manager.identify(device) }
-                    if device.isStale || manager.commandState(for: device.id).phase == .failed {
-                        Button("Retry") { manager.retry(device) }
-                    }
-                }
-                .buttonStyle(.bordered)
-            }
-            .padding(22)
-        }
-        .background(Lumen.canvas)
     }
 }

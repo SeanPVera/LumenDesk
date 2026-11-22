@@ -505,6 +505,39 @@ final class MusicModeTests: XCTestCase {
         XCTAssertFalse(controller.hasCalibrationGrid(for: .all))
     }
 
+    func testTopologyHasActiveTargetsParityWithExpandedTargetsEmptiness() {
+        let f1 = MusicFixtureDescriptor(id: "f1", label: "Desk", transport: .lifxLAN)
+        let f2 = MusicFixtureDescriptor(id: "f2", label: "Wall", transport: .nanoleafStream, segmentCount: 4)
+        let fOff = MusicFixtureDescriptor(id: "fOff", label: "Corner", transport: .lifxLAN, role: .off)
+
+        var topology = FixtureTopology()
+        // Empty fixtures
+        XCTAssertFalse(topology.hasActiveTargets(for: []))
+        XCTAssertEqual(topology.hasActiveTargets(for: []), !topology.expandedTargets(for: []).isEmpty)
+
+        // Only .off fixtures
+        XCTAssertFalse(topology.hasActiveTargets(for: [fOff]))
+        XCTAssertEqual(topology.hasActiveTargets(for: [fOff]), !topology.expandedTargets(for: [fOff]).isEmpty)
+
+        // Single active fixture
+        XCTAssertTrue(topology.hasActiveTargets(for: [f1]))
+        XCTAssertEqual(topology.hasActiveTargets(for: [f1]), !topology.expandedTargets(for: [f1]).isEmpty)
+
+        // Multiple fixtures with segment counts
+        XCTAssertTrue(topology.hasActiveTargets(for: [f1, f2, fOff]))
+        XCTAssertEqual(topology.hasActiveTargets(for: [f1, f2, fOff]), !topology.expandedTargets(for: [f1, f2, fOff]).isEmpty)
+
+        // All active fixtures excluded
+        topology.excludedFixtureIDs = ["f1", "f2"]
+        XCTAssertFalse(topology.hasActiveTargets(for: [f1, f2, fOff]))
+        XCTAssertEqual(topology.hasActiveTargets(for: [f1, f2, fOff]), !topology.expandedTargets(for: [f1, f2, fOff]).isEmpty)
+
+        // One fixture remaining not excluded
+        topology.excludedFixtureIDs = ["f1"]
+        XCTAssertTrue(topology.hasActiveTargets(for: [f1, f2, fOff]))
+        XCTAssertEqual(topology.hasActiveTargets(for: [f1, f2, fOff]), !topology.expandedTargets(for: [f1, f2, fOff]).isEmpty)
+    }
+
     @MainActor
     func testJoiningASyntheticRoomDoesNotReplaceTheSharedLiveSourceStatus() {
         let backend = MusicCaptureStub()

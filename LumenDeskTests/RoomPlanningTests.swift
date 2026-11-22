@@ -527,6 +527,85 @@ final class RoomWorkspaceTests: XCTestCase {
         XCTAssertEqual(candidate.brightness, expected.brightness, accuracy: 0.001)
     }
 
+    @MainActor
+    func testLiveBrushUpdatesPreserveTheOpeningSpatialStateAndPreviewIdentity() throws {
+        let manager = LightManager(defaults: UserDefaults(suiteName: UUID().uuidString)!,
+                                   persistenceStore: temporaryPersistenceStore())
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+        let room = try XCTUnwrap(manager.rooms.first)
+        let targets = manager.devices(in: room)
+        let ids = Set(targets.map(\.id))
+        let strip = try XCTUnwrap(targets.first { manager.segmentProfile(for: $0)?.layout == .cobStrip })
+        let luna = try XCTUnwrap(targets.first { $0.isLIFXLuna })
+        manager.applySegments(strip, state: manager.segmentState(for: strip))
+        let originalSegments = manager.activeSegmentState(for: strip.id)
+        let originalMatrix = manager.activeLIFXMatrixState(for: luna.id)
+        let originalPower = Dictionary(uniqueKeysWithValues: targets.map { ($0.id, $0.isOn) })
+        let originalBrightness = Dictionary(uniqueKeysWithValues: targets.map { ($0.id, $0.brightness) })
+        let theme = try XCTUnwrap(LightingCatalog.theme(withID: "aurora"))
+
+        let previewID = try XCTUnwrap(manager.startLookPreview(
+            LookBrush.spatialWash.applying(to: theme), deviceIDs: ids, in: .room(room.id),
+            transitionDuration: 0
+        ))
+        let washSegments = manager.activeSegmentState(for: strip.id)
+        let washMatrix = manager.activeLIFXMatrixState(for: luna.id)
+        XCTAssertEqual(manager.startLookPreview(
+            LookBrush.gradient.applying(to: theme), deviceIDs: ids, in: .room(room.id),
+            transitionDuration: 0, updating: previewID
+        ), previewID)
+        XCTAssertNotEqual(manager.activeSegmentState(for: strip.id)?.colors, washSegments?.colors)
+        XCTAssertNotEqual(manager.activeLIFXMatrixState(for: luna.id)?.colors, washMatrix?.colors)
+
+        manager.stopSceneRehearsal(restore: true)
+        XCTAssertEqual(manager.activeSegmentState(for: strip.id), originalSegments)
+        XCTAssertEqual(manager.activeLIFXMatrixState(for: luna.id), originalMatrix)
+        for light in targets {
+            XCTAssertEqual(light.isOn, originalPower[light.id])
+            XCTAssertEqual(light.brightness, try XCTUnwrap(originalBrightness[light.id]), accuracy: 0.001)
+        }
+        // A coalesced edit that wakes after Restore cannot relight the room.
+        XCTAssertNil(manager.startLookPreview(theme, deviceIDs: ids, in: .room(room.id), updating: previewID))
+        XCTAssertNil(manager.rehearsalSceneID)
+        XCTAssertEqual(manager.activeSegmentState(for: strip.id), originalSegments)
+    }
+
+    @MainActor
+    func testLivePreviewScopeChangesRestoreExcludedLightsAndCaptureNewTargets() throws {
+        let manager = LightManager(defaults: UserDefaults(suiteName: UUID().uuidString)!,
+                                   persistenceStore: temporaryPersistenceStore())
+        manager.enterDemoMode()
+        defer { manager.exitDemoMode() }
+        let room = try XCTUnwrap(manager.rooms.first)
+        let bulbs = manager.devices(in: room).filter {
+            if case .solid = manager.themeCapability(for: $0) { return true }
+            return false
+        }
+        XCTAssertGreaterThanOrEqual(bulbs.count, 2)
+        let a = try XCTUnwrap(bulbs.first)
+        let b = try XCTUnwrap(bulbs.last)
+        a.isOn = false
+        a.color = .red
+        a.brightness = 0.27
+        b.color = .blue
+        b.brightness = 0.43
+        let theme = try XCTUnwrap(LightingCatalog.theme(withID: "afterglow"))
+        let id = try XCTUnwrap(manager.startLookPreview(theme, deviceIDs: [a.id], in: .room(room.id)))
+
+        manager.startLookPreview(theme, deviceIDs: [a.id, b.id], in: .room(room.id), updating: id)
+        manager.startLookPreview(theme, deviceIDs: [b.id], in: .room(room.id), updating: id)
+        XCTAssertFalse(a.isOn)
+        XCTAssertEqual(a.brightness, 0.27, accuracy: 0.001)
+        XCTAssertLessThan(a.color.rgbDistance(to: .red), 0.001)
+        XCTAssertEqual(manager.rehearsalSceneID, id)
+
+        manager.startLookPreview(theme, deviceIDs: [], in: .room(room.id), updating: id)
+        XCTAssertNil(manager.rehearsalSceneID)
+        XCTAssertEqual(b.brightness, 0.43, accuracy: 0.001)
+        XCTAssertLessThan(b.color.rgbDistance(to: .blue), 0.001)
+    }
+
     func testSelectionNeverExpandsAStaleSelectionToTheWholeRoom() {
         XCTAssertEqual(RoomWorkspaceSelection.targets(selected: ["gone"], available: ["a", "b"]), [])
         XCTAssertEqual(RoomWorkspaceSelection.targets(selected: [], available: ["a", "b"]), ["a", "b"])
@@ -926,15 +1005,110 @@ final class RoomCanvasRenderTests: XCTestCase {
 
         try await capture("room-canvas-620", RoomCanvasShellView(), manager, width: 620, height: 850)
         try await capture("room-canvas-1100", RoomCanvasShellView(), manager, width: 1100, height: 900)
+        try await capture("room-canvas-1280", RoomCanvasShellView(), manager, width: 1280, height: 800)
         try await capture("room-canvas-1440", RoomCanvasShellView(), manager, width: 1440, height: 1000)
-        try await capture("room-canvas-settings", NavigationStack { RoomCanvasSettingsView() },
-                          manager, width: 760, height: 760)
+        try await capture("room-canvas-settings", RoomCanvasSettingsView(), manager, width: 640, height: 520)
+        try await capture("settings-network", RoomCanvasSettingsView(initialTab: .network),
+                          manager, width: 640, height: 620)
+        let room = try XCTUnwrap(manager.rooms.first)
+        try await capture("look-composer-680", LookComposerView(
+            room: room, initialSelection: []
+        ), manager, width: 680, height: 900)
+        try await capture("look-composer-1040", LookComposerView(
+            room: room, initialSelection: []
+        ), manager, width: 1040, height: 1000)
+        // Polar light pages: demo fixtures where the Sample Room has the
+        // model, stand-alone devices (never added to the manager, so nothing
+        // can be sent) for the rest of the owned set.
+        for device in manager.devices where LightPageModel.resolve(device).isDedicatedPage {
+            try await capture("light-page-\((device.sku ?? "lifx-\(device.productID ?? 0)").replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: " ", with: "-"))",
+                              LightPageView(device: device), manager, width: 1280, height: 900)
+        }
+        // The Uplighter's section cards run below the default frame; show
+        // them whole, ripple flow included.
+        if let uplighter = manager.devices.first(where: { $0.sku == "H60B0" }) {
+            try await capture("light-page-H60B0-sections", LightPageView(device: uplighter), manager,
+                              width: 1280, height: 1320)
+        }
+        let standalone: [(String, LightDevice)] = [
+            ("light-page-H70B1", LightDevice(id: "govee:render-curtain", brand: .govee, backendID: "render-curtain",
+                                             name: "Bedroom Curtain", address: "0.0.0.0", sku: "H70B1", isOn: true,
+                                             brightness: 0.68, color: Color(hex: 0x2EE6A6))),
+            ("light-page-H612B", LightDevice(id: "govee:render-strip", brand: .govee, backendID: "render-strip",
+                                             name: "H612B 551F", address: "0.0.0.0", sku: "H612B", isOn: true,
+                                             brightness: 0.55, color: Color(hex: 0x4F8CFF))),
+            ("light-page-H608B", LightDevice(id: "govee:render-pods", brand: .govee, backendID: "render-pods",
+                                             name: "H608B 4D21", address: "0.0.0.0", sku: "H608B", isOn: true,
+                                             brightness: 0.7, color: Color(hex: 0xF5B84B))),
+            ("light-page-H6062-setup", LightDevice(id: "govee:render-glide-new", brand: .govee, backendID: "render-glide-new",
+                                                   name: "Glide 0C3A", address: "0.0.0.0", sku: "H6062", isOn: true,
+                                                   brightness: 0.6, color: Color(hex: 0x7EB6FF))),
+            ("light-page-H6062", LightDevice(id: "govee:render-glide", brand: .govee, backendID: "render-glide",
+                                             name: "Desk Glide", address: "0.0.0.0", sku: "H6062", isOn: true,
+                                             brightness: 0.8, color: Color(hex: 0x7EB6FF))),
+            ("light-page-lifx-129", LightDevice(id: "lifx:render-bulb", brand: .lifx, backendID: "render-bulb",
+                                                name: "Overhead 2", address: "0.0.0.0", productID: 129, isOn: true,
+                                                brightness: 0.55, color: Color(hex: 0xFFB765)))
+        ]
+        // Stored layouts only (nothing is sent): a 6 + 1 Glide chain in a
+        // cool-to-warm sweep, and string pods holding mixed white points.
+        let glideStops = [Color(hex: 0x4F8CFF), Color(hex: 0x9B6BFF), Color(hex: 0xFF4FA3), Color(hex: 0xF5B84B)]
+        manager.goveeSegmentStates["govee:render-glide"] = GoveeSegmentState(
+            colors: (0..<28).map { index in
+                GoveeSegmentColor(color: glideStops[index * glideStops.count / 28])
+            })
+        GlideChainStore.save(.kitSixPlusOne, deviceID: "govee:render-glide")
+        defer {
+            GlideChainStore.save(nil, deviceID: "govee:render-glide")
+            GlideChainStore.save(nil, deviceID: "govee:render-glide-new")
+        }
+        let podCount = GoveeSegmentProfile.detect(sku: "H608B")?.defaultSegmentCount ?? 8
+        let podWhites = [2_700, 3_700, 4_600, 5_600, 6_500]
+        manager.goveeSegmentStates["govee:render-pods"] = GoveeSegmentState(
+            colors: (0..<podCount).map { .white(kelvin: podWhites[$0 % podWhites.count]) })
+        for (name, device) in standalone {
+            try await capture(name, LightPageView(device: device), manager, width: 1280, height: 900)
+        }
+        try await capture("looks-library", LooksLibraryView(room: room, compose: {}), manager, width: 860, height: 620)
+        // Polar screens: Add lights (3 steps), Nanoleaf pairing, Live and
+        // the empty room. The Sample Room keeps every one of them offline.
+        try await capture("add-lights-discover", AddOrRepairRoomView(selectedRoomID: .constant(room.id), onFinish: {}),
+                          manager, width: 820, height: 640)
+        try await capture("add-lights-place", AddOrRepairRoomView(selectedRoomID: .constant(room.id), onFinish: {},
+                                                                  initialStep: .place),
+                          manager, width: 820, height: 640)
+        let shapes = NanoleafCandidate(id: "render-shapes", name: "Shapes E8FF",
+                                       endpoint: try NanoleafEndpoint(host: "192.0.2.10", port: 16021), model: "NL42")
+        try await capture("nanoleaf-pairing", NanoleafPairingView(candidate: shapes, preferredRoomID: room.id,
+                                                                  initialPhase: .listening(elapsed: 11)),
+                          manager, width: 520, height: 660)
+        try await capture("nanoleaf-pairing-failed", NanoleafPairingView(
+            candidate: shapes, preferredRoomID: room.id,
+            initialPhase: .failed("No token within 30s. Hold the button until the LED flashes and retry, or check Wi\u{2011}Fi.")
+        ), manager, width: 520, height: 660)
+        try await capture("live", RoomLiveView(room: room), manager, width: 960, height: 640)
+        try await capture("empty-room", RoomCanvasEmptyState(openSetup: {}), manager, width: 1000, height: 640)
+        #if os(macOS)
+        try await capture("menu-bar-extra", MenuBarPopoverView(), manager, width: 340, height: 500)
+        // A second room shows the room switcher; Sample Room stays offline.
+        _ = manager.addRoom(named: "Hall")
+        try await capture("menu-bar-extra-rooms", MenuBarPopoverView(), manager, width: 340, height: 540)
+        #endif
+
+        let theme = try XCTUnwrap(LightingCatalog.theme(withID: "aurora"))
+        for brush in [LookBrush.spatialWash, .gradient] {
+            try await capture("look-preview-\(brush.id)", ComposerRoomPreview(
+                room: room, lights: manager.devices(in: room), targetIDs: Set(room.lightIDs),
+                theme: brush.applying(to: theme), paletteAssignments: nil,
+                spatialField: .themeDefault
+            ), manager, width: 680, height: 360)
+        }
     }
 
     @MainActor
     private func capture<Content: View>(_ name: String, _ content: Content, _ manager: LightManager,
                                        width: CGFloat, height: CGFloat) async throws {
-        let root = content.environmentObject(manager).preferredColorScheme(.light)
+        let root = content.environmentObject(manager).preferredColorScheme(.dark)
             .frame(width: width, height: height).background(Lumen.canvas)
         let host = NSHostingView(rootView: root)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: height),

@@ -10,16 +10,19 @@
 		0025B9A340416BF9D4CB34B4 /* encoder_dict.c in Sources */ = {isa = PBXBuildFile; fileRef = CC4C393A6B9FBEB8A0C3B293 /* encoder_dict.c */; };
 		0038FBFE720CECE859550F76 /* ConfirmationCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55CE0DFE08EB5175457DC556 /* ConfirmationCoordinator.swift */; };
 		02114B058C3BF61CF664C595 /* static_dict.h in CopyFiles */ = {isa = PBXBuildFile; fileRef = 078E74277DA600AD6BC5679D /* static_dict.h */; };
+		04C2407BA291F244E70457D5 /* ExternalChange.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4092D830E506CBE3F52C6225 /* ExternalChange.swift */; };
 		08EEFBC87506952498969883 /* RoomLiveView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 106A9365A3408FF1A01DECF8 /* RoomLiveView.swift */; };
 		098CC85FA76D2ACE4107232B /* NanoleafLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BD17AFBE2C23CDC8E2DBA1B /* NanoleafLayout.swift */; };
 		0AE87EC36E7EF70C82679A61 /* dec_static_init.c in Sources */ = {isa = PBXBuildFile; fileRef = E1B8CEC3A1B9727C48112600 /* dec_static_init.c */; };
 		0B6F32883FD985589E067D07 /* NanoleafShapesControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 957B159758573B27F0CBF7F2 /* NanoleafShapesControllerTests.swift */; };
 		0C9F2B4CBC777AF7131FA719 /* brotli_bit_stream.h in CopyFiles */ = {isa = PBXBuildFile; fileRef = 85E2A1251ABB73D28D9FA1AF /* brotli_bit_stream.h */; };
 		0DE25226667DAEB31CFAEFBD /* cluster_inc.h in CopyFiles */ = {isa = PBXBuildFile; fileRef = 8D202ACD6C0993B399080F5F /* cluster_inc.h */; };
+		0ED428488DA26CEBC14F53CC /* UplighterSectionsPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 981840BF66564CBC2FA87161 /* UplighterSectionsPanel.swift */; };
 		0EE573BD17C21B2144C32F71 /* enc_state.h in CopyFiles */ = {isa = PBXBuildFile; fileRef = 61E184C2A4B50DD5BCB908F8 /* enc_state.h */; };
 		113BC50EF72F2CC1CC79D503 /* static_dict.c in Sources */ = {isa = PBXBuildFile; fileRef = 04FF4864E2ADCDB3EB19E62D /* static_dict.c */; };
 		11D50A82F62D0B78C3D55E7A /* LightManager+Transports.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D080371E6D5A5E5E3FEEFC5 /* LightManager+Transports.swift */; };
 		120711FE838537E319607B17 /* RoomCanvasView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1EE30FA5D6A6176759668F8A /* RoomCanvasView.swift */; };
+		13D9839CF5D9379FDBCCBD5D /* UplighterSectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A04B7C1DA65B592089AA54D4 /* UplighterSectionTests.swift */; };
 		158F4E70BF6C9BB02D0FC7EC /* LookComposerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D12FF00FA4592F62FA16D25B /* LookComposerView.swift */; };
 		15959A9E7749C8712B38CEA9 /* memory.c in Sources */ = {isa = PBXBuildFile; fileRef = CA0E57D253C0F874C8A3CA44 /* memory.c */; };
 		16B70E5F5C3814E178519807 /* params.h in CopyFiles */ = {isa = PBXBuildFile; fileRef = C122533DDB53BD96F81D2566 /* params.h */; };
@@ -41,6 +44,7 @@
 		35A6EC5B7575FD916DA066C2 /* dictionary_hash.h in CopyFiles */ = {isa = PBXBuildFile; fileRef = 989A6790C7DBCC63B874CA04 /* dictionary_hash.h */; };
 		374042B10EDE3274F8F4100C /* CommandCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF2D694630A6D1E8D020A508 /* CommandCoordinatorTests.swift */; };
 		37447B7A888DAC4210137244 /* dictionary_hash.c in Sources */ = {isa = PBXBuildFile; fileRef = 87DD6127E35CA00250FF72D9 /* dictionary_hash.c */; };
+		378F72A32CC54A7A61B0B019 /* LightManager+LookDrafts.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE0746794C50A3561F766167 /* LightManager+LookDrafts.swift */; };
 		39C7975678AE8E319062E888 /* Room.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07137E6D6CAB2A3F3104E544 /* Room.swift */; };
 		3AB010B40EA1B6E11DD0E8D6 /* NanoleafGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CAF9D9C34700DD33F9BA1F2 /* NanoleafGeometry.swift */; };
 		3C68F3F9E74AD9EEB70ACBDB /* DomainTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94F40232CD1D3BBAD21A48B5 /* DomainTests.swift */; };
@@ -53,6 +57,7 @@
 		489409800D6876315EE3D401 /* GoveeSegmentEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB3363F9F3EAD628D06B3CC1 /* GoveeSegmentEditorView.swift */; };
 		49D173FD7876569ADAF3DE93 /* SQLiteStateDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE9C1F3CC78B8B1EB8CE3CF7 /* SQLiteStateDatabase.swift */; };
 		4D1564E36CAB8E90776AE4C6 /* NanoleafSceneLibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66CCDE166BACA7C66F4EFD40 /* NanoleafSceneLibraryView.swift */; };
+		4D460324A53C8FEFA583DB52 /* LightPageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D991B0A141688EE713F22EDD /* LightPageView.swift */; };
 		4DFDF9B9707D42D3CB3199C1 /* LightManager+Nanoleaf.swift in Sources */ = {isa = PBXBuildFile; fileRef = E46375EBFD2CB1BF23401983 /* LightManager+Nanoleaf.swift */; };
 		4FF3A6D797C48F593725F341 /* constants.h in CopyFiles */ = {isa = PBXBuildFile; fileRef = ACA066A6EC63CB210666CAF3 /* constants.h */; };
 		509A5591727F3DCCE43EDD77 /* NanoleafShapesStudioView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89EB2B85B9849A689648EAB7 /* NanoleafShapesStudioView.swift */; };
@@ -60,8 +65,10 @@
 		5228729A35FEC3AA0995CAC0 /* memory.h in CopyFiles */ = {isa = PBXBuildFile; fileRef = 3E321BD1987D35FBA40D33FC /* memory.h */; };
 		54649EF64E03B94487A14329 /* MusicMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5984011FEFF3567B0F87D208 /* MusicMode.swift */; };
 		54DCC3508565887E1681D135 /* hash_longest_match_inc.h in CopyFiles */ = {isa = PBXBuildFile; fileRef = 781C2EF724F78942BC320CAF /* hash_longest_match_inc.h */; };
+		54F6A6BED8DA7911C2B38432 /* GoveeLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 600C580D295FDDC5DCFD8A20 /* GoveeLayoutTests.swift */; };
 		55A742C90B293A49645DB127 /* decode.c in Sources */ = {isa = PBXBuildFile; fileRef = 80CF176DD507938CCCECAD84 /* decode.c */; };
 		58FE7B07E0D699D2A47774C9 /* ThemePlanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64D8EEBB3D1467D9E07354B7 /* ThemePlanner.swift */; };
+		59217542147C2C57EE5E6D8B /* GlideChainPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8386D391803155E3E81738E0 /* GlideChainPanel.swift */; };
 		599053E983D128A2F51C218D /* MenuBarPopoverView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F3818B64A3CD99A6C400D02 /* MenuBarPopoverView.swift */; };
 		5BA76A979FE31ABB1045D19A /* bit_cost.c in Sources */ = {isa = PBXBuildFile; fileRef = B66CB179B0AC6D8B41E7C515 /* bit_cost.c */; };
 		5BA7E7842D08F2FAB6CB8C24 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A5270671ADC69D11718BCBD7 /* Assets.xcassets */; };
@@ -79,6 +86,7 @@
 		6C2103D2AB82A5B7FD85A475 /* static_dict_lut.h in CopyFiles */ = {isa = PBXBuildFile; fileRef = BC43FF683676B3216AAE6E54 /* static_dict_lut.h */; };
 		6C3C40FD1043EE6C9887E55B /* UDPSocket.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45E82F2F1AD021614747F580 /* UDPSocket.swift */; };
 		6D4AAA2A05CA3E57F86595B7 /* ringbuffer.h in CopyFiles */ = {isa = PBXBuildFile; fileRef = DC518C8832551E1223EE0BB8 /* ringbuffer.h */; };
+		6DEAF4D17A6289AE4D644DB4 /* GoveeGlideChain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4287B677D0D3B15ED429C4B7 /* GoveeGlideChain.swift */; };
 		6E31178210440453FB383100 /* RoomPlanning.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42173FEE79B7DB60BE8CFE9B /* RoomPlanning.swift */; };
 		6E412930E694EC9013699ACD /* compress_fragment.h in CopyFiles */ = {isa = PBXBuildFile; fileRef = D185EC80D789AAEF54C2D750 /* compress_fragment.h */; };
 		70522CA5161ED39AAA015260 /* Fonts in Resources */ = {isa = PBXBuildFile; fileRef = 3CBAAA0708D31D7E04BB7FC7 /* Fonts */; };
@@ -126,12 +134,14 @@
 		A9276EFF88319A1BF20F8B88 /* LIFXMatrix.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17415E71AFDCD3CAF372FC7A /* LIFXMatrix.swift */; };
 		A9DE2EA5E71891BBEF15CB77 /* ScheduleEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECC37F705415ED8B55BC448B /* ScheduleEntry.swift */; };
 		AA30F6502B5132143700EACA /* metablock.h in CopyFiles */ = {isa = PBXBuildFile; fileRef = AD13DA3767487C069E6C9066 /* metablock.h */; };
+		AA3440520C75441DE1064E25 /* LumenCommands.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBC0F92BF05EA4A8367214C5 /* LumenCommands.swift */; };
 		AAE7E8C6C43DD698DC4DAF1B /* compress_fragment_two_pass.c in Sources */ = {isa = PBXBuildFile; fileRef = 5063851141FA6D6BD889E28B /* compress_fragment_two_pass.c */; };
 		ABAEF24DAA77EBBA3EC843EB /* PersistenceStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C76EE3C023F769E16DEDE73E /* PersistenceStoreTests.swift */; };
 		AC1A4EFDD8B60BADB7212D4A /* BeatMapTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7FB42038D46BF8DDD0AE17D /* BeatMapTests.swift */; };
 		ACEE0A81DD76C39CA4DF09BB /* enc_static_init.c in Sources */ = {isa = PBXBuildFile; fileRef = 4E72AE0503F3AEABF2F18AC4 /* enc_static_init.c */; };
 		ADF018602136B11FFDEC7817 /* huffman.h in CopyFiles */ = {isa = PBXBuildFile; fileRef = E5E64204E2BA835E9571F5C4 /* huffman.h */; };
 		AF58245DD131D601A6FC60D0 /* compress_fragment.c in Sources */ = {isa = PBXBuildFile; fileRef = 932B743A59DD154209802EA8 /* compress_fragment.c */; };
+		B1640CE7B6F63A6318433AE7 /* PolarComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C4AD958A3D9CB9DBF5BD90E /* PolarComponents.swift */; };
 		B26BD72C58FE950DEF3C6FC1 /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 2C924EA42F0B4A61CB33C113 /* Preview Assets.xcassets */; };
 		B28436ADAAC7544F63BF20D1 /* dictionary_hash_inc.h in CopyFiles */ = {isa = PBXBuildFile; fileRef = 6C140AF7C0CEAA6699F33302 /* dictionary_hash_inc.h */; };
 		B3FAE69F85D6BC9F13DFC852 /* RoomPlanningTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4FA41B9EA53E79A3FE52969 /* RoomPlanningTests.swift */; };
@@ -139,6 +149,7 @@
 		B41D01A39796B6C431184207 /* LIFXLunaEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C34229F4FD7557786C4406F /* LIFXLunaEditorView.swift */; };
 		B586CCEBD363D588314940E8 /* NanoleafShapesController.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5DECAFECE0A0ECDCE4AB237 /* NanoleafShapesController.swift */; };
 		B6461D327EB623D0FA996427 /* LightingThemeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16646D1C80B532C81716187D /* LightingThemeTests.swift */; };
+		B6D148097BAB8BE496DF213F /* GoveeHeroPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D4EFB7EC466FF2AF29DFD61 /* GoveeHeroPanel.swift */; };
 		B7C769D0B64072600EC8B856 /* bit_cost_inc.h in CopyFiles */ = {isa = PBXBuildFile; fileRef = 96F5C495B1A0604B5FF16196 /* bit_cost_inc.h */; };
 		B91415A28FC334FE011E0955 /* hash_longest_match64_inc.h in CopyFiles */ = {isa = PBXBuildFile; fileRef = BD530D81F592F1D6AD825E2F /* hash_longest_match64_inc.h */; };
 		B98E99E22EFEAF62BEFD3B90 /* hash_composite_inc.h in CopyFiles */ = {isa = PBXBuildFile; fileRef = 42857103B392B985D65FF1FB /* hash_composite_inc.h */; };
@@ -149,6 +160,7 @@
 		BD6CCAE753A859CA3D46FE92 /* brotli_bit_stream.c in Sources */ = {isa = PBXBuildFile; fileRef = 8A382F3B16E0D002CFCBCF75 /* brotli_bit_stream.c */; };
 		BEE76578AECB24000B02EA42 /* context.h in CopyFiles */ = {isa = PBXBuildFile; fileRef = 30B12F0B389082C0B8D6B266 /* context.h */; };
 		C0663C28D87E68044A425F7F /* BeatMap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 247DCC3D5C947849DC642FCE /* BeatMap.swift */; };
+		C2834E80C73702B4C61A1D3A /* LightPageModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29A4A9DFC98336A580283F64 /* LightPageModelTests.swift */; };
 		C330C0CA79A0339BED1F3BB4 /* matching_tag_mask.h in CopyFiles */ = {isa = PBXBuildFile; fileRef = BB2A6F4C0543AE92A55CC566 /* matching_tag_mask.h */; };
 		C3582D41FB0061FE9FEE4094 /* literal_cost.h in CopyFiles */ = {isa = PBXBuildFile; fileRef = 0B187EF1105CF7B6A032C462 /* literal_cost.h */; };
 		C36EB318DAC1B3A25094253C /* LightManager+MusicAndState.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC08EBBFECED19A85F2BD97 /* LightManager+MusicAndState.swift */; };
@@ -162,16 +174,19 @@
 		CED86A303474D05AF5BEF6CE /* backward_references.c in Sources */ = {isa = PBXBuildFile; fileRef = D1BFFD4CE532074847225A5E /* backward_references.c */; };
 		CEDD60F987B88C077AF32792 /* CommandCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CB0C331B17B90579AE5A22E /* CommandCoordinator.swift */; };
 		CEFC3B97C1FE48E05AA89687 /* utf8_util.c in Sources */ = {isa = PBXBuildFile; fileRef = ECD4251FE293E854AF4C66E6 /* utf8_util.c */; };
+		D059C07944679D845A614D22 /* PolarTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 592374B5E9FF6E7DF43B6101 /* PolarTokens.swift */; };
 		D1D21803D0C03780EB990586 /* fast_log.h in CopyFiles */ = {isa = PBXBuildFile; fileRef = 080BD83000996198E5551273 /* fast_log.h */; };
 		D2605156A8A3129908EA9773 /* NanoleafTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65AAD610166656C2A77EABA6 /* NanoleafTests.swift */; };
 		D4D8244B2AA6B097F04A1A76 /* bit_reader.c in Sources */ = {isa = PBXBuildFile; fileRef = 940216A3A44471DFAD935169 /* bit_reader.c */; };
 		D7215D884A6A1F5704B34429 /* histogram_inc.h in CopyFiles */ = {isa = PBXBuildFile; fileRef = 12F954DE4E5194A9AA02265A /* histogram_inc.h */; };
 		D7D64146B6144A3BAC1C20F7 /* NanoleafEvents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73022490EC92D7F66299180F /* NanoleafEvents.swift */; };
 		D80994A6FAB357DFB7A4F0B1 /* hash_base.h in CopyFiles */ = {isa = PBXBuildFile; fileRef = EB37167199A2B62D8235271A /* hash_base.h */; };
+		DCD76F5F0E3C0D5BCA2F729E /* ExternalChangeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B45F4D6AAA74FB5546099B04 /* ExternalChangeTests.swift */; };
 		DD031C13670AAFA6E2A4CDC2 /* BeatTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32259B4E1AF22A121CB66F93 /* BeatTracker.swift */; };
 		DED553F0B790D3E9B879A2B0 /* backward_references_hq.c in Sources */ = {isa = PBXBuildFile; fileRef = 3E486EE89DC79A553B7652ED /* backward_references_hq.c */; };
 		DEE995F0224B16B1CD049E28 /* ConfirmationCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B245C1EE0A8EE891427D6F0 /* ConfirmationCoordinatorTests.swift */; };
 		E1A5C4BC761A3B616D91EA19 /* static_dict_lut.c in Sources */ = {isa = PBXBuildFile; fileRef = 871FD7A8866F5FAA37CA6A7A /* static_dict_lut.c */; };
+		E200912BE01EBFEB8C4A0DF0 /* LookDraft.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DD07C2833EF65BEA2352872 /* LookDraft.swift */; };
 		E480E7372A34033C05DB1BA0 /* GoveeClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4FC9FD29F94CD9949109CF2 /* GoveeClient.swift */; };
 		E529F20C6684529609F65CE4 /* NanoleafShapesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8E39A3259C136BDAF970242 /* NanoleafShapesTests.swift */; };
 		E581B177753A8374F396AC49 /* LIFXClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E55449609214081461D98A6 /* LIFXClient.swift */; };
@@ -184,6 +199,7 @@
 		ECE95C6FD511315EEEB24947 /* transform.c in Sources */ = {isa = PBXBuildFile; fileRef = E9EFD8CBABB0F4E55C271735 /* transform.c */; };
 		EE46CC8492D544361BB17699 /* hash_longest_match_simd_opt_inc.h in CopyFiles */ = {isa = PBXBuildFile; fileRef = 6136BAF7308E7826C436F038 /* hash_longest_match_simd_opt_inc.h */; };
 		EE9FB018DA27C1AE43A26818 /* cluster.c in Sources */ = {isa = PBXBuildFile; fileRef = 04FC57B156A1F48F5575167A /* cluster.c */; };
+		F06E6AEAB245FB33C9288B32 /* PolarScreens.swift in Sources */ = {isa = PBXBuildFile; fileRef = A247614CEF041A63809CA346 /* PolarScreens.swift */; };
 		F08BCFA7828751C7F79F55EA /* MusicModeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA11FED9123E75EBF1E5FEE6 /* MusicModeTests.swift */; };
 		F0A895C64549DDB26E2D27B0 /* static_dict_lut_inc.h in CopyFiles */ = {isa = PBXBuildFile; fileRef = 4E5537CC410F19283CDC379F /* static_dict_lut_inc.h */; };
 		F26A935FD52C45B061E7F48E /* hash_forgetful_chain_inc.h in CopyFiles */ = {isa = PBXBuildFile; fileRef = 18806014C60CABC4F914CAA2 /* hash_forgetful_chain_inc.h */; };
@@ -193,6 +209,7 @@
 		F83A42FB884DD4E225E703E4 /* GoveeSegments.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF522B69DE66631D7EC80C99 /* GoveeSegments.swift */; };
 		F8775163EEC8B319D2D66AA3 /* AudioReactiveSessionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2B1F76D3114F3390D5F95FC /* AudioReactiveSessionController.swift */; };
 		F8F872F7D938141E446ABF2F /* write_bits.h in CopyFiles */ = {isa = PBXBuildFile; fileRef = 039BA05E6A77566F8A647CC5 /* write_bits.h */; };
+		F9A448AAA0FB15FACF7D97C1 /* PolarComposerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DD4BCCDCAE3ED8F6AB7FFB0 /* PolarComposerTests.swift */; };
 		FAD7B2D6C5956E6434F7A032 /* transform.h in CopyFiles */ = {isa = PBXBuildFile; fileRef = 155154C45486B15E73A40144 /* transform.h */; };
 		FAF3388109BB090E73088825 /* fast_log.c in Sources */ = {isa = PBXBuildFile; fileRef = FC085FB95F392DA45A223210 /* fast_log.c */; };
 		FB2BB02E876345BA4E627CE5 /* platform.c in Sources */ = {isa = PBXBuildFile; fileRef = 04DDA0E3568674C29BE1AFF6 /* platform.c */; };
@@ -200,6 +217,7 @@
 		FC605E78A95C517310DE7934 /* literal_cost.c in Sources */ = {isa = PBXBuildFile; fileRef = A83889FB82AA0525E6ACBE61 /* literal_cost.c */; };
 		FD0CD61A1C761E133D3CE478 /* MusicChoreographyEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 843E20632E6363B2181BDF9C /* MusicChoreographyEngine.swift */; };
 		FD77973B768A5FAEE2EA328F /* NanoleafShapesModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2859F14C9573731FA13F7A76 /* NanoleafShapesModels.swift */; };
+		FF9E4C930484B5EE5EF1DA4D /* LightPageModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE7E162A0828533387C21329 /* LightPageModel.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -311,6 +329,7 @@
 		080BD83000996198E5551273 /* fast_log.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = fast_log.h; sourceTree = "<group>"; };
 		0B187EF1105CF7B6A032C462 /* literal_cost.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = literal_cost.h; sourceTree = "<group>"; };
 		0BD17AFBE2C23CDC8E2DBA1B /* NanoleafLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NanoleafLayout.swift; sourceTree = "<group>"; };
+		0D4EFB7EC466FF2AF29DFD61 /* GoveeHeroPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoveeHeroPanel.swift; sourceTree = "<group>"; };
 		0EC55EB7967B15DA86F9264C /* command.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = command.c; sourceTree = "<group>"; };
 		0F3818B64A3CD99A6C400D02 /* MenuBarPopoverView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarPopoverView.swift; sourceTree = "<group>"; };
 		0F64F1CCC83BF82FC6892E47 /* LumenDeskTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LumenDeskTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -328,6 +347,7 @@
 		1A166BEF10376EF252629551 /* metablock_inc.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = metablock_inc.h; sourceTree = "<group>"; };
 		1A1D282B4B25773384E1B8DA /* encode.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = encode.c; sourceTree = "<group>"; };
 		1ABD9F2DD5AA3FBF83CC7C9A /* prefix_inc.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = prefix_inc.h; sourceTree = "<group>"; };
+		1DD4BCCDCAE3ED8F6AB7FFB0 /* PolarComposerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PolarComposerTests.swift; sourceTree = "<group>"; };
 		1E46D114EF5080DC83CDA0F3 /* platform.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = platform.h; sourceTree = "<group>"; };
 		1EE30FA5D6A6176759668F8A /* RoomCanvasView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCanvasView.swift; sourceTree = "<group>"; };
 		202330CAABDE80EE8B8EBDD1 /* RoomCanvasSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCanvasSettingsView.swift; sourceTree = "<group>"; };
@@ -336,6 +356,7 @@
 		257B28E39A47FDF96E8DF557 /* quality.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = quality.h; sourceTree = "<group>"; };
 		2859F14C9573731FA13F7A76 /* NanoleafShapesModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NanoleafShapesModels.swift; sourceTree = "<group>"; };
 		29540E5CD0432E7DCF4D368E /* prefix.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = prefix.h; sourceTree = "<group>"; };
+		29A4A9DFC98336A580283F64 /* LightPageModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LightPageModelTests.swift; sourceTree = "<group>"; };
 		2C924EA42F0B4A61CB33C113 /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
 		2D3A6D66E087D82D68280905 /* dec_static_init.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = dec_static_init.h; sourceTree = "<group>"; };
 		2E55449609214081461D98A6 /* LIFXClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LIFXClient.swift; sourceTree = "<group>"; };
@@ -354,15 +375,18 @@
 		3E486EE89DC79A553B7652ED /* backward_references_hq.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = backward_references_hq.c; sourceTree = "<group>"; };
 		3F4915F4D5F4F4E83A2CE413 /* backward_references_opt_inc.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = backward_references_opt_inc.h; sourceTree = "<group>"; };
 		3FC7716E5F3FAC8668F67DD0 /* ProtocolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolTests.swift; sourceTree = "<group>"; };
+		4092D830E506CBE3F52C6225 /* ExternalChange.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalChange.swift; sourceTree = "<group>"; };
 		40EC12501024C75648E90449 /* NanoleafProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NanoleafProtocol.swift; sourceTree = "<group>"; };
 		41AFBCE749E0A3B5A8DD720F /* backward_references_hq.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = backward_references_hq.h; sourceTree = "<group>"; };
 		42173FEE79B7DB60BE8CFE9B /* RoomPlanning.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomPlanning.swift; sourceTree = "<group>"; };
 		42857103B392B985D65FF1FB /* hash_composite_inc.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = hash_composite_inc.h; sourceTree = "<group>"; };
+		4287B677D0D3B15ED429C4B7 /* GoveeGlideChain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoveeGlideChain.swift; sourceTree = "<group>"; };
 		44C38786D52CF182A85846AA /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		45E82F2F1AD021614747F580 /* UDPSocket.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UDPSocket.swift; sourceTree = "<group>"; };
 		499B20B93037BBD809F1FF73 /* hash_rolling_inc.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = hash_rolling_inc.h; sourceTree = "<group>"; };
 		4B245C1EE0A8EE891427D6F0 /* ConfirmationCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfirmationCoordinatorTests.swift; sourceTree = "<group>"; };
 		4CAF9D9C34700DD33F9BA1F2 /* NanoleafGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NanoleafGeometry.swift; sourceTree = "<group>"; };
+		4DD07C2833EF65BEA2352872 /* LookDraft.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LookDraft.swift; sourceTree = "<group>"; };
 		4E5537CC410F19283CDC379F /* static_dict_lut_inc.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = static_dict_lut_inc.h; sourceTree = "<group>"; };
 		4E72AE0503F3AEABF2F18AC4 /* enc_static_init.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = enc_static_init.c; sourceTree = "<group>"; };
 		4E94DF3F64F8ECDDEC857945 /* prefix.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = prefix.c; sourceTree = "<group>"; };
@@ -372,11 +396,13 @@
 		54F6EBD01E6046DB9DE78813 /* version.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = version.h; sourceTree = "<group>"; };
 		55CE0DFE08EB5175457DC556 /* ConfirmationCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfirmationCoordinator.swift; sourceTree = "<group>"; };
 		5614AA11A43A20B3D1C10ED5 /* LightManager+RoomsAndScenes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LightManager+RoomsAndScenes.swift"; sourceTree = "<group>"; };
+		592374B5E9FF6E7DF43B6101 /* PolarTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PolarTokens.swift; sourceTree = "<group>"; };
 		5984011FEFF3567B0F87D208 /* MusicMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicMode.swift; sourceTree = "<group>"; };
 		599BBC04993EE3BA31CFDEEF /* IlsBundleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IlsBundleTests.swift; sourceTree = "<group>"; };
 		5C1DA46DDA1DEEFF74445882 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		5DA3610F7BF3ECBDC5457938 /* shared_dictionary_internal.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = shared_dictionary_internal.h; sourceTree = "<group>"; };
 		5E91BEC2F0286EDB274E00DE /* LumenDeskApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LumenDeskApp.swift; sourceTree = "<group>"; };
+		600C580D295FDDC5DCFD8A20 /* GoveeLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoveeLayoutTests.swift; sourceTree = "<group>"; };
 		609AE1BC1F066FB7D225C1C1 /* LightingCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LightingCatalog.swift; sourceTree = "<group>"; };
 		6136BAF7308E7826C436F038 /* hash_longest_match_simd_opt_inc.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = hash_longest_match_simd_opt_inc.h; sourceTree = "<group>"; };
 		61E184C2A4B50DD5BCB908F8 /* enc_state.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = enc_state.h; sourceTree = "<group>"; };
@@ -405,6 +431,7 @@
 		80CF176DD507938CCCECAD84 /* decode.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = decode.c; sourceTree = "<group>"; };
 		8158A3BB812B457CD883C323 /* block_splitter_inc.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = block_splitter_inc.h; sourceTree = "<group>"; };
 		81EC6F004BFA5D8D17F6B35C /* LumenDesk.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LumenDesk.entitlements; sourceTree = "<group>"; };
+		8386D391803155E3E81738E0 /* GlideChainPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlideChainPanel.swift; sourceTree = "<group>"; };
 		843E20632E6363B2181BDF9C /* MusicChoreographyEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicChoreographyEngine.swift; sourceTree = "<group>"; };
 		85E2A1251ABB73D28D9FA1AF /* brotli_bit_stream.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = brotli_bit_stream.h; sourceTree = "<group>"; };
 		871FD7A8866F5FAA37CA6A7A /* static_dict_lut.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = static_dict_lut.c; sourceTree = "<group>"; };
@@ -413,6 +440,7 @@
 		89EB2B85B9849A689648EAB7 /* NanoleafShapesStudioView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NanoleafShapesStudioView.swift; sourceTree = "<group>"; };
 		8A382F3B16E0D002CFCBCF75 /* brotli_bit_stream.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = brotli_bit_stream.c; sourceTree = "<group>"; };
 		8C34229F4FD7557786C4406F /* LIFXLunaEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LIFXLunaEditorView.swift; sourceTree = "<group>"; };
+		8C4AD958A3D9CB9DBF5BD90E /* PolarComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PolarComponents.swift; sourceTree = "<group>"; };
 		8CB0C331B17B90579AE5A22E /* CommandCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandCoordinator.swift; sourceTree = "<group>"; };
 		8D202ACD6C0993B399080F5F /* cluster_inc.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = cluster_inc.h; sourceTree = "<group>"; };
 		90E89BCCD7EB800AB533320F /* GoveeProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoveeProtocol.swift; sourceTree = "<group>"; };
@@ -423,12 +451,15 @@
 		94F40232CD1D3BBAD21A48B5 /* DomainTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DomainTests.swift; sourceTree = "<group>"; };
 		957B159758573B27F0CBF7F2 /* NanoleafShapesControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NanoleafShapesControllerTests.swift; sourceTree = "<group>"; };
 		96F5C495B1A0604B5FF16196 /* bit_cost_inc.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = bit_cost_inc.h; sourceTree = "<group>"; };
+		981840BF66564CBC2FA87161 /* UplighterSectionsPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UplighterSectionsPanel.swift; sourceTree = "<group>"; };
 		98706D2402E301E7189596D7 /* LossyCodable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LossyCodable.swift; sourceTree = "<group>"; };
 		989A6790C7DBCC63B874CA04 /* dictionary_hash.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = dictionary_hash.h; sourceTree = "<group>"; };
 		9AC9395C7371F64D20015119 /* dictionary_inc.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = dictionary_inc.h; sourceTree = "<group>"; };
 		9FE6145D4871B33A5E56E561 /* DemoWorkspaceController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoWorkspaceController.swift; sourceTree = "<group>"; };
+		A04B7C1DA65B592089AA54D4 /* UplighterSectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UplighterSectionTests.swift; sourceTree = "<group>"; };
 		A16A3EBDB72C90A672265F94 /* NanoleafShapesCanvas.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NanoleafShapesCanvas.swift; sourceTree = "<group>"; };
 		A1BF7E455740C5DE0C059E4C /* NanoleafShapesClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NanoleafShapesClientTests.swift; sourceTree = "<group>"; };
+		A247614CEF041A63809CA346 /* PolarScreens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PolarScreens.swift; sourceTree = "<group>"; };
 		A5270671ADC69D11718BCBD7 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A83889FB82AA0525E6ACBE61 /* literal_cost.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = literal_cost.c; sourceTree = "<group>"; };
 		A8509210717FA636884F3D51 /* LightManager+Studios.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LightManager+Studios.swift"; sourceTree = "<group>"; };
@@ -441,6 +472,7 @@
 		B10686F115FAA2465736F859 /* libBrotli.a */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = archive.ar; path = libBrotli.a; sourceTree = BUILT_PRODUCTS_DIR; };
 		B20F6B7996CCE2E2B3EB0EF2 /* BrotliBridge.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = BrotliBridge.h; sourceTree = "<group>"; };
 		B29F6A903470F16D2BAFB5C4 /* hash_to_binary_tree_inc.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = hash_to_binary_tree_inc.h; sourceTree = "<group>"; };
+		B45F4D6AAA74FB5546099B04 /* ExternalChangeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalChangeTests.swift; sourceTree = "<group>"; };
 		B66CB179B0AC6D8B41E7C515 /* bit_cost.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = bit_cost.c; sourceTree = "<group>"; };
 		B799B123BAAE6A41BF4A8E1D /* LIFXProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LIFXProtocol.swift; sourceTree = "<group>"; };
 		B7A42FBCAB76A9EAB9173514 /* bit_cost.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = bit_cost.h; sourceTree = "<group>"; };
@@ -449,6 +481,7 @@
 		BD50095255179E7035FDC6E9 /* MusicLightingRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicLightingRenderer.swift; sourceTree = "<group>"; };
 		BD530D81F592F1D6AD825E2F /* hash_longest_match64_inc.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = hash_longest_match64_inc.h; sourceTree = "<group>"; };
 		BDEB5102E9346B228CEAB6DA /* entropy_encode.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = entropy_encode.c; sourceTree = "<group>"; };
+		BE0746794C50A3561F766167 /* LightManager+LookDrafts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LightManager+LookDrafts.swift"; sourceTree = "<group>"; };
 		BEB9B11DF6D2F292A2B45C08 /* hash_longest_match64_simd_inc.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = hash_longest_match64_simd_inc.h; sourceTree = "<group>"; };
 		BF522B69DE66631D7EC80C99 /* GoveeSegments.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoveeSegments.swift; sourceTree = "<group>"; };
 		C122533DDB53BD96F81D2566 /* params.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = params.h; sourceTree = "<group>"; };
@@ -469,7 +502,9 @@
 		D5AAE07C114D253E5FEA0B53 /* hash.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = hash.h; sourceTree = "<group>"; };
 		D7BAA996D9EAD79C609C19EF /* BrotliBridge.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = BrotliBridge.h; sourceTree = "<group>"; };
 		D7FB42038D46BF8DDD0AE17D /* BeatMapTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BeatMapTests.swift; sourceTree = "<group>"; };
+		D991B0A141688EE713F22EDD /* LightPageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LightPageView.swift; sourceTree = "<group>"; };
 		D9F32CE9B9291C7096393D1A /* DesignControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignControls.swift; sourceTree = "<group>"; };
+		DBC0F92BF05EA4A8367214C5 /* LumenCommands.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LumenCommands.swift; sourceTree = "<group>"; };
 		DC08C7E0DCE13DBCEA4A95C2 /* state.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = state.h; sourceTree = "<group>"; };
 		DC518C8832551E1223EE0BB8 /* ringbuffer.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ringbuffer.h; sourceTree = "<group>"; };
 		DEC08EBBFECED19A85F2BD97 /* LightManager+MusicAndState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LightManager+MusicAndState.swift"; sourceTree = "<group>"; };
@@ -488,6 +523,7 @@
 		EC896BD1C4308C00D67B0CE5 /* huffman.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = huffman.c; sourceTree = "<group>"; };
 		ECC37F705415ED8B55BC448B /* ScheduleEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleEntry.swift; sourceTree = "<group>"; };
 		ECD4251FE293E854AF4C66E6 /* utf8_util.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = utf8_util.c; sourceTree = "<group>"; };
+		EE7E162A0828533387C21329 /* LightPageModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LightPageModel.swift; sourceTree = "<group>"; };
 		F02BA719B05339A084BF7106 /* NetworkUtilityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkUtilityTests.swift; sourceTree = "<group>"; };
 		F362620318B20405A4230B92 /* metablock.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = metablock.c; sourceTree = "<group>"; };
 		F4FA41B9EA53E79A3FE52969 /* RoomPlanningTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomPlanningTests.swift; sourceTree = "<group>"; };
@@ -562,6 +598,7 @@
 				55CE0DFE08EB5175457DC556 /* ConfirmationCoordinator.swift */,
 				9FE6145D4871B33A5E56E561 /* DemoWorkspaceController.swift */,
 				8740301C7A1481BC61D36A15 /* LightManager.swift */,
+				BE0746794C50A3561F766167 /* LightManager+LookDrafts.swift */,
 				DEC08EBBFECED19A85F2BD97 /* LightManager+MusicAndState.swift */,
 				E46375EBFD2CB1BF23401983 /* LightManager+Nanoleaf.swift */,
 				5614AA11A43A20B3D1C10ED5 /* LightManager+RoomsAndScenes.swift */,
@@ -585,14 +622,38 @@
 			path = Services;
 			sourceTree = "<group>";
 		};
+		453BE304CE61B58C3E6E9F80 /* Design */ = {
+			isa = PBXGroup;
+			children = (
+				8C4AD958A3D9CB9DBF5BD90E /* PolarComponents.swift */,
+				592374B5E9FF6E7DF43B6101 /* PolarTokens.swift */,
+			);
+			path = Design;
+			sourceTree = "<group>";
+		};
+		5383811981F678734594174D /* LightPages */ = {
+			isa = PBXGroup;
+			children = (
+				8386D391803155E3E81738E0 /* GlideChainPanel.swift */,
+				0D4EFB7EC466FF2AF29DFD61 /* GoveeHeroPanel.swift */,
+				D991B0A141688EE713F22EDD /* LightPageView.swift */,
+				981840BF66564CBC2FA87161 /* UplighterSectionsPanel.swift */,
+			);
+			path = LightPages;
+			sourceTree = "<group>";
+		};
 		5578CCF8387B155934A9D396 /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				4092D830E506CBE3F52C6225 /* ExternalChange.swift */,
+				4287B677D0D3B15ED429C4B7 /* GoveeGlideChain.swift */,
 				BF522B69DE66631D7EC80C99 /* GoveeSegments.swift */,
 				17415E71AFDCD3CAF372FC7A /* LIFXMatrix.swift */,
 				E4D96D52BB1C41605E7A300E /* LightDevice.swift */,
 				609AE1BC1F066FB7D225C1C1 /* LightingCatalog.swift */,
 				160BE34C1C4EB24E8ECBD032 /* LightingScene.swift */,
+				EE7E162A0828533387C21329 /* LightPageModel.swift */,
+				4DD07C2833EF65BEA2352872 /* LookDraft.swift */,
 				5984011FEFF3567B0F87D208 /* MusicMode.swift */,
 				07137E6D6CAB2A3F3104E544 /* Room.swift */,
 				ECC37F705415ED8B55BC448B /* ScheduleEntry.swift */,
@@ -683,9 +744,11 @@
 				66CCDE166BACA7C66F4EFD40 /* NanoleafSceneLibraryView.swift */,
 				A16A3EBDB72C90A672265F94 /* NanoleafShapesCanvas.swift */,
 				89EB2B85B9849A689648EAB7 /* NanoleafShapesStudioView.swift */,
+				A247614CEF041A63809CA346 /* PolarScreens.swift */,
 				202330CAABDE80EE8B8EBDD1 /* RoomCanvasSettingsView.swift */,
 				1EE30FA5D6A6176759668F8A /* RoomCanvasView.swift */,
 				106A9365A3408FF1A01DECF8 /* RoomLiveView.swift */,
+				5383811981F678734594174D /* LightPages */,
 				22C65B9B6D3544437463C962 /* Preview Content */,
 			);
 			path = Views;
@@ -788,9 +851,11 @@
 				B20F6B7996CCE2E2B3EB0EF2 /* BrotliBridge.h */,
 				D9F32CE9B9291C7096393D1A /* DesignControls.swift */,
 				5C1DA46DDA1DEEFF74445882 /* Info.plist */,
+				DBC0F92BF05EA4A8367214C5 /* LumenCommands.swift */,
 				81EC6F004BFA5D8D17F6B35C /* LumenDesk.entitlements */,
 				5E91BEC2F0286EDB274E00DE /* LumenDeskApp.swift */,
 				44C38786D52CF182A85846AA /* Theme.swift */,
+				453BE304CE61B58C3E6E9F80 /* Design */,
 				5578CCF8387B155934A9D396 /* Models */,
 				81590455D4A236CCB0FD9578 /* Resources */,
 				2AC0FB2C79D3294702B1E8BB /* Services */,
@@ -843,8 +908,11 @@
 				4B245C1EE0A8EE891427D6F0 /* ConfirmationCoordinatorTests.swift */,
 				38092019A8838CE51C210B2D /* DemoWorkspaceControllerTests.swift */,
 				94F40232CD1D3BBAD21A48B5 /* DomainTests.swift */,
+				B45F4D6AAA74FB5546099B04 /* ExternalChangeTests.swift */,
+				600C580D295FDDC5DCFD8A20 /* GoveeLayoutTests.swift */,
 				599BBC04993EE3BA31CFDEEF /* IlsBundleTests.swift */,
 				16646D1C80B532C81716187D /* LightingThemeTests.swift */,
+				29A4A9DFC98336A580283F64 /* LightPageModelTests.swift */,
 				6C72365E01F3C9C5A259AD3F /* MusicChoreographyCachingTests.swift */,
 				FA11FED9123E75EBF1E5FEE6 /* MusicModeTests.swift */,
 				A1BF7E455740C5DE0C059E4C /* NanoleafShapesClientTests.swift */,
@@ -854,9 +922,11 @@
 				65AAD610166656C2A77EABA6 /* NanoleafTests.swift */,
 				F02BA719B05339A084BF7106 /* NetworkUtilityTests.swift */,
 				C76EE3C023F769E16DEDE73E /* PersistenceStoreTests.swift */,
+				1DD4BCCDCAE3ED8F6AB7FFB0 /* PolarComposerTests.swift */,
 				3FC7716E5F3FAC8668F67DD0 /* ProtocolTests.swift */,
 				F4FA41B9EA53E79A3FE52969 /* RoomPlanningTests.swift */,
 				3CE903D9B1645AA72557CAA5 /* ScheduleEngineTests.swift */,
+				A04B7C1DA65B592089AA54D4 /* UplighterSectionTests.swift */,
 			);
 			path = LumenDeskTests;
 			sourceTree = "<group>";
@@ -991,7 +1061,11 @@
 				0038FBFE720CECE859550F76 /* ConfirmationCoordinator.swift in Sources */,
 				185195D8DEB1F0905108FAC6 /* DemoWorkspaceController.swift in Sources */,
 				F568E026CD0F823CEA251741 /* DesignControls.swift in Sources */,
+				04C2407BA291F244E70457D5 /* ExternalChange.swift in Sources */,
+				59217542147C2C57EE5E6D8B /* GlideChainPanel.swift in Sources */,
 				E480E7372A34033C05DB1BA0 /* GoveeClient.swift in Sources */,
+				6DEAF4D17A6289AE4D644DB4 /* GoveeGlideChain.swift in Sources */,
+				B6D148097BAB8BE496DF213F /* GoveeHeroPanel.swift in Sources */,
 				F60FE9FA2597893FCAFD8885 /* GoveeProtocol.swift in Sources */,
 				489409800D6876315EE3D401 /* GoveeSegmentEditorView.swift in Sources */,
 				F83A42FB884DD4E225E703E4 /* GoveeSegments.swift in Sources */,
@@ -1005,16 +1079,21 @@
 				A9276EFF88319A1BF20F8B88 /* LIFXMatrix.swift in Sources */,
 				A0CFE9F2DC3D6EE7F594B7F5 /* LIFXProtocol.swift in Sources */,
 				871AEE7CBCB0AD124CB40813 /* LightDevice.swift in Sources */,
+				378F72A32CC54A7A61B0B019 /* LightManager+LookDrafts.swift in Sources */,
 				C36EB318DAC1B3A25094253C /* LightManager+MusicAndState.swift in Sources */,
 				4DFDF9B9707D42D3CB3199C1 /* LightManager+Nanoleaf.swift in Sources */,
 				882A4D99AF7BE3CD2814B812 /* LightManager+RoomsAndScenes.swift in Sources */,
 				61313A1F127616569ABACFBD /* LightManager+Studios.swift in Sources */,
 				11D50A82F62D0B78C3D55E7A /* LightManager+Transports.swift in Sources */,
 				9CB30194B777A3686DC1EFAE /* LightManager.swift in Sources */,
+				FF9E4C930484B5EE5EF1DA4D /* LightPageModel.swift in Sources */,
+				4D460324A53C8FEFA583DB52 /* LightPageView.swift in Sources */,
 				C7A20A027FBE149B48721AFF /* LightingCatalog.swift in Sources */,
 				9AFBB71453AE57EC416C11CD /* LightingScene.swift in Sources */,
 				158F4E70BF6C9BB02D0FC7EC /* LookComposerView.swift in Sources */,
+				E200912BE01EBFEB8C4A0DF0 /* LookDraft.swift in Sources */,
 				699D2ED41C358F498B7DB3AF /* LossyCodable.swift in Sources */,
+				AA3440520C75441DE1064E25 /* LumenCommands.swift in Sources */,
 				C4CCCCD5B030A9BD2097CDD3 /* LumenDeskApp.swift in Sources */,
 				599053E983D128A2F51C218D /* MenuBarPopoverView.swift in Sources */,
 				FD0CD61A1C761E133D3CE478 /* MusicChoreographyEngine.swift in Sources */,
@@ -1036,6 +1115,9 @@
 				509A5591727F3DCCE43EDD77 /* NanoleafShapesStudioView.swift in Sources */,
 				347BFA3E6AF148E011E0226F /* NowPlayingMonitor.swift in Sources */,
 				6780D51171B6C4F1FB36212D /* PersistenceStore.swift in Sources */,
+				B1640CE7B6F63A6318433AE7 /* PolarComponents.swift in Sources */,
+				F06E6AEAB245FB33C9288B32 /* PolarScreens.swift in Sources */,
+				D059C07944679D845A614D22 /* PolarTokens.swift in Sources */,
 				39C7975678AE8E319062E888 /* Room.swift in Sources */,
 				E7D7FD29147EF15490F2B3D3 /* RoomCanvasSettingsView.swift in Sources */,
 				120711FE838537E319607B17 /* RoomCanvasView.swift in Sources */,
@@ -1049,6 +1131,7 @@
 				58FE7B07E0D699D2A47774C9 /* ThemePlanner.swift in Sources */,
 				6C3C40FD1043EE6C9887E55B /* UDPSocket.swift in Sources */,
 				A413CA0AED8DF0CD43400ACD /* UXEnhancements.swift in Sources */,
+				0ED428488DA26CEBC14F53CC /* UplighterSectionsPanel.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1104,7 +1187,10 @@
 				DEE995F0224B16B1CD049E28 /* ConfirmationCoordinatorTests.swift in Sources */,
 				A3AF40B15DFC0AF7AE8BB991 /* DemoWorkspaceControllerTests.swift in Sources */,
 				3C68F3F9E74AD9EEB70ACBDB /* DomainTests.swift in Sources */,
+				DCD76F5F0E3C0D5BCA2F729E /* ExternalChangeTests.swift in Sources */,
+				54F6A6BED8DA7911C2B38432 /* GoveeLayoutTests.swift in Sources */,
 				25E8540FF451210C29AC275B /* IlsBundleTests.swift in Sources */,
+				C2834E80C73702B4C61A1D3A /* LightPageModelTests.swift in Sources */,
 				B6461D327EB623D0FA996427 /* LightingThemeTests.swift in Sources */,
 				83300CB1D596AA4325D2BBD3 /* MusicChoreographyCachingTests.swift in Sources */,
 				F08BCFA7828751C7F79F55EA /* MusicModeTests.swift in Sources */,
@@ -1115,9 +1201,11 @@
 				D2605156A8A3129908EA9773 /* NanoleafTests.swift in Sources */,
 				A24A741F4FED6FBA6415DE3D /* NetworkUtilityTests.swift in Sources */,
 				ABAEF24DAA77EBBA3EC843EB /* PersistenceStoreTests.swift in Sources */,
+				F9A448AAA0FB15FACF7D97C1 /* PolarComposerTests.swift in Sources */,
 				9626BEEB6B0378986447A864 /* ProtocolTests.swift in Sources */,
 				B3FAE69F85D6BC9F13DFC852 /* RoomPlanningTests.swift in Sources */,
 				C92DCC3649947F1AB90E0870 /* ScheduleEngineTests.swift in Sources */,
+				13D9839CF5D9379FDBCCBD5D /* UplighterSectionTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

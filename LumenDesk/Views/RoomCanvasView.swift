@@ -16,8 +16,79 @@ final class RoomCanvasSessionStore: ObservableObject {
     @Published var showingAddOrRepair = false
     @Published var showingLive = false
     @Published var showingSettings = false
+    @Published var showingLooks = false
+    /// The Look open in the composer for editing; nil composes a new one.
+    @Published var editingLookID: UUID?
+    /// The light whose page is open in the detail column, replacing the
+    /// Room Stage until the person goes back.
     @Published var editorDeviceID: String?
+    /// "Save current as a Look" prompt, owned by the shell so ⌘S works
+    /// whether the Room Stage or a Light Page is showing.
+    @Published var namingCurrentLook = false
+    /// A sheet waiting for a sibling sheet to finish dismissing.
+    private(set) var pendingSheet: RoomCanvasSheet?
     private var selectionRoomID: UUID?
+
+    /// The sheet on screen, if any. The shell hangs five sibling sheets
+    /// off one view; only one can be presented at a time.
+    var presentedSheet: RoomCanvasSheet? {
+        if showingComposer { return .composer }
+        if showingAddOrRepair { return .addLights }
+        if showingLive { return .live }
+        if showingSettings { return .settings }
+        if showingLooks { return .looks }
+        return nil
+    }
+
+    func isShowing(_ sheet: RoomCanvasSheet) -> Bool {
+        switch sheet {
+        case .composer: return showingComposer
+        case .addLights: return showingAddOrRepair
+        case .live: return showingLive
+        case .settings: return showingSettings
+        case .looks: return showingLooks
+        }
+    }
+
+    func setShowing(_ sheet: RoomCanvasSheet, _ value: Bool) {
+        switch sheet {
+        case .composer: showingComposer = value
+        case .addLights: showingAddOrRepair = value
+        case .live: showingLive = value
+        case .settings: showingSettings = value
+        case .looks: showingLooks = value
+        }
+    }
+
+    /// Presents `sheet`, dismissing any sibling first. With a sibling up,
+    /// the new sheet follows once the dismissal has had time to finish;
+    /// presenting both in one transaction is dropped by SwiftUI on macOS 13.
+    func present(_ sheet: RoomCanvasSheet, editingLook lookID: UUID? = nil,
+                 handoffDelay: TimeInterval = 0.35) {
+        let current = presentedSheet
+        if current == sheet { return }
+        if sheet == .composer { editingLookID = lookID }
+        for other in RoomCanvasSheet.allCases where other != sheet { setShowing(other, false) }
+        guard current != nil else {
+            pendingSheet = nil
+            setShowing(sheet, true)
+            return
+        }
+        pendingSheet = sheet
+        DispatchQueue.main.asyncAfter(deadline: .now() + handoffDelay) { [weak self] in
+            guard let self, self.pendingSheet == sheet else { return }
+            self.pendingSheet = nil
+            if sheet == .composer { self.editingLookID = lookID }
+            self.setShowing(sheet, true)
+        }
+    }
+
+    /// Opens a light's page and keeps the stage selection on that light,
+    /// so the composer and Identify follow Prev / Next.
+    func openLightPage(_ id: String) {
+        editorDeviceID = id
+        selectedFixtureIDs = [id]
+    }
 
     func select(_ room: Room, devices: [LightDevice]) {
         selectedRoomID = room.id
@@ -59,6 +130,10 @@ final class RoomCanvasSessionStore: ObservableObject {
     }
 }
 
+enum RoomCanvasSheet: CaseIterable, Equatable {
+    case composer, addLights, live, settings, looks
+}
+
 enum RoomCanvasStatus: Int, CaseIterable, Equatable {
     case confirmed
     case pending
@@ -87,7 +162,7 @@ enum RoomCanvasStatus: Int, CaseIterable, Equatable {
         switch self {
         case .confirmed: return Lumen.verdigris
         case .pending: return Lumen.warn
-        case .changedElsewhere: return Lumen.graphite
+        case .changedElsewhere: return Polar.changed
         case .needsAttention: return Lumen.fail
         }
     }
@@ -103,7 +178,7 @@ enum RoomCanvasStatus: Int, CaseIterable, Equatable {
         }) {
             return .pending
         }
-        if lights.contains(where: { manager.externallyChangedDeviceIDs.contains($0.id) }) {
+        if lights.contains(where: { manager.externalChanges[$0.id] != nil }) {
             return .changedElsewhere
         }
         return .confirmed
@@ -132,6 +207,112 @@ struct RoomCanvasStatusBadge: View {
     }
 }
 
+// MARK: - Changed elsewhere
+
+/// What changed outside LumenDesk on these fixtures, and the two answers to
+/// it: put the lights back, or keep what they now show. It names the light,
+/// shows each value before and after, says when the difference was read, and
+/// states what is known about the cause without naming an app the light
+/// never reported.
+struct ExternalChangeNotice: View {
+    @EnvironmentObject private var manager: LightManager
+    let deviceIDs: Set<String>
+    /// How many fixtures are spelled out before the rest are only counted.
+    var limit = 3
+
+    var body: some View {
+        let changes = manager.externalChanges(in: deviceIDs)
+        if !changes.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                ForEach(Array(changes.prefix(limit))) { change in
+                    ExternalChangeRow(
+                        change: change,
+                        name: manager.device(withID: change.deviceID)?.label ?? "A fixture"
+                    )
+                }
+                if changes.count > limit {
+                    Text("And \(changes.count - limit) more in this selection.")
+                        .font(.polarUI(12))
+                        .foregroundStyle(Polar.meter)
+                }
+                HStack(spacing: 8) {
+                    Button(changes.count == 1 ? "Put it back" : "Put \(changes.count) back") {
+                        manager.overrideExternalChange(deviceIDs: deviceIDs)
+                    }
+                    .buttonStyle(PolarButtonStyle(kind: .prominent, compact: true))
+                    .help("Send what these lights showed before the change. Undo returns to the change.")
+                    Button("Keep this") {
+                        manager.acknowledgeExternalChange(deviceIDs: deviceIDs)
+                    }
+                    .buttonStyle(PolarButtonStyle(kind: .quiet, compact: true))
+                    .help("Accept what these lights show now as the current state.")
+                }
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Polar.changed.opacity(0.08),
+                        in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Polar.changed.opacity(0.42), lineWidth: 1))
+        }
+    }
+}
+
+private struct ExternalChangeRow: View {
+    let change: ExternalChange
+    let name: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("\(name) changed outside LumenDesk",
+                  systemImage: RoomCanvasStatus.changedElsewhere.symbol)
+                .font(.polarUI(12, weight: .semibold))
+                .foregroundStyle(Polar.chalk)
+            ForEach(change.differences) { difference in
+                line(difference)
+                    .font(.polarMono(12))
+                    .foregroundStyle(Polar.chalk)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel(difference.summary)
+            }
+            Text(change.timingStatement { $0.formatted(date: .omitted, time: .shortened) })
+                .font(.polarUI(12))
+                .foregroundStyle(Polar.meter)
+                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(change.originTitle)
+                    .font(.polarUI(12, weight: .semibold))
+                    .foregroundStyle(Polar.chalk)
+                Text(change.originStatement)
+                    .font(.polarUI(12))
+                    .foregroundStyle(Polar.meter)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    /// One wrapped line per value: "Brightness  40% → 80%". Colours carry a
+    /// swatch beside the hex, so the change reads without decoding it. Built
+    /// in typed steps: one long `+` chain is slow for the type checker.
+    private func line(_ difference: ExternalChange.Difference) -> Text {
+        let title: Text = Text(verbatim: "\(difference.field.title)  ").foregroundColor(Polar.meter)
+        let before: Text = swatch(difference.before, field: difference.field)
+            + Text(verbatim: difference.before)
+        let arrow: Text = Text(verbatim: "  \u{2192}  ").foregroundColor(Polar.meter)
+        let after: Text = swatch(difference.after, field: difference.field)
+            + Text(verbatim: difference.after)
+        return title + before + arrow + after
+    }
+
+    private func swatch(_ value: String, field: ExternalChange.Field) -> Text {
+        guard field == .colour, let rgb = ExternalChange.rgbValue(hex: value) else {
+            return Text(verbatim: "")
+        }
+        let dot: Text = Text(Image(systemName: "circle.fill")).foregroundColor(Color(hex: rgb))
+        return dot + Text(verbatim: " ")
+    }
+}
+
 // MARK: - Room-first shell
 
 struct RoomCanvasShellView: View {
@@ -141,6 +322,7 @@ struct RoomCanvasShellView: View {
     let startInSetup: Bool
     let onPrepared: () -> Void
     @State private var handledInitialSetup: Bool = false
+    @State private var currentLookName: String = ""
 
     init(startInSetup: Bool = false, onPrepared: @escaping () -> Void = {}) {
         self.startInSetup = startInSetup
@@ -166,7 +348,14 @@ struct RoomCanvasShellView: View {
                     #endif
             } detail: {
                 NavigationStack {
-                    if let selectedRoom {
+                    if let editorDevice {
+                        LightPageView(
+                            device: editorDevice,
+                            navigate: { session.openLightPage($0) },
+                            close: { session.editorDeviceID = nil }
+                        )
+                        .id(editorDevice.id)
+                    } else if let selectedRoom {
                         RoomCanvasWorkspace(room: selectedRoom, session: session)
                     } else {
                         RoomCanvasEmptyState(openSetup: { session.showingAddOrRepair = true })
@@ -179,6 +368,10 @@ struct RoomCanvasShellView: View {
         .foregroundStyle(Lumen.graphite)
         .tint(Lumen.ember)
         .background(Lumen.canvas)
+        .onReceive(NotificationCenter.default.publisher(for: .lumenCommand)) { notification in
+            guard let command = LumenCommandBus.command(from: notification) else { return }
+            handle(command)
+        }
         .overlay(alignment: .bottom) { statusOverlays }
         .onAppear {
             session.reconcile(rooms: manager.rooms, devices: manager.devices)
@@ -195,16 +388,32 @@ struct RoomCanvasShellView: View {
         .onReceive(manager.$devices) { devices in
             session.reconcile(rooms: manager.rooms, devices: devices)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .lumenSaveCurrentLook)) { _ in
+            beginSaveCurrentLook()
+        }
+        .alert("Save current as a Look", isPresented: $session.namingCurrentLook) {
+            TextField("Look name", text: $currentLookName)
+            Button("Cancel", role: .cancel) {}
+            Button("Save") {
+                guard let selectedRoom else { return }
+                _ = manager.captureLook(name: currentLookName, deviceIDs: Set(selectedRoom.lightIDs))
+            }
+            .disabled(currentLookName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        } message: {
+            Text("Captures the power, colour, brightness, and supported spatial output in \(selectedRoom?.name ?? "this room").")
+        }
         .onChange(of: openRoomRequest) { request in
             consumeOpenRoomRequest(request)
         }
         .sheet(isPresented: $session.showingComposer, onDismiss: {
             manager.stopSceneRehearsal(restore: true)
+            session.editingLookID = nil
         }) {
             if let selectedRoom {
                 LookComposerView(
                     room: selectedRoom,
-                    initialSelection: session.selectedFixtureIDs
+                    initialSelection: session.selectedFixtureIDs,
+                    editing: session.editingLookID.flatMap { id in manager.scenes.first { $0.id == id } }
                 )
                 .environmentObject(manager)
             }
@@ -223,18 +432,71 @@ struct RoomCanvasShellView: View {
             }
         }
         .sheet(isPresented: $session.showingSettings) {
-            NavigationStack { RoomCanvasSettingsView() }
+            RoomCanvasSettingsView(showsDone: true)
+                .sheetFrame(minWidth: 560, idealWidth: 640, minHeight: 460, idealHeight: 540)
                 .environmentObject(manager)
         }
-        .sheet(isPresented: Binding(
-            get: { session.editorDeviceID != nil },
-            set: { if !$0 { session.editorDeviceID = nil } }
-        )) {
-            if let editorDevice {
-                ContextualFixtureEditor(device: editorDevice)
-                    .environmentObject(manager)
+        .sheet(isPresented: $session.showingLooks) {
+            if let selectedRoom {
+                LooksLibraryView(
+                    room: selectedRoom,
+                    compose: { session.present(.composer) },
+                    edit: { look in session.present(.composer, editingLook: look.id) }
+                )
+                .environmentObject(manager)
             }
         }
+    }
+
+    /// Menu-bar commands that act on what this window is showing.
+    private func handle(_ command: LumenCommand) {
+        switch command {
+        case .newLook:
+            guard selectedRoom != nil else { return }
+            session.present(.composer)
+        case .addLights:
+            session.present(.addLights)
+        case .openLooks:
+            guard selectedRoom != nil else { return }
+            session.present(.looks)
+        case .openLive:
+            guard selectedRoom != nil else { return }
+            session.present(.live)
+        case .identifySelected:
+            if let editorDevice {
+                manager.identify(editorDevice)
+            } else {
+                for device in manager.devices where session.selectedFixtureIDs.contains(device.id) {
+                    manager.identify(device)
+                }
+            }
+        case .openLightPage:
+            guard let room = selectedRoom else { return }
+            let ordered = room.lightIDs.filter { session.selectedFixtureIDs.contains($0) }
+            if let first = ordered.first { session.openLightPage(first) }
+        case .saveLook:
+            // The composer saves its own draft; otherwise the shell asks
+            // for a name, from the Room Stage or a Light Page alike.
+            guard !session.showingComposer, selectedRoom != nil else { return }
+            beginSaveCurrentLook()
+        case .duplicateLook:
+            // The composer duplicates its draft itself.
+            guard !session.showingComposer else { return }
+            if let lastID = manager.lastSceneResult?.scene.id,
+               manager.scenes.contains(where: { $0.id == lastID }) {
+                manager.duplicateLook(lastID)
+            } else {
+                manager.publishError("Apply a Look first, then press \u{2318}D to duplicate it. You can also right-click any Look.")
+            }
+        }
+    }
+
+    private func beginSaveCurrentLook() {
+        guard selectedRoom != nil else { return }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEE h:mm a"
+        currentLookName = formatter.string(from: Date())
+        session.namingCurrentLook = true
     }
 
     private func consumeOpenRoomRequest(_ request: String) {
@@ -313,49 +575,88 @@ private struct RoomCanvasSidebar: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("LUMENDESK")
-                    .font(LumenType.instrumentLabel(size: 11))
-                    .tracking(1.6)
-                    .foregroundStyle(Lumen.ember)
-                Text("Room Canvas")
-                    .font(LumenType.display(size: 25, weight: .bold))
+            HStack(spacing: 10) {
+                LumenHexMark(size: 26)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("LumenDesk")
+                        .font(.polarDisplay(17, weight: .bold))
+                    Text("Lighting instrument")
+                        .font(.polarUI(12))
+                        .foregroundStyle(Polar.meter)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 18)
-            .padding(.top, 20)
+            .padding(.horizontal, 16)
+            .padding(.top, 18)
             .padding(.bottom, 14)
 
-            HStack {
-                Text("Rooms")
-                    .font(LumenType.body(size: 12, weight: .semibold))
-                    .foregroundStyle(Lumen.meter)
-                Spacer()
-                Text("\(manager.rooms.count)")
-                    .font(LumenType.readout(size: 12))
-                    .foregroundStyle(Lumen.meter)
-            }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 8)
-
             ScrollView {
-                LazyVStack(spacing: 6) {
-                    ForEach(manager.rooms) { room in
-                        roomButton(room)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        PolarSectionLabel("Rooms")
+                        Spacer()
+                        Text("\(manager.rooms.count)")
+                            .font(.polarMono(12))
+                            .foregroundStyle(Polar.meter)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.bottom, 4)
+                    ForEach(Array(manager.rooms.enumerated()), id: \.element.id) { index, room in
+                        roomButton(room, index: index)
+                    }
+
+                    if !manager.scenes.isEmpty {
+                        PolarSectionLabel("Looks")
+                            .padding(.horizontal, 8)
+                            .padding(.top, 18)
+                            .padding(.bottom, 4)
+                        ForEach(manager.scenes.prefix(8)) { look in
+                            Button {
+                                applyFromSidebar(look)
+                            } label: {
+                                HStack(spacing: 8) {
+                                    LookSwatchDots(look: look)
+                                    Text(look.name)
+                                        .font(.polarUI(13))
+                                        .foregroundStyle(Polar.chalk.opacity(0.86))
+                                        .lineLimit(1)
+                                    Spacer()
+                                }
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 6)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .help("Apply \u{201C}\(look.name)\u{201D} (switches to its room if needed)")
+                            .contextMenu {
+                                Button("Apply") { applyFromSidebar(look) }
+                                Button("Edit in Composer\u{2026}") {
+                                    guard let room = LookDraftBuilder.room(for: look, rooms: manager.rooms,
+                                                                           preferring: session.selectedRoomID) else { return }
+                                    if room.id != session.selectedRoomID {
+                                        session.select(room, devices: manager.devices(in: room))
+                                    }
+                                    session.present(.composer, editingLook: look.id)
+                                }
+                                Button("Duplicate Look") { manager.duplicateLook(look.id) }
+                                Divider()
+                                Button("Open Looks Library") { session.present(.looks) }
+                            }
+                        }
                     }
                 }
-                .padding(.horizontal, 10)
+                .padding(.horizontal, 8)
             }
 
             VStack(spacing: 8) {
                 Button {
                     session.showingAddOrRepair = true
                 } label: {
-                    Label("Add or repair room", systemImage: "plus.circle")
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Label("Add lights", systemImage: "plus")
+                        .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(Lumen.ember)
+                .buttonStyle(PolarButtonStyle(kind: .prominent))
+                .help("Add or repair lights (⌘N)")
 
                 Button {
                     session.showingSettings = true
@@ -363,15 +664,19 @@ private struct RoomCanvasSidebar: View {
                     Label("Settings", systemImage: "gearshape")
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.plain)
+                .font(.polarUI(13))
+                .foregroundStyle(Polar.meter)
+                .padding(.horizontal, 4)
 
-                Label("Foreground local control", systemImage: "network")
-                    .font(LumenType.body(size: 11))
-                    .foregroundStyle(Lumen.meter)
+                Text("Select a light to open its page. ⌘, Settings")
+                    .font(.polarUI(12))
+                    .foregroundStyle(Polar.meter.opacity(0.85))
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 4)
             }
             .padding(14)
-            .background(Lumen.floor.opacity(0.7))
+            .overlay(alignment: .top) { Rectangle().fill(Polar.ruleSoft).frame(height: 1) }
         }
         .background(Lumen.deck)
         .navigationTitle("LumenDesk")
@@ -393,38 +698,61 @@ private struct RoomCanvasSidebar: View {
         }
     }
 
-    private func roomButton(_ room: Room) -> some View {
+    /// A sidebar Look applies to the room it belongs to: the open room
+    /// when it covers any of its fixtures, otherwise the sidebar switches
+    /// to the room holding most of them first. Same apply path as the
+    /// room's Looks bar.
+    private func applyFromSidebar(_ look: LightingScene) {
+        guard let room = LookDraftBuilder.room(for: look, rooms: manager.rooms,
+                                               preferring: session.selectedRoomID) else {
+            manager.publishError("\u{201C}\(look.name)\u{201D} has no fixtures in any room yet.")
+            return
+        }
+        if room.id != session.selectedRoomID {
+            session.select(room, devices: manager.devices(in: room))
+        }
+        manager.applyLook(look, deviceIDs: Set(room.lightIDs))
+    }
+
+    private func roomButton(_ room: Room, index: Int) -> some View {
         let lights = manager.devices(in: room)
         let selected = room.id == session.selectedRoomID
         let status = RoomCanvasStatus.resolve(lights, manager: manager)
+        let litCount = lights.filter { $0.isOn && !$0.isStale }.count
         return HStack(spacing: 4) {
             Button {
                 session.select(room, devices: lights)
             } label: {
                 HStack(spacing: 10) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 5, style: .continuous)
-                            .fill(selected ? Lumen.ember : Lumen.graphite.opacity(0.08))
-                            .frame(width: 34, height: 34)
-                        Image(systemName: "square.split.2x2")
-                            .foregroundStyle(selected ? Lumen.canvas : Lumen.graphite)
-                    }
-                    VStack(alignment: .leading, spacing: 3) {
+                    Circle()
+                        .fill(Polar.roomTint(index))
+                        .frame(width: 8, height: 8)
+                        .shadow(color: Polar.roomTint(index).opacity(litCount > 0 ? 0.9 : 0), radius: 4)
+                    VStack(alignment: .leading, spacing: 2) {
                         Text(room.name)
-                            .font(LumenType.display(size: 16, weight: .semibold))
-                            .lineLimit(2)
-                            .minimumScaleFactor(0.88)
+                            .font(.polarUI(13, weight: selected ? .semibold : .regular))
+                            .foregroundStyle(Polar.chalk)
+                            .lineLimit(1)
                         HStack(spacing: 5) {
-                            Text("\(lights.count) fixture\(lights.count == 1 ? "" : "s")")
-                            Image(systemName: status.symbol)
-                                .accessibilityLabel(status.title)
+                            Text("\(litCount)/\(lights.count) on")
+                                .font(.polarMono(12))
+                            if status != .confirmed {
+                                Image(systemName: status.symbol)
+                                    .accessibilityLabel(status.title)
+                            }
                         }
-                        .font(LumenType.body(size: 11))
-                        .foregroundStyle(status == .confirmed ? Lumen.meter : status.color)
+                        .foregroundStyle(status == .confirmed ? Polar.meter : status.color)
                     }
                     .layoutPriority(1)
+                    Spacer(minLength: 0)
+                    if index < 9 {
+                        Text("⌘\(index + 1)")
+                            .font(.polarMono(12))
+                            .foregroundStyle(Polar.meter.opacity(0.7))
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -436,7 +764,7 @@ private struct RoomCanvasSidebar: View {
                 Button("Delete Room", role: .destructive) { manager.deleteRoom(room.id) }
             } label: {
                 Image(systemName: "ellipsis")
-                    .frame(width: 24, height: 34)
+                    .frame(width: 22, height: 30)
                     .contentShape(Rectangle())
             }
             .accessibilityLabel("Actions for \(room.name)")
@@ -444,14 +772,15 @@ private struct RoomCanvasSidebar: View {
             .menuIndicator(.hidden)
             .fixedSize()
         }
-        .padding(9)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 7)
         .background(
             RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(selected ? Lumen.floor : Color.clear)
+                .fill(selected ? Polar.raisedHi : Color.clear)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .stroke(selected ? Lumen.ember.opacity(0.38) : Color.clear, lineWidth: 1)
+                .stroke(selected ? Polar.accent.opacity(0.45) : Color.clear, lineWidth: 1)
         )
         .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
     }
@@ -462,31 +791,36 @@ private struct RoomCanvasSidebar: View {
     }
 }
 
-private struct RoomCanvasEmptyState: View {
+struct RoomCanvasEmptyState: View {
     let openSetup: () -> Void
 
     var body: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 18) {
             ZStack {
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .fill(Lumen.floor)
-                    .frame(width: 112, height: 96)
-                Image(systemName: "square.dashed")
-                    .font(.system(size: 40, weight: .light))
+                RoundedRectangle(cornerRadius: Polar.radiusPanel, style: .continuous)
+                    .strokeBorder(Polar.wall, style: StrokeStyle(lineWidth: 1.5, dash: [6, 5]))
+                    .frame(width: 132, height: 112)
+                LumenHexMark(size: 56)
+                    .opacity(0.85)
             }
             Text("Make the room the interface")
-                .font(LumenType.display(size: 30, weight: .bold))
+                .font(.polarDisplay(30))
+                .foregroundStyle(Polar.chalk)
             Text("Find a fixture, identify it in the room, then place it where you expect to find it.")
-                .font(LumenType.body(size: 15))
-                .foregroundStyle(Lumen.meter)
+                .font(.polarUI(15))
+                .foregroundStyle(Polar.meter)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 460)
-            Button("Add or repair room", action: openSetup)
-                .buttonStyle(.borderedProminent)
-                .tint(Lumen.ember)
+            Button(action: openSetup) {
+                Label("Add lights", systemImage: "plus")
+            }
+            .buttonStyle(PolarButtonStyle(kind: .prominent))
+            Text("\u{2318}N")
+                .font(.polarMono(11))
+                .foregroundStyle(Polar.meter)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Lumen.canvas)
+        .background(Polar.stage)
     }
 }
 
@@ -565,17 +899,17 @@ private struct RoomCanvasWorkspace: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 14)
-        .background(Lumen.floor.opacity(0.76))
-        .overlay(alignment: .bottom) { Rectangle().fill(Lumen.ruleSoft).frame(height: 1) }
+        .background(Polar.desk)
+        .overlay(alignment: .bottom) { Rectangle().fill(Polar.ruleSoft).frame(height: 1) }
     }
 
     private func roomHeading(showsInstruction: Bool) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(currentRoom.name)
-                .font(LumenType.display(size: 28, weight: .bold))
+                .font(.polarDisplay(28, weight: .bold))
                 .lineLimit(1)
             if showsInstruction {
-                Text("Touch a fixture to select it. Drag it to keep the canvas familiar.")
+                Text("Click a light to select it, double-click to open its page. Drag to arrange.")
                     .font(LumenType.body(size: 12))
                     .foregroundStyle(Lumen.meter)
                     .lineLimit(1)
@@ -583,21 +917,43 @@ private struct RoomCanvasWorkspace: View {
         }
     }
 
+    /// The room's status. When it reads Changed elsewhere it is also the way
+    /// to the answer: it selects the lights that changed, and the selection
+    /// panel then says what changed and offers to put them back.
+    @ViewBuilder
     private var roomStatus: some View {
-        RoomCanvasStatusBadge(
-            status: RoomCanvasStatus.resolve(lights, manager: manager),
-            compact: true
-        )
+        let status = RoomCanvasStatus.resolve(lights, manager: manager)
+        if status == .changedElsewhere {
+            Button {
+                let changed = lights.map(\.id).filter { manager.externalChanges[$0] != nil }
+                if !changed.isEmpty { session.selectedFixtureIDs = Set(changed) }
+            } label: {
+                RoomCanvasStatusBadge(status: status, compact: true)
+            }
+            .buttonStyle(.plain)
+            .help("Select the lights that changed to see what changed and put them back")
+            .accessibilityHint("Selects the lights that changed")
+        } else {
+            RoomCanvasStatusBadge(status: status, compact: true)
+        }
     }
 
     private var headerActions: some View {
         HStack(spacing: 8) {
             Button {
+                session.showingLooks = true
+            } label: {
+                Label("Looks", systemImage: "swatchpalette")
+            }
+            .buttonStyle(PolarButtonStyle(kind: .quiet, compact: true))
+            .help("Looks (⌘L)")
+            Button {
                 session.showingLive = true
             } label: {
                 Label("Live", systemImage: "waveform")
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(PolarButtonStyle(kind: .quiet, compact: true))
+            .help("Live (⇧⌘L)")
             Button {
                 manager.scan()
             } label: {
@@ -607,9 +963,9 @@ private struct RoomCanvasWorkspace: View {
                     Label("Find", systemImage: "arrow.clockwise")
                 }
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(PolarButtonStyle(kind: .quiet, compact: true))
             .disabled(manager.isScanning)
-            .help(manager.isScanning ? manager.scanPhase : "Find fixtures on the local network")
+            .help(manager.isScanning ? manager.scanPhase : "Find fixtures on the local network (⌘R)")
         }
     }
 
@@ -630,16 +986,30 @@ private struct RoomCanvasWorkspace: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding(30)
             } else {
+                if isOffline {
+                    OfflineBanner(roomName: currentRoom.name)
+                        .padding([.horizontal, .top], 18)
+                } else {
+                    NeedsAttentionStrip(lights: lights, openSetup: { session.showingAddOrRepair = true })
+                        .padding([.horizontal, .top], 18)
+                }
                 DirectionARoomField(
                     room: currentRoom,
                     lights: lights,
-                    selection: selection
+                    selection: selection,
+                    openLight: { session.editorDeviceID = $0 }
                 )
                 .padding(18)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Lumen.canvas)
+    }
+
+    /// Every light in the room has stopped answering, which on a LAN-only
+    /// app means the network is gone rather than one fixture.
+    private var isOffline: Bool {
+        !manager.isDemoMode && lights.count > 1 && lights.allSatisfy(\.isStale)
     }
 
     private var selectionInspector: some View {
@@ -671,6 +1041,9 @@ struct DirectionARoomField: View {
     let room: Room
     let lights: [LightDevice]
     @Binding var selection: Set<String>
+    /// Opens a light's page (double-click on its orb). Nil where the field
+    /// is only a picker, as in Add lights.
+    var openLight: ((String) -> Void)? = nil
     @State private var dragOffsets: [String: CGSize] = [:]
 
     var body: some View {
@@ -680,14 +1053,14 @@ struct DirectionARoomField: View {
             let horizontalInset: CGFloat = compactWidth ? 34 : 54
             let verticalInset: CGFloat = condensed ? 42 : 46
             ZStack {
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .fill(Lumen.floor)
-                spatialFieldWash(in: geometry.size, horizontalInset: horizontalInset, verticalInset: verticalInset)
-                    .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                RoundedRectangle(cornerRadius: Polar.radiusStage, style: .continuous)
+                    .fill(Polar.stage)
                 roomGrid
-                    .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .stroke(Lumen.graphite, lineWidth: 3)
+                    .clipShape(RoundedRectangle(cornerRadius: Polar.radiusStage, style: .continuous))
+                spatialFieldWash(in: geometry.size, horizontalInset: horizontalInset, verticalInset: verticalInset)
+                    .clipShape(RoundedRectangle(cornerRadius: Polar.radiusStage, style: .continuous))
+                RoundedRectangle(cornerRadius: Polar.radiusStage, style: .continuous)
+                    .stroke(Polar.wall, lineWidth: 1)
                 roomDetails
 
                 ForEach(lights.indices, id: \.self) { index in
@@ -700,12 +1073,15 @@ struct DirectionARoomField: View {
                         activeSegmentState: manager.activeSegmentState(for: light.id),
                         selected: selection.contains(light.id),
                         status: RoomCanvasStatus.resolve([light], manager: manager),
+                        statusDetail: manager.externalChanges[light.id]?.differenceSummary,
                         compact: compactWidth,
                         condensed: condensed,
-                        select: { toggle(light.id) }
+                        silhouette: LightPageModel.resolve(light).silhouette,
+                        select: { toggle(light.id) },
+                        open: openLight.map { handler -> () -> Void in { handler(light.id) } }
                     )
                     .frame(width: nodeWidth(for: light, compact: compactWidth),
-                           height: condensed ? 68 : 86)
+                           height: condensed ? 92 : 118)
                     .position(
                         x: horizontalInset
                             + (geometry.size.width - horizontalInset * 2) * anchor.x
@@ -766,8 +1142,8 @@ struct DirectionARoomField: View {
                         .fill(
                             RadialGradient(
                                 colors: [
-                                    primaryColor.opacity(0.24 * max(0.2, light.brightness)),
-                                    secondaryColor.opacity(0.10 * max(0.2, light.brightness)),
+                                    primaryColor.opacity(0.30 * max(0.25, light.brightness)),
+                                    secondaryColor.opacity(0.12 * max(0.25, light.brightness)),
                                     Color.clear
                                 ],
                                 center: .center,
@@ -800,7 +1176,7 @@ struct DirectionARoomField: View {
                     y += 32
                 }
             }
-            .stroke(Lumen.graphite.opacity(0.055), lineWidth: 1)
+            .stroke(Polar.wall.opacity(0.55), lineWidth: 0.5)
         }
         .accessibilityHidden(true)
     }
@@ -811,9 +1187,9 @@ struct DirectionARoomField: View {
         return VStack {
             HStack {
                 Text(room.name.uppercased())
-                    .font(LumenType.instrumentLabel(size: 10))
+                    .font(.polarCaption)
                     .tracking(1.2)
-                    .foregroundStyle(Lumen.graphite.opacity(0.48))
+                    .foregroundStyle(Polar.meter.opacity(0.7))
                 Spacer()
                 if isLiveMusic {
                     HStack(spacing: 6) {
@@ -834,11 +1210,6 @@ struct DirectionARoomField: View {
                 }
             }
             Spacer()
-            HStack {
-                Capsule().fill(Lumen.graphite.opacity(0.22)).frame(width: 68, height: 8)
-                Spacer()
-                RoundedRectangle(cornerRadius: 2).fill(Lumen.graphite.opacity(0.16)).frame(width: 42, height: 28)
-            }
         }
         .padding(18)
         .accessibilityHidden(true)
@@ -847,14 +1218,14 @@ struct DirectionARoomField: View {
     private func nodeWidth(for light: LightDevice, compact: Bool) -> CGFloat {
         if compact {
             switch manager.themeCapability(for: light) {
-            case .segments, .matrix, .panels: return 68
-            case .solid: return 64
+            case .segments, .matrix, .panels: return 84
+            case .solid: return 72
             }
         }
         switch manager.themeCapability(for: light) {
-        case .segments: return 126
-        case .matrix, .panels: return 104
-        case .solid: return 94
+        case .segments: return 132
+        case .matrix, .panels: return 112
+        case .solid: return 104
         }
     }
 
@@ -882,62 +1253,72 @@ private struct FixtureCanvasNode: View {
     let activeSegmentState: GoveeSegmentState?
     let selected: Bool
     let status: RoomCanvasStatus
+    /// What an outside change altered, when the status is Changed elsewhere.
+    var statusDetail: String? = nil
     let compact: Bool
     let condensed: Bool
+    var silhouette: OrbSilhouette = .bulb
     let select: () -> Void
+    var open: (() -> Void)? = nil
+
+    private var orbSize: CGFloat { compact ? 30 : (condensed ? 34 : 42) }
 
     var body: some View {
-        Button(action: select) {
-            VStack(spacing: 4) {
-                ZStack {
-                    if light.isOn && !light.isStale {
-                        Circle()
-                            .fill(
-                                RadialGradient(
-                                    colors: [primaryGlowColor.opacity(0.55 * light.brightness), primaryGlowColor.opacity(0)],
-                                    center: .center,
-                                    startRadius: 2,
-                                    endRadius: 34
-                                )
-                            )
-                            .frame(width: compact ? 54 : 74, height: condensed ? 42 : 60)
-                    }
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(Lumen.graphite)
-                        .frame(width: compact ? 32 : 38, height: condensed ? 26 : 30)
-                    Image(systemName: fixtureSymbol)
-                        .font(.system(size: compact ? 12 : (condensed ? 13 : 14), weight: .semibold))
-                        .foregroundStyle(light.isOn ? primaryGlowColor : Lumen.canvas.opacity(0.66))
+        VStack(spacing: 4) {
+            ZStack(alignment: .topTrailing) {
+                GlowingOrb(color: primaryGlowColor, level: light.brightness, isOn: light.isOn,
+                           silhouette: silhouette, size: orbSize, selected: selected,
+                           stale: light.isStale)
+                if status != .confirmed {
                     Image(systemName: status.symbol)
-                        .font(.system(size: condensed ? 8 : 10, weight: .bold))
+                        .font(.system(size: condensed ? 9 : 11, weight: .bold))
                         .foregroundStyle(status.color)
-                        .padding(condensed ? 2 : 3)
-                        .background(Lumen.floor, in: Circle())
-                        .offset(x: compact ? 17 : 20, y: condensed ? -14 : -17)
+                        .padding(3)
+                        .background(Polar.desk, in: Circle())
+                        .offset(x: 4, y: -4)
                 }
-                .frame(width: compact ? 54 : 74, height: condensed ? 42 : 58)
-                segmentBadge
-                Text(light.label)
-                    .font(LumenType.body(size: compact ? 9 : 11, weight: .semibold))
-                    .foregroundStyle(Lumen.graphite)
-                    .lineLimit(compact ? 2 : 1)
-                    .multilineTextAlignment(.center)
-                    .minimumScaleFactor(0.82)
             }
-            .frame(maxWidth: .infinity)
-            .padding(.horizontal, compact ? 4 : 7)
-            .padding(.vertical, condensed ? 2 : 5)
-            .background(Lumen.floor.opacity(selected ? 0.98 : 0.78), in: RoundedRectangle(cornerRadius: 10))
-            .overlay(
-                RoundedRectangle(cornerRadius: 10)
-                    .stroke(selected ? Lumen.ember : Lumen.graphite.opacity(0.18), lineWidth: selected ? 2 : 1)
-            )
+            .frame(height: orbSize + 18)
+            segmentBadge
+            Text(light.label)
+                .font(.polarUI(compact ? 12 : 13, weight: .semibold))
+                .foregroundStyle(Polar.chalk)
+                .lineLimit(compact ? 2 : 1)
+                .multilineTextAlignment(.center)
+                .minimumScaleFactor(0.82)
+                .shadow(color: Polar.stage, radius: 3)
+            Text(light.isOn ? status.title : "Off · \(status.title)")
+                .font(.polarMono(12, weight: .medium))
+                .foregroundStyle(light.isOn ? status.color : Polar.meter)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
         }
-        .buttonStyle(.plain)
-        .help(light.label)
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 4)
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) { open?() }
+        .onTapGesture(count: 1, perform: select)
+        .help(helpText)
+        .accessibilityElement(children: .ignore)
+        .accessibilityAddTraits(.isButton)
         .accessibilityLabel(light.label)
-        .accessibilityValue("\(selected ? "Selected, " : "")\(status.title), \(light.isOn ? "on" : "off"), \(Int(light.brightness * 100)) percent")
+        .accessibilityValue("\(selected ? "Selected, " : "")\(statusText), \(light.isOn ? "on" : "off"), \(Int(light.brightness * 100)) percent")
         .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityAction(.default, select)
+        .accessibilityAction(named: "Open light page") { open?() }
+    }
+
+    /// The status as VoiceOver reads it, with what changed when it applies.
+    private var statusText: String {
+        guard let statusDetail else { return status.title }
+        return "\(status.title): \(statusDetail)"
+    }
+
+    private var helpText: String {
+        let base = open == nil ? light.label : "\(light.label) — double-click to open its page"
+        guard let statusDetail else { return base }
+        return "\(base)\n\(status.title): \(statusDetail)"
     }
 
     private var primaryGlowColor: Color {
@@ -963,23 +1344,12 @@ private struct FixtureCanvasNode: View {
                 }
                 .accessibilityHidden(true)
             } else {
-                SegmentMiniStripView(colors: state.colors.map { $0.isOn ? $0.litColor : Lumen.graphite.opacity(0.22) })
+                SegmentMiniStripView(colors: state.colors.map { $0.isOn ? $0.litColor : Polar.raised })
                     .frame(width: compact ? 44 : 64, height: 4)
             }
         }
     }
 
-    private var fixtureSymbol: String {
-        if light.isLIFXLuna { return "circle.grid.3x3.fill" }
-        if light.brand == .govee, let profile = segmentProfile, profile.recognized {
-            return profile.layout.icon
-        }
-        switch light.brand {
-        case .nanoleaf: return "hexagon.fill"
-        case .govee: return "lightswitch.on"
-        case .lifx: return "lightbulb.fill"
-        }
-    }
 }
 
 private struct RoomSelectionInspector: View {
@@ -1034,6 +1404,8 @@ private struct RoomSelectionInspector: View {
                         .font(LumenType.body(size: 13))
                         .foregroundStyle(Lumen.meter)
                 } else {
+                    ExternalChangeNotice(deviceIDs: ids)
+
                     HStack(spacing: 9) {
                         Button("On") { manager.setPower(deviceIDs: ids, on: true) }
                             .buttonStyle(.borderedProminent)
@@ -1063,24 +1435,26 @@ private struct RoomSelectionInspector: View {
                         valueLabel: kelvinValueLabel
                     )
 
-                    ColorPicker("Output colour", selection: Binding(
-                        get: { targets.first?.color ?? .white },
-                        set: { manager.setColor(deviceIDs: ids, color: $0) }
-                    ), supportsOpacity: false)
-                    .font(LumenType.body(size: 13, weight: .semibold))
+                    HStack {
+                        Text("Output colour")
+                            .font(LumenType.body(size: 13, weight: .semibold))
+                        Spacer()
+                        ColorPicker("Output colour", selection: Binding(
+                            get: { targets.first?.color ?? .white },
+                            set: { manager.setColor(deviceIDs: ids, color: $0) }
+                        ), supportsOpacity: false)
+                        .polarColorWell(targets.first?.color ?? .white, width: 44, height: 24)
+                        .accessibilityLabel("Output colour")
+                    }
 
-                    if manager.externallyChangedDeviceIDs.isDisjoint(with: ids) == false {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Label("A fixture changed outside LumenDesk. The canvas now shows what the room reported.",
-                                  systemImage: RoomCanvasStatus.changedElsewhere.symbol)
-                                .font(LumenType.body(size: 12, weight: .semibold))
-                            Button("Use this as current") {
-                                manager.acknowledgeExternalChange(deviceIDs: ids)
-                            }
-                            .buttonStyle(.bordered)
+                    if targets.count == 1, let device = targets.first {
+                        Button { edit(device.id) } label: {
+                            Label(hasSpatialEditor(device) ? "Open light page · \(capabilityObject(device))" : "Open light page",
+                                  systemImage: "arrow.up.right.square")
+                                .frame(maxWidth: .infinity)
                         }
-                        .padding(12)
-                        .background(Lumen.graphite.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
+                        .buttonStyle(PolarButtonStyle(kind: .prominent))
+                        .help("Open this light's own page (⌘↩)")
                     }
 
                     uplighterZoneControls
@@ -1303,10 +1677,7 @@ private struct RoomSelectionInspector: View {
                         renamingFixtureID = device.id
                     }
                     .buttonStyle(.bordered)
-                    if hasSpatialEditor(device) {
-                        Button("Edit \(capabilityObject(device))") { edit(device.id) }
-                            .buttonStyle(.bordered)
-                    }
+
                 }
             }
             .padding(12)
@@ -1376,8 +1747,6 @@ private struct LookShelf: View {
     @EnvironmentObject private var manager: LightManager
     let room: Room
     let compose: () -> Void
-    @State private var namingCurrent: Bool = false
-    @State private var currentName: String = ""
     @State private var renamingLookID: UUID? = nil
     @State private var renamedLookName: String = ""
 
@@ -1403,6 +1772,17 @@ private struct LookShelf: View {
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 9) {
+                    Menu {
+                        LightingThemeCategoryMenuContent { theme in
+                            _ = manager.startLookPreview(
+                                theme, deviceIDs: ids, in: .room(room.id), transitionDuration: 1.2
+                            )
+                        }
+                    } label: {
+                        Label("Color themes", systemImage: "swatchpalette")
+                    }
+                    .buttonStyle(RoomLookButtonStyle())
+                    .help("Preview a theme on the room without saving a Look")
                     ForEach(RoomLookTemplate.everyday) { template in
                         Button {
                             guard let theme = LightingCatalog.theme(withID: template.themeID) else { return }
@@ -1428,6 +1808,7 @@ private struct LookShelf: View {
                                 renamedLookName = look.name
                                 renamingLookID = look.id
                             }
+                            Button("Duplicate Look") { manager.duplicateLook(look.id) }
                             Button("Delete Look", role: .destructive) {
                                 manager.deleteScene(look.id)
                             }
@@ -1435,8 +1816,7 @@ private struct LookShelf: View {
                     }
 
                     Button {
-                        currentName = suggestedName
-                        namingCurrent = true
+                        NotificationCenter.default.post(name: .lumenSaveCurrentLook, object: nil)
                     } label: {
                         Label("Save current", systemImage: "plus")
                     }
@@ -1448,16 +1828,6 @@ private struct LookShelf: View {
         .padding(.vertical, 12)
         .background(Lumen.deck)
         .overlay(alignment: .top) { Rectangle().fill(Lumen.rule).frame(height: 1) }
-        .alert("Save current as a Look", isPresented: $namingCurrent) {
-            TextField("Look name", text: $currentName)
-            Button("Cancel", role: .cancel) {}
-            Button("Save") {
-                _ = manager.captureLook(name: currentName, deviceIDs: ids)
-            }
-            .disabled(currentName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-        } message: {
-            Text("Captures the power, colour, brightness, and supported spatial output in \(room.name).")
-        }
         .alert("Rename Look", isPresented: Binding(
             get: { renamingLookID != nil },
             set: { if !$0 { renamingLookID = nil } }
@@ -1473,12 +1843,6 @@ private struct LookShelf: View {
         } message: {
             Text("The new name appears on every room shelf where this Look is available.")
         }
-    }
-
-    private var suggestedName: String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "EEE h:mm a"
-        return formatter.string(from: Date())
     }
 }
 

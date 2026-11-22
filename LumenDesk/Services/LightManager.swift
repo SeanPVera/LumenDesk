@@ -54,9 +54,38 @@ final class LightManager: ObservableObject {
     var activityEvents: [ActivityEvent] = []
     var lastSceneResult: SceneApplicationResult?
     /// Fixtures whose observed state changed without a LumenDesk command in
-    /// flight. Direction A keeps this fact in the room instead of quietly
-    /// replacing the user's intent or hiding another controller's action.
-    @Published var externallyChangedDeviceIDs: Set<String> = []
+    /// flight, with what each reported before and after and what is known
+    /// about the cause. Direction A keeps this fact in the room instead of
+    /// quietly replacing the user's intent or hiding another controller's
+    /// action.
+    @Published var externalChanges: [String: ExternalChange] = [:]
+    var externallyChangedDeviceIDs: Set<String> { Set(externalChanges.keys) }
+    /// What "Put it back" restores for each changed fixture: the light as
+    /// LumenDesk held it before the first differing reading was folded in.
+    var externalChangeRestorePoints: [String: LightRuntimeSnapshot] = [:]
+    /// When LumenDesk last sent each light something no reading confirms:
+    /// segment and matrix layouts, which a status reply does not echo, and
+    /// commands that timed out. The reading that follows one is that send
+    /// arriving, so it must not be reported as a change made elsewhere.
+    var unconfirmedSends: [String: Date] = [:]
+    /// The channels each unconfirmed send can move. A differing reading in
+    /// its window is only excused when every difference is one of these.
+    var unconfirmedSendChannels: [String: Set<ExternalChange.Field>] = [:]
+    /// Lights that had stopped answering and were then reached by a reply
+    /// carrying no state (discovery). The next state reading still counts as
+    /// the light coming back.
+    var silentUntilStateReading: Set<String> = []
+    /// When each light last sent a real state reply. Discovery replies and
+    /// zone readings mark a light seen without carrying its state, so they
+    /// are neither a baseline to differ from nor the moment it was last known.
+    var lastStateReadingAt: [String: Date] = [:]
+    /// Govee lights whose last status reply carried a colour temperature:
+    /// they were showing white, which only the temperature command restores.
+    var goveeWhiteReadingIDs: Set<String> = []
+    /// A Luna's zones as LumenDesk held them before a reading replaced them.
+    /// Matrix and colour replies arrive separately, so by the time a colour
+    /// reading reveals an outside change the zones may already be the new ones.
+    var matrixBeforeReading: [String: LIFXMatrixState] = [:]
     var favoriteOrder: [FavoriteReference] = []
     @Published var recentColors: [RecentColor] = []
     var discoveryChanges: [DiscoveryChange] = []
@@ -530,33 +559,74 @@ final class LightManager: ObservableObject {
         }
     }
 
-    func markSeen(_ device: LightDevice, confirmsPendingCommand: Bool = false) {
-        let wasStale = device.isStale
+    /// `prior` is the light as LumenDesk held it before the caller folded this
+    /// reading into the model. It is what an outside change can be put back
+    /// to, so callers that overwrite the model pass it. A call without one
+    /// (a discovery reply, a Luna zone reply) proves the light is reachable
+    /// but carries no power, level or colour: it neither raises nor settles a
+    /// change, and it leaves the "had stopped answering" evidence for the
+    /// state reading that follows.
+    func markSeen(_ device: LightDevice, confirmsPendingCommand: Bool = false,
+                  prior: LightRuntimeSnapshot? = nil) {
+        let isStateReading = prior != nil
+        let wasMarkedStale = device.isStale
+        let wasStale: Bool
+        if isStateReading {
+            let reachedWithoutState = silentUntilStateReading.remove(device.id) != nil
+            wasStale = device.isStale || reachedWithoutState
+        } else {
+            if device.isStale { silentUntilStateReading.insert(device.id) }
+            wasStale = device.isStale
+        }
         device.lastSeen = Date()
         device.isStale = false
-        let rgb = device.color.rgbComponents
-        let hex = String(format: "#%02X%02X%02X", Int(rgb.r * 255), Int(rgb.g * 255), Int(rgb.b * 255))
         let observed = ConfirmedDeviceState(
             isOn: device.isOn,
             brightness: device.brightness,
-            colorHex: hex,
+            colorHex: Self.hexString(device.color),
             kelvin: device.kelvin,
             nanoleafAppearance: device.nanoleafAppearance,
             confirmedAt: Date()
         )
-        if !confirmsPendingCommand,
-           !commandPendingIDs.contains(device.id),
-           !isEffectAnimating(device.id),
-           let previous = confirmedStates[device.id],
-           Self.materiallyDiffers(previous, observed) {
-            externallyChangedDeviceIDs.insert(device.id)
+        let isPending = commandPendingIDs.contains(device.id)
+        let lastReading = lastStateReadingAt[device.id]
+        if isStateReading { lastStateReadingAt[device.id] = observed.confirmedAt }
+        if isStateReading, !confirmsPendingCommand, !isPending, !isEffectAnimating(device.id) {
+            if externalChanges[device.id] != nil {
+                reconcileExternalChange(device, observed: observed, wasStale: wasStale)
+            } else if let lastReading,
+                      var previous = confirmedStates[device.id],
+                      Self.materiallyDiffers(previous, observed),
+                      !unconfirmedSendExplains(device.id, previous: previous, observed: observed) {
+                // Without an earlier state reply there is nothing to have
+                // changed from, and the change is dated from that reply, not
+                // from a discovery reply that only marked the light seen.
+                previous.confirmedAt = lastReading
+                noteExternalChange(device, previous: previous, observed: observed,
+                                   prior: prior, wasStale: wasStale)
+            }
+        }
+        // An unconfirmed send explains the first settled state reading after
+        // it and no later one. Discovery replies carry no state (no `prior`),
+        // and a reply already in flight when it was sent arrives within a
+        // moment, so neither uses it up.
+        if isStateReading, !isPending, let sentAt = unconfirmedSends[device.id],
+           observed.confirmedAt.timeIntervalSince(sentAt) > 2 {
+            unconfirmedSends[device.id] = nil
+            unconfirmedSendChannels[device.id] = nil
+        }
+        // Zones held for a Luna are only needed until the colour reading that
+        // follows them. If that reading raised nothing, they are history and
+        // must not be restored by a later, unrelated change.
+        if isStateReading, !isPending, externalChanges[device.id] == nil {
+            matrixBeforeReading[device.id] = nil
         }
         commandCoordinator.recordObservation(
             deviceID: device.id,
             confirmedState: observed,
             confirmsPendingCommand: confirmsPendingCommand
         )
-        if wasStale {
+        if wasMarkedStale {
             appendDiscoveryChange(device, kind: .backOnline, detail: "Responded again")
             // A light that dropped off and came back likely power-cycled,
             // which clears the razer overlay stream-hold layouts live in.
@@ -568,15 +638,211 @@ final class LightManager: ObservableObject {
         _ lhs: ConfirmedDeviceState,
         _ rhs: ConfirmedDeviceState
     ) -> Bool {
-        lhs.isOn != rhs.isOn
-            || abs(lhs.brightness - rhs.brightness) > 0.03
-            || lhs.colorHex != rhs.colorHex
-            || abs(lhs.kelvin - rhs.kelvin) > 100
-            || lhs.nanoleafAppearance != rhs.nanoleafAppearance
+        ExternalChange.materiallyDiffers(lhs, rhs)
     }
 
+    static func hexString(_ color: Color) -> String {
+        let rgb = color.rgbComponents
+        func channel(_ value: Double) -> Int { Int((max(0, min(1, value)) * 255).rounded()) }
+        return String(format: "#%02X%02X%02X", channel(rgb.r), channel(rgb.g), channel(rgb.b))
+    }
+
+    // MARK: - Changes made elsewhere
+
+    /// Opens the record of a change LumenDesk did not make. This first
+    /// differing reading fixes `before` and the restore point, so "Put it
+    /// back" means the light as LumenDesk last held it however many times it
+    /// changes afterwards.
+    func noteExternalChange(_ device: LightDevice, previous: ConfirmedDeviceState,
+                            observed: ConfirmedDeviceState,
+                            prior: LightRuntimeSnapshot?, wasStale: Bool) {
+        let evidence = externalChangeEvidence(for: device, previous: previous,
+                                              observed: observed, wasStale: wasStale)
+        let change = ExternalChange(deviceID: device.id, vendor: device.brand.displayName,
+                                    before: previous, after: observed,
+                                    noticedAt: observed.confirmedAt, evidence: evidence)
+        externalChanges[device.id] = change
+        externalChangeRestorePoints[device.id] = externalChangeRestorePoint(
+            for: device, previous: previous, prior: prior)
+        logActivity(.command, title: "Changed elsewhere",
+                    detail: "\(device.label): \(change.differenceSummary). \(change.originTitle).")
+    }
+
+    /// Measures an open change against what LumenDesk held, on every state
+    /// reading and not only when two readings in a row differ. A light that
+    /// fades back in small steps never trips that comparison, and would
+    /// leave the notice showing a state the light left long ago.
+    func reconcileExternalChange(_ device: LightDevice, observed: ConfirmedDeviceState,
+                                 wasStale: Bool) {
+        guard var change = externalChanges[device.id] else { return }
+        guard ExternalChange.materiallyDiffers(change.before, observed) else {
+            // Whatever changed the light has put it back, so there is
+            // nothing left to keep or override.
+            clearExternalChange(device.id)
+            logActivity(.command, title: "Outside change reverted",
+                        detail: "\(device.label) is back to what LumenDesk last confirmed.")
+            return
+        }
+        let shown = change.differences
+        let cause = change.evidence
+        // Only a reading that moved again can say anything new about why.
+        let moved = ExternalChange.materiallyDiffers(change.after, observed)
+        let evidence = moved
+            ? externalChangeEvidence(for: device, previous: change.after,
+                                     observed: observed, wasStale: wasStale)
+            : ExternalChange.Evidence.unreported
+        change.update(after: observed, evidence: evidence)
+        // Republish only when what the notice shows has changed.
+        if change.differences != shown || change.evidence != cause {
+            externalChanges[device.id] = change
+        }
+    }
+
+    /// What LumenDesk saw around a differing reading, most specific first.
+    /// None of it is a sender: the LAN protocols do not carry one.
+    func externalChangeEvidence(for device: LightDevice, previous: ConfirmedDeviceState,
+                                observed: ConfirmedDeviceState,
+                                wasStale: Bool) -> ExternalChange.Evidence {
+        let now = observed.confirmedAt
+        if device.brand == .nanoleaf {
+            let wall = shapes.wall(device.id)
+            if let touchedAt = wall.touchedAt {
+                let elapsed = now.timeIntervalSince(touchedAt)
+                if elapsed >= 0, elapsed <= ExternalChange.touchWindow { return .panelTouched }
+            }
+            switch wall.output {
+            case .nativeEffect(let name):
+                // A scene that was already running is not what changed.
+                if previous.nanoleafAppearance?.effect != name { return .controllerScene(name: name) }
+            case .external(let detail):
+                return .foreignMode(detail: detail)
+            default:
+                break
+            }
+        }
+        return wasStale ? .returnedAfterSilence : .unreported
+    }
+
+    /// The light as LumenDesk held it before something else changed it.
+    /// Power, level, colour and white point are the last reading that agreed
+    /// with LumenDesk, so the restore matches what the notice shows as
+    /// "before". Layouts no reading carries (Govee segments, Luna zones, a
+    /// Shapes design) come from `prior`.
+    func externalChangeRestorePoint(for device: LightDevice, previous: ConfirmedDeviceState,
+                                    prior: LightRuntimeSnapshot?) -> LightRuntimeSnapshot {
+        let held = prior ?? snapshot(device)
+        var color = held.color
+        if Self.hexString(held.color) != previous.colorHex,
+           let rgb = ExternalChange.rgbValue(hex: previous.colorHex) {
+            color = Color(hex: rgb)
+        }
+        return LightRuntimeSnapshot(
+            deviceID: device.id,
+            isOn: previous.isOn,
+            brightness: previous.brightness,
+            color: color,
+            kelvin: previous.kelvin,
+            segments: held.segments,
+            matrix: matrixBeforeReading[device.id] ?? held.matrix,
+            nanoleafAppearance: previous.nanoleafAppearance ?? held.nanoleafAppearance,
+            nanoleafDesign: held.nanoleafDesign,
+            whiteKelvin: held.whiteKelvin == nil ? nil : previous.kelvin
+        )
+    }
+
+    /// Any LumenDesk command to a light settles an open change on it.
+    func clearExternalChange(_ deviceID: String) {
+        if externalChanges[deviceID] != nil { externalChanges[deviceID] = nil }
+        externalChangeRestorePoints[deviceID] = nil
+        matrixBeforeReading[deviceID] = nil
+    }
+
+    /// Records a send no reading will confirm. Like any LumenDesk command it
+    /// settles an open change on the light, and the reading that follows it
+    /// is put down to LumenDesk and not to another app.
+    func noteUnconfirmedSend(_ device: LightDevice, sentAt: Date = Date(),
+                             channels: Set<ExternalChange.Field> = ExternalChange.layoutChannels) {
+        clearExternalChange(device.id)
+        recordUnconfirmedSend(device.id, at: sentAt, channels: channels)
+    }
+
+    /// Remembers a send no reading will confirm, adding to the channels of
+    /// one still inside its window.
+    func recordUnconfirmedSend(_ deviceID: String, at sentAt: Date,
+                               channels: Set<ExternalChange.Field>) {
+        var excused = channels
+        if let earlier = unconfirmedSends[deviceID],
+           sentAt.timeIntervalSince(earlier) <= ExternalChange.ownSendWindow {
+            excused.formUnion(unconfirmedSendChannels[deviceID] ?? [])
+        }
+        unconfirmedSends[deviceID] = sentAt
+        unconfirmedSendChannels[deviceID] = excused
+    }
+
+    /// Whether a differing reading could be LumenDesk's own unconfirmed send
+    /// reaching the light: it arrived inside the window, and every channel it
+    /// differs on is one that send could move. A change to anything else (a
+    /// light switched off while a layout was landing) is still reported.
+    func unconfirmedSendExplains(_ deviceID: String, previous: ConfirmedDeviceState,
+                                 observed: ConfirmedDeviceState) -> Bool {
+        guard let sentAt = unconfirmedSends[deviceID] else { return false }
+        let elapsed = observed.confirmedAt.timeIntervalSince(sentAt)
+        guard elapsed >= 0, elapsed <= ExternalChange.ownSendWindow else { return false }
+        let excused = unconfirmedSendChannels[deviceID] ?? Set(ExternalChange.Field.allCases)
+        return ExternalChange.differingFields(previous, observed).isSubset(of: excused)
+    }
+
+    /// Changes on these fixtures, in the order the room lists them.
+    func externalChanges(in deviceIDs: Set<String>) -> [ExternalChange] {
+        devices.compactMap { deviceIDs.contains($0.id) ? externalChanges[$0.id] : nil }
+    }
+
+    /// Keeps what the lights now show and stops flagging it.
     func acknowledgeExternalChange(deviceIDs: Set<String>) {
-        externallyChangedDeviceIDs.subtract(deviceIDs)
+        let kept = devices.filter { deviceIDs.contains($0.id) && externalChanges[$0.id] != nil }
+        for device in kept { clearExternalChange(device.id) }
+        guard !kept.isEmpty else { return }
+        logActivity(.command, title: "Outside change kept",
+                    detail: kept.map(\.label).joined(separator: ", "))
+    }
+
+    /// Puts these fixtures back to what they showed before something else
+    /// changed them. Recorded for undo, so Undo returns to the outside change.
+    func overrideExternalChange(deviceIDs: Set<String>) {
+        let lights = devices.filter {
+            deviceIDs.contains($0.id) && externalChangeRestorePoints[$0.id] != nil
+        }
+        let points = lights.compactMap { externalChangeRestorePoints[$0.id] }
+        // A flagged light with nothing saved to put back is reported, not
+        // quietly kept: the flag stays so the user can choose Keep this.
+        let unrestorable = devices.filter {
+            deviceIDs.contains($0.id) && externalChanges[$0.id] != nil
+                && externalChangeRestorePoints[$0.id] == nil
+        }
+        if !unrestorable.isEmpty {
+            let names = unrestorable.map(\.label).joined(separator: ", ")
+            publishError("LumenDesk has no earlier state saved for \(names), so it cannot put \(unrestorable.count == 1 ? "it" : "them") back. Choose Keep this or set the light by hand.")
+            logActivity(.command, title: "Outside change not put back", detail: names)
+        }
+        guard !points.isEmpty else { return }
+        let staleCount = lights.filter(\.isStale).count
+        if staleCount > 0 {
+            publishError("\(staleCount) light\(staleCount == 1 ? "" : "s") may be offline — command sent anyway.")
+        }
+        recordChange(lights)
+        apply(points)
+        // `apply` restores a plain Govee light through the colour command,
+        // which selects RGB. One that was showing white follows it with the
+        // temperature command, so white is what the light ends on.
+        for point in points {
+            guard let kelvin = point.whiteKelvin, point.segments == nil,
+                  let light = device(withID: point.deviceID), light.brand == .govee else { continue }
+            sendColorTemperature(light, kelvin: kelvin)
+        }
+        for light in lights { clearExternalChange(light.id) }
+        announceAction("Put back", lights: lights)
+        logActivity(.command, title: "Outside change overridden",
+                    detail: lights.map(\.label).joined(separator: ", "))
     }
 
     func reportedStateMatchesExpectation(
@@ -714,7 +980,7 @@ final class LightManager: ObservableObject {
     // MARK: - Command queue and confirmed state
 
     func enqueueCommand(for device: LightDevice, coalescingKey: String, summary: String, debounce: TimeInterval = 0.08, operation: @escaping @MainActor () -> Void) {
-        externallyChangedDeviceIDs.remove(device.id)
+        clearExternalChange(device.id)
         let simulated = isDemoMode ? CommandCoordinator.SimulatedCommand(
             isStale: { [weak device] in device?.isStale ?? true },
             didFail: { [weak self, weak device] in
@@ -735,6 +1001,12 @@ final class LightManager: ObservableObject {
             },
             timedOut: { [weak self, weak device] in
                 guard let self, let device else { return }
+                // The light may still act on it; a reading that differs next
+                // is then this command, not another app. Dated from the
+                // timeout so the reading after it is the one covered.
+                self.recordUnconfirmedSend(
+                    device.id, at: Date(),
+                    channels: ExternalChange.channels(forCoalescingKey: coalescingKey))
                 self.publishError("\(device.label) did not confirm the change. Keep trying or rescan.")
             }
         )
@@ -1623,7 +1895,11 @@ final class LightManager: ObservableObject {
             device.color = active.blendedColor
             noteSegmentCommand(device, summary: "Changing lamp zone color")
             if demoWorkspaceController.allowsLiveNetworking {
-                assertStreamHold(device, state: active)
+                if profile.usesUplighterSections {
+                    sendSegmentPackets(device, state: active)
+                } else {
+                    assertStreamHold(device, state: active)
+                }
             }
             return
         }
@@ -1775,6 +2051,11 @@ final class LightManager: ObservableObject {
                                 turnOn: false, announce: false)
             } else if let segments = snap.segments, d.brand == .govee {
                 applySegments(d, state: segments, recordUndo: false, turnOn: false, announce: false)
+                sendBrightness(d, value: snap.brightness)
+            } else if snap.whiteKelvin != nil, d.brand == .govee {
+                // Restored in white by the temperature command that follows
+                // (`overrideExternalChange`). An RGB colour first would show
+                // a flash of the wrong mode.
                 sendBrightness(d, value: snap.brightness)
             } else {
                 sendColor(d, color: snap.color)

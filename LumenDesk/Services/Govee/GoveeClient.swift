@@ -211,14 +211,14 @@ final class GoveeClient {
     /// the razer-off into the same exclusive batch (its own kind, not the
     /// shared "razer-mode" kind) also means a preview re-enable arriving
     /// mid-apply queues after these packets instead of replacing the off.
-    func applySegments(deviceID: String, packets: [[UInt8]]) {
+    func applySegments(deviceID: String, packets: [[UInt8]], chunkSize: Int = 6) {
         guard !packets.isEmpty else { return }
         // Each relayed packet is a full mode command the device's MCU has to
         // execute; string and curtain lights (the slowest firmware, see
         // `commandGap`) fall behind when too many arrive in one datagram.
         // Small chunks + the paced queue keep every command inside the
         // firmware's budget.
-        let chunkSize = 6
+        let chunkSize = max(1, chunkSize)
         let batch = [GoveeProtocol.razerModeRequest(on: false)]
             + stride(from: 0, to: packets.count, by: chunkSize).map { start in
                 GoveeProtocol.ptRealRequest(packets: Array(packets[start..<min(start + chunkSize, packets.count)]))

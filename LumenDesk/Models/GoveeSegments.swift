@@ -97,6 +97,14 @@ struct GoveeSegmentProfile {
     var simultaneousZoneLimit: Int? = nil
     /// Physical presentation for string lights. Nil for every other layout.
     var stringLightStyle: GoveeStringLightStyle?
+    /// White points the studio offers per segment (H608x string downlights,
+    /// 2700–6500 K in Govee's spec). Nil where segments are colour only.
+    var segmentWhiteRange: ClosedRange<Int>? = nil
+    /// The H60B0 Uplighter: zones are the firmware's numbered sections
+    /// (ripple, side ring, down light), driven by their own LAN `ptReal`
+    /// commands (`GoveeProtocol.UplighterSection`) rather than the razer
+    /// stream, whose colour order doesn't follow the lamp's sections.
+    var usesUplighterSections: Bool = false
 
     var editorUnitName: String {
         if let stringLightStyle { return stringLightStyle.unitName }
@@ -151,7 +159,8 @@ struct GoveeSegmentProfile {
         func add(_ sku: String, _ layout: GoveeSegmentLayout, _ count: Int, _ gradient: Bool,
                  stream: Bool = false, fixed: Bool = false, zoneNames: [String] = [],
                  zoneShortNames: [String] = [], zoneLimit: Int? = nil,
-                 stringStyle: GoveeStringLightStyle? = nil) {
+                 stringStyle: GoveeStringLightStyle? = nil, whiteRange: ClosedRange<Int>? = nil,
+                 sections: Bool = false) {
             rows[sku] = GoveeSegmentProfile(
                 layout: layout,
                 defaultSegmentCount: count,
@@ -162,7 +171,9 @@ struct GoveeSegmentProfile {
                 zoneNames: zoneNames,
                 zoneShortNames: zoneShortNames,
                 simultaneousZoneLimit: zoneLimit,
-                stringLightStyle: stringStyle
+                stringLightStyle: stringStyle,
+                segmentWhiteRange: whiteRange,
+                usesUplighterSections: sections
             )
         }
         // Flexible RGBIC / RGBICW interior strips
@@ -197,14 +208,17 @@ struct GoveeSegmentProfile {
         // stays adjustable in case a kit reports differently. The bars are
         // separate pieces, so there is no blend toggle.
         add("H6062", .wallLight, 28, false)
-        // Uplighter floor lamp: upper ripple, middle ambient, and lower daily
-        // zones are independently addressable and held through streaming.
-        // The lamp only drives two of the three at once, so the studio treats
-        // "which two are lit" as part of the layout.
-        add("H60B0", .lamp, 3, false, stream: true, fixed: true,
-            zoneNames: ["Upper Ripple", "Middle Ambient", "Lower Daily Illumination"],
-            zoneShortNames: ["Upper", "Middle", "Lower"],
-            zoneLimit: 2)
+        // Uplighter floor lamp. Zone i is firmware section i + 1: 1 Ripple
+        // (the projector head), 2 Side ring (8-segment RGBIC band), 3 Down
+        // light (white only, 2700–6500 K). Each is written with its own
+        // section command, so the mapping is by section number, not by
+        // colour position in a stream frame (the razer stream sent the
+        // "lower" colour to the ripple). The lamp drives two sections at
+        // once, so "which two are lit" is part of the layout.
+        add("H60B0", .lamp, 3, false, fixed: true,
+            zoneNames: ["Ripple", "Side ring", "Down light"],
+            zoneShortNames: ["Ripple", "Side", "Down"],
+            zoneLimit: 2, sections: true)
         // Christmas String Lights: Govee's Uni-IC controller addresses every
         // physical bead. H70C1 is 33 ft / 100 beads; H70C2 and H70C4 are
         // 66 ft / 200 beads. Their fixed topology is held via streaming.
@@ -219,10 +233,13 @@ struct GoveeSegmentProfile {
         // Indoor RGBIC string downlights (5 pods per meter: 2 m = 10, 3 m = 15,
         // 5 m = 25, 10 m = 50). Count stays adjustable for cut or extended runs,
         // and stream hold keeps per-pod colors live over LAN.
-        add("H608A", .stringLights, 25, true, stream: true, stringStyle: .bulb)
-        add("H608B", .stringLights, 15, true, stream: true, stringStyle: .bulb)
-        add("H608C", .stringLights, 10, true, stream: true, stringStyle: .bulb)
-        add("H608D", .stringLights, 50, true, stream: true, stringStyle: .bulb)
+        // Govee lists 2700–6500 K for these RGBIC pods. They have no separate
+        // white LEDs, so a pod's white point is mixed from its RGB and goes
+        // out in the same stream frame as a colour would.
+        add("H608A", .stringLights, 25, true, stream: true, stringStyle: .bulb, whiteRange: 2_700...6_500)
+        add("H608B", .stringLights, 15, true, stream: true, stringStyle: .bulb, whiteRange: 2_700...6_500)
+        add("H608C", .stringLights, 10, true, stream: true, stringStyle: .bulb, whiteRange: 2_700...6_500)
+        add("H608D", .stringLights, 50, true, stream: true, stringStyle: .bulb, whiteRange: 2_700...6_500)
         // H70B1 is a 20-column curtain, not a one-dimensional string. The LAN
         // stream addresses columns; the 520-bead pixel canvas remains a Govee
         // Home feature.
@@ -280,6 +297,10 @@ struct GoveeSegmentColor: Equatable {
     /// like the H60B0 uplighter, which can only run some of their zones at
     /// once, express which zones are in use.
     var isOn: Bool
+    /// The white point this segment holds, when it was set as a white
+    /// rather than a colour. `red/green/blue` then hold the same white mixed
+    /// from RGB, which is what RGB-only pods and the razer stream show.
+    var kelvin: Int? = nil
 
     init(red: Double, green: Double, blue: Double, brightness: Double = 1.0, isOn: Bool = true) {
         self.red = red.isFinite ? max(0, min(1, red)) : 0
@@ -302,6 +323,16 @@ struct GoveeSegmentColor: Equatable {
                   isOn: isOn)
     }
 
+    /// A white point, mixed from RGB for display and for RGB-only output.
+    static func white(kelvin: Int, brightness: Double = 1.0, isOn: Bool = true) -> GoveeSegmentColor {
+        let clamped = min(9_000, max(1_000, kelvin))
+        let rgb = KelvinRGB.components(clamped)
+        var color = GoveeSegmentColor(red: rgb.red, green: rgb.green, blue: rgb.blue,
+                                      brightness: brightness, isOn: isOn)
+        color.kelvin = clamped
+        return color
+    }
+
     var color: Color { Color(red: red, green: green, blue: blue) }
     /// Color with the segment's own brightness folded in, for previews. A
     /// switched-off segment reads as unlit.
@@ -321,6 +352,7 @@ struct GoveeSegmentColor: Equatable {
     /// segments group together whatever colors they are holding.
     var packetKey: String {
         let c = renderedRGB255
+        if isOn, let kelvin { return "k\(kelvin)" }
         return "\(c.r):\(c.g):\(c.b)"
     }
     var brightnessPercent: Int { max(1, min(100, Int((brightness * 100).rounded()))) }
@@ -335,6 +367,12 @@ struct GoveeSegmentColor: Equatable {
 
     static func interpolate(_ from: GoveeSegmentColor, _ to: GoveeSegmentColor, fraction: Double) -> GoveeSegmentColor {
         let t = max(0, min(1, fraction))
+        if let a = from.kelvin, let b = to.kelvin {
+            // Two whites blend along the white-point line, not through RGB.
+            return .white(kelvin: Int((Double(a) + Double(b - a) * t).rounded()),
+                          brightness: from.brightness + (to.brightness - from.brightness) * t,
+                          isOn: t < 0.5 ? from.isOn : to.isOn)
+        }
         return GoveeSegmentColor(red: from.red + (to.red - from.red) * t,
                                  green: from.green + (to.green - from.green) * t,
                                  blue: from.blue + (to.blue - from.blue) * t,
@@ -344,7 +382,7 @@ struct GoveeSegmentColor: Equatable {
 }
 
 extension GoveeSegmentColor: Codable {
-    enum CodingKeys: String, CodingKey { case red, green, blue, brightness, isOn }
+    enum CodingKeys: String, CodingKey { case red, green, blue, brightness, isOn, kelvin }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -354,6 +392,7 @@ extension GoveeSegmentColor: Codable {
         let brightness = (try? c.decode(Double.self, forKey: .brightness)) ?? 1.0
         let isOn = (try? c.decode(Bool.self, forKey: .isOn)) ?? true
         self.init(red: red, green: green, blue: blue, brightness: brightness, isOn: isOn)
+        self.kelvin = try? c.decodeIfPresent(Int.self, forKey: .kelvin)
     }
 }
 
@@ -367,6 +406,9 @@ struct GoveeSegmentState: Codable, Equatable {
     /// layout. Solid colors, white mode, and effects flip this off so scenes
     /// and undo know which representation to restore.
     var isActive: Bool
+    /// H60B0 ripple flow (lens speed) 0…100, 0 = still. Nil = leave the
+    /// lamp's own setting alone.
+    var rippleFlow: Int? = nil
 
     var segmentCount: Int { colors.count }
 
@@ -481,12 +523,59 @@ extension GoveeSegmentState {
         }
         for group in colorGroups {
             let rgb = group.color.renderedRGB255
-            packets.append(GoveeProtocol.segmentColorPacket(r: rgb.r, g: rgb.g, b: rgb.b,
-                                                            segments: group.segments))
+            if group.color.isOn, let kelvin = group.color.kelvin {
+                packets.append(GoveeProtocol.segmentWhitePacket(kelvin: kelvin, white: rgb,
+                                                                segments: group.segments))
+            } else {
+                packets.append(GoveeProtocol.segmentColorPacket(r: rgb.r, g: rgb.g, b: rgb.b,
+                                                                segments: group.segments))
+            }
         }
         for group in brightnessGroups {
             packets.append(GoveeProtocol.segmentBrightnessPacket(percent: group.percent,
                                                                  segments: group.segments))
+        }
+        return packets
+    }
+}
+
+extension GoveeSegmentState {
+    /// The H60B0 white point a zone holds: its own Kelvin when it was set as
+    /// a white, otherwise the closest white to its colour (the down light
+    /// takes Kelvin only).
+    static func uplighterKelvin(_ color: GoveeSegmentColor) -> Int {
+        let range = GoveeProtocol.uplighterKelvinRange
+        if let kelvin = color.kelvin { return max(range.lowerBound, min(range.upperBound, kelvin)) }
+        return KelvinRGB.nearestKelvin(red: color.red, green: color.green, blue: color.blue, in: range)
+    }
+
+    /// The H60B0 packet batch for this layout, zone i = section i + 1.
+    /// Sections going dark are switched off first so the lamp never sees
+    /// three lit; then each lit section is switched on and given its colour
+    /// (or white point), brightness and, for the ripple, its flow. Settings
+    /// for dark sections aren't sent. At most 9 frames, which fits one
+    /// `ptReal` datagram (the lamp accepted 18 in testing).
+    func uplighterSectionPackets() -> [[UInt8]] {
+        typealias Section = GoveeProtocol.UplighterSection
+        let zones = Array(colors.prefix(Section.allCases.count))
+        var packets: [[UInt8]] = []
+        for (index, color) in zones.enumerated() where !color.isOn {
+            if let section = Section(rawValue: UInt8(index + 1)) {
+                packets.append(GoveeProtocol.uplighterSectionPowerPacket(section, on: false))
+            }
+        }
+        for (index, color) in zones.enumerated() where color.isOn {
+            guard let section = Section(rawValue: UInt8(index + 1)) else { continue }
+            packets.append(GoveeProtocol.uplighterSectionPowerPacket(section, on: true))
+            if section == .down {
+                packets.append(GoveeProtocol.uplighterDownKelvinPacket(Self.uplighterKelvin(color)))
+            } else if let packet = GoveeProtocol.uplighterColorPacket(section, rgb: color.rgb255, kelvin: color.kelvin) {
+                packets.append(packet)
+            }
+            packets.append(GoveeProtocol.uplighterBrightnessPacket(section, percent: color.brightnessPercent))
+            if section == .ripple, let flow = rippleFlow {
+                packets.append(GoveeProtocol.uplighterFlowPacket(flow))
+            }
         }
         return packets
     }
@@ -624,7 +713,7 @@ struct GoveeSegmentPreset: Identifiable, Codable, Equatable {
     }
 
     /// Curated 3-zone presets for the Govee Uplighter Floor Lamp (H60B0) that
-    /// pair specific Upper Ripple / Middle Ambient / Lower Daily Illumination
+    /// pair specific Ripple / Side ring / Down light
     /// colors with a valid 1- or 2-zone power combination.
     static let uplighterBuiltIns: [GoveeSegmentPreset] = [
         uplighterPreset("Ripple + Reading", zones: [0, 2], [0x27B9E8, 0x7A5CFF, 0xFFF2CC]),

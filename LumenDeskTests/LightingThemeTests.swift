@@ -39,6 +39,39 @@ final class LightingThemeTests: XCTestCase {
 
     // MARK: - Catalog integrity
 
+    func testComposerOffersTheEntireUnmodifiedCatalogAlongsideEmberAndMoss() throws {
+        let choices = ComposerPalette.choices
+        XCTAssertEqual(choices.count, LightingCatalog.themes.count + 1)
+        XCTAssertEqual(Set(choices.map(\.id)).count, choices.count)
+        XCTAssertEqual(choices.first?.name, "Ember & Moss")
+        for theme in LightingCatalog.themes {
+            let choice = try XCTUnwrap(choices.first { $0.id == theme.id })
+            XCTAssertEqual(choice.theme, theme, "Composer lost or changed \(theme.name)")
+            XCTAssertEqual(LookBrush.original.applying(to: choice.theme), theme,
+                           "Original must preserve the authored spread as well as the palette")
+        }
+    }
+
+    func testComposerWashAndGradientPlanDifferentOutputOnEverySpatialCapability() throws {
+        let source = try theme("aurora")
+        let fixtures = [strip("strip"), luna("luna"),
+                        ThemeFixture(id: "wall", capability: .panels(count: 9))]
+        let wash = LookBrush.spatialWash.applying(to: source)
+        let gradient = LookBrush.gradient.applying(to: source)
+        XCTAssertEqual(wash.colors, source.colors)
+        XCTAssertEqual(gradient.colors, source.colors)
+        XCTAssertEqual(wash.brightness, source.brightness)
+        XCTAssertEqual(gradient.brightness, source.brightness)
+
+        let washPlans = ThemePlanner.plan(wash, fixtures: fixtures).fixtures
+        let gradientPlans = ThemePlanner.plan(gradient, fixtures: fixtures).fixtures
+        XCTAssertNotEqual(washPlans[0].segments?.colors, gradientPlans[0].segments?.colors)
+        XCTAssertNotEqual(washPlans[1].matrix?.colors, gradientPlans[1].matrix?.colors)
+        XCTAssertNotEqual(washPlans[2].panels, gradientPlans[2].panels)
+        let panelColors = try XCTUnwrap(gradientPlans[2].panels).map { $0.hex(atLevel: 1) }
+        XCTAssertGreaterThan(Set(panelColors).count, 2)
+    }
+
     func testCatalogCarriesFortyEightUniquelyIdentifiedThemes() {
         let themes = LightingCatalog.themes
         XCTAssertEqual(themes.count, 48)

@@ -124,6 +124,103 @@ final class IlsBundleTests: XCTestCase {
         XCTAssertEqual(map.downbeatOffset, 2)
     }
 
+    /// Exactly four beats and no downbeats — the bar-length loop must not read
+    /// past the end (this used to trap on `beats[beats.count]`).
+    func testAnalysisToBeatMapFourBeatsNoDownbeats() throws {
+        var analysis = IlsAnalysis()
+        analysis.duration = 2
+        for frame in [0, 50, 100, 150] {
+            var item = IlsAnalysis.IlsItem()
+            item.frameInTrack = frame
+            item.beat = true
+            analysis.items.append(item)
+        }
+        let map = try XCTUnwrap(analysis.beatMap)
+        XCTAssertEqual(map.beats.count, 4)
+        XCTAssertTrue(map.barEnergy.isEmpty) // not enough beats for a full bar span
+    }
+
+    /// Five beats and no downbeats — the half-open span loop runs exactly once.
+    func testAnalysisToBeatMapFiveBeatsNoDownbeats() throws {
+        var analysis = IlsAnalysis()
+        analysis.duration = 2.5
+        for frame in [0, 50, 100, 150, 200] {
+            var item = IlsAnalysis.IlsItem()
+            item.frameInTrack = frame
+            item.beat = true
+            analysis.items.append(item)
+        }
+        let map = try XCTUnwrap(analysis.beatMap)
+        XCTAssertEqual(map.beats.count, 5)
+    }
+
+    /// Beats arriving out of wire order must come out ascending.
+    func testAnalysisToBeatMapSortsBeats() throws {
+        var analysis = IlsAnalysis()
+        analysis.duration = 2
+        for frame in [150, 0, 100, 50, 50] { // reversed, with a duplicate
+            var item = IlsAnalysis.IlsItem()
+            item.frameInTrack = frame
+            item.beat = true
+            analysis.items.append(item)
+        }
+        let map = try XCTUnwrap(analysis.beatMap)
+        XCTAssertEqual(map.beats, [0, 0.5, 1.0, 1.5]) // sorted, de-duped
+    }
+
+    /// A single huge frame must not drive a multi-gigabyte envelope.
+    func testAnalysisToBeatMapClampsEnvelope() throws {
+        var analysis = IlsAnalysis()
+        for frame in [0, 50, 100, 150] {
+            var item = IlsAnalysis.IlsItem()
+            item.frameInTrack = frame
+            item.beat = true
+            analysis.items.append(item)
+        }
+        var corrupt = IlsAnalysis.IlsItem()
+        corrupt.frameInTrack = 5_000_000_000 // ~1.6 years at 100 Hz
+        analysis.items.append(corrupt)
+        let map = try XCTUnwrap(analysis.beatMap)
+        XCTAssertLessThanOrEqual(map.envelope.count, IlsAnalysis.maxFrames + 1)
+    }
+
+    // MARK: - Protobuf hardening
+
+    func testTruncatedBoolThrows() {
+        // Field 9 (beat) tag with no value byte following.
+        XCTAssertThrowsError(try IlsProtobuf.decodeItem([0x48])) { error in
+            XCTAssertEqual(error as? IlsDecodeError, .truncatedInput)
+        }
+    }
+
+    func testNegativeVarintDoesNotTrap() throws {
+        // Field 1 (frameInTrack) = -1 → 10-byte sign-extended varint.
+        let bytes: [UInt8] = [0x08, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01]
+        let item = try IlsProtobuf.decodeItem(bytes)
+        XCTAssertEqual(item.frameInTrack, -1)
+    }
+
+    // MARK: - ISRC validation
+
+    func testISRCValidation() throws {
+        XCTAssertEqual(try IlsClient.validatedISRC("usum71000123"), "USUM71000123")
+        XCTAssertThrowsError(try IlsClient.validatedISRC("../secrets"))
+        XCTAssertThrowsError(try IlsClient.validatedISRC("US/UM71000123"))
+        XCTAssertThrowsError(try IlsClient.validatedISRC("SHORT"))
+    }
+
+    // MARK: - Token expiry
+
+    func testTokenExpiresEarlyWithSkew() {
+        let fresh = IlsClient.Token(installationId: "i", accessToken: "a", dpopNonce: "n",
+                                    expiresAt: Date.now.addingTimeInterval(120), keyThumbprint: "t")
+        XCTAssertTrue(fresh.isCurrent)
+        // Inside the 30 s skew window → already treated as expired.
+        let expiring = IlsClient.Token(installationId: "i", accessToken: "a", dpopNonce: "n",
+                                       expiresAt: Date.now.addingTimeInterval(20), keyThumbprint: "t")
+        XCTAssertFalse(expiring.isCurrent)
+    }
+
     // MARK: - DPoP
 
     func testDPoPProofIsES256WithRawSignature() throws {

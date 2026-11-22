@@ -20,6 +20,11 @@ struct IlsAnalysis {
     var items: [IlsItem] = []
     var tempo = 0.0
 
+    /// Upper bound on a frame index when allocating per-frame buffers:
+    /// one hour at 100 Hz. A corrupt or adversarial `frameInTrack` can be
+    /// any 64-bit value, so the envelope is never sized past this.
+    static let maxFrames = 360_000
+
     /// The 100 Hz frame this item describes.
     struct IlsItem {
         var frameInTrack = 0
@@ -118,6 +123,32 @@ struct IlsProtobufReader {
     }
 }
 
+/// Throwing reads layered over `IlsProtobufReader`, so a truncated stream
+/// raises `truncatedInput` instead of silently yielding a default (a
+/// missing bool read as `true`, a missing double read as 0, etc.).
+private extension IlsProtobufReader {
+    mutating func requireVarint() throws -> UInt64 {
+        guard let value = readVarint() else { throw IlsDecodeError.truncatedInput }
+        return value
+    }
+
+    /// A signed protobuf integer. Negative `int32`/`int64` values arrive as a
+    /// 10-byte sign-extended two's-complement `UInt64` (≥ 2^63); reinterpret
+    /// the bit pattern rather than letting `Int(_:)` trap on overflow.
+    mutating func requireSignedInt() throws -> Int {
+        Int(Int64(bitPattern: try requireVarint()))
+    }
+
+    mutating func requireBool() throws -> Bool {
+        try requireVarint() != 0
+    }
+
+    mutating func requireDouble() throws -> Double {
+        guard let bits = readFixed64() else { throw IlsDecodeError.truncatedInput }
+        return Double(bitPattern: bits)
+    }
+}
+
 /// Decoding errors for the iLightShow analysis payload.
 enum IlsDecodeError: Error, Equatable {
     case truncatedInput
@@ -135,7 +166,7 @@ enum IlsProtobuf {
         while let (field, wireType) = reader.nextField() {
             switch (field, wireType) {
             case (1, 1):
-                analysis.duration = Double(bitPattern: reader.readFixed64() ?? 0)
+                analysis.duration = try reader.requireDouble()
             case (2, 2):
                 analysis.title = try string(field: 2, wireType: 2, reader: &reader)
             case (3, 2):
@@ -143,7 +174,9 @@ enum IlsProtobuf {
             case (4, 2):
                 analysis.isrc = try string(field: 4, wireType: 2, reader: &reader)
             case (5, 2):
-                analysis.shazamFingerprint = reader.readBytes(count: try length(reader: &reader)) ?? []
+                let count = try length(reader: &reader)
+                guard let fingerprint = reader.readBytes(count: count) else { throw IlsDecodeError.truncatedInput }
+                analysis.shazamFingerprint = fingerprint
             case (7, 2):
                 analysis.chromaprint = try string(field: 7, wireType: 2, reader: &reader)
             case (8, 2):
@@ -151,7 +184,7 @@ enum IlsProtobuf {
                 guard let itemBytes = reader.readBytes(count: count) else { throw IlsDecodeError.truncatedInput }
                 analysis.items.append(try decodeItem(itemBytes))
             case (9, 1):
-                analysis.tempo = Double(bitPattern: reader.readFixed64() ?? 0)
+                analysis.tempo = try reader.requireDouble()
             default:
                 guard reader.skip(wireType: wireType) else {
                     throw IlsDecodeError.fieldNotDecoded(field: field, wireType: wireType)
@@ -168,43 +201,43 @@ enum IlsProtobuf {
         while let (field, wireType) = reader.nextField() {
             switch (field, wireType) {
             case (1, 0):
-                item.frameInTrack = Int(reader.readVarint() ?? 0)
+                item.frameInTrack = try reader.requireSignedInt()
             case (2, 0):
-                item.frameInPortion = Int(reader.readVarint() ?? 0)
+                item.frameInPortion = try reader.requireSignedInt()
             case (3, 0):
-                item.drum = reader.readVarint() != 0
+                item.drum = try reader.requireBool()
             case (4, 0):
-                item.drumAct = Int(reader.readVarint() ?? 0)
+                item.drumAct = try reader.requireSignedInt()
             case (5, 0):
-                item.buildup = reader.readVarint() != 0
+                item.buildup = try reader.requireBool()
             case (6, 0):
-                item.buildupAct = Int(reader.readVarint() ?? 0)
+                item.buildupAct = try reader.requireSignedInt()
             case (7, 0):
-                item.strobe = reader.readVarint() != 0
+                item.strobe = try reader.requireBool()
             case (8, 0):
-                item.strobeAct = Int(reader.readVarint() ?? 0)
+                item.strobeAct = try reader.requireSignedInt()
             case (9, 0):
-                item.beat = reader.readVarint() != 0
+                item.beat = try reader.requireBool()
             case (10, 0):
-                item.beatAct = Int(reader.readVarint() ?? 0)
+                item.beatAct = try reader.requireSignedInt()
             case (11, 0):
-                item.downbeat = reader.readVarint() != 0
+                item.downbeat = try reader.requireBool()
             case (12, 0):
-                item.downbeatAct = Int(reader.readVarint() ?? 0)
+                item.downbeatAct = try reader.requireSignedInt()
             case (13, 0):
-                item.section = reader.readVarint() != 0
+                item.section = try reader.requireBool()
             case (14, 0):
-                item.sectionAct = Int(reader.readVarint() ?? 0)
+                item.sectionAct = try reader.requireSignedInt()
             case (15, 0):
-                item.aggressiveAct = Int(reader.readVarint() ?? 0)
+                item.aggressiveAct = try reader.requireSignedInt()
             case (16, 0):
-                item.partyAct = Int(reader.readVarint() ?? 0)
+                item.partyAct = try reader.requireSignedInt()
             case (17, 1):
-                item.timeBeforeNextDrum = Double(bitPattern: reader.readFixed64() ?? 0)
+                item.timeBeforeNextDrum = try reader.requireDouble()
             case (18, 1):
-                item.timeBeforeNextBeat = Double(bitPattern: reader.readFixed64() ?? 0)
+                item.timeBeforeNextBeat = try reader.requireDouble()
             case (19, 0):
-                item.singleLightUse = reader.readVarint() != 0
+                item.singleLightUse = try reader.requireBool()
             default:
                 guard reader.skip(wireType: wireType) else {
                     throw IlsDecodeError.fieldNotDecoded(field: field, wireType: wireType)
@@ -238,7 +271,14 @@ extension IlsAnalysis {
     /// so this is a direct copy — no resampling. Beats, downbeats, drums,
     /// sections, and tempos all come straight from the timeline.
     var beatMap: BeatMap? {
-        let beatItems = items.filter(\.beat)
+        // `BeatMap.beats` must be strictly ascending (the grid's binary
+        // search and the nearest-beat scan below both rely on it); wire
+        // order is not guaranteed, so sort and drop duplicate frames.
+        var seenFrames = Set<Int>()
+        let beatItems = items
+            .filter(\.beat)
+            .sorted { $0.frameInTrack < $1.frameInTrack }
+            .filter { seenFrames.insert($0.frameInTrack).inserted }
         guard beatItems.count >= 4 else { return nil }
 
         let beats = beatItems.map(\.time)
@@ -246,7 +286,7 @@ extension IlsAnalysis {
         // Downbeat phase: which beat of the 4-beat bar carries the downbeat
         // (mode of the nearest-beat index % 4). Defaults to 0.
         var downbeatOffset = 0
-        let downbeats = items.filter(\.downbeat).sorted(by: { $0.frameInTrack < $1.frameInTrack })
+        let downbeats = items.filter(\.downbeat).sorted { $0.frameInTrack < $1.frameInTrack }
         if !downbeats.isEmpty {
             var phases: [Int: Int] = [:]
             var beatIndex = 0
@@ -257,11 +297,19 @@ extension IlsAnalysis {
                 }
                 phases[beatIndex % BeatMap.beatsPerBar, default: 0] += 1
             }
-            downbeatOffset = phases.max { $0.value < $1.value }?.key ?? 0
+            // Mode, tie-broken toward the lowest phase for a stable result
+            // (Dictionary iteration order is otherwise randomized), matching
+            // BeatMapBuilder.downbeatOffset.
+            downbeatOffset = phases
+                .sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }
+                .first?.key ?? 0
         }
 
-        // Envelope at 100 Hz: strongest event per frame wins.
-        let lastFrame = items.map(\.frameInTrack).max() ?? 0
+        // Envelope at 100 Hz: strongest event per frame wins. The frame
+        // count is clamped so a corrupt `frameInTrack` cannot force a
+        // multi-gigabyte allocation.
+        let maxFrame = items.lazy.map(\.frameInTrack).filter { $0 >= 0 }.max() ?? 0
+        let lastFrame = min(maxFrame, IlsAnalysis.maxFrames)
         var envelope = [Double](repeating: 0, count: lastFrame + 1)
         for item in items {
             guard item.frameInTrack >= 0, item.frameInTrack < envelope.count else { continue }
@@ -272,7 +320,12 @@ extension IlsAnalysis {
             if item.buildup { strength = max(strength, 0.5) }
             if item.strobe { strength = max(strength, 0.4) }
             if item.section { strength = max(strength, 0.8) }
-            envelope[item.frameInTrack] = strength
+            // The server already sends per-event intensities (0…~100); fold
+            // the strongest in so a quiet drum is not identical to a loud one.
+            let act = Double(max(item.beatAct, item.drumAct, item.sectionAct, item.aggressiveAct, item.partyAct))
+            if act > 0 { strength = max(strength, min(1.0, act / 100.0)) }
+            // Preserve the strongest event when two items share a frame.
+            envelope[item.frameInTrack] = max(envelope[item.frameInTrack], strength)
         }
 
         // Confidence: how evenly spaced the beats are (1 - relative spread).
@@ -293,11 +346,12 @@ extension IlsAnalysis {
             }
         }
 
-        // Bar energy: strongest envelope value inside each bar window.
-        // Bar length comes from downbeat spacing when present, else the
+        // Bar energy: mean envelope value inside each bar window, so loud and
+        // quiet bars differ (a max would read 1.0 on every bar that holds a
+        // beat). Bar length comes from downbeat spacing when present, else the
         // median 4-beat span.
         var barLength: Double = 0
-        let downbeatTimes = items.filter(\.downbeat).map(\.time).sorted()
+        let downbeatTimes = downbeats.map(\.time)
         if downbeatTimes.count >= 2 {
             var spacings: [Double] = []
             for i in 1..<downbeatTimes.count {
@@ -305,9 +359,9 @@ extension IlsAnalysis {
                 if spacing > 0.05 { spacings.append(spacing) }
             }
             if !spacings.isEmpty { spacings.sort(); barLength = spacings[spacings.count / 2] }
-        } else if beats.count >= BeatMap.beatsPerBar {
+        } else if beats.count > BeatMap.beatsPerBar {
             var spans: [Double] = []
-            for i in 0...max(beats.count - BeatMap.beatsPerBar, 0) {
+            for i in 0..<(beats.count - BeatMap.beatsPerBar) {
                 let span = beats[i + BeatMap.beatsPerBar] - beats[i]
                 if span > 0.05 { spans.append(span) }
             }
@@ -321,7 +375,8 @@ extension IlsAnalysis {
                 let first = max(0, Int(start * BeatMap.envelopeRate))
                 let last = min(envelope.count - 1, Int(end * BeatMap.envelopeRate))
                 if last >= first {
-                    barEnergy.append(envelope[first...last].max() ?? 0)
+                    let window = envelope[first...last]
+                    barEnergy.append(window.reduce(0, +) / Double(window.count))
                 }
             }
         }

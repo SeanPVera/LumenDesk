@@ -4,11 +4,17 @@ options:
     macOS: "13.0"
     iOS: "16.0"
   createIntermediateGroups: true
+attributes:
+  LastUpgradeCheck: "2700"
+  LastSwiftUpdateCheck: "2700"
 settings:
   base:
     SWIFT_VERSION: "5.0"
     DEVELOPMENT_TEAM: "SW2N54YNK3"
     CODE_SIGN_STYLE: Automatic
+    # Modern signing identity name; without this xcodegen emits the legacy
+    # "iPhone Developer" string into the regenerated project.
+    CODE_SIGN_IDENTITY: "Apple Development"
 targets:
   LumenDesk:
     type: application
@@ -59,6 +65,9 @@ targets:
       - target: Brotli
     settings:
       base:
+        # Set explicitly so xcodegen does not inject the legacy
+        # "iPhone Developer" identity into the application target.
+        CODE_SIGN_IDENTITY: "Apple Development"
         PRODUCT_BUNDLE_IDENTIFIER: com.lumendesk.LumenDesk
         # Info.plist reads both through $(...), so a release build can
         # override them on the xcodebuild command line without editing
@@ -88,8 +97,9 @@ targets:
           # bundle immediately before requesting Screen Recording access.
           REGISTER_WITH_LAUNCH_SERVICES[sdk=macosx*]: NO
   Brotli:
-    # The official Brotli 1.2.0 C library (Apache-2.0), vendored for the
-    # iLightShow bundle decoder — see Vendor/brotli/LICENSE.
+    # Vendored Brotli C sources (MIT; see Vendor/brotli/LICENSE), for the
+    # iLightShow bundle decoder. Taken from upstream google/brotli; the
+    # dec/ + common/ tree is what production uses, enc/ is DEBUG-only (tests).
     type: library.static
     supportedDestinations: [macOS, iOS]
     sources:
@@ -142,8 +152,11 @@ schemes:
       config: Debug
     test:
       config: Debug
+      # Keep the parallel test run main's scheme had; xcodegen otherwise
+      # defaults a single test target to non-parallel.
       targets:
-        - LumenDeskTests
+        - name: LumenDeskTests
+          parallelizable: true
     analyze:
       config: Debug
     profile:

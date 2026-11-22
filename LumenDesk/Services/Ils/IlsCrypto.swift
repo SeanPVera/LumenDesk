@@ -72,8 +72,11 @@ enum IlsCrypto {
         }
     }
 
-    /// Encrypts and compresses — used by tests to build synthetic bundles
-    /// in the exact server format.
+    #if DEBUG
+    /// Encrypts and compresses — used only by tests to build synthetic
+    /// bundles in the exact server format. Excluded from Release (production
+    /// only ever decrypts), which keeps the Brotli encoder out of the
+    /// shipping binary.
     static func seal(plain: [UInt8], nonce: [UInt8]) throws -> [UInt8] {
         guard nonce.count == 12 else { throw BundleError.tooShort }
         guard let compressed = IlsBrotli.compress(plain) else { throw BundleError.brotliFailed }
@@ -85,4 +88,5 @@ enum IlsCrypto {
         )
         return nonce + [UInt8](sealed.ciphertext) + [UInt8](sealed.tag)
     }
+    #endif
 }

@@ -3,6 +3,8 @@ import Foundation
 /// Errors from the iLightShow client.
 enum IlsError: Error, LocalizedError {
     case notEnrolled
+    case invalidISRC(String)
+    case responseTooLarge(Int)
     case challengeFailed(status: Int, body: String)
     case enrollFailed(status: Int, body: String)
     case analysisFailed(status: Int, body: String)
@@ -13,6 +15,10 @@ enum IlsError: Error, LocalizedError {
         switch self {
         case .notEnrolled:
             return "Not enrolled with the iLightShow API."
+        case .invalidISRC(let value):
+            return "Not a valid ISRC: \(value)"
+        case .responseTooLarge(let bytes):
+            return "Analysis response too large (\(bytes) bytes)."
         case .challengeFailed(let status, let body):
             return "Challenge failed (\(status)): \(body)"
         case .enrollFailed(let status, let body):
@@ -37,7 +43,10 @@ enum IlsError: Error, LocalizedError {
 ///    variant (the backend patch ships with this PR).
 /// 3. `GET /ils/v3/isrc/{isrc}` — DPoP-authenticated; the body is the
 ///    encrypted bundle opened by `IlsCrypto`.
-final class IlsClient: @unchecked Sendable {
+///
+/// An `actor` so the mutable token/nonce state is never touched by two
+/// overlapping requests at once.
+actor IlsClient {
     struct Configuration {
         var baseURL: URL
         var platform: String
@@ -50,11 +59,11 @@ final class IlsClient: @unchecked Sendable {
         init(
             baseURL: URL = URL(string: "https://api.ilightshow.app")!,
             platform: String = "macos",
-            appVersion: String = "2.1",
-            appBuild: Int = 291,
-            os: String = "mac",
+            appVersion: String = Configuration.bundleAppVersion,
+            appBuild: Int = Configuration.bundleAppBuild,
+            os: String = Configuration.defaultOS,
             key: IlsDPoPKey? = nil,
-            session: URLSession = .shared
+            session: URLSession? = nil
         ) throws {
             self.baseURL = baseURL
             self.platform = platform
@@ -62,30 +71,64 @@ final class IlsClient: @unchecked Sendable {
             self.appBuild = appBuild
             self.os = os
             self.key = try key ?? IlsDPoPKey()
-            self.session = session
+            self.session = session ?? Configuration.makeSession()
+        }
+
+        /// `CFBundleShortVersionString`, with a harmless fallback for tests.
+        static var bundleAppVersion: String {
+            Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
+        }
+
+        /// `CFBundleVersion`, with a harmless fallback for tests.
+        static var bundleAppBuild: Int {
+            Int(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "") ?? 0
+        }
+
+        static var defaultOS: String {
+            #if os(macOS)
+            return "macos"
+            #else
+            return "ios"
+            #endif
+        }
+
+        /// A session with finite timeouts, so a stalled request cannot hang
+        /// the music path forever (the default `.shared` waits indefinitely).
+        static func makeSession() -> URLSession {
+            let configuration = URLSessionConfiguration.ephemeral
+            configuration.timeoutIntervalForRequest = 20
+            configuration.timeoutIntervalForResource = 40
+            configuration.waitsForConnectivity = false
+            return URLSession(configuration: configuration)
         }
     }
 
-    struct Token {
+    struct Token: Codable {
         let installationId: String
         let accessToken: String
-        let dpopNonce: String
+        var dpopNonce: String
         let expiresAt: Date?
+        /// Thumbprint of the DPoP key this token was issued against.
+        let keyThumbprint: String
 
+        /// Expires 30 s early as a clock-skew buffer.
         var isCurrent: Bool {
             guard let expiresAt else { return true }
-            return Date.now < expiresAt.addingTimeInterval(30)
+            return Date.now < expiresAt.addingTimeInterval(-30)
         }
     }
 
-    private static let tokenStorageKey = "com.lumendesk.ilightshow.token"
+    private static let tokenAccount = "com.lumendesk.ilightshow.token"
+    /// Analysis bundles are a few hundred KB; reject anything that could be a
+    /// decompression-bomb feed before it reaches GCM/Brotli.
+    private static let maxBundleBytes = 8 * 1024 * 1024
 
     private let config: Configuration
     private(set) var token: Token?
 
     /// Creates a client with default configuration.
-    convenience init() throws {
-        try self.init(configuration: Configuration())
+    init() throws {
+        self.config = try Configuration()
     }
 
     init(configuration: Configuration) {
@@ -144,66 +187,99 @@ final class IlsClient: @unchecked Sendable {
               let enrollment = try? Self.json(enrollData),
               let installationId = enrollment["installation_id"] as? String ?? enrollment["installationId"] as? String,
               let accessToken = enrollment["access_token"] as? String ?? enrollment["accessToken"] as? String,
-              let dpopNonce = enrollment["dpop_nonce"] as? String ?? enrollment["dpopNonce"] as? String
+              let dpopNonce = enrollment["dpop_nonce"] as? String
+                ?? enrollment["dpopNonce"] as? String
+                ?? enrollHTTP?.value(forHTTPHeaderField: "DPoP-Nonce")
         else {
             throw IlsError.enrollFailed(status: enrollStatus, body: String(data: enrollData, encoding: .utf8) ?? "no HTTP response")
         }
 
-        var expiresAt: Date?
-        if let unix = enrollment["expires_at"] as? Double {
-            expiresAt = Date(timeIntervalSince1970: unix)
-        } else if let iso = enrollment["expires_at"] as? String {
-            expiresAt = Self.iso8601.date(from: iso)
-        }
+        let expiresAt = Self.parseExpiry(enrollment["expires_at"] ?? enrollment["expiresAt"])
 
         let newToken = Token(
             installationId: installationId,
             accessToken: accessToken,
             dpopNonce: dpopNonce,
-            expiresAt: expiresAt
+            expiresAt: expiresAt,
+            keyThumbprint: config.key.thumbprint
         )
         token = newToken
         persistToken()
         return newToken
     }
 
-    /// Restores the persisted token from a previous run, if still valid.
+    /// Restores the persisted token from a previous run, if still valid and
+    /// bound to the current DPoP key.
     func restoreToken() {
-        guard
-            let data = UserDefaults.standard.data(forKey: Self.tokenStorageKey),
-            let stored = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-            let installationId = stored["installationId"] as? String,
-            let accessToken = stored["accessToken"] as? String,
-            let dpopNonce = stored["dpopNonce"] as? String
+        guard let data = IlsKeychain.load(account: Self.tokenAccount, service: IlsDPoPKey.service),
+              let candidate = try? JSONDecoder().decode(Token.self, from: data)
         else { return }
-        let candidate = Token(
-            installationId: installationId,
-            accessToken: accessToken,
-            dpopNonce: dpopNonce,
-            expiresAt: (stored["expiresAt"] as? Double).map { Date(timeIntervalSince1970: $0) }
-        )
+        // A token issued against a different key (e.g. the key was
+        // regenerated after a Keychain miss) is useless — discard it.
+        guard candidate.keyThumbprint == config.key.thumbprint else {
+            IlsKeychain.delete(account: Self.tokenAccount, service: IlsDPoPKey.service)
+            return
+        }
         if candidate.isCurrent { token = candidate }
     }
 
     private func persistToken() {
-        guard let token else { return }
-        let stored: [String: Any] = [
-            "installationId": token.installationId,
-            "accessToken": token.accessToken,
-            "dpopNonce": token.dpopNonce,
-            "expiresAt": (token.expiresAt?.timeIntervalSince1970).map { $0 } ?? NSNull(),
-        ]
-        UserDefaults.standard.set(try? JSONSerialization.data(withJSONObject: stored), forKey: Self.tokenStorageKey)
+        guard let token, let data = try? JSONEncoder().encode(token) else { return }
+        IlsKeychain.save(data, account: Self.tokenAccount, service: IlsDPoPKey.service)
     }
 
     // MARK: - Analysis
 
     /// Fetches and decrypts the analysis bundle for an ISRC.
     ///
-    /// The server returns 201 with the bundle when an analysis exists and
-    /// 200 with an empty body otherwise (the app's behavior, `C0658l`).
-    func analysis(for isrc: String) async throws -> IlsAnalysis {
-        guard let token, token.isCurrent else { throw IlsError.notEnrolled }
+    /// `201` carries the bundle; `200` means no analysis exists. A single
+    /// `401` is recovered from by refreshing the `DPoP-Nonce` (and
+    /// re-enrolling when the token has expired) and retrying once.
+    func analysis(for rawISRC: String) async throws -> IlsAnalysis {
+        let isrc = try Self.validatedISRC(rawISRC)
+        guard token != nil else { throw IlsError.notEnrolled }
+        if token?.isCurrent == false { try await enroll() }
+
+        var attempts = 0
+        while true {
+            attempts += 1
+            guard let current = token else { throw IlsError.notEnrolled }
+            let (data, http) = try await performAnalysisRequest(isrc: isrc, token: current)
+            let status = http?.statusCode ?? -1
+
+            if status == 401, attempts < 2 {
+                var recovered = false
+                if let nonce = http?.value(forHTTPHeaderField: "DPoP-Nonce") {
+                    token?.dpopNonce = nonce
+                    persistToken()
+                    recovered = true
+                }
+                if Self.indicatesExpiredToken(http: http, body: data) {
+                    try await enroll()
+                    recovered = true
+                }
+                if recovered { continue }
+                throw IlsError.analysisFailed(status: status, body: String(data: data, encoding: .utf8) ?? "no HTTP response")
+            }
+
+            switch status {
+            case 201:
+                guard data.count <= Self.maxBundleBytes else { throw IlsError.responseTooLarge(data.count) }
+                guard data.count >= 12 + 16 else { throw IlsError.noAnalysisFound }
+                do {
+                    return try IlsCrypto.decodeBundle(Array(data))
+                } catch let error as IlsCrypto.BundleError {
+                    throw IlsError.decoding("\(error)")
+                }
+            case 200:
+                throw IlsError.noAnalysisFound
+            default:
+                throw IlsError.analysisFailed(status: status, body: String(data: data, encoding: .utf8) ?? "no HTTP response")
+            }
+        }
+    }
+
+    private func performAnalysisRequest(isrc: String, token: Token) async throws -> (Data, HTTPURLResponse?) {
         let url = config.baseURL.appendingPathComponent("ils/v3/isrc/\(isrc)")
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
@@ -223,19 +299,51 @@ final class IlsClient: @unchecked Sendable {
 
         let (data, response) = try await config.session.data(for: request)
         let http = response as? HTTPURLResponse
-        let status = http?.statusCode ?? -1
-        guard (200...299).contains(status) else {
-            throw IlsError.analysisFailed(status: status, body: String(data: data, encoding: .utf8) ?? "no HTTP response")
+        if let expected = http?.expectedContentLength, expected > Int64(Self.maxBundleBytes) {
+            throw IlsError.responseTooLarge(Int(clamping: expected))
         }
-        guard data.count >= 12 + 16 else { throw IlsError.noAnalysisFound }
-        do {
-            return try IlsCrypto.decodeBundle(Array(data))
-        } catch let error as IlsCrypto.BundleError {
-            throw IlsError.decoding("\(error)")
-        }
+        return (data, http)
     }
 
     // MARK: - Helpers
+
+    /// A valid ISRC is two letters, three alphanumerics, seven digits — 12
+    /// characters total. Rejecting anything else keeps `/`, `..` and spaces
+    /// out of the request path, and the uppercased form matches the `htu` the
+    /// server signs over.
+    static func validatedISRC(_ raw: String) throws -> String {
+        let candidate = raw.trimmingCharacters(in: .whitespaces).uppercased()
+        let pattern = "^[A-Z]{2}[A-Z0-9]{3}[0-9]{7}$"
+        guard candidate.range(of: pattern, options: .regularExpression) != nil else {
+            throw IlsError.invalidISRC(raw)
+        }
+        return candidate
+    }
+
+    /// Whether a 401 is a token-expiry signal (as opposed to a stale nonce),
+    /// read from `WWW-Authenticate` or an `{"error": …}` body.
+    private static func indicatesExpiredToken(http: HTTPURLResponse?, body: Data) -> Bool {
+        if let header = http?.value(forHTTPHeaderField: "WWW-Authenticate"),
+           header.localizedCaseInsensitiveContains("token_expired") {
+            return true
+        }
+        if let json = try? json(body), let error = json["error"] as? String {
+            return error == "token_expired"
+        }
+        return false
+    }
+
+    /// Parses an `expires_at` that may be a UNIX time or an ISO-8601 string
+    /// (with or without fractional seconds). The format styles are value
+    /// types, so this is safe to call from concurrent requests.
+    static func parseExpiry(_ value: Any?) -> Date? {
+        if let unix = value as? Double { return Date(timeIntervalSince1970: unix) }
+        if let unix = value as? Int { return Date(timeIntervalSince1970: Double(unix)) }
+        guard let string = value as? String else { return nil }
+        if let date = try? Date(string, strategy: .iso8601) { return date }
+        let fractional = Date.ISO8601FormatStyle(includingFractionalSeconds: true)
+        return try? fractional.parse(string)
+    }
 
     /// The same client headers the app sends on every request.
     private func addClientHeaders(_ request: inout URLRequest) {
@@ -246,8 +354,6 @@ final class IlsClient: @unchecked Sendable {
         request.setValue(config.os, forHTTPHeaderField: "x-ils-os")
         request.setValue("LumenDesk/\(config.appVersion)", forHTTPHeaderField: "User-Agent")
     }
-
-    private static let iso8601 = ISO8601DateFormatter()
 
     private static func json(_ data: Data) throws -> [String: Any] {
         guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {

@@ -4,7 +4,8 @@ import Security
 
 /// Errors from the DPoP key and proof machinery.
 enum DPoPError: Error, Equatable {
-    case keyCreationFailed
+    /// An unexpected Keychain status while loading the stored key (not a
+    /// plain "item not found"), which must not be mistaken for "no key".
     case keyImportFailed
     case signatureFailed
 }
@@ -16,17 +17,19 @@ enum DPoPError: Error, Equatable {
 /// presented at challenge time, with every request carrying a JWT proof
 /// signed by that key (`C0679t` in the 4.0.0-beta APK).
 final class IlsDPoPKey: @unchecked Sendable {
-    private static let keyAccount = "com.lumendesk.ilightshow.dpop.v1"
-    private static let service = "com.lumendesk.LumenDesk"
+    static let keyAccount = "com.lumendesk.ilightshow.dpop.v1"
+    static let service = "com.lumendesk.LumenDesk"
 
     private let privateKey: P256.Signing.PrivateKey
     private let jwkX: Data
     private let jwkY: Data
 
     /// Loads the persisted key when one exists, otherwise generates and
-    /// stores a fresh one.
+    /// stores a fresh one. A transient Keychain error (locked, ACL denial)
+    /// is surfaced rather than treated as "no key", so the existing enrolled
+    /// key is never silently replaced.
     convenience init() throws {
-        if let stored = IlsKeychain.load(account: Self.keyAccount, service: Self.service),
+        if let stored = try IlsKeychain.loadStrict(account: Self.keyAccount, service: Self.service),
            let key = Self.importPrivateKey(stored) {
             self.init(privateKey: key)
             return
@@ -54,15 +57,18 @@ final class IlsDPoPKey: @unchecked Sendable {
 
     var publicKey: P256.Signing.PublicKey { privateKey.publicKey }
 
-    /// The JWK fragment for DPoP proof headers —
-    /// `"jwk":{"kty":"EC","crv":"P-256","x":"…","y":"…"}`.
-    var jwkFragment: String {
-        "\"jwk\":{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"\(IlsDPoP.base64URL(jwkX))\",\"y\":\"\(IlsDPoP.base64URL(jwkY))\"}"
-    }
-
-    /// The JWK as a dictionary, for the challenge body's `public_key`.
+    /// The JWK as a dictionary, for the challenge body's `public_key` and the
+    /// DPoP proof header.
     var jwkDictionary: [String: String] {
         ["kty": "EC", "crv": "P-256", "x": IlsDPoP.base64URL(jwkX), "y": IlsDPoP.base64URL(jwkY)]
+    }
+
+    /// RFC 7638 JWK thumbprint (SHA-256 over the canonical member set). Binds
+    /// a persisted token to the key that enrolled it, so a token restored
+    /// after the key was regenerated is discarded rather than used.
+    var thumbprint: String {
+        let canonical = "{\"crv\":\"P-256\",\"kty\":\"EC\",\"x\":\"\(IlsDPoP.base64URL(jwkX))\",\"y\":\"\(IlsDPoP.base64URL(jwkY))\"}"
+        return IlsDPoP.sha256Base64URL(Data(canonical.utf8))
     }
 
     /// Signs with ECDSA P-256/SHA-256, returning the raw 64-byte `r || s`
@@ -76,7 +82,10 @@ final class IlsDPoPKey: @unchecked Sendable {
     }
 }
 
-/// A minimal Keychain store for the DPoP key.
+/// A minimal Keychain store for the DPoP key and the enrolment token.
+///
+/// Items are `ThisDeviceOnly` so the device-bound credential is not carried
+/// to another device through an encrypted backup.
 enum IlsKeychain {
     @discardableResult
     static func save(_ data: Data, account: String, service: String) -> Bool {
@@ -90,11 +99,22 @@ enum IlsKeychain {
             kSecAttrAccount: account,
             kSecAttrService: service,
             kSecValueData: data,
-            kSecAttrAccessible: kSecAttrAccessibleAfterFirstUnlock,
+            kSecAttrAccessible: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
         ] as CFDictionary, nil) == errSecSuccess
     }
 
-    static func load(account: String, service: String) -> Data? {
+    static func delete(account: String, service: String) {
+        SecItemDelete([
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrAccount: account,
+            kSecAttrService: service,
+        ] as CFDictionary)
+    }
+
+    /// Returns the stored data, nil when the item is absent, or throws on an
+    /// unexpected status so callers do not mistake a locked Keychain for a
+    /// missing item (which would otherwise regenerate and overwrite the key).
+    static func loadStrict(account: String, service: String) throws -> Data? {
         var item: CFTypeRef?
         let status = SecItemCopyMatching([
             kSecClass: kSecClassGenericPassword,
@@ -103,8 +123,20 @@ enum IlsKeychain {
             kSecReturnData: true,
             kSecMatchLimit: kSecMatchLimitOne,
         ] as CFDictionary, &item)
-        guard status == errSecSuccess else { return nil }
-        return item as? Data
+        switch status {
+        case errSecSuccess:
+            return item as? Data
+        case errSecItemNotFound:
+            return nil
+        default:
+            throw DPoPError.keyImportFailed
+        }
+    }
+
+    /// Best-effort load used where an absent or unreadable item is equally a
+    /// "no credential" outcome (the token, which is simply re-fetched).
+    static func load(account: String, service: String) -> Data? {
+        (try? loadStrict(account: account, service: service)) ?? nil
     }
 }
 
@@ -125,6 +157,11 @@ enum IlsDPoP {
     /// Builds a DPoP proof JWT (ES256), mirroring `C0679t` in the APK:
     /// header `{typ, alg, jwk}`, payload `{htm, htu, iat, jti, nonce, ath?}`,
     /// signed over `b64url(header).b64url(payload)`.
+    ///
+    /// Header and payload are JSON-serialized (not string-interpolated) so a
+    /// quote, backslash or control character in `url` or the server-supplied
+    /// `nonce` cannot break the JSON or inject claims. Per RFC 9449 §4.2 the
+    /// `htu` claim is the request URI with query and fragment removed.
     static func proof(
         key: IlsDPoPKey,
         method: String,
@@ -132,13 +169,35 @@ enum IlsDPoP {
         nonce: String,
         accessToken: String? = nil
     ) throws -> String {
-        let header = "{\"typ\":\"dpop+jwt\",\"alg\":\"ES256\"," + key.jwkFragment + "}"
-        var payload = "\"htm\":\"\(method)\",\"htu\":\"\(url)\",\"iat\":\(Int(Date().timeIntervalSince1970)),\"jti\":\"\(UUID().uuidString)\",\"nonce\":\"\(nonce)\""
-        if let token = accessToken {
-            payload += ",\"ath\":\"\(sha256Base64URL(Data(token.utf8)))\""
+        let header: [String: Any] = [
+            "typ": "dpop+jwt",
+            "alg": "ES256",
+            "jwk": key.jwkDictionary,
+        ]
+        var payload: [String: Any] = [
+            "htm": method,
+            "htu": htu(from: url),
+            "iat": Int(Date().timeIntervalSince1970),
+            "jti": UUID().uuidString,
+            "nonce": nonce,
+        ]
+        if let accessToken {
+            payload["ath"] = sha256Base64URL(Data(accessToken.utf8))
         }
-        let signingInput = base64URL(Data(header.utf8)) + "." + base64URL(Data("{\(payload)}".utf8))
+        let signingInput = try base64URL(json(header)) + "." + base64URL(json(payload))
         let signature = try key.sign(Data(signingInput.utf8))
         return signingInput + "." + base64URL(signature)
+    }
+
+    /// The `htu` value: the URI without query or fragment (RFC 9449 §4.2).
+    private static func htu(from url: String) -> String {
+        guard var components = URLComponents(string: url) else { return url }
+        components.query = nil
+        components.fragment = nil
+        return components.string ?? url
+    }
+
+    private static func json(_ object: [String: Any]) throws -> Data {
+        try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
     }
 }

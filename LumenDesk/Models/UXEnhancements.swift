@@ -209,6 +209,9 @@ enum AppPreferenceKey {
     static let menuBarScope = "LumenDesk.menuBarScope.v1"
     static let showMenuBarUrgentOnly = "LumenDesk.menuBarUrgentOnly.v1"
     static let audioPrivacyAcknowledged = "LumenDesk.audioPrivacyAcknowledged.v1"
+    /// Opt-in: use iLightShow's precomputed analysis (track identified by
+    /// ShazamKit) as the beat map in Music Mode, falling back to live learning.
+    static let musicServerAnalysis = "LumenDesk.musicMode.serverAnalysis.v1"
     /// Ephemeral cross-scene handoff from the menu-bar controller to the
     /// independent Room Canvas session. The canvas clears it after consuming
     /// the requested room so choosing the same room again still produces a

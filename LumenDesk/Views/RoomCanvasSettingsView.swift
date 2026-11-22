@@ -53,6 +53,7 @@ struct RoomCanvasSettingsView: View {
     @AppStorage(AppPreferenceKey.quietInterface) private var quietInterface = false
     @AppStorage(AppPreferenceKey.confirmationPolicy) private var confirmationPolicy = ConfirmationPolicy.balanced.rawValue
     @AppStorage(AppPreferenceKey.audioPrivacyAcknowledged) private var audioAcknowledged = false
+    @AppStorage(AppPreferenceKey.musicServerAnalysis) private var musicServerAnalysis = false
     @State private var backupDocument: RoomLookBackupDocument = RoomLookBackupDocument()
     @State private var exportingBackup: Bool = false
     @State private var importingBackup: Bool = false
@@ -225,6 +226,17 @@ struct RoomCanvasSettingsView: View {
                     PlatformOpener.openSettings(macPane: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
                 }
                 .buttonStyle(PolarButtonStyle(kind: .quiet, compact: true))
+            }
+            card {
+                HStack {
+                    Text("Use iLightShow analysis (experimental)")
+                    Spacer()
+                    Toggle("Use iLightShow analysis", isOn: $musicServerAnalysis)
+                        .toggleStyle(.switch)
+                        .labelsHidden()
+                        .tint(Polar.accent)
+                }
+                footnote("Identifies the playing track with ShazamKit and fetches its precomputed beat map, so the show follows the song's own structure. Falls back to live listening when a track can't be identified or has no analysis. Takes effect the next time Music Mode starts.")
             }
         }
     }

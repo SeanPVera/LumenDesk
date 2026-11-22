@@ -50,6 +50,9 @@ enum BeatMapStatus: Equatable {
 /// live audio. Main thread only.
 final class BeatMapCoordinator {
     var onStatusChange: ((BeatMapStatus) -> Void)?
+    /// Fired when the followed track changes or stops, so a track identifier
+    /// can restart. Main thread, like every other callback here.
+    var onTrackChanged: (() -> Void)?
     private(set) var status: BeatMapStatus = .off {
         didSet { if status != oldValue { onStatusChange?(status) } }
     }
@@ -85,6 +88,9 @@ final class BeatMapCoordinator {
     private var lastAlignment = -Double.greatestFiniteMagnitude
     private var acceptsHopsSince = -Double.greatestFiniteMagnitude
     private var automationDenied = false
+    /// Track keys whose map came from the server; the live learner must not
+    /// overwrite an authoritative map with a refinement of its own.
+    private var serverMapKeys: Set<String> = []
     #if os(macOS)
     private var monitor: NowPlayingMonitor?
     #endif
@@ -116,6 +122,7 @@ final class BeatMapCoordinator {
         map = nil
         clock.reset()
         current = nil
+        serverMapKeys.removeAll()
         liveOnsets.removeAll()
         lastAlignment = -Double.greatestFiniteMagnitude
         acceptsHopsSince = -Double.greatestFiniteMagnitude
@@ -204,6 +211,7 @@ final class BeatMapCoordinator {
             map = nil
             clock.reset()
             resetLiveHistory(since: now())
+            onTrackChanged?()
             updateFollowingStatus()
             return
         }
@@ -212,6 +220,7 @@ final class BeatMapCoordinator {
             endTrack()
             clock.reset()
             resetLiveHistory(since: sample.sampledAt)
+            onTrackChanged?()
             let progress = savedLearning[key].flatMap { abs($0.duration - sample.duration) < 1 ? $0 : nil }
                 ?? store.loadLearning(key: key, duration: sample.duration)
             if let cached = store.load(key: key) {
@@ -238,6 +247,32 @@ final class BeatMapCoordinator {
             resetLiveHistory(since: sample.sampledAt)
         }
         updateFollowingStatus()
+    }
+
+    /// The followed track's key when it is a candidate for a server map
+    /// (following, playing, not already server-mapped) — the owner fetches the
+    /// map for this key off the main thread and hands it back to
+    /// `adoptServerMap(_:key:)`. Nil means "no fetch needed".
+    func serverMapTargetKey() -> String? {
+        guard source == .following, let current, current.isPlaying else { return nil }
+        let key = current.app.trackKey(current.trackID)
+        return serverMapKeys.contains(key) ? nil : key
+    }
+
+    /// Replaces the live-learned map with the server's authoritative one, if
+    /// the followed track has not changed since the fetch began.
+    func adoptServerMap(_ serverMap: BeatMap, key: String) {
+        guard source == .following, isCurrentTrack(key), serverMap.isPlayable else { return }
+        serverMapKeys.insert(key)
+        map = serverMap
+        // The server map is authoritative; stop learning this track so a live
+        // refinement cannot replace it.
+        learner = nil
+        updateFollowingStatus()
+    }
+
+    private func isCurrentTrack(_ key: String) -> Bool {
+        current.map { $0.app.trackKey($0.trackID) == key } ?? false
     }
 
     /// Hops analysed since the last render tick, with host times.
@@ -375,8 +410,9 @@ final class BeatMapCoordinator {
                 }
                 guard self.source == .following,
                       let current = self.current, current.app.trackKey(current.trackID) == finished.key else { return }
-                // A failed refinement must not replace an already usable map.
-                if let built, built.isPlayable { self.map = built }
+                // A failed refinement must not replace an already usable map,
+                // and the live learner never overrides an authoritative server map.
+                if let built, built.isPlayable, !self.serverMapKeys.contains(finished.key) { self.map = built }
                 if finished.coverage >= 0.99 { self.learner = nil }
                 self.updateFollowingStatus()
             }

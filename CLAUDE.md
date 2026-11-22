@@ -137,6 +137,7 @@ Flow: `AudioCaptureService` (ScreenCaptureKit system audio on macOS, AVAudioEngi
 - Live frames never emit persistent `ptReal` writes — RGBIC devices get the volatile razer stream only.
 - Photosensitivity-safe mode is on by default; `FlashSafetyLimiter` enforces a non-configurable hard ceiling of 3 flashes/second that no code path may bypass. Reduced Motion also disables flashes.
 - `BeatTracker.beatsPerBar` stays 4. Metre detection is an overlay (`MetreTracker` in the same file) so existing downbeat tests keep passing. Do not add new Swift files without sequential pbxproj A1/B1 IDs.
+- **iLightShow analysis source** (`MUSIC_MODE_ILS.md`, `Services/Music/`): an opt-in source for `BeatMapCoordinator`, not a new pipeline. `ShazamTrackIdentifier` resolves the ISRC from captured PCM, `IlsBeatMapProvider` fetches a precomputed `BeatMap` via `IlsClient`, and the coordinator adopts it over the live learner (`adoptServerMap`/`serverMapKeys`). It is best-effort: off by default (`AppPreferenceKey.musicServerAnalysis`), and every failure falls back to live learning. The renderer, flash-safety and `music-pulse` identifier are untouched.
 
 ### Views and navigation
 

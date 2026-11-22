@@ -208,6 +208,13 @@ actor IlsClient {
         return newToken
     }
 
+    /// Restores a stored token, enrolling only when there is none valid. The
+    /// single entry point callers use before fetching an analysis.
+    func ensureEnrolled() async throws {
+        if token == nil { restoreToken() }
+        if token?.isCurrent != true { try await enroll() }
+    }
+
     /// Restores the persisted token from a previous run, if still valid and
     /// bound to the current DPoP key.
     func restoreToken() {

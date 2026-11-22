@@ -165,6 +165,11 @@ final class AudioReactiveSessionController: ObservableObject {
 
     private let captureService: AudioCaptureService
     private let beatMaps: BeatMapCoordinator
+    /// Identifies the playing track (ShazamKit) so a precomputed iLightShow map
+    /// can be fetched. Nil when server analysis is off.
+    private var trackIdentifier: TrackIdentifying?
+    /// Fetches precomputed maps by ISRC. Nil when server analysis is off.
+    private var serverMapProvider: IlsBeatMapProviding?
     private let now: () -> TimeInterval
     /// The grid the last frame rendered against, which taps are measured from.
     private var calibrationGrids: [LightScope: (reference: TimeInterval, interval: TimeInterval, updatedAt: TimeInterval)] = [:]
@@ -216,6 +221,7 @@ final class AudioReactiveSessionController: ObservableObject {
                 self.restartSystemAudio()
             }
         }
+        configureServerAnalysis()
         subscriptionToken = captureService.subscribe { [weak self] snapshot in
             Task { @MainActor in
                 guard let self, self.sessions.values.contains(where: { !$0.synthetic }) else { return }
@@ -236,6 +242,56 @@ final class AudioReactiveSessionController: ObservableObject {
         }
     }
 
+    /// Opt-in: drive the beat grid from iLightShow's precomputed analysis,
+    /// identified by ShazamKit from the audio Music Mode already captures. When
+    /// off, or where ShazamKit is unavailable, Music Mode keeps learning maps
+    /// live exactly as before. A fetch that fails (no analysis, backend not
+    /// provisioned) silently falls back to the live map.
+    /// Idempotent and reversible, so the setting can be toggled between Music
+    /// Mode sessions without relaunching.
+    private func configureServerAnalysis() {
+        #if canImport(ShazamKit)
+        let enabled = Self.serverAnalysisEnabled
+        if enabled, trackIdentifier == nil {
+            serverMapProvider = IlsBeatMapProvider.live()
+            let identifier = ShazamTrackIdentifier()
+            trackIdentifier = identifier
+            identifier.onMatch = { [weak self] track in
+                // ShazamKit reports off an internal queue; hop to the main actor.
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated { self?.fetchServerMap(forISRC: track.isrc) }
+                }
+            }
+            beatMaps.onTrackChanged = { [weak identifier] in identifier?.reset() }
+            captureService.onPCMBuffer = { [weak identifier] buffer, time in
+                identifier?.append(buffer, at: time)
+            }
+        } else if !enabled, trackIdentifier != nil {
+            trackIdentifier = nil
+            serverMapProvider = nil
+            captureService.onPCMBuffer = nil
+            beatMaps.onTrackChanged = nil
+        }
+        #endif
+    }
+
+    /// Fetches the precomputed map for the identified track and hands it to the
+    /// coordinator if that track is still playing. Off the main thread for the
+    /// network/decode, back on it to adopt.
+    private func fetchServerMap(forISRC isrc: String) {
+        guard let provider = serverMapProvider, let key = beatMaps.serverMapTargetKey() else { return }
+        Task { @MainActor [weak self] in
+            guard let map = await provider.beatMap(forISRC: isrc) else { return }
+            self?.beatMaps.adoptServerMap(map, key: key)
+        }
+    }
+
+    /// Whether to fetch precomputed maps from iLightShow (default off; the
+    /// macOS Option A backend must be live first).
+    static var serverAnalysisEnabled: Bool {
+        UserDefaults.standard.bool(forKey: AppPreferenceKey.musicServerAnalysis)
+    }
+
     func start(
         scope: LightScope,
         configuration: MusicModeConfiguration,
@@ -251,6 +307,8 @@ final class AudioReactiveSessionController: ObservableObject {
             completion(.unavailable)
             return
         }
+        // Pick up a toggle of the server-analysis setting since the last start.
+        configureServerAnalysis()
         let startTime = now()
         clearCalibration(for: scope)
         if !useSyntheticPattern && !sessions.values.contains(where: { !$0.synthetic }) {

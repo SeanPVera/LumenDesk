@@ -42,6 +42,8 @@ final class LightPageModelTests: XCTestCase {
         XCTAssertEqual(LightPageModel.resolve(brand: .nanoleaf, sku: "NL42", productID: nil), .nanoleafHexagons)
         XCTAssertEqual(LightPageModel.resolve(brand: .nanoleaf, sku: "NL22", productID: nil), .fallback(.nanoleafStudio))
         XCTAssertEqual(LightPageModel.resolve(brand: .nanoleaf, sku: nil, productID: nil), .fallback(.nanoleafStudio))
+        XCTAssertEqual(LightPageModel.resolve(brand: .nanoleaf, sku: "NL75K1E100", productID: nil), .nanoleafEssentials)
+        XCTAssertEqual(LightPageModel.resolve(brand: .nanoleaf, sku: "nl75k1", productID: nil), .nanoleafEssentials)
     }
 
     func testUnownedFixturesKeepPreRedesignRouting() {
@@ -56,8 +58,8 @@ final class LightPageModelTests: XCTestCase {
 
     func testDedicatedPagesCarryModelLines() {
         let owned: [LightPageModel] = [
-            .lifxLuna, .lifxColorBulb(.mini), .nanoleafHexagons, .goveeCurtain, .goveeCurtainString,
-            .goveeCOBStrip, .goveeGlideBars, .goveeUplighter, .goveeStringPods, .goveeStripS
+            .lifxLuna, .lifxColorBulb(.mini), .nanoleafHexagons, .nanoleafEssentials, .goveeCurtain,
+            .goveeCurtainString, .goveeCOBStrip, .goveeGlideBars, .goveeUplighter, .goveeStringPods, .goveeStripS
         ]
         for model in owned {
             XCTAssertTrue(model.isDedicatedPage)

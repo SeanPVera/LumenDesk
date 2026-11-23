@@ -101,6 +101,8 @@ struct LightPageView: View {
             ColorBulbControls(device: device, variant: variant)
         case .fallback(.basic):
             ColorBulbControls(device: device, variant: nil)
+        case .nanoleafEssentials:
+            ColorBulbControls(device: device, variant: nil)
         case .nanoleafHexagons, .fallback(.nanoleafStudio):
             painterPanel {
                 NanoleafShapesStudio(device: device, shapes: manager.shapes,

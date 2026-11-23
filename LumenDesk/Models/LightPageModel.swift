@@ -43,6 +43,8 @@ enum LightPageModel: Equatable {
     case lifxColorBulb(LIFXBulbVariant)
     /// Nanoleaf Shapes NL42 (White Hexagons): panel layout studio.
     case nanoleafHexagons
+    /// Nanoleaf Essentials NL75 (Wi-Fi A19/E26 bulb): single-emitter colour page.
+    case nanoleafEssentials
     /// Govee H70B1 Curtain Lights: 20 LAN-addressable columns.
     case goveeCurtain
     /// Govee H70BC (Living Room String Light): curtain-family, 20 columns.
@@ -83,6 +85,7 @@ enum LightPageModel: Equatable {
             return .fallback(.basic)
         case .nanoleaf:
             if code == "NL42" { return .nanoleafHexagons }
+            if NanoleafProductFamily(model: code) == .essentials { return .nanoleafEssentials }
             return .fallback(.nanoleafStudio)
         case .govee:
             switch code {
@@ -114,6 +117,7 @@ enum LightPageModel: Equatable {
         case .lifxLuna: return "LIFX Luna · product 219 · 5×6 matrix"
         case .lifxColorBulb(let variant): return "\(variant.displayName) · product \(variant.rawValue)"
         case .nanoleafHexagons: return "Nanoleaf Shapes Hexagons · NL42"
+        case .nanoleafEssentials: return "Nanoleaf Essentials · Wi-Fi bulb · NL75"
         case .goveeCurtain: return "Govee H70B1 · Curtain · 20 LAN columns"
         case .goveeCurtainString: return "Govee H70BC · Curtain family · 20 LAN columns"
         case .goveeCOBStrip: return "Govee H61E6 · COB strip · 15 zones"
@@ -131,6 +135,7 @@ enum LightPageModel: Equatable {
         case .lifxLuna: return "LIFX Luna · 26 zones"
         case .lifxColorBulb: return "Colour bulb · single emitter"
         case .nanoleafHexagons: return "Shapes Hexagons · layout"
+        case .nanoleafEssentials: return "Essentials bulb · single emitter"
         case .goveeCurtain, .goveeCurtainString: return "Curtain · 20 columns"
         case .goveeCOBStrip: return "COB strip · 15 zones"
         case .goveeGlideBars: return "Glide bars · 28 zones"
@@ -147,6 +152,7 @@ enum LightPageModel: Equatable {
         case .lifxLuna: return "Matrix paint"
         case .lifxColorBulb: return "Colour & white"
         case .nanoleafHexagons: return "Paint & scenes"
+        case .nanoleafEssentials: return "Colour & white"
         case .goveeCurtain, .goveeCurtainString: return "Column painter · 20"
         case .goveeCOBStrip: return "Zone painter · 15"
         case .goveeGlideBars: return "Wall-chain zones · 28"
@@ -162,6 +168,7 @@ enum LightPageModel: Equatable {
         case .lifxLuna: return .matrix
         case .lifxColorBulb: return .bulb
         case .nanoleafHexagons: return .panels
+        case .nanoleafEssentials: return .bulb
         case .goveeCurtain, .goveeCurtainString: return .curtain
         case .goveeCOBStrip, .goveeStripS: return .strip
         case .goveeGlideBars: return .bars

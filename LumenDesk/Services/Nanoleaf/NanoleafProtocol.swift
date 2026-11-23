@@ -65,22 +65,32 @@ struct NanoleafEndpoint: Codable, Equatable {
     }
 }
 
-/// The Nanoleaf products LumenDesk drives panel by panel, read from the
-/// controller's `model`. Both speak the same local OpenAPI and the same
-/// static `animData`; they differ in panel shape, live-stream protocol and
-/// touch.
+/// The Nanoleaf products LumenDesk drives over the local OpenAPI, read from
+/// the controller's `model`. `shapes` and `lightPanels` are driven panel by
+/// panel and share the same static `animData`, differing in panel shape,
+/// live-stream protocol and touch; `essentials` is a single-emitter bulb with
+/// no panels, geometry or stream, driven entirely through `state`.
 enum NanoleafProductFamily: String, Codable, Equatable {
     /// NL42.
     case shapes
     /// NL22: the original Aurora triangles, sold as Light Panels since 2018.
     case lightPanels
+    /// NL75 (Essentials A19/E26 Wi-Fi bulb). A single light, not a wall.
+    case essentials
 
     init?(model: String?) {
         guard let model else { return nil }
-        switch model.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() {
+        let code = model.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        switch code {
         case "NL42": self = .shapes
         case "NL22": self = .lightPanels
-        default: return nil
+        default:
+            // The Wi-Fi Essentials bulb reports an NL75-family model (NL75K1,
+            // sometimes carrying a packaging suffix such as NL75K1E100). The
+            // exact string the firmware returns isn't documented, so match the
+            // family by prefix. The Matter-over-Thread Essentials bulbs expose
+            // no HTTP OpenAPI and never reach this code path.
+            if code.hasPrefix("NL75") { self = .essentials } else { return nil }
         }
     }
 
@@ -89,21 +99,26 @@ enum NanoleafProductFamily: String, Codable, Equatable {
         switch self {
         case .shapes: return "Shapes"
         case .lightPanels: return "Aurora"
+        case .essentials: return "Essentials"
         }
     }
 
-    /// External control version. Shapes accept only v2. Light Panels are
-    /// documented with v1, the version they assume when none is named, and
-    /// v1 is what OpenRGB drives them with, so LumenDesk uses it there.
-    var streamProtocol: NanoleafStreamProtocol {
+    /// External control version, or nil for a fixture with no panel stream.
+    /// Shapes accept only v2. Light Panels are documented with v1, the version
+    /// they assume when none is named, and v1 is what OpenRGB drives them with,
+    /// so LumenDesk uses it there. An Essentials bulb is a single emitter
+    /// driven through `state`, never external control.
+    var streamProtocol: NanoleafStreamProtocol? {
         switch self {
         case .shapes: return .v2
         case .lightPanels: return .v1
+        case .essentials: return nil
         }
     }
 
     /// Whether the panels sense touch. The OpenAPI's touch events come from
-    /// Canvas and Shapes; Light Panels have no touch hardware.
+    /// Canvas and Shapes; Light Panels and Essentials bulbs have no touch
+    /// hardware.
     var sensesTouch: Bool { self == .shapes }
 }
 
@@ -212,7 +227,7 @@ enum NanoleafError: LocalizedError, Equatable {
         case .invalidAddress: return "Enter a device IP address or local hostname and a port from 1 to 65535."
         case .pairingRequired: return "Nanoleaf access expired. Pair this controller again."
         case .pairingWindowClosed: return "Hold the controller’s power button for 5–7 seconds until its LED flashes, then press Pair within 30 seconds."
-        case .unsupportedModel: return "This integration supports Nanoleaf Shapes (NL42) and Aurora Light Panels (NL22)."
+        case .unsupportedModel: return "This integration supports Nanoleaf Shapes (NL42), Aurora Light Panels (NL22), and Wi-Fi Essentials bulbs (NL75)."
         case .invalidResponse: return "The Nanoleaf controller returned an unreadable response."
         case .unavailable: return "Cannot reach the Nanoleaf controller. Check its power and your local network connection."
         case .storageFailure: return "Could not save Nanoleaf pairing in Keychain. Please try again."

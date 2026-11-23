@@ -73,6 +73,8 @@ unattended automation.
 - Govee LAN lights, including recognized RGBIC segment and fixed-zone models
 - Nanoleaf Shapes and Aurora, including pairing, controller layouts, per-panel
   designs, and live panel output
+- Nanoleaf Essentials Wi-Fi bulbs (NL75 A19/E26), paired over the same local
+  API and driven as a single colour/white emitter
 
 Unknown or partially reported hardware falls back to a safe single-colour
 capability. Physical output is best-effort: the app distinguishes a sent

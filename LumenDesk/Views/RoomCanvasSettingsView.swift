@@ -236,7 +236,7 @@ struct RoomCanvasSettingsView: View {
                         .labelsHidden()
                         .tint(Polar.accent)
                 }
-                footnote("Identifies the playing track with ShazamKit and fetches its precomputed beat map, so the show follows the song's own structure. Falls back to live listening when a track can't be identified or has no analysis. Takes effect the next time Music Mode starts.")
+                footnote("Looks up the playing track by name and artist (via MusicBrainz) and fetches its precomputed beat map, so the show follows the song's own structure. Sends the track title and artist to musicbrainz.org only while this is on. Falls back to live listening when a track can't be matched or has no analysis. Takes effect the next time Music Mode starts.")
             }
         }
     }

@@ -163,9 +163,6 @@ final class AudioCaptureService {
     private var snapshotSubscribers: [UUID: (AudioReactiveSnapshot) -> Void] = [:]
     var onLevel: ((Double) -> Void)?
     var onSnapshot: ((AudioReactiveSnapshot) -> Void)?
-    /// Every captured buffer, on `analysisQueue`, for track identification.
-    /// The buffer is the analysis copy, safe to hold past the callback.
-    var onPCMBuffer: ((AVAudioPCMBuffer, TimeInterval) -> Void)?
     var onCaptureFailure: (() -> Void)?
     /// The platform source stopped for a reason that has now passed (an iOS
     /// call or route change), so restarting it can succeed. Called on main.
@@ -538,7 +535,6 @@ final class AudioCaptureService {
             guard let self else { return }
             defer { self.finishBuffer(duration: duration, generation: generation) }
             guard self.analyzerGeneration == generation else { return }
-            self.onPCMBuffer?(analysisBuffer, hostTime)
             if resetRequired {
                 self.analyzer.resetStream()
                 self.unpublishedSnapshot = nil

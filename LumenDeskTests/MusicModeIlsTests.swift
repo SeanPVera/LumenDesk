@@ -105,6 +105,43 @@ final class MusicModeIlsTests: XCTestCase {
     }
     #endif
 
+    // MARK: - MusicBrainz resolver
+
+    func testMusicBrainzResolver() async {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [StubURLProtocol.self]
+        let session = URLSession(configuration: config)
+        let resolver = MusicBrainzISRCResolver(baseURL: URL(string: "https://mb.test")!,
+                                               session: session, minRequestInterval: 0)
+
+        // Hit: search finds a recording, lookup returns its ISRC (uppercased).
+        StubURLProtocol.handler = { request in
+            let url = request.url?.absoluteString ?? ""
+            if url.contains("query=") {
+                return (Data(#"{"recordings":[{"id":"rec-1","title":"Song"}]}"#.utf8), 200)
+            }
+            return (Data(#"{"id":"rec-1","isrcs":["usum71000123"]}"#.utf8), 200)
+        }
+        let hit = await resolver.isrc(title: "Song", artist: "Artist")
+        XCTAssertEqual(hit, "USUM71000123")
+
+        // Miss: no recording matched → nil.
+        StubURLProtocol.handler = { _ in (Data(#"{"recordings":[]}"#.utf8), 200) }
+        let noMatch = await resolver.isrc(title: "Unknown", artist: "Nobody")
+        XCTAssertNil(noMatch)
+
+        // Matched recording that carries no ISRC → nil.
+        StubURLProtocol.handler = { request in
+            let url = request.url?.absoluteString ?? ""
+            if url.contains("query=") {
+                return (Data(#"{"recordings":[{"id":"rec-2"}]}"#.utf8), 200)
+            }
+            return (Data(#"{"id":"rec-2","isrcs":[]}"#.utf8), 200)
+        }
+        let noISRC = await resolver.isrc(title: "Instrumental", artist: "Someone")
+        XCTAssertNil(noISRC)
+    }
+
     // MARK: - Fixtures
 
     enum TestError: Error { case boom }
@@ -139,5 +176,27 @@ final class MusicModeIlsTests: XCTestCase {
         let beats = stride(from: 0.0, to: 10.0, by: 0.5).map { $0 }
         return BeatMap(version: BeatMap.currentVersion, duration: 10, tempo: tempo, beats: beats,
                        downbeatOffset: 0, barEnergy: [0.5, 0.6], envelope: [0, 1, 0, 1], confidence: 1)
+    }
+}
+
+/// Returns canned HTTP bodies so the resolver's parsing is tested without the
+/// network. Only the resolver test mutates `handler`.
+final class StubURLProtocol: URLProtocol {
+    nonisolated(unsafe) static var handler: ((URLRequest) -> (Data, Int))?
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func stopLoading() {}
+
+    override func startLoading() {
+        guard let handler = Self.handler, let url = request.url else {
+            client?.urlProtocolDidFinishLoading(self)
+            return
+        }
+        let (data, status) = handler(request)
+        let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: data)
+        client?.urlProtocolDidFinishLoading(self)
     }
 }

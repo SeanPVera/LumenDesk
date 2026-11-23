@@ -11,6 +11,7 @@
 		0038FBFE720CECE859550F76 /* ConfirmationCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55CE0DFE08EB5175457DC556 /* ConfirmationCoordinator.swift */; };
 		02114B058C3BF61CF664C595 /* static_dict.h in CopyFiles */ = {isa = PBXBuildFile; fileRef = 078E74277DA600AD6BC5679D /* static_dict.h */; };
 		04C2407BA291F244E70457D5 /* ExternalChange.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4092D830E506CBE3F52C6225 /* ExternalChange.swift */; };
+		089892BF00BAF44A631E662D /* MusicBrainzISRCResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6420AB0E2BCBD43C2F02F2D0 /* MusicBrainzISRCResolver.swift */; };
 		08EEFBC87506952498969883 /* RoomLiveView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 106A9365A3408FF1A01DECF8 /* RoomLiveView.swift */; };
 		098CC85FA76D2ACE4107232B /* NanoleafLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BD17AFBE2C23CDC8E2DBA1B /* NanoleafLayout.swift */; };
 		0AE87EC36E7EF70C82679A61 /* dec_static_init.c in Sources */ = {isa = PBXBuildFile; fileRef = E1B8CEC3A1B9727C48112600 /* dec_static_init.c */; };
@@ -135,7 +136,6 @@
 		A9DE2EA5E71891BBEF15CB77 /* ScheduleEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECC37F705415ED8B55BC448B /* ScheduleEntry.swift */; };
 		AA30F6502B5132143700EACA /* metablock.h in CopyFiles */ = {isa = PBXBuildFile; fileRef = AD13DA3767487C069E6C9066 /* metablock.h */; };
 		AA3440520C75441DE1064E25 /* LumenCommands.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBC0F92BF05EA4A8367214C5 /* LumenCommands.swift */; };
-		AA6D0063F44E5BE8DAAC244C /* TrackIdentifying.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3773B2109D6D3919704D67B4 /* TrackIdentifying.swift */; };
 		AAE7E8C6C43DD698DC4DAF1B /* compress_fragment_two_pass.c in Sources */ = {isa = PBXBuildFile; fileRef = 5063851141FA6D6BD889E28B /* compress_fragment_two_pass.c */; };
 		ABAEF24DAA77EBBA3EC843EB /* PersistenceStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C76EE3C023F769E16DEDE73E /* PersistenceStoreTests.swift */; };
 		AC1A4EFDD8B60BADB7212D4A /* BeatMapTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7FB42038D46BF8DDD0AE17D /* BeatMapTests.swift */; };
@@ -145,7 +145,6 @@
 		B1640CE7B6F63A6318433AE7 /* PolarComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C4AD958A3D9CB9DBF5BD90E /* PolarComponents.swift */; };
 		B26BD72C58FE950DEF3C6FC1 /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 2C924EA42F0B4A61CB33C113 /* Preview Assets.xcassets */; };
 		B28436ADAAC7544F63BF20D1 /* dictionary_hash_inc.h in CopyFiles */ = {isa = PBXBuildFile; fileRef = 6C140AF7C0CEAA6699F33302 /* dictionary_hash_inc.h */; };
-		B312CB5E1488EB1483420E23 /* ShazamTrackIdentifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E4A7938F063747F982A38A3 /* ShazamTrackIdentifier.swift */; };
 		B3FAE69F85D6BC9F13DFC852 /* RoomPlanningTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4FA41B9EA53E79A3FE52969 /* RoomPlanningTests.swift */; };
 		B4185330C712DA3DFD85DA3D /* huffman.c in Sources */ = {isa = PBXBuildFile; fileRef = EC896BD1C4308C00D67B0CE5 /* huffman.c */; };
 		B41D01A39796B6C431184207 /* LIFXLunaEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C34229F4FD7557786C4406F /* LIFXLunaEditorView.swift */; };
@@ -370,7 +369,6 @@
 		317123DEBCDDD0F7C3C6867F /* NanoleafClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NanoleafClient.swift; sourceTree = "<group>"; };
 		32259B4E1AF22A121CB66F93 /* BeatTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BeatTracker.swift; sourceTree = "<group>"; };
 		3747828527BA198B0B7D7D77 /* backward_references_inc.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = backward_references_inc.h; sourceTree = "<group>"; };
-		3773B2109D6D3919704D67B4 /* TrackIdentifying.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackIdentifying.swift; sourceTree = "<group>"; };
 		38092019A8838CE51C210B2D /* DemoWorkspaceControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoWorkspaceControllerTests.swift; sourceTree = "<group>"; };
 		3AC4237922B334FAE9D88BC2 /* IlsCrypto.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IlsCrypto.swift; sourceTree = "<group>"; };
 		3CA01F2A29D8F981F9280BF5 /* enc_static_init.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = enc_static_init.h; sourceTree = "<group>"; };
@@ -378,7 +376,6 @@
 		3CE903D9B1645AA72557CAA5 /* ScheduleEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleEngineTests.swift; sourceTree = "<group>"; };
 		3E321BD1987D35FBA40D33FC /* memory.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = memory.h; sourceTree = "<group>"; };
 		3E486EE89DC79A553B7652ED /* backward_references_hq.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = backward_references_hq.c; sourceTree = "<group>"; };
-		3E4A7938F063747F982A38A3 /* ShazamTrackIdentifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShazamTrackIdentifier.swift; sourceTree = "<group>"; };
 		3F4915F4D5F4F4E83A2CE413 /* backward_references_opt_inc.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = backward_references_opt_inc.h; sourceTree = "<group>"; };
 		3FC7716E5F3FAC8668F67DD0 /* ProtocolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolTests.swift; sourceTree = "<group>"; };
 		4092D830E506CBE3F52C6225 /* ExternalChange.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalChange.swift; sourceTree = "<group>"; };
@@ -412,6 +409,7 @@
 		609AE1BC1F066FB7D225C1C1 /* LightingCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LightingCatalog.swift; sourceTree = "<group>"; };
 		6136BAF7308E7826C436F038 /* hash_longest_match_simd_opt_inc.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = hash_longest_match_simd_opt_inc.h; sourceTree = "<group>"; };
 		61E184C2A4B50DD5BCB908F8 /* enc_state.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = enc_state.h; sourceTree = "<group>"; };
+		6420AB0E2BCBD43C2F02F2D0 /* MusicBrainzISRCResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicBrainzISRCResolver.swift; sourceTree = "<group>"; };
 		64D8EEBB3D1467D9E07354B7 /* ThemePlanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemePlanner.swift; sourceTree = "<group>"; };
 		65AAD610166656C2A77EABA6 /* NanoleafTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NanoleafTests.swift; sourceTree = "<group>"; };
 		65B7BD43AB86CA444368FD6E /* PersistenceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceStore.swift; sourceTree = "<group>"; };
@@ -560,8 +558,7 @@
 			isa = PBXGroup;
 			children = (
 				823E4BEADC2522631B075B3C /* IlsBeatMapProvider.swift */,
-				3E4A7938F063747F982A38A3 /* ShazamTrackIdentifier.swift */,
-				3773B2109D6D3919704D67B4 /* TrackIdentifying.swift */,
+				6420AB0E2BCBD43C2F02F2D0 /* MusicBrainzISRCResolver.swift */,
 			);
 			path = Music;
 			sourceTree = "<group>";
@@ -1118,6 +1115,7 @@
 				AA3440520C75441DE1064E25 /* LumenCommands.swift in Sources */,
 				C4CCCCD5B030A9BD2097CDD3 /* LumenDeskApp.swift in Sources */,
 				599053E983D128A2F51C218D /* MenuBarPopoverView.swift in Sources */,
+				089892BF00BAF44A631E662D /* MusicBrainzISRCResolver.swift in Sources */,
 				FD0CD61A1C761E133D3CE478 /* MusicChoreographyEngine.swift in Sources */,
 				F4609069C18B241E8C5A4299 /* MusicLightingRenderer.swift in Sources */,
 				54649EF64E03B94487A14329 /* MusicMode.swift in Sources */,
@@ -1148,11 +1146,9 @@
 				49D173FD7876569ADAF3DE93 /* SQLiteStateDatabase.swift in Sources */,
 				BCF9204AF56C4BB8A29EA94A /* ScheduleEngine.swift in Sources */,
 				A9DE2EA5E71891BBEF15CB77 /* ScheduleEntry.swift in Sources */,
-				B312CB5E1488EB1483420E23 /* ShazamTrackIdentifier.swift in Sources */,
 				32E4CC42764A54EF8CBF1DE3 /* Theme.swift in Sources */,
 				CE813563DEC41808066DB02E /* ThemePalette.swift in Sources */,
 				58FE7B07E0D699D2A47774C9 /* ThemePlanner.swift in Sources */,
-				AA6D0063F44E5BE8DAAC244C /* TrackIdentifying.swift in Sources */,
 				6C3C40FD1043EE6C9887E55B /* UDPSocket.swift in Sources */,
 				A413CA0AED8DF0CD43400ACD /* UXEnhancements.swift in Sources */,
 				0ED428488DA26CEBC14F53CC /* UplighterSectionsPanel.swift in Sources */,

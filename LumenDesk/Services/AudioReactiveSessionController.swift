@@ -165,9 +165,9 @@ final class AudioReactiveSessionController: ObservableObject {
 
     private let captureService: AudioCaptureService
     private let beatMaps: BeatMapCoordinator
-    /// Identifies the playing track (ShazamKit) so a precomputed iLightShow map
-    /// can be fetched. Nil when server analysis is off.
-    private var trackIdentifier: TrackIdentifying?
+    /// Resolves the playing track's ISRC from its metadata. Nil when server
+    /// analysis is off.
+    private var isrcResolver: ISRCResolving?
     /// Fetches precomputed maps by ISRC. Nil when server analysis is off.
     private var serverMapProvider: IlsBeatMapProviding?
     private let now: () -> TimeInterval
@@ -242,47 +242,39 @@ final class AudioReactiveSessionController: ObservableObject {
         }
     }
 
-    /// Opt-in: drive the beat grid from iLightShow's precomputed analysis,
-    /// identified by ShazamKit from the audio Music Mode already captures. When
-    /// off, or where ShazamKit is unavailable, Music Mode keeps learning maps
-    /// live exactly as before. A fetch that fails (no analysis, backend not
-    /// provisioned) silently falls back to the live map.
-    /// Idempotent and reversible, so the setting can be toggled between Music
-    /// Mode sessions without relaunching.
+    /// Opt-in: drive the beat grid from iLightShow's precomputed analysis. The
+    /// playing track's ISRC is resolved from its Now Playing metadata
+    /// (MusicBrainz), then its map is fetched. When off, or when a track can't
+    /// be resolved or has no analysis, Music Mode keeps learning maps live
+    /// exactly as before — every failure falls back silently. Idempotent and
+    /// reversible, so the setting can be toggled between sessions.
     private func configureServerAnalysis() {
-        #if canImport(ShazamKit)
         let enabled = Self.serverAnalysisEnabled
-        if enabled, trackIdentifier == nil {
+        if enabled, isrcResolver == nil {
             serverMapProvider = IlsBeatMapProvider.live()
-            let identifier = ShazamTrackIdentifier()
-            trackIdentifier = identifier
-            identifier.onMatch = { [weak self] track in
-                // ShazamKit reports off an internal queue; hop to the main actor.
-                DispatchQueue.main.async {
-                    MainActor.assumeIsolated { self?.fetchServerMap(forISRC: track.isrc) }
-                }
+            isrcResolver = MusicBrainzISRCResolver()
+            beatMaps.onTrackChanged = { [weak self] in
+                // The coordinator fires this on the main thread.
+                MainActor.assumeIsolated { self?.resolveServerMapForCurrentTrack() }
             }
-            beatMaps.onTrackChanged = { [weak identifier] in identifier?.reset() }
-            captureService.onPCMBuffer = { [weak identifier] buffer, time in
-                identifier?.append(buffer, at: time)
-            }
-        } else if !enabled, trackIdentifier != nil {
-            trackIdentifier = nil
+        } else if !enabled, isrcResolver != nil {
+            isrcResolver = nil
             serverMapProvider = nil
-            captureService.onPCMBuffer = nil
             beatMaps.onTrackChanged = nil
         }
-        #endif
     }
 
-    /// Fetches the precomputed map for the identified track and hands it to the
-    /// coordinator if that track is still playing. Off the main thread for the
-    /// network/decode, back on it to adopt.
-    private func fetchServerMap(forISRC isrc: String) {
-        guard let provider = serverMapProvider, let key = beatMaps.serverMapTargetKey() else { return }
+    /// Resolves the current track's ISRC from its metadata and adopts its
+    /// precomputed map, if the track is still playing. Off the main thread for
+    /// the network/decode, back on it to adopt.
+    private func resolveServerMapForCurrentTrack() {
+        guard let provider = serverMapProvider,
+              let resolver = isrcResolver,
+              let candidate = beatMaps.currentServerMapCandidate() else { return }
         Task { @MainActor [weak self] in
+            guard let isrc = await resolver.isrc(title: candidate.title, artist: candidate.artist) else { return }
             guard let map = await provider.beatMap(forISRC: isrc) else { return }
-            self?.beatMaps.adoptServerMap(map, key: key)
+            self?.beatMaps.adoptServerMap(map, key: candidate.key)
         }
     }
 

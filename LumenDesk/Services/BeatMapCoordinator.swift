@@ -216,11 +216,11 @@ final class BeatMapCoordinator {
             return
         }
         let key = sample.app.trackKey(sample.trackID)
-        if current.map({ $0.app.trackKey($0.trackID) }) != key {
+        let changedTrack = current.map { $0.app.trackKey($0.trackID) } != key
+        if changedTrack {
             endTrack()
             clock.reset()
             resetLiveHistory(since: sample.sampledAt)
-            onTrackChanged?()
             let progress = savedLearning[key].flatMap { abs($0.duration - sample.duration) < 1 ? $0 : nil }
                 ?? store.loadLearning(key: key, duration: sample.duration)
             if let cached = store.load(key: key) {
@@ -238,6 +238,9 @@ final class BeatMapCoordinator {
             lastCheckpointAt = sample.sampledAt
         }
         current = sample
+        // Fire after `current` is the new sample, so an observer can read the
+        // new track's metadata.
+        if changedTrack { onTrackChanged?() }
         let wasPlaying = clock.isPlaying
         let result = clock.report(position: sample.position, at: sample.sampledAt, playing: sample.isPlaying)
         if result == .jumped || wasPlaying != sample.isPlaying {
@@ -257,6 +260,13 @@ final class BeatMapCoordinator {
         guard source == .following, let current, current.isPlaying else { return nil }
         let key = current.app.trackKey(current.trackID)
         return serverMapKeys.contains(key) ? nil : key
+    }
+
+    /// The current track's metadata and key when it is a server-map candidate,
+    /// for an ISRC resolver to look up. Nil means "no lookup needed".
+    func currentServerMapCandidate() -> (title: String, artist: String, key: String)? {
+        guard let key = serverMapTargetKey(), let current else { return nil }
+        return (current.title, current.artist, key)
     }
 
     /// Replaces the live-learned map with the server's authoritative one, if

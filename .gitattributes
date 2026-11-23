@@ -1,0 +1,4 @@
+# Vendored Brotli dictionary blobs (excluded from the build; kept for a
+# faithful vendor drop). Binary, so git diff --check skips them.
+Vendor/brotli/c/common/dictionary.bin binary
+Vendor/brotli/c/common/dictionary.bin.br binary

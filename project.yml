@@ -4,11 +4,17 @@ options:
     macOS: "13.0"
     iOS: "16.0"
   createIntermediateGroups: true
+attributes:
+  LastUpgradeCheck: "2700"
+  LastSwiftUpdateCheck: "2700"
 settings:
   base:
     SWIFT_VERSION: "5.0"
     DEVELOPMENT_TEAM: "SW2N54YNK3"
     CODE_SIGN_STYLE: Automatic
+    # Modern signing identity name; without this xcodegen emits the legacy
+    # "iPhone Developer" string into the regenerated project.
+    CODE_SIGN_IDENTITY: "Apple Development"
 targets:
   LumenDesk:
     type: application
@@ -55,8 +61,20 @@ targets:
           - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
+    dependencies:
+      - target: Brotli
     settings:
       base:
+        # Set explicitly so xcodegen does not inject the legacy
+        # "iPhone Developer" identity into the application target.
+        CODE_SIGN_IDENTITY: "Apple Development"
+        # Settings the hand-maintained project carried that xcodegen does not
+        # emit by default; kept so regeneration does not regress them.
+        DEAD_CODE_STRIPPING: YES
+        ENABLE_USER_SCRIPT_SANDBOXING: YES
+        "LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]":
+          - "$(inherited)"
+          - "@executable_path/../Frameworks"
         PRODUCT_BUNDLE_IDENTIFIER: com.lumendesk.LumenDesk
         # Info.plist reads both through $(...), so a release build can
         # override them on the xcodebuild command line without editing
@@ -76,12 +94,41 @@ targets:
         DEVELOPMENT_ASSET_PATHS: '"Preview Content"'
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        SWIFT_OBJC_BRIDGING_HEADER: LumenDesk/BrotliBridge.h
+        HEADER_SEARCH_PATHS:
+          - "$(SRCROOT)/Vendor/brotli/c/include"
       configs:
         Debug:
           # Test builds should not become candidates for macOS permission-
           # driven relaunches. Music Mode registers the currently running
           # bundle immediately before requesting Screen Recording access.
           REGISTER_WITH_LAUNCH_SERVICES[sdk=macosx*]: NO
+  Brotli:
+    # Vendored Brotli C sources (MIT; see Vendor/brotli/LICENSE), for the
+    # iLightShow bundle decoder. Taken from upstream google/brotli; the
+    # dec/ + common/ tree is what production uses, enc/ is DEBUG-only (tests).
+    type: library.static
+    supportedDestinations: [macOS, iOS]
+    sources:
+      - path: Vendor/brotli/c/common
+        excludes:
+          - dictionary.bin
+          - dictionary.bin.br
+      - path: Vendor/brotli/c/dec
+      - path: Vendor/brotli/c/enc
+        excludes:
+          # C++ lazy-init variant; the default (BROTLI_STATIC_INIT_NONE)
+          # uses enc_static_init.c alone.
+          - static_init_lazy.cc
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.lumendesk.brotli
+        HEADER_SEARCH_PATHS:
+          - "$(SRCROOT)/Vendor/brotli/c"
+          - "$(SRCROOT)/Vendor/brotli/c/include"
+        CLANG_C_LANGUAGE_STANDARD: c11
+        SKIP_INSTALL: YES
+        GCC_TREAT_WARNINGS_AS_ERRORS: NO
   LumenDeskTests:
     type: bundle.unit-test
     platform: macOS
@@ -95,3 +142,33 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.lumendesk.LumenDeskTests
         GENERATE_INFOPLIST_FILE: YES
         CODE_SIGNING_ALLOWED: NO
+        # xcodegen's default TEST_HOST is the iOS bundle layout; macOS apps
+        # keep the binary under Contents/MacOS. Set it explicitly or the
+        # test target fails with "Could not find test host".
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/LumenDesk.app/Contents/MacOS/LumenDesk"
+        SWIFT_OBJC_BRIDGING_HEADER: LumenDeskTests/BrotliBridge.h
+        HEADER_SEARCH_PATHS:
+          - "$(SRCROOT)/Vendor/brotli/c/include"
+schemes:
+  LumenDesk:
+    build:
+      targets:
+        LumenDesk: all
+        # Only the test action, so Run/Profile/Archive/Analyze of this scheme
+        # do not try to build the macOS-only test target.
+        LumenDeskTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      # Keep the parallel test run main's scheme had; xcodegen otherwise
+      # defaults a single test target to non-parallel.
+      targets:
+        - name: LumenDeskTests
+          parallelizable: true
+    analyze:
+      config: Debug
+    profile:
+      config: Release
+    archive:
+      config: Release

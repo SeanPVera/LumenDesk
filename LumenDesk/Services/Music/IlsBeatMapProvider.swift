@@ -41,10 +41,12 @@ actor IlsBeatMapProvider: IlsBeatMapProviding {
         self.prepare = prepare
     }
 
-    /// Convenience production provider backed by a fresh `IlsClient`.
+    /// Convenience production provider backed by a fresh `IlsClient`. `prepare`
+    /// uses an operator-issued dev credential when present, otherwise the
+    /// standard enrol flow.
     static func live() -> IlsBeatMapProvider? {
         guard let client = try? IlsClient() else { return nil }
-        return IlsBeatMapProvider(fetcher: client, prepare: { try await client.ensureEnrolled() })
+        return IlsBeatMapProvider(fetcher: client, prepare: { try await client.prepareForFetch() })
     }
 
     func beatMap(forISRC isrc: String) async -> BeatMap? {

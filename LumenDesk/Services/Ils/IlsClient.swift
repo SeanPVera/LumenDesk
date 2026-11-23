@@ -46,6 +46,28 @@ enum IlsError: Error, LocalizedError {
 ///
 /// An `actor` so the mutable token/nonce state is never touched by two
 /// overlapping requests at once.
+/// What LumenDesk hands the backend operator to be issued a dev credential:
+/// the public key to bind the token to, plus the client identity. No secrets —
+/// the private DPoP key never leaves the Keychain.
+struct IlsProvisioningRequest: Codable {
+    /// The DPoP public key as a JWK; the operator binds the token to it.
+    let publicKey: [String: String]
+    /// RFC 7638 thumbprint of `publicKey`, as a convenience/confirmation.
+    let keyThumbprint: String
+    let platform: String
+    let appBuild: Int
+    let appVersion: String
+    let os: String
+}
+
+/// What the operator returns out-of-band, bound to the key in the request.
+struct IlsDevCredential: Codable {
+    let installationId: String
+    let accessToken: String
+    let dpopNonce: String
+    let expiresAt: Date?
+}
+
 actor IlsClient {
     struct Configuration {
         var baseURL: URL
@@ -55,6 +77,10 @@ actor IlsClient {
         var os: String
         let key: IlsDPoPKey
         let session: URLSession
+        /// Where the dev provisioning request is written and the returned dev
+        /// credential is read (non-secret request out, secret credential in and
+        /// then deleted). Injectable for tests.
+        let supportDirectory: URL
 
         init(
             baseURL: URL = URL(string: "https://api.ilightshow.app")!,
@@ -63,7 +89,8 @@ actor IlsClient {
             appBuild: Int = Configuration.bundleAppBuild,
             os: String = Configuration.defaultOS,
             key: IlsDPoPKey? = nil,
-            session: URLSession? = nil
+            session: URLSession? = nil,
+            supportDirectory: URL? = nil
         ) throws {
             self.baseURL = baseURL
             self.platform = platform
@@ -72,6 +99,13 @@ actor IlsClient {
             self.os = os
             self.key = try key ?? IlsDPoPKey()
             self.session = session ?? Configuration.makeSession()
+            self.supportDirectory = supportDirectory ?? Configuration.defaultSupportDirectory
+        }
+
+        static var defaultSupportDirectory: URL {
+            let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+                ?? URL(fileURLWithPath: NSTemporaryDirectory())
+            return base.appendingPathComponent("LumenDesk", isDirectory: true)
         }
 
         /// `CFBundleShortVersionString`, with a harmless fallback for tests.
@@ -208,13 +242,6 @@ actor IlsClient {
         return newToken
     }
 
-    /// Restores a stored token, enrolling only when there is none valid. The
-    /// single entry point callers use before fetching an analysis.
-    func ensureEnrolled() async throws {
-        if token == nil { restoreToken() }
-        if token?.isCurrent != true { try await enroll() }
-    }
-
     /// Restores the persisted token from a previous run, if still valid and
     /// bound to the current DPoP key.
     func restoreToken() {
@@ -233,6 +260,86 @@ actor IlsClient {
     private func persistToken() {
         guard let token, let data = try? JSONEncoder().encode(token) else { return }
         IlsKeychain.save(data, account: Self.tokenAccount, service: IlsDPoPKey.service)
+    }
+
+    // MARK: - Authorized out-of-band provisioning
+    //
+    // When the operator (not this client) issues a dev credential bound to our
+    // DPoP key, the macOS enrol endpoint is not needed: we hold the key, so our
+    // DPoP proofs are valid for the token. This is the clean path — no
+    // attestation bypass, no instrumentation, no key extraction.
+
+    private var provisioningRequestURL: URL {
+        config.supportDirectory.appendingPathComponent("ils-provisioning-request.json")
+    }
+
+    private var devCredentialURL: URL {
+        config.supportDirectory.appendingPathComponent("ils-dev-credential.json")
+    }
+
+    /// The provisioning request to hand the operator. Non-secret (public key
+    /// only); the operator binds the issued token to `keyThumbprint`.
+    func provisioningRequest() -> IlsProvisioningRequest {
+        IlsProvisioningRequest(
+            publicKey: config.key.jwkDictionary,
+            keyThumbprint: config.key.thumbprint,
+            platform: config.platform,
+            appBuild: config.appBuild,
+            appVersion: config.appVersion,
+            os: config.os
+        )
+    }
+
+    /// Writes the provisioning request to the support directory (if not already
+    /// present) so the operator can be sent it. Returns its path.
+    @discardableResult
+    func writeProvisioningRequest() throws -> URL {
+        try FileManager.default.createDirectory(at: config.supportDirectory, withIntermediateDirectories: true)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(provisioningRequest()).write(to: provisioningRequestURL, options: .atomic)
+        return provisioningRequestURL
+    }
+
+    /// Adopts a dev credential issued for our key, persisting it like an
+    /// enrolment token.
+    func importDevCredential(_ credential: IlsDevCredential) {
+        let imported = Token(
+            installationId: credential.installationId,
+            accessToken: credential.accessToken,
+            dpopNonce: credential.dpopNonce,
+            expiresAt: credential.expiresAt,
+            keyThumbprint: config.key.thumbprint
+        )
+        token = imported
+        persistToken()
+    }
+
+    /// Imports a dev credential the operator dropped at `devCredentialURL`, then
+    /// deletes the plaintext file (the secret lives in the Keychain afterward).
+    @discardableResult
+    func loadDevCredentialIfPresent() -> Bool {
+        guard let data = try? Data(contentsOf: devCredentialURL),
+              let credential = try? JSONDecoder().decode(IlsDevCredential.self, from: data) else {
+            return false
+        }
+        importDevCredential(credential)
+        try? FileManager.default.removeItem(at: devCredentialURL)
+        return true
+    }
+
+    /// Ensures a usable token before a fetch. Prefers a restored or
+    /// operator-issued dev credential; only if neither exists does it attempt
+    /// the (attestation-gated) enrol flow. On the first run with no credential
+    /// it drops a provisioning request for the operator.
+    func prepareForFetch() async throws {
+        if token == nil { restoreToken() }
+        if token?.isCurrent == true { return }
+        if loadDevCredentialIfPresent(), token?.isCurrent == true { return }
+        // No credential yet — leave the operator what they need to issue one,
+        // then try the standard enrol (which needs the backend route live).
+        try? writeProvisioningRequest()
+        try await enroll()
     }
 
     // MARK: - Analysis

@@ -1,3 +1,4 @@
+import CryptoKit
 import XCTest
 @testable import LumenDesk
 
@@ -104,6 +105,39 @@ final class MusicModeIlsTests: XCTestCase {
         XCTAssertEqual(resets, 3)
     }
     #endif
+
+    // MARK: - Authorized dev provisioning
+
+    func testProvisioningRequestAndDevCredentialImport() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let key = IlsDPoPKey(privateKey: P256.Signing.PrivateKey())
+        let client = IlsClient(configuration: try IlsClient.Configuration(key: key, supportDirectory: dir))
+
+        // The request carries the public key + thumbprint and no secret.
+        let request = await client.provisioningRequest()
+        XCTAssertEqual(request.keyThumbprint, key.thumbprint)
+        XCTAssertEqual(request.publicKey, key.jwkDictionary)
+        XCTAssertEqual(request.platform, "macos")
+        let path = try await client.writeProvisioningRequest()
+        XCTAssertTrue(FileManager.default.fileExists(atPath: path.path))
+
+        // A credential dropped by the operator is imported and the plaintext
+        // file is deleted; the token is bound to our key.
+        let credential = IlsDevCredential(installationId: "inst-1", accessToken: "tok-1",
+                                          dpopNonce: "nonce-1", expiresAt: Date.now.addingTimeInterval(3600))
+        let credURL = dir.appendingPathComponent("ils-dev-credential.json")
+        try JSONEncoder().encode(credential).write(to: credURL)
+
+        let loaded = await client.loadDevCredentialIfPresent()
+        XCTAssertTrue(loaded)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: credURL.path),
+                       "the secret credential file is removed after import")
+        let token = await client.token
+        XCTAssertEqual(token?.accessToken, "tok-1")
+        XCTAssertEqual(token?.keyThumbprint, key.thumbprint)
+        XCTAssertTrue(token?.isCurrent ?? false)
+    }
 
     // MARK: - MusicBrainz resolver
 

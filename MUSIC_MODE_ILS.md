@@ -55,6 +55,27 @@ While the setting is on, the playing track's **title and artist** are sent to
 User-Agent, no personal contact details). Nothing is sent when the setting is
 off. The footnote on the toggle says so.
 
+## Access: authorized out-of-band provisioning
+
+The macOS enrol endpoint is attestation-gated and not deployed, so with the
+operator's authorization LumenDesk is provisioned out of band, the clean way —
+no attestation bypass, no app instrumentation, no key extraction:
+
+1. LumenDesk generates its DPoP key (Keychain, never exported) and writes a
+   **provisioning request** to `Application Support/LumenDesk/
+   ils-provisioning-request.json` — the key's JWK + RFC 7638 thumbprint and the
+   client identity. No secret leaves the device.
+2. The operator issues a token **bound to that key's thumbprint** and returns
+   `{ installationId, accessToken, dpopNonce, expiresAt }`.
+3. Drop that at `Application Support/LumenDesk/ils-dev-credential.json`.
+   `prepareForFetch()` imports it to the Keychain and deletes the plaintext
+   file. Because LumenDesk holds the key, its DPoP proofs are valid for the
+   token — standard RFC 9449, nothing circumvented.
+
+`prepareForFetch()` prefers a restored or dev credential and only falls back to
+the (gated) enrol flow, so once a credential is in place no backend route change
+is needed.
+
 ## Prerequisite / follow-up
 
 - **Backend.** Needs the iLightShow *Option A* macOS enrol endpoint (DPoP-only,

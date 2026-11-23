@@ -12,5 +12,7 @@
     <true/>
     <key>com.apple.security.files.user-selected.read-write</key>
     <true/>
+    <key>com.apple.developer.shazamkit</key>
+    <true/>
 </dict>
 </plist>

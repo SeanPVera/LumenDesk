@@ -339,8 +339,10 @@ extension LightManager {
                                    status: wall.orientation.isFailed ? .warning : .neutral))
         rows.append(ScanDiagnostic(title: "Showing", value: wall.output.summary, status: .neutral))
         if let family = device.nanoleafFamily {
+            let detail = family.streamProtocol.map { "live output over external control \($0.rawValue)" }
+                ?? "single bulb · driven through state"
             rows.append(ScanDiagnostic(title: "Product",
-                                       value: "\(family.displayName) · live output over external control \(family.streamProtocol.rawValue)",
+                                       value: "\(family.displayName) · \(detail)",
                                        status: .neutral))
         }
         if let firmware = wall.firmware {

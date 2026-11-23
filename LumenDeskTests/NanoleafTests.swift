@@ -48,17 +48,27 @@ final class NanoleafTests: XCTestCase {
     func testProductFamiliesPickTheirStreamProtocolAndTouch() {
         XCTAssertEqual(NanoleafProductFamily(model: "NL42"), .shapes)
         XCTAssertEqual(NanoleafProductFamily(model: " nl22 "), .lightPanels)
+        XCTAssertEqual(NanoleafProductFamily(model: "NL75K1E100"), .essentials)
+        XCTAssertEqual(NanoleafProductFamily(model: " nl75k1 "), .essentials)
+        XCTAssertEqual(NanoleafProductFamily(model: "NL75"), .essentials)
         XCTAssertNil(NanoleafProductFamily(model: "NL29"))
         XCTAssertNil(NanoleafProductFamily(model: nil))
         XCTAssertEqual(NanoleafProductFamily.shapes.streamProtocol, .v2)
         XCTAssertEqual(NanoleafProductFamily.lightPanels.streamProtocol, .v1)
+        XCTAssertNil(NanoleafProductFamily.essentials.streamProtocol)
         XCTAssertTrue(NanoleafProductFamily.shapes.sensesTouch)
         XCTAssertFalse(NanoleafProductFamily.lightPanels.sensesTouch)
+        XCTAssertFalse(NanoleafProductFamily.essentials.sensesTouch)
         XCTAssertEqual(NanoleafProductFamily.lightPanels.displayName, "Aurora")
+        XCTAssertEqual(NanoleafProductFamily.essentials.displayName, "Essentials")
         let wall = LightDevice(id: "nanoleaf:S1", brand: .nanoleaf, backendID: "S1", name: "Hall",
                                address: "192.0.2.5", sku: "NL22")
         XCTAssertEqual(wall.nanoleafFamily, .lightPanels)
         XCTAssertEqual(wall.nanoleafProductName, "Aurora")
+        let essentials = LightDevice(id: "nanoleaf:B1", brand: .nanoleaf, backendID: "B1", name: "Lamp",
+                                     address: "192.0.2.7", sku: "NL75K1E100")
+        XCTAssertEqual(essentials.nanoleafFamily, .essentials)
+        XCTAssertEqual(essentials.nanoleafProductName, "Essentials")
         let bulb = LightDevice(id: "govee:x", brand: .govee, backendID: "x", name: "Strip", address: "192.0.2.6", sku: "NL22")
         XCTAssertNil(bulb.nanoleafFamily, "only a Nanoleaf device has a Nanoleaf family")
     }

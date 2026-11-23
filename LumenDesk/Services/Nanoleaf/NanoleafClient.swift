@@ -650,7 +650,11 @@ final class NanoleafClient: NSObject {
                     throw NanoleafError.streamUnavailable
                 }
                 guard self.streams[serial]?.token == token else { return }
-                let version = try await self.family(for: pairing).streamProtocol
+                guard let version = try await self.family(for: pairing).streamProtocol else {
+                    // A single-emitter Essentials bulb has no panel stream;
+                    // never open external control for one.
+                    throw NanoleafError.streamUnavailable
+                }
                 guard self.streams[serial]?.token == token else { return }
                 let reply = try await self.request(endpoint: pairing.endpoint, path: "/api/v1/\(pairing.token)/effects",
                                                    method: "PUT", body: NanoleafCommand.activateExternalControl(version))
@@ -767,7 +771,7 @@ final class NanoleafClient: NSObject {
                 // Touch (4) only where there is touch hardware. Read on every
                 // attempt, so a controller first heard of after this loop
                 // started is asked the right way on the next reconnect.
-                let events = self.families[serial] == .lightPanels ? "1,2,3" : "1,2,3,4"
+                let events = (self.families[serial]?.sensesTouch ?? false) ? "1,2,3,4" : "1,2,3"
                 components?.queryItems = [URLQueryItem(name: "id", value: events)]
                 if let url = components?.url { request.url = url }
                 request.cachePolicy = .reloadIgnoringLocalCacheData

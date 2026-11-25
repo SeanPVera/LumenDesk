@@ -43,16 +43,19 @@ without being rewritten. New code should use `Polar`/`Font.polar*`.
 | Govee Curtain | H70B1 | 20-column hero + column painter | wired (stream hold) |
 | Govee String Light | H70BC | same, curtain family | wired; model flagged as matched by elimination |
 | Govee COB strip | H61E6 | blended bar + 15-zone painter | wired |
-| Govee Light Bars | H6062 | 28-zone chain + painter | wired; chain geometry is a preview |
+| Govee Light Bars | H6062 | 28-zone chain + painter | wired; painting writes segments, but the chain arrangement is set by hand because Govee doesn't report it |
 | Govee Uplighter | H60B0 | 3 named lamps, 2-lit limit | wired (stream hold) |
-| Govee String pods | H608B | 15 pods on a wire + painter | wired; per-pod white is a preview |
+| Govee String pods | H608B | 15 pods on a wire + painter | wired; per-pod white (RGB-mixed stream, Kelvin segment packet on durable apply) |
 | Govee Strip Light S | H612B | 75 segments in rows of 15, labels every 5th | wired (stream hold) |
 
 Anything else falls back to the pre-redesign editor routing.
 
-Controls the LAN protocol can't drive are gated by `LightPageFeatureFlags`
-(all `false`) and render as dashed "Coming later" notes that send nothing:
-curtain bead painting, Glide chain geometry, per-pod Kelvin.
+`LightPageFeatureFlags` has been retired. Where a control the LAN protocol
+genuinely can't drive would otherwise appear, the page instead carries a
+factual note explaining the hardware limit rather than a dashed "Coming later"
+placeholder — e.g. the curtain paints by column because single beads are
+reachable only over Bluetooth, which LumenDesk doesn't use. Glide chain
+geometry and per-pod Kelvin, once gated behind those flags, are now wired.
 
 ## Commands
 

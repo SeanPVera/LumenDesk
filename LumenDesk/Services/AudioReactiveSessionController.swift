@@ -165,6 +165,11 @@ final class AudioReactiveSessionController: ObservableObject {
 
     private let captureService: AudioCaptureService
     private let beatMaps: BeatMapCoordinator
+    /// Resolves the playing track's ISRC from its metadata. Nil when server
+    /// analysis is off.
+    private var isrcResolver: ISRCResolving?
+    /// Fetches precomputed maps by ISRC. Nil when server analysis is off.
+    private var serverMapProvider: IlsBeatMapProviding?
     private let now: () -> TimeInterval
     /// The grid the last frame rendered against, which taps are measured from.
     private var calibrationGrids: [LightScope: (reference: TimeInterval, interval: TimeInterval, updatedAt: TimeInterval)] = [:]
@@ -216,6 +221,7 @@ final class AudioReactiveSessionController: ObservableObject {
                 self.restartSystemAudio()
             }
         }
+        configureServerAnalysis()
         subscriptionToken = captureService.subscribe { [weak self] snapshot in
             Task { @MainActor in
                 guard let self, self.sessions.values.contains(where: { !$0.synthetic }) else { return }
@@ -236,6 +242,48 @@ final class AudioReactiveSessionController: ObservableObject {
         }
     }
 
+    /// Opt-in: drive the beat grid from iLightShow's precomputed analysis. The
+    /// playing track's ISRC is resolved from its Now Playing metadata
+    /// (MusicBrainz), then its map is fetched. When off, or when a track can't
+    /// be resolved or has no analysis, Music Mode keeps learning maps live
+    /// exactly as before — every failure falls back silently. Idempotent and
+    /// reversible, so the setting can be toggled between sessions.
+    private func configureServerAnalysis() {
+        let enabled = Self.serverAnalysisEnabled
+        if enabled, isrcResolver == nil {
+            serverMapProvider = IlsBeatMapProvider.live()
+            isrcResolver = MusicBrainzISRCResolver()
+            beatMaps.onTrackChanged = { [weak self] in
+                // The coordinator fires this on the main thread.
+                MainActor.assumeIsolated { self?.resolveServerMapForCurrentTrack() }
+            }
+        } else if !enabled, isrcResolver != nil {
+            isrcResolver = nil
+            serverMapProvider = nil
+            beatMaps.onTrackChanged = nil
+        }
+    }
+
+    /// Resolves the current track's ISRC from its metadata and adopts its
+    /// precomputed map, if the track is still playing. Off the main thread for
+    /// the network/decode, back on it to adopt.
+    private func resolveServerMapForCurrentTrack() {
+        guard let provider = serverMapProvider,
+              let resolver = isrcResolver,
+              let candidate = beatMaps.currentServerMapCandidate() else { return }
+        Task { @MainActor [weak self] in
+            guard let isrc = await resolver.isrc(title: candidate.title, artist: candidate.artist) else { return }
+            guard let map = await provider.beatMap(forISRC: isrc) else { return }
+            self?.beatMaps.adoptServerMap(map, key: candidate.key)
+        }
+    }
+
+    /// Whether to fetch precomputed maps from iLightShow (default off; the
+    /// macOS Option A backend must be live first).
+    static var serverAnalysisEnabled: Bool {
+        UserDefaults.standard.bool(forKey: AppPreferenceKey.musicServerAnalysis)
+    }
+
     func start(
         scope: LightScope,
         configuration: MusicModeConfiguration,
@@ -251,6 +299,8 @@ final class AudioReactiveSessionController: ObservableObject {
             completion(.unavailable)
             return
         }
+        // Pick up a toggle of the server-analysis setting since the last start.
+        configureServerAnalysis()
         let startTime = now()
         clearCalibration(for: scope)
         if !useSyntheticPattern && !sessions.values.contains(where: { !$0.synthetic }) {

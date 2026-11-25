@@ -50,6 +50,9 @@ enum BeatMapStatus: Equatable {
 /// live audio. Main thread only.
 final class BeatMapCoordinator {
     var onStatusChange: ((BeatMapStatus) -> Void)?
+    /// Fired when the followed track changes or stops, so a track identifier
+    /// can restart. Main thread, like every other callback here.
+    var onTrackChanged: (() -> Void)?
     private(set) var status: BeatMapStatus = .off {
         didSet { if status != oldValue { onStatusChange?(status) } }
     }
@@ -85,6 +88,9 @@ final class BeatMapCoordinator {
     private var lastAlignment = -Double.greatestFiniteMagnitude
     private var acceptsHopsSince = -Double.greatestFiniteMagnitude
     private var automationDenied = false
+    /// Track keys whose map came from the server; the live learner must not
+    /// overwrite an authoritative map with a refinement of its own.
+    private var serverMapKeys: Set<String> = []
     #if os(macOS)
     private var monitor: NowPlayingMonitor?
     #endif
@@ -116,6 +122,7 @@ final class BeatMapCoordinator {
         map = nil
         clock.reset()
         current = nil
+        serverMapKeys.removeAll()
         liveOnsets.removeAll()
         lastAlignment = -Double.greatestFiniteMagnitude
         acceptsHopsSince = -Double.greatestFiniteMagnitude
@@ -204,11 +211,13 @@ final class BeatMapCoordinator {
             map = nil
             clock.reset()
             resetLiveHistory(since: now())
+            onTrackChanged?()
             updateFollowingStatus()
             return
         }
         let key = sample.app.trackKey(sample.trackID)
-        if current.map({ $0.app.trackKey($0.trackID) }) != key {
+        let changedTrack = current.map { $0.app.trackKey($0.trackID) } != key
+        if changedTrack {
             endTrack()
             clock.reset()
             resetLiveHistory(since: sample.sampledAt)
@@ -229,6 +238,9 @@ final class BeatMapCoordinator {
             lastCheckpointAt = sample.sampledAt
         }
         current = sample
+        // Fire after `current` is the new sample, so an observer can read the
+        // new track's metadata.
+        if changedTrack { onTrackChanged?() }
         let wasPlaying = clock.isPlaying
         let result = clock.report(position: sample.position, at: sample.sampledAt, playing: sample.isPlaying)
         if result == .jumped || wasPlaying != sample.isPlaying {
@@ -238,6 +250,39 @@ final class BeatMapCoordinator {
             resetLiveHistory(since: sample.sampledAt)
         }
         updateFollowingStatus()
+    }
+
+    /// The followed track's key when it is a candidate for a server map
+    /// (following, playing, not already server-mapped) — the owner fetches the
+    /// map for this key off the main thread and hands it back to
+    /// `adoptServerMap(_:key:)`. Nil means "no fetch needed".
+    func serverMapTargetKey() -> String? {
+        guard source == .following, let current, current.isPlaying else { return nil }
+        let key = current.app.trackKey(current.trackID)
+        return serverMapKeys.contains(key) ? nil : key
+    }
+
+    /// The current track's metadata and key when it is a server-map candidate,
+    /// for an ISRC resolver to look up. Nil means "no lookup needed".
+    func currentServerMapCandidate() -> (title: String, artist: String, key: String)? {
+        guard let key = serverMapTargetKey(), let current else { return nil }
+        return (current.title, current.artist, key)
+    }
+
+    /// Replaces the live-learned map with the server's authoritative one, if
+    /// the followed track has not changed since the fetch began.
+    func adoptServerMap(_ serverMap: BeatMap, key: String) {
+        guard source == .following, isCurrentTrack(key), serverMap.isPlayable else { return }
+        serverMapKeys.insert(key)
+        map = serverMap
+        // The server map is authoritative; stop learning this track so a live
+        // refinement cannot replace it.
+        learner = nil
+        updateFollowingStatus()
+    }
+
+    private func isCurrentTrack(_ key: String) -> Bool {
+        current.map { $0.app.trackKey($0.trackID) == key } ?? false
     }
 
     /// Hops analysed since the last render tick, with host times.
@@ -375,8 +420,9 @@ final class BeatMapCoordinator {
                 }
                 guard self.source == .following,
                       let current = self.current, current.app.trackKey(current.trackID) == finished.key else { return }
-                // A failed refinement must not replace an already usable map.
-                if let built, built.isPlayable { self.map = built }
+                // A failed refinement must not replace an already usable map,
+                // and the live learner never overrides an authoritative server map.
+                if let built, built.isPlayable, !self.serverMapKeys.contains(finished.key) { self.map = built }
                 if finished.coverage >= 0.99 { self.learner = nil }
                 self.updateFollowingStatus()
             }
